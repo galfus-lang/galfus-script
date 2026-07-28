@@ -167,7 +167,8 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     let Some(pattern) = syntax.child(*arm, 0) else {
                         continue;
                     };
-                    let Some(body) = syntax.child(*arm, 1) else {
+                    let Some(body) = syntax.child(*arm, 1).and_then(|body| syntax.child(body, 0))
+                    else {
                         continue;
                     };
                     let is_wildcard = syntax
@@ -879,7 +880,10 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     }
 
                     let pattern_node = syntax.child(arm_node, 0).unwrap();
-                    let body_node = syntax.child(arm_node, 1).unwrap();
+                    let body_node = syntax
+                        .child(arm_node, 1)
+                        .and_then(|body| syntax.child(body, 0))
+                        .unwrap();
 
                     let arm_body_block = self.builder.next_block();
                     let next_arm_block = self.builder.next_block();
@@ -936,7 +940,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
             SyntaxNodeKind::NewArrayExpression => {
                 self.lower_new_array_expression(expr_id, node, /* dummy */ &[])
             }
-            SyntaxNodeKind::ArrowFunctionExpression => {
+            kind if kind.is_function_expression() => {
                 let ty = self
                     .builder
                     .type_result
@@ -944,7 +948,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     .node_type(expr_id)
                     .unwrap_or_else(|| galfus_core::TypeId::new(0));
 
-                if let Some(func) = self.builder.build_arrow_function(expr_id, ty) {
+                if let Some(func) = self.builder.build_function_expression(expr_id, ty) {
                     let func_id = func.id;
                     self.builder.specialized_functions.push(func);
                     Operand::Constant(Constant::Function(func_id))

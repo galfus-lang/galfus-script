@@ -171,7 +171,7 @@ impl Parser {
 
         self.skip_newlines();
 
-        let body = self.parse_block()?;
+        let body = self.parse_function_body()?;
 
         let mut children = Vec::new();
 

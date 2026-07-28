@@ -118,8 +118,8 @@ impl<'a> Resolver<'a> {
             };
 
             match child_node.kind() {
-                SyntaxNodeKind::ArrowFunctionExpression => {
-                    self.resolve_arrow_function_expression(*child, parent_scope);
+                SyntaxNodeKind::ExpressionFunction | SyntaxNodeKind::BlockFunction => {
+                    self.resolve_function_expression(*child, parent_scope);
                 }
 
                 SyntaxNodeKind::ForStatement => {
@@ -145,9 +145,9 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    fn resolve_arrow_function_expression(&mut self, expression: NodeId, parent_scope: ScopeId) {
-        let arrow_scope = self.resolution.add_scope(
-            ScopeKind::ArrowFunction,
+    fn resolve_function_expression(&mut self, expression: NodeId, parent_scope: ScopeId) {
+        let function_scope = self.resolution.add_scope(
+            ScopeKind::FunctionExpression,
             Some(parent_scope),
             Some(expression),
         );
@@ -156,8 +156,8 @@ impl<'a> Resolver<'a> {
             .syntax
             .first_child_of_kind(expression, SyntaxNodeKind::ParameterList)
         {
-            self.resolution.bind_scope(parameters, arrow_scope);
-            self.declare_parameter_list(parameters, arrow_scope);
+            self.resolution.bind_scope(parameters, function_scope);
+            self.declare_parameter_list(parameters, function_scope);
         }
 
         let Some(body) = self
@@ -173,9 +173,9 @@ impl<'a> Resolver<'a> {
         };
 
         if body_node.kind() == SyntaxNodeKind::Block {
-            self.resolve_block(*body, arrow_scope);
+            self.resolve_block(*body, function_scope);
         } else {
-            self.resolve_nested_blocks_in(*body, arrow_scope);
+            self.resolve_nested_blocks_in(*body, function_scope);
         }
     }
 
@@ -229,7 +229,11 @@ impl<'a> Resolver<'a> {
             self.declare_pattern_bindings(pattern, arm_scope);
         }
 
-        let Some(body) = self.syntax.child(arm, 1) else {
+        let Some(body) = self
+            .syntax
+            .child(arm, 1)
+            .and_then(|body| self.syntax.child(body, 0))
+        else {
             return;
         };
 
@@ -253,7 +257,11 @@ impl<'a> Resolver<'a> {
             self.declare_instanceof_pattern_bindings(pattern, arm_scope);
         }
 
-        let Some(body) = self.syntax.child(arm, 1) else {
+        let Some(body) = self
+            .syntax
+            .child(arm, 1)
+            .and_then(|body| self.syntax.child(body, 0))
+        else {
             return;
         };
 

@@ -388,10 +388,6 @@ impl Parser {
 
         self.skip_newlines();
 
-        self.expect(TokenKind::Arrow)?;
-
-        self.skip_newlines();
-
         let body = self.parse_arm_body()?;
 
         let span = Span::cover(self.node_span(pattern), self.node_span(body))
@@ -406,10 +402,6 @@ impl Parser {
         } else {
             self.parse_type()
         }?;
-
-        self.skip_newlines();
-
-        self.expect(TokenKind::Arrow)?;
 
         self.skip_newlines();
 

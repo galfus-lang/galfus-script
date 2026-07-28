@@ -56,7 +56,11 @@ fn parse_instanceof_expression_with_type_patterns() {
     assert_eq!(first_pattern_node.kind(), SyntaxNodeKind::TypePattern);
     assert_eq!(source.slice(first_pattern_node.span()), Some("i32 v"));
 
-    let body = first_arm_node.child(1).unwrap();
+    let body = syntax
+        .node(first_arm_node.child(1).unwrap())
+        .unwrap()
+        .first_child()
+        .unwrap();
     assert_eq!(
         syntax.node(body).unwrap().kind(),
         SyntaxNodeKind::BinaryExpression
@@ -66,7 +70,7 @@ fn parse_instanceof_expression_with_type_patterns() {
 #[test]
 fn parse_instanceof_wildcard_pattern() {
     let source =
-        source("fn main(): i32 {\n  instanceof value {\n    _ => {\n      return 0\n    }\n  }\n}");
+        source("fn main(): i32 {\n  instanceof value {\n    _ {\n      return 0\n    }\n  }\n}");
 
     let result = parse(&source);
 
@@ -92,7 +96,7 @@ fn parse_instanceof_wildcard_pattern() {
 #[test]
 fn parse_instanceof_expression_with_array_type_pattern() {
     let source = source(
-        "fn main(value: [u8] | null): null {\n  instanceof value {\n    [u8] name => {\n      return\n    },\n    _ => {\n      return\n    }\n  }\n}",
+        "fn main(value: [u8] | null): null {\n  instanceof value {\n    [u8] name {\n      return\n    },\n    _ {\n      return\n    }\n  }\n}",
     );
 
     let result = parse(&source);
@@ -129,7 +133,11 @@ fn parse_instanceof_expression_with_null_pattern_and_expression_arms() {
     let last_arm = arms_node.child(2).unwrap();
     let last_arm_node = syntax.node(last_arm).unwrap();
     let pattern = last_arm_node.first_child().unwrap();
-    let body = last_arm_node.child(1).unwrap();
+    let body = syntax
+        .node(last_arm_node.child(1).unwrap())
+        .unwrap()
+        .first_child()
+        .unwrap();
 
     assert_eq!(
         syntax.node(pattern).unwrap().kind(),

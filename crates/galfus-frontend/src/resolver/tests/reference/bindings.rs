@@ -37,11 +37,11 @@ fn resolve_binds_parameter_name_expression() {
 }
 
 #[test]
-fn resolve_declares_arrow_function_parameter_in_arrow_scope() {
+fn resolve_declares_function_expression_parameter_in_function_scope() {
     let source = source(
         r#"
         fn main(): null {
-            const double = (value: i32): i32 => value * 2
+            const double = fn (value: i32): i32 => value * 2
             return
         }
         "#,
@@ -62,15 +62,15 @@ fn resolve_declares_arrow_function_parameter_in_arrow_scope() {
     let resolution = graph.resolution().unwrap();
 
     let root = syntax.root().unwrap();
-    let arrow = find_node_by_kind(syntax, root, SyntaxNodeKind::ArrowFunctionExpression).unwrap();
-    let arrow_scope = resolution
-        .scope(resolution.node_scope(arrow).unwrap())
+    let function = find_node_by_kind(syntax, root, SyntaxNodeKind::ExpressionFunction).unwrap();
+    let function_scope = resolution
+        .scope(resolution.node_scope(function).unwrap())
         .unwrap();
     let parameter_symbol = resolution
-        .symbol(arrow_scope.symbol("value").unwrap())
+        .symbol(function_scope.symbol("value").unwrap())
         .unwrap();
 
-    assert_eq!(arrow_scope.kind(), ScopeKind::ArrowFunction);
+    assert_eq!(function_scope.kind(), ScopeKind::FunctionExpression);
     assert_eq!(parameter_symbol.kind(), SymbolKind::Parameter);
 
     let expression = find_name_expression_by_text(syntax, &source, root, "value").unwrap();
@@ -80,11 +80,11 @@ fn resolve_declares_arrow_function_parameter_in_arrow_scope() {
 
     assert_eq!(reference_symbol.name(), "value");
     assert_eq!(reference_symbol.kind(), SymbolKind::Parameter);
-    assert_eq!(reference_symbol.scope(), arrow_scope.id());
+    assert_eq!(reference_symbol.scope(), function_scope.id());
 }
 
 #[test]
-fn resolve_arrow_function_parameter_reaches_block_body() {
+fn resolve_block_function_parameter_reaches_block_body() {
     let source = source(
         r#"
         fn print(value: i32): null {
@@ -92,7 +92,7 @@ fn resolve_arrow_function_parameter_reaches_block_body() {
         }
 
         fn main(): null {
-            const logValue = (value: i32): null => {
+            const logValue = fn (value: i32): null {
                 print(value)
                 return
             }
@@ -116,8 +116,8 @@ fn resolve_arrow_function_parameter_reaches_block_body() {
     let resolution = graph.resolution().unwrap();
 
     let root = syntax.root().unwrap();
-    let arrow = find_node_by_kind(syntax, root, SyntaxNodeKind::ArrowFunctionExpression).unwrap();
-    let arrow_scope_id = resolution.node_scope(arrow).unwrap();
+    let function = find_node_by_kind(syntax, root, SyntaxNodeKind::BlockFunction).unwrap();
+    let function_scope_id = resolution.node_scope(function).unwrap();
 
     let expression = find_name_expression_by_text(syntax, &source, root, "value").unwrap();
     let reference_symbol = resolution
@@ -126,15 +126,15 @@ fn resolve_arrow_function_parameter_reaches_block_body() {
 
     assert_eq!(reference_symbol.name(), "value");
     assert_eq!(reference_symbol.kind(), SymbolKind::Parameter);
-    assert_eq!(reference_symbol.scope(), arrow_scope_id);
+    assert_eq!(reference_symbol.scope(), function_scope_id);
 }
 
 #[test]
-fn resolve_arrow_function_body_can_capture_parent_scope_name() {
+fn resolve_function_expression_body_can_capture_parent_scope_name() {
     let source = source(
         r#"
         fn main(offset: i32): null {
-            const addOffset = (value: i32): i32 => value + offset
+            const addOffset = fn (value: i32): i32 => value + offset
             return
         }
         "#,
@@ -165,11 +165,11 @@ fn resolve_arrow_function_body_can_capture_parent_scope_name() {
 }
 
 #[test]
-fn resolve_reports_duplicate_arrow_function_parameter() {
+fn resolve_reports_duplicate_function_expression_parameter() {
     let source = source(
         r#"
         fn main(): null {
-            const duplicate = (value: i32, value: i32): i32 => value
+            const duplicate = fn (value: i32, value: i32): i32 => value
             return
         }
         "#,

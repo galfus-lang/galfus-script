@@ -116,10 +116,10 @@ fn resolve_instanceof_type_pattern_binding_reaches_block_arm_body() {
         r#"
         fn main(value: i32 | null): i32 {
             instanceof value {
-                i32 count => {
+                i32 count {
                     return count
                 },
-                _ => {
+                _ {
                     return 0
                 }
             }

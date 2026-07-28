@@ -39,7 +39,7 @@ impl Parser {
                         offset += 1;
                     }
                     TokenKind::LeftBrace if depth == 0 => {
-                        break true;
+                        break self.is_struct_pattern_start(offset);
                     }
                     TokenKind::Identifier
                     | TokenKind::ColonColon
@@ -95,6 +95,29 @@ impl Parser {
         ));
 
         None
+    }
+
+    fn is_struct_pattern_start(&self, brace_offset: usize) -> bool {
+        let mut offset = brace_offset + 1;
+        while self.peek(offset).kind() == &TokenKind::Newline {
+            offset += 1;
+        }
+
+        match self.peek(offset).kind() {
+            TokenKind::RightBrace | TokenKind::DotDotDot => true,
+            TokenKind::Identifier => {
+                offset += 1;
+                while self.peek(offset).kind() == &TokenKind::Newline {
+                    offset += 1;
+                }
+
+                matches!(
+                    self.peek(offset).kind(),
+                    TokenKind::Colon | TokenKind::Comma | TokenKind::RightBrace
+                )
+            }
+            _ => false,
+        }
     }
 
     pub(super) fn parse_literal_pattern(&mut self) -> Option<NodeId> {
@@ -266,10 +289,6 @@ impl Parser {
 
         self.skip_newlines();
 
-        self.expect(TokenKind::Arrow)?;
-
-        self.skip_newlines();
-
         let body = self.parse_arm_body()?;
 
         let span = Span::cover(self.node_span(pattern), self.node_span(body))
@@ -346,7 +365,7 @@ impl Parser {
                         offset += 1;
                     }
                     TokenKind::LeftBrace if depth == 0 => {
-                        break true;
+                        break self.is_struct_pattern_start(offset);
                     }
                     TokenKind::Identifier
                     | TokenKind::ColonColon
@@ -368,7 +387,10 @@ impl Parser {
                 return self.parse_struct_pattern();
             }
 
-            if self.peek_after_newlines(1).kind() == &TokenKind::Arrow {
+            if matches!(
+                self.peek_after_newlines(1).kind(),
+                TokenKind::Arrow | TokenKind::LeftBrace
+            ) {
                 return self.parse_binding_pattern();
             }
         }
@@ -377,11 +399,42 @@ impl Parser {
     }
 
     pub(super) fn parse_arm_body(&mut self) -> Option<NodeId> {
-        if self.at(&TokenKind::LeftBrace) {
-            return self.parse_block();
+        if self.at(&TokenKind::Arrow) {
+            self.bump();
+            self.skip_newlines();
+
+            if self.at(&TokenKind::LeftBrace) {
+                let block = self.current().span();
+                self.graph.push_diagnostic(Diagnostic::error_with_message(
+                    ParserDiagnosticCode::ArrowMustIntroduceExpression,
+                    "a block arm must follow its pattern directly; remove `=>`".to_string(),
+                    block,
+                ));
+                let _ = self.parse_block();
+                return None;
+            }
+
+            let expression = self.parse_expression()?;
+            let span = self.node_span(expression);
+            return Some(self.add_node(SyntaxNodeKind::ExpressionArmBody, span, vec![expression]));
         }
 
-        self.parse_expression()
+        if self.at(&TokenKind::LeftBrace) {
+            let block = self.parse_block()?;
+            let span = self.node_span(block);
+            return Some(self.add_node(SyntaxNodeKind::BlockArmBody, span, vec![block]));
+        }
+
+        let found = self.current().clone();
+        self.graph.push_diagnostic(Diagnostic::error_with_message(
+            ParserDiagnosticCode::ExpectedToken,
+            format!(
+                "expected `Arrow` or `LeftBrace`, found `{:?}`",
+                found.kind()
+            ),
+            found.span(),
+        ));
+        None
     }
 
     pub(super) fn parse_struct_binding_pattern(&mut self) -> Option<NodeId> {

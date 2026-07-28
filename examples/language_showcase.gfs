@@ -196,10 +196,10 @@ fn type_dispatch<T: Scalar>(): i32 {
   }
 }
 
-fn arrow_functions(): i32 {
-  const double = (value: i32): i32 => value * 2
-  const increment = (value: i32) => value + 1
-  const add = (left: i32, right: i32): i32 => {
+fn function_expressions(): i32 {
+  const double = fn (value: i32): i32 => value * 2
+  const increment = fn (value: i32) => value + 1
+  const add = fn (left: i32, right: i32): i32 {
     return left + right
   }
 
@@ -244,10 +244,10 @@ export fn main(_args: [[u8]]): i32 {
   const looped = loop_controls(5)
   const namedLooped = named_loop_controls()
   const dispatched = type_dispatch<i32>()
-  const arrow = arrow_functions()
+  const functions = function_expressions()
   const copied = casts_and_copy(point)
   const literals = literals_operators_and_branching()
-  const calculation = destructured + narrowed + ranged + looped + namedLooped + dispatched + arrow + copied.x + literals
+  const calculation = destructured + narrowed + ranged + looped + namedLooped + dispatched + functions + copied.x + literals
 
   println(calculation_to_text(calculation))
 

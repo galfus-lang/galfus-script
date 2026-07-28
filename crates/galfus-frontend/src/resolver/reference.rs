@@ -112,8 +112,8 @@ impl<'a> Resolver<'a> {
                 return;
             }
 
-            SyntaxNodeKind::ArrowFunctionExpression => {
-                self.resolve_arrow_function_references(node, scope);
+            SyntaxNodeKind::ExpressionFunction | SyntaxNodeKind::BlockFunction => {
+                self.resolve_function_expression_references(node, scope);
                 return;
             }
 
@@ -257,12 +257,16 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    fn resolve_arrow_function_references(&mut self, expression: NodeId, arrow_scope: ScopeId) {
+    fn resolve_function_expression_references(
+        &mut self,
+        expression: NodeId,
+        function_scope: ScopeId,
+    ) {
         if let Some(parameters) = self
             .syntax
             .first_child_of_kind(expression, SyntaxNodeKind::ParameterList)
         {
-            self.resolve_node_references(parameters, arrow_scope);
+            self.resolve_node_references(parameters, function_scope);
         }
 
         let Some(body) = self
@@ -273,7 +277,7 @@ impl<'a> Resolver<'a> {
             return;
         };
 
-        self.resolve_node_references(*body, arrow_scope);
+        self.resolve_node_references(*body, function_scope);
     }
 
     fn resolve_direct_decorator_list(&mut self, node: NodeId, scope: ScopeId) {

@@ -22,7 +22,7 @@ impl<'a> DeclarationTypeChecker<'a> {
                 return;
             }
 
-            SyntaxNodeKind::ArrowFunctionExpression => {
+            kind if kind.is_function_expression() => {
                 return;
             }
 

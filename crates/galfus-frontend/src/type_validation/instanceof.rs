@@ -84,7 +84,12 @@ impl<'a> DeclarationTypeChecker<'a> {
                     continue;
                 }
 
-                let body = self.graph.syntax().child(arm, 1).unwrap_or(arm);
+                let body = self
+                    .graph
+                    .syntax()
+                    .child(arm, 1)
+                    .and_then(|body| self.graph.syntax().child(body, 0))
+                    .unwrap_or(arm);
                 self.report_incompatible_instanceof_arm_type(body, arm_expected, actual);
                 has_error = true;
             }
@@ -122,7 +127,12 @@ impl<'a> DeclarationTypeChecker<'a> {
                 continue;
             }
 
-            let body = self.graph.syntax().child(arm, 1).unwrap_or(arm);
+            let body = self
+                .graph
+                .syntax()
+                .child(arm, 1)
+                .and_then(|body| self.graph.syntax().child(body, 0))
+                .unwrap_or(arm);
             self.report_incompatible_instanceof_arm_type(body, expected_inferred, actual);
             has_error = true;
         }
@@ -218,7 +228,11 @@ impl<'a> DeclarationTypeChecker<'a> {
         context: InstanceofArmContext<'_>,
     ) -> Option<TypeId> {
         let pattern = self.graph.syntax().child(arm, 0)?;
-        let body = self.graph.syntax().child(arm, 1)?;
+        let body = self
+            .graph
+            .syntax()
+            .child(arm, 1)
+            .and_then(|body| self.graph.syntax().child(body, 0))?;
 
         let narrowed_type = self.check_instanceof_pattern_type(
             pattern,

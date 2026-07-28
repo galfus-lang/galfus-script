@@ -132,7 +132,8 @@ pub enum SyntaxNodeKind {
     CastExpression,
     UnaryExpression,
     BinaryExpression,
-    ArrowFunctionExpression,
+    ExpressionFunction,
+    BlockFunction,
     GenericExpression,
     GenericArgumentList,
     EnumDiscriminant,
@@ -142,6 +143,8 @@ pub enum SyntaxNodeKind {
     MatchExpression,
     MatchArmList,
     MatchArm,
+    ExpressionArmBody,
+    BlockArmBody,
     InstanceofExpression,
     InstanceofArmList,
     InstanceofArm,
@@ -177,6 +180,10 @@ pub enum SyntaxNodeKind {
 }
 
 impl SyntaxNodeKind {
+    pub fn is_function_expression(self) -> bool {
+        matches!(self, Self::ExpressionFunction | Self::BlockFunction)
+    }
+
     pub fn is_item(self) -> bool {
         matches!(
             self,
@@ -223,7 +230,8 @@ impl SyntaxNodeKind {
                 | SyntaxNodeKind::CastExpression
                 | SyntaxNodeKind::UnaryExpression
                 | SyntaxNodeKind::BinaryExpression
-                | SyntaxNodeKind::ArrowFunctionExpression
+                | SyntaxNodeKind::ExpressionFunction
+                | SyntaxNodeKind::BlockFunction
                 | SyntaxNodeKind::GenericExpression
                 | SyntaxNodeKind::ArrayLiteral
                 | SyntaxNodeKind::StructLiteral

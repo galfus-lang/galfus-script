@@ -69,7 +69,7 @@
     "declarations": {
       "patterns": [
         {
-          "match": "\\b(fn)\\s+((?:[A-Za-z_][A-Za-z0-9_]*::)?[A-Za-z_][A-Za-z0-9_]*)",
+          "match": "\\b(fn)(?:\\([^)]*\\))?\\s+((?:[A-Za-z_][A-Za-z0-9_]*::)?[A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": {
               "name": "storage.type.function.gfs"
@@ -209,7 +209,7 @@
           "match": "==|!=|<=|>="
         },
         {
-          "name": "keyword.operator.arrow.gfs",
+          "name": "keyword.operator.expression-body.gfs",
           "match": "=>"
         },
         {

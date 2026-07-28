@@ -3,25 +3,25 @@ use crate::{FunctionParameterType, PrimitiveType, SyntaxNodeKind};
 use galfus_core::{NodeId, TypeId};
 
 impl<'a> DeclarationTypeChecker<'a> {
-    pub(super) fn infer_arrow_function_expression_type(&mut self, node: NodeId) -> Option<TypeId> {
+    pub(super) fn infer_function_expression_type(&mut self, node: NodeId) -> Option<TypeId> {
         let parameters_node = self
             .graph
             .syntax()
             .first_child_of_kind(node, SyntaxNodeKind::ParameterList)?;
 
-        let parameters = self.lower_arrow_function_parameters(parameters_node)?;
+        let parameters = self.lower_function_parameters(parameters_node)?;
         let explicit_return_type = self
             .last_direct_type_child(node)
             .and_then(|return_type| self.layer.node_type(return_type));
 
-        let body = self.arrow_function_body(node)?;
+        let body = self.function_body(node)?;
 
         let return_type = match explicit_return_type {
             Some(return_type) => {
-                self.check_arrow_function_body_type(body, return_type);
+                self.check_function_body_type(body, return_type);
                 return_type
             }
-            None => self.infer_arrow_function_body_type(body)?,
+            None => self.infer_function_body_type(body)?,
         };
 
         Some(
@@ -31,7 +31,7 @@ impl<'a> DeclarationTypeChecker<'a> {
         )
     }
 
-    fn lower_arrow_function_parameters(
+    fn lower_function_parameters(
         &mut self,
         parameters_node: NodeId,
     ) -> Option<Vec<FunctionParameterType>> {
@@ -62,7 +62,7 @@ impl<'a> DeclarationTypeChecker<'a> {
                 None => {
                     self.report_cannot_infer_type(
                         parameter,
-                        "arrow function parameter requires an explicit type",
+                        "function expression parameter requires an explicit type",
                     );
 
                     self.layer.table_mut().error()
@@ -87,11 +87,11 @@ impl<'a> DeclarationTypeChecker<'a> {
         Some(parameters)
     }
 
-    fn arrow_function_body(&self, node: NodeId) -> Option<NodeId> {
+    fn function_body(&self, node: NodeId) -> Option<NodeId> {
         self.graph.syntax().node(node)?.children().last().copied()
     }
 
-    fn infer_arrow_function_body_type(&mut self, body: NodeId) -> Option<TypeId> {
+    fn infer_function_body_type(&mut self, body: NodeId) -> Option<TypeId> {
         let body_node = self.graph.syntax().node(body)?;
 
         if body_node.kind() == SyntaxNodeKind::Block {
@@ -101,7 +101,7 @@ impl<'a> DeclarationTypeChecker<'a> {
         self.infer_expression_type(body)
     }
 
-    fn check_arrow_function_body_type(&mut self, body: NodeId, expected: TypeId) {
+    fn check_function_body_type(&mut self, body: NodeId, expected: TypeId) {
         let Some(body_node) = self.graph.syntax().node(body) else {
             return;
         };

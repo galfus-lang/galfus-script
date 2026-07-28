@@ -27,8 +27,8 @@ impl Parser {
         &mut self,
         _boundary: ExpressionBoundary,
     ) -> Option<NodeId> {
-        if self.at(&TokenKind::LeftParen) && self.is_arrow_function_start() {
-            return self.parse_arrow_function_expression();
+        if self.at(&TokenKind::Fn) {
+            return self.parse_anonymous_function_expression();
         }
 
         if self.at(&TokenKind::LeftParen) {

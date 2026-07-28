@@ -29,6 +29,21 @@
     "description": "Create a struct anchor function",
     "body": ["fn ${1:Type}::${2:name}(self${3}): ${4:null} {", "  ${5}", "}"]
   },
+  "Expression function": {
+    "prefix": "gfnexpr",
+    "description": "Create a function with an expression body",
+    "body": ["fn ${1:name}(${2}): ${3:Return} => ${4:expression}"]
+  },
+  "Expression function expression": {
+    "prefix": "gfuncexpr",
+    "description": "Create an anonymous function with an expression body",
+    "body": ["fn (${1:parameters}): ${2:Return} => ${3:expression}"]
+  },
+  "Block function expression": {
+    "prefix": "gfuncblock",
+    "description": "Create an anonymous function with a block body",
+    "body": ["fn (${1:parameters}): ${2:Return} {", "  ${3}", "  return ${4:value}", "}"]
+  },
   "Struct": {
     "prefix": "gstruct",
     "description": "Create a Galfus struct",
@@ -99,6 +114,11 @@
       "}"
     ]
   },
+  "Match block arm": {
+    "prefix": "gmatchblock",
+    "description": "Create a match arm with a direct block body",
+    "body": ["${1:Pattern} {", "  ${2}", "  return ${3:value}", "},"]
+  },
   "Instanceof expression": {
     "prefix": "ginstanceof",
     "description": "Narrow a value by runtime type",
@@ -109,6 +129,11 @@
       "}"
     ]
   },
+  "Instanceof block arm": {
+    "prefix": "ginstanceofblock",
+    "description": "Create an instanceof arm with a direct block body",
+    "body": ["${1:Type} ${2:narrowed} {", "  ${3}", "  return ${4:value}", "},"]
+  },
   "Typeof expression": {
     "prefix": "gtypeof",
     "description": "Narrow a value by type check",
@@ -118,6 +143,11 @@
       "  _ => ${4:fallback}",
       "}"
     ]
+  },
+  "Typeof block arm": {
+    "prefix": "gtypeofblock",
+    "description": "Create a typeof arm with a direct block body",
+    "body": ["${1:Type} {", "  ${2}", "  return ${3:value}", "},"]
   },
   "Transaction": {
     "prefix": "gtransaction",

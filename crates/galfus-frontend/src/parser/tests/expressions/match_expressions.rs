@@ -17,7 +17,7 @@ fn first_match_expression(result: &ParseResult) -> NodeId {
 #[test]
 fn parse_match_expression_with_binding_pattern() {
     let source = source(
-        "fn main(): null {\n  match value {\n    other => {\n      print(other)\n    }\n  }\n  return\n}",
+        "fn main(): null {\n  match value {\n    other {\n      print(other)\n    }\n  }\n  return\n}",
     );
 
     let result = parse(&source);
@@ -70,7 +70,7 @@ fn parse_match_expression_with_binding_pattern() {
 #[test]
 fn parse_match_expression_with_variant_patterns() {
     let source = source(
-        "fn main(): null {\n  match result {\n    Result::Ok(user) => {\n      print(user.name)\n    },\n    Result::Error(message) => {\n      print(message)\n    }\n  }\n  return\n}",
+        "fn main(): null {\n  match result {\n    Result::Ok(user) {\n      print(user.name)\n    },\n    Result::Error(message) {\n      print(message)\n    }\n  }\n  return\n}",
     );
 
     let result = parse(&source);
@@ -120,7 +120,7 @@ fn parse_match_expression_with_variant_patterns() {
 #[test]
 fn parse_match_expression_with_unit_variant_pattern() {
     let source = source(
-        "fn main(): null {\n  match color {\n    Color::Red => {\n      print(\"red\")\n    }\n  }\n  return\n}",
+        "fn main(): null {\n  match color {\n    Color::Red {\n      print(\"red\")\n    }\n  }\n  return\n}",
     );
 
     let result = parse(&source);
@@ -147,7 +147,7 @@ fn parse_match_expression_with_unit_variant_pattern() {
 #[test]
 fn parse_match_expression_rejects_dot_variant_pattern() {
     let source = source(
-        "fn main(): null {\n  match color {\n    Color.Red => {\n      print(\"red\")\n    }\n  }\n  return\n}",
+        "fn main(): null {\n  match color {\n    Color.Red {\n      print(\"red\")\n    }\n  }\n  return\n}",
     );
 
     let result = parse(&source);
@@ -158,7 +158,7 @@ fn parse_match_expression_rejects_dot_variant_pattern() {
 #[test]
 fn parse_match_expression_with_literal_patterns() {
     let source = source(
-        "fn main(): null {\n  match code {\n    200 => {\n      print(\"ok\")\n    },\n    404 => {\n      print(\"not found\")\n    }\n  }\n  return\n}",
+        "fn main(): null {\n  match code {\n    200 {\n      print(\"ok\")\n    },\n    404 {\n      print(\"not found\")\n    }\n  }\n  return\n}",
     );
 
     let result = parse(&source);
@@ -195,7 +195,7 @@ fn parse_match_expression_with_literal_patterns() {
 #[test]
 fn parse_match_subject_allows_struct_literal_inside_call_argument() {
     let source = source(
-        "fn main(): null {\n  match normalize(new(User) { name }) {\n    other => {\n      print(other)\n    }\n  }\n  return\n}",
+        "fn main(): null {\n  match normalize(new(User) { name }) {\n    other {\n      print(other)\n    }\n  }\n  return\n}",
     );
 
     let result = parse(&source);
@@ -220,7 +220,7 @@ fn parse_match_subject_allows_struct_literal_inside_call_argument() {
 #[test]
 fn parse_match_subject_identifier_does_not_become_struct_literal() {
     let source = source(
-        "fn main(): null {\n  match result {\n    other => {\n      print(other)\n    }\n  }\n  return\n}",
+        "fn main(): null {\n  match result {\n    other {\n      print(other)\n    }\n  }\n  return\n}",
     );
 
     let result = parse(&source);
@@ -248,7 +248,7 @@ fn parse_match_subject_identifier_does_not_become_struct_literal() {
 #[test]
 fn parse_match_expression_with_wildcard_pattern() {
     let source = source(
-        "fn main(): null {\n  match value {\n    _ => {\n      print(\"fallback\")\n    }\n  }\n  return\n}",
+        "fn main(): null {\n  match value {\n    _ {\n      print(\"fallback\")\n    }\n  }\n  return\n}",
     );
 
     let result = parse(&source);
@@ -294,7 +294,11 @@ fn parse_match_expression_with_expression_arms() {
 
     let first_arm = arms_node.first_child().unwrap();
     let first_arm_node = syntax.node(first_arm).unwrap();
-    let body = first_arm_node.child(1).unwrap();
+    let body = syntax
+        .node(first_arm_node.child(1).unwrap())
+        .unwrap()
+        .first_child()
+        .unwrap();
 
     assert_eq!(
         syntax.node(body).unwrap().kind(),

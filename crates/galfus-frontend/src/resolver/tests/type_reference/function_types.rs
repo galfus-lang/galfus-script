@@ -139,7 +139,7 @@ fn resolve_binds_function_return_named_type() {
 }
 
 #[test]
-fn resolve_binds_arrow_function_signature_named_types() {
+fn resolve_binds_function_expression_signature_named_types() {
     let source = source(
         r#"
         struct User {
@@ -147,7 +147,7 @@ fn resolve_binds_arrow_function_signature_named_types() {
         }
 
         fn main(): null {
-            const identity = (user: User): User => user
+            const identity = fn (user: User): User => user
             return
         }
         "#,

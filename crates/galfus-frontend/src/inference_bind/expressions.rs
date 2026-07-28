@@ -87,9 +87,7 @@ impl<'a> ExpressionInferrer<'a> {
 
             SyntaxNodeKind::CallExpression => self.infer_call_expression_type(node, expected),
 
-            SyntaxNodeKind::ArrowFunctionExpression => {
-                self.infer_arrow_function_expression_type(node, None)
-            }
+            kind if kind.is_function_expression() => self.infer_function_expression_type(node, None),
 
             SyntaxNodeKind::MatchExpression => self.infer_match_expression_type(node, None),
 

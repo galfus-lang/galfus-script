@@ -42,7 +42,7 @@ impl<'a> ExpressionInferrer<'a> {
         None
     }
 
-    pub(super) fn infer_arrow_function_expression_type(
+    pub(super) fn infer_function_expression_type(
         &mut self,
         _node: NodeId,
         expected: Option<TypeId>,
