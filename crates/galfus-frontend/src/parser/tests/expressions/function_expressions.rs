@@ -243,7 +243,7 @@ fn parse_anonymous_function_metadata() {
 }
 
 #[test]
-fn parse_rejects_legacy_anonymous_function_syntax() {
+fn parse_rejects_anonymous_function_without_fn_prefix() {
     let source = source("fn main(): null { const value = (item: i32): i32 => item; return }");
 
     let result = parse(&source);

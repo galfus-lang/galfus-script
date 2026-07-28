@@ -74,6 +74,50 @@ fn check_accepts_block_function_body() {
 }
 
 #[test]
+fn check_reports_missing_return_for_block_function() {
+    let source = source(
+        r#"
+        var callback = fn (): i32 {
+          var value = 1
+        }
+        "#,
+    );
+
+    let parse_result = parse(&source);
+    assert!(
+        !parse_result.has_errors(),
+        "{:?}",
+        parse_result.diagnostics()
+    );
+
+    let resolve_result = resolve(&source, parse_result.into_graph());
+    assert!(
+        !resolve_result.has_errors(),
+        "{:?}",
+        resolve_result.diagnostics()
+    );
+
+    let graph = resolve_result.into_graph();
+    let result = check_declaration_types(&source, &graph);
+    let result = check_definition_types(&source, &graph, result);
+
+    assert!(result.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code().as_str() == TypeDiagnosticCode::MissingReturn.as_code()
+    }));
+}
+
+#[test]
+fn check_accepts_function_metadata_on_function_expression() {
+    let (_source, _graph, result) = check_source(
+        r#"
+        var callback = fn(stamp) (): i32 => 1
+        "#,
+    );
+
+    assert!(!result.has_errors());
+}
+
+#[test]
 fn check_accepts_expression_function_as_call_argument() {
     let (_source, _graph, result) = check_source(
         r#"

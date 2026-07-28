@@ -50,9 +50,11 @@ impl<'a> DeclarationTypeChecker<'a> {
             return;
         };
 
-        if syntax_node.kind() == SyntaxNodeKind::FunctionItem {
+        if matches!(
+            syntax_node.kind(),
+            SyntaxNodeKind::FunctionItem | SyntaxNodeKind::BlockFunction
+        ) {
             self.check_single_function_return_path(node);
-            return;
         }
 
         for child in syntax_node.children() {
@@ -547,7 +549,9 @@ impl<'a> DeclarationTypeChecker<'a> {
             .first_child_of_kind(node, SyntaxNodeKind::KeywordMetadataList)
         {
             let owner = match kind {
-                SyntaxNodeKind::FunctionItem => MetadataOwner::Function,
+                SyntaxNodeKind::FunctionItem
+                | SyntaxNodeKind::ExpressionFunction
+                | SyntaxNodeKind::BlockFunction => MetadataOwner::Function,
                 SyntaxNodeKind::EnumItem => MetadataOwner::Enum,
                 SyntaxNodeKind::LoopStatement => MetadataOwner::Loop,
                 SyntaxNodeKind::ForStatement => MetadataOwner::For,
