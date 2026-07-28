@@ -31,5 +31,3 @@ permissions:
 jobs:
   shared-validate:
     uses: galfus-lang/.github/.github/workflows/pr-labels-n-validate.yml@main
-    secrets:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
