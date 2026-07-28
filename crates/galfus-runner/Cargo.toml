@@ -7,4 +7,5 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 galfus-contract = { path = "../galfus-contract" }
+galfus-runtime = { path = "../galfus-runtime" }
 galfus-workspace = { path = "../galfus-workspace" }

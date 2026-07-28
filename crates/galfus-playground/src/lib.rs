@@ -11,6 +11,7 @@ use std::sync;
 
 use anyhow::Result;
 use galfus_contract::{Providers, ThreadExecutor};
+use galfus_runtime::SingleThreadExecutor;
 use galfus_workspace::{LoadResult, Workspace};
 
 pub use buffer_io::BufferIoProvider;
@@ -95,7 +96,7 @@ impl Playground {
 
     pub fn run(&mut self, args: &[Vec<u8>]) -> Result<i32> {
         use galfus_contract::ThreadExecutor;
-        let executor = sync::Arc::new(galfus_workspace::executor::SingleThreadExecutor::new());
+        let executor = sync::Arc::new(SingleThreadExecutor::new());
         let exit_code = sync::Arc::new(sync::Mutex::new(0));
         let ec = sync::Arc::clone(&exit_code);
         executor.on_exit(Box::new(move |res: Result<i32, String>| {

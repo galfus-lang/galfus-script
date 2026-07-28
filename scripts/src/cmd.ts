@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 
-
+import { checkCrateDependencies } from './dependencies';
 import { buildPlayground } from './playground/build';
 import { setupExtension } from './setup/extension';
 
@@ -13,7 +13,7 @@ const setup = program.command('setup').description('Local development setup comm
 const playground = program
   .command('playground')
   .description('Playground development and distribution commands');
-
+const check = program.command('check').description('Repository validation commands');
 
 
 setup
@@ -30,6 +30,11 @@ playground
   .option('-t, --target <target>', 'wasm-bindgen target (web, bundler, nodejs, etc)', 'web')
   .option('-o, --out-dir <path>', 'Output directory relative to the repository root')
   .action(buildPlayground);
+
+check
+  .command('dependencies')
+  .description('Reject forbidden crate dependencies')
+  .action(checkCrateDependencies);
 
 program.parseAsync(process.argv).catch((error) => {
   console.error('[galfus-scripts] Failed:', error);

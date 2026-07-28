@@ -1,3 +1,4 @@
+pub mod executor;
 pub mod queue;
 pub mod registry;
 pub mod task;
@@ -12,6 +13,8 @@ use galfus_vm::thread::VirtualThread;
 use galfus_vm::{HeapObject, VirtualMachine, VmPanic, VmValue};
 use queue::{BlockedQueue, RunnableQueue};
 use registry::{ThreadId, ThreadRegistry};
+
+pub use executor::SingleThreadExecutor;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {

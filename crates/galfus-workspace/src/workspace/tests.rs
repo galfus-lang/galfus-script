@@ -1,7 +1,7 @@
 use super::*;
-use crate::executor::SingleThreadExecutor;
 use galfus_contract::ThreadExecutor;
 use galfus_contract::{HostProvider, HostResponse, HostValue, MessageInjector, Providers};
+use galfus_runtime::SingleThreadExecutor;
 use std::sync::{Arc, Mutex};
 
 struct TerminatorIo {

@@ -3,6 +3,7 @@ use std::fs;
 use std::sync;
 
 use super::*;
+use galfus_runtime::SingleThreadExecutor;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static NEXT_WORKSPACE_ID: AtomicUsize = AtomicUsize::new(0);
@@ -64,7 +65,7 @@ fn load_workspace_accepts_standalone_source_file() {
     assert!(workspace.check().is_valid);
     workspace.compile().expect("compiles standalone source");
     use galfus_contract::ThreadExecutor;
-    let executor = sync::Arc::new(galfus_workspace::executor::SingleThreadExecutor::new());
+    let executor = sync::Arc::new(SingleThreadExecutor::new());
     let exit_code = sync::Arc::new(sync::Mutex::new(0));
     let ec = sync::Arc::clone(&exit_code);
     executor.on_exit(Box::new(move |res: Result<i32, String>| {
