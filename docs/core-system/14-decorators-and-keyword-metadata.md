@@ -253,7 +253,6 @@ fn(stamp)
 loop(after)
 loop(name: ...)
 for(name: ...)
-new(Type, shared)
 enum(IntegerType)
 ```
 
@@ -267,10 +266,6 @@ loop(name: root) {
 }
 
 for(name: users) user in users {
-}
-
-new(User, shared) {
-  id: 1,
 }
 
 enum(i64) BigKind {
@@ -290,12 +285,6 @@ Invalid:
 struct(stamp) User {
 }
 
-enum(shared) Kind {
-  A,
-}
-
-loop(shared) ready {
-}
 ```
 
 ## 14.15 Determinism

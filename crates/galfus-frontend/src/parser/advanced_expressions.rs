@@ -39,8 +39,6 @@ impl Parser {
 
         if matches!(type_kind, SyntaxNodeKind::ArrayType) {
             let mut children = vec![type_node];
-            let mut metadata_items = Vec::new();
-            let mut metadata_span = None;
 
             if self.at(&TokenKind::Comma) {
                 self.bump();
@@ -55,87 +53,14 @@ impl Parser {
                 self.skip_newlines();
             }
 
-            while self.at(&TokenKind::Comma) {
-                self.bump();
-                self.skip_newlines();
-
-                if self.at(&TokenKind::RightParen) {
-                    break;
-                }
-
-                let start_position = self.position;
-                if let Some(item) = self.parse_keyword_metadata_item() {
-                    if metadata_span.is_none() {
-                        metadata_span = Some(self.node_span(item));
-                    } else {
-                        metadata_span = Some(
-                            Span::cover(metadata_span.unwrap(), self.node_span(item))
-                                .unwrap_or(metadata_span.unwrap()),
-                        );
-                    }
-                    metadata_items.push(item);
-                }
-
-                self.skip_newlines();
-                if self.position == start_position {
-                    self.bump();
-                }
-            }
-
             let close = self.expect(TokenKind::RightParen)?;
-
-            if !metadata_items.is_empty() {
-                let span = metadata_span.unwrap_or(close.span());
-                children.push(self.add_node(
-                    SyntaxNodeKind::KeywordMetadataList,
-                    span,
-                    metadata_items,
-                ));
-            }
 
             let span = Span::cover(new_token.span(), close.span()).unwrap_or(new_token.span());
 
             return Some(self.add_node(SyntaxNodeKind::NewArrayExpression, span, children));
         }
 
-        let mut metadata_items = Vec::new();
-        let mut metadata_span = None;
-
-        while self.at(&TokenKind::Comma) {
-            self.bump();
-            self.skip_newlines();
-
-            if self.at(&TokenKind::RightParen) {
-                break;
-            }
-
-            let start_position = self.position;
-            if let Some(item) = self.parse_keyword_metadata_item() {
-                if metadata_span.is_none() {
-                    metadata_span = Some(self.node_span(item));
-                } else {
-                    metadata_span = Some(
-                        Span::cover(metadata_span.unwrap(), self.node_span(item))
-                            .unwrap_or(metadata_span.unwrap()),
-                    );
-                }
-                metadata_items.push(item);
-            }
-
-            self.skip_newlines();
-            if self.position == start_position {
-                self.bump();
-            }
-        }
-
-        let close = self.expect(TokenKind::RightParen)?;
-
-        let metadata_list = if !metadata_items.is_empty() {
-            let span = metadata_span.unwrap_or(close.span());
-            Some(self.add_node(SyntaxNodeKind::KeywordMetadataList, span, metadata_items))
-        } else {
-            None
-        };
+        self.expect(TokenKind::RightParen)?;
 
         self.skip_newlines();
 
@@ -144,13 +69,7 @@ impl Parser {
         let span =
             Span::cover(new_token.span(), self.node_span(fields)).unwrap_or(new_token.span());
 
-        let mut children = vec![type_node];
-        if let Some(metadata) = metadata_list {
-            children.push(metadata);
-        }
-        children.push(fields);
-
-        Some(self.add_node(SyntaxNodeKind::StructLiteral, span, children))
+        Some(self.add_node(SyntaxNodeKind::StructLiteral, span, vec![type_node, fields]))
     }
 
     pub(super) fn parse_arrow_function_expression(&mut self) -> Option<NodeId> {

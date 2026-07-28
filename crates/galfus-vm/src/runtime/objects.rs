@@ -1,7 +1,3 @@
-use std::collections;
-use std::mem;
-
-use crate::runtime;
 use crate::thread;
 
 use super::*;
@@ -15,8 +11,7 @@ impl VirtualMachine {
     ) -> Result<ExecutionStep, VmError> {
         match instr {
             // Category D: Heaps, Structs & Collections
-            Instruction::AllocLocal { dest, type_idx }
-            | Instruction::AllocShared { dest, type_idx } => {
+            Instruction::AllocLocal { dest, type_idx } => {
                 let ty = self
                     .current_image(thread)
                     .unwrap()
@@ -681,118 +676,5 @@ impl VirtualMachine {
                 });
             }
         })
-    }
-}
-
-/// Realiza a cópia profunda de um valor (e todos os objetos alcançáveis) de um heap de origem para um heap de destino.
-pub fn copy_value_between_heaps(
-    source_heap: &thread::PrivateHeap,
-    dest_heap: &mut thread::PrivateHeap,
-    value: &Value,
-) -> Result<Value, VmError> {
-    match value {
-        Value::Object(obj_ref) => {
-            let mut copied_map = collections::HashMap::new();
-            copy_object_inter_heap(source_heap, dest_heap, *obj_ref, &mut copied_map)
-                .map(Value::Object)
-        }
-        other => Ok(other.clone()),
-    }
-}
-
-fn copy_object_inter_heap(
-    source_heap: &thread::PrivateHeap,
-    dest_heap: &mut thread::PrivateHeap,
-    obj_ref: ObjectRef,
-    copied_map: &mut collections::HashMap<usize, ObjectRef>,
-) -> Result<ObjectRef, VmError> {
-    if let Some(&new_ref) = copied_map.get(&obj_ref.raw()) {
-        return Ok(new_ref);
-    }
-
-    let source_obj = source_heap.get_object(obj_ref)?;
-    let mut new_obj = source_obj.clone();
-    // Clear references
-    match &mut new_obj {
-        runtime::HeapObject::Struct { fields, .. } => {
-            for field in fields.iter_mut() {
-                *field = Value::Null;
-            }
-        }
-        runtime::HeapObject::Array { elements, .. } => {
-            for element in elements.iter_mut() {
-                *element = Value::Null;
-            }
-        }
-        runtime::HeapObject::Tuple { elements } => {
-            for element in elements.iter_mut() {
-                *element = Value::Null;
-            }
-        }
-        runtime::HeapObject::Choice { payload, .. } => {
-            *payload = Value::Null;
-        }
-    }
-
-    let dest_ref = dest_heap.alloc(new_obj);
-    copied_map.insert(obj_ref.raw(), dest_ref);
-
-    // Deep copy recursive
-    match source_obj {
-        runtime::HeapObject::Struct { fields, .. } => {
-            let mut copied_fields = fields
-                .iter()
-                .map(|field| copy_value_internal(source_heap, dest_heap, field, copied_map))
-                .collect::<Result<Vec<_>, _>>()?;
-            if let runtime::HeapObject::Struct { fields, .. } =
-                dest_heap.get_object_mut(dest_ref)?
-            {
-                mem::swap(fields, &mut copied_fields);
-            }
-        }
-        runtime::HeapObject::Array { elements, .. } => {
-            let mut copied_elements = elements
-                .iter()
-                .map(|element| copy_value_internal(source_heap, dest_heap, element, copied_map))
-                .collect::<Result<Vec<_>, _>>()?;
-            if let runtime::HeapObject::Array { elements, .. } =
-                dest_heap.get_object_mut(dest_ref)?
-            {
-                mem::swap(elements, &mut copied_elements);
-            }
-        }
-        runtime::HeapObject::Tuple { elements } => {
-            let mut copied_elements = elements
-                .iter()
-                .map(|element| copy_value_internal(source_heap, dest_heap, element, copied_map))
-                .collect::<Result<Vec<_>, _>>()?;
-            if let runtime::HeapObject::Tuple { elements } = dest_heap.get_object_mut(dest_ref)? {
-                mem::swap(elements, &mut copied_elements);
-            }
-        }
-        runtime::HeapObject::Choice { payload, .. } => {
-            let copied_payload = copy_value_internal(source_heap, dest_heap, payload, copied_map)?;
-            if let runtime::HeapObject::Choice { payload, .. } =
-                dest_heap.get_object_mut(dest_ref)?
-            {
-                *payload = copied_payload;
-            }
-        }
-    }
-
-    Ok(dest_ref)
-}
-
-fn copy_value_internal(
-    source_heap: &thread::PrivateHeap,
-    dest_heap: &mut thread::PrivateHeap,
-    value: &Value,
-    copied_map: &mut collections::HashMap<usize, ObjectRef>,
-) -> Result<Value, VmError> {
-    match value {
-        Value::Object(obj_ref) => {
-            copy_object_inter_heap(source_heap, dest_heap, *obj_ref, copied_map).map(Value::Object)
-        }
-        other => Ok(other.clone()),
     }
 }

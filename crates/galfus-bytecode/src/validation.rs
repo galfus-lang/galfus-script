@@ -373,8 +373,7 @@ pub fn validate_bytecode_module(
                 }
 
                 // Category D
-                Instruction::AllocLocal { dest, type_idx }
-                | Instruction::AllocShared { dest, type_idx } => {
+                Instruction::AllocLocal { dest, type_idx } => {
                     check_reg(dest, &mut errors);
                     check_type(type_idx, &mut errors);
                     if (type_idx.raw() as usize) < module.types.len() {

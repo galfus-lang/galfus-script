@@ -85,15 +85,6 @@ new(User) {
 }
 ```
 
-With construction metadata:
-
-```galfus
-new(User, shared) {
-  id: 1,
-  name: "Ana",
-}
-```
-
 Array construction:
 
 ```galfus

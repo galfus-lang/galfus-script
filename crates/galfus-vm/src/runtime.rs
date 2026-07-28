@@ -154,7 +154,7 @@ pub struct VirtualMachine {
 }
 
 impl VirtualMachine {
-    pub fn shared_providers(&self) -> Option<Arc<Mutex<Providers>>> {
+    pub fn providers(&self) -> Option<Arc<Mutex<Providers>>> {
         self.context.providers.clone()
     }
 
@@ -175,7 +175,7 @@ impl VirtualMachine {
         self
     }
 
-    pub fn with_shared_providers(mut self, providers: Option<Arc<Mutex<Providers>>>) -> Self {
+    pub fn with_provider_handle(mut self, providers: Option<Arc<Mutex<Providers>>>) -> Self {
         self.context.providers = providers;
         self
     }
@@ -428,7 +428,6 @@ impl VirtualMachine {
             | Instruction::Panic { .. } => self.execute_control_instruction(thread, instr)?,
 
             Instruction::AllocLocal { .. }
-            | Instruction::AllocShared { .. }
             | Instruction::LoadField { .. }
             | Instruction::StoreField { .. }
             | Instruction::NewArray { .. }

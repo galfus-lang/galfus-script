@@ -1,6 +1,13 @@
 use super::super::*;
 
 #[test]
+fn parse_rejects_shared_array_allocation_metadata() {
+    let source = source("fn main(): null {\n  const values = new([u8], 4, shared)\n  return\n}");
+
+    assert!(parse(&source).has_errors());
+}
+
+#[test]
 fn parse_empty_array_literal() {
     let source = source("fn main(): null {\n  const values = []\n  return\n}");
 

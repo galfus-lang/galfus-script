@@ -29,7 +29,7 @@ impl<'a> DeclarationTypeChecker<'a> {
 
         if let Some(type_node) = type_node {
             let text = self.node_text(type_node);
-            if text == "shared" || text == "stamp" || text == "after" || text == "name" {
+            if text == "stamp" || text == "after" || text == "name" {
                 self.report_invalid_keyword_metadata(
                     type_node,
                     format!("invalid metadata {} for enum", text),

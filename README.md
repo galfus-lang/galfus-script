@@ -67,6 +67,8 @@ Galfus Script does not rely on a traditional global garbage collector or manual 
 
 Values live as long as they are reachable from anchors through edges. When anchors or edges are removed, the affected graph fragments are released deterministically and cycle-safely at runtime.
 
+Each execution thread owns a private heap. Inter-thread mailboxes transport byte sequences only; structured values require explicit serialization before they can be sent.
+
 ---
 
 ## Repository Layout

@@ -61,7 +61,6 @@ impl TokenKind {
                 | Self::False
                 | Self::New
                 | Self::Copy
-                | Self::Rollback
                 | Self::SelfKw
         )
     }

@@ -1,6 +1,6 @@
 use std::thread;
 
-use super::RuntimeTask;
+use super::{RuntimeTask, copy_thread_args};
 use crate::queue::BlockedQueue;
 use crate::registry::{ThreadId, ThreadRegistry};
 use galfus_bytecode::instruction::{FuncIdx, Reg, TypeIdx};
@@ -10,7 +10,7 @@ use galfus_bytecode::{
 use galfus_contract::{RunnableTask, ThreadExecutor, ThreadResult};
 use galfus_core::{ModuleId, ModulePath, SemanticRevision};
 use galfus_vm::thread::VirtualThread;
-use galfus_vm::{ExecutionStep, VirtualMachine, VmValue};
+use galfus_vm::{ExecutionStep, HeapObject, VirtualMachine, VmValue};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -35,6 +35,56 @@ impl ThreadExecutor for TestExecutor {
     fn spawn(&self, task: Box<dyn RunnableTask>) {
         self.tasks.lock().unwrap().push_back(task);
     }
+}
+
+#[test]
+fn thread_arguments_copy_only_byte_sequences() {
+    let mut source_heap = galfus_vm::thread::PrivateHeap::new();
+    let bytes_ref = source_heap.alloc(HeapObject::Array {
+        element_ty: TypeIdx(0),
+        elements: vec![VmValue::Uint8(b'a'), VmValue::Uint8(b'b')],
+    });
+    let args = VmValue::Object(source_heap.alloc(HeapObject::Array {
+        element_ty: TypeIdx(1),
+        elements: vec![VmValue::Object(bytes_ref)],
+    }));
+    let mut target_heap = galfus_vm::thread::PrivateHeap::new();
+
+    let copied = copy_thread_args(&source_heap, &mut target_heap, &args)
+        .expect("byte-sequence arguments are copied into the target heap");
+
+    let VmValue::Object(copied_args_ref) = copied else {
+        panic!("expected an argument array");
+    };
+    let HeapObject::Array { elements, .. } = target_heap
+        .get_object(copied_args_ref)
+        .expect("copied argument array exists")
+    else {
+        panic!("expected an argument array");
+    };
+    let VmValue::Object(copied_bytes_ref) = elements[0] else {
+        panic!("expected a byte sequence");
+    };
+    assert!(matches!(
+        target_heap
+            .get_object(copied_bytes_ref)
+            .expect("copied bytes exist"),
+        HeapObject::Array { elements, .. }
+            if elements == &vec![VmValue::Uint8(b'a'), VmValue::Uint8(b'b')]
+    ));
+}
+
+#[test]
+fn thread_arguments_reject_non_byte_values() {
+    let mut source_heap = galfus_vm::thread::PrivateHeap::new();
+    let args = VmValue::Object(source_heap.alloc(HeapObject::Array {
+        element_ty: TypeIdx(1),
+        elements: vec![VmValue::Int32(7)],
+    }));
+    let mut target_heap = galfus_vm::thread::PrivateHeap::new();
+
+    assert!(copy_thread_args(&source_heap, &mut target_heap, &args).is_none());
+    assert!(target_heap.objects.is_empty());
 }
 
 #[test]

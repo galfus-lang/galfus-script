@@ -2,7 +2,7 @@ use super::*;
 use crate::SyntaxNodeKind;
 use galfus_core::{NodeId, Span};
 
-const METADATA_FLAGS: &[&str] = &["stamp", "after", "shared"];
+const METADATA_FLAGS: &[&str] = &["stamp", "after"];
 
 impl Parser {
     pub(super) fn parse_optional_keyword_metadata(&mut self, is_loop: bool) -> Option<NodeId> {
@@ -12,14 +12,14 @@ impl Parser {
 
         if is_loop {
             // For loops, we only treat it as metadata if the first item inside is a known flag
-            // (stamp, after, shared) or is a pair (starts with identifier followed by colon).
+            // (stamp, after) or is a pair (starts with identifier followed by colon).
             let mut offset = 1;
             while self.peek(offset).kind() == &TokenKind::Newline {
                 offset += 1;
             }
             if self.peek(offset).kind() == &TokenKind::Identifier {
                 let text = self.token_text(self.peek(offset));
-                let is_flag = text == "stamp" || text == "after" || text == "shared";
+                let is_flag = text == "stamp" || text == "after";
 
                 let mut next_offset = offset + 1;
                 while self.peek(next_offset).kind() == &TokenKind::Newline {
@@ -108,7 +108,7 @@ impl Parser {
             }
         }
 
-        // 2) Flag: stamp, after, shared
+        // 2) Flag: stamp, after
         if self.at(&TokenKind::Identifier) {
             let text = self.token_text(self.current());
             if METADATA_FLAGS.contains(&text) {

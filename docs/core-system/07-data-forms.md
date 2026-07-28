@@ -179,18 +179,7 @@ struct User {
 
 After construction, they cannot be reassigned.
 
-## 7.11 Struct Construction Metadata
-
-```galfus
-var user = new(User, shared) {
-  id: 1,
-  name: "Ana",
-}
-```
-
-`shared` is keyword metadata in construction position. It is not globally reserved.
-
-## 7.12 Inferred Struct Construction
+## 7.11 Inferred Struct Construction
 
 ```galfus
 var user: User = new {
@@ -210,7 +199,7 @@ var user = new {
 }
 ```
 
-## 7.13 Struct Shorthand and Spread
+## 7.12 Struct Shorthand and Spread
 
 Shorthand:
 
@@ -235,7 +224,7 @@ var user2 = new(User) {
 
 Nested values are not deep-copied.
 
-## 7.14 Struct Expansion
+## 7.13 Struct Expansion
 
 Struct expansion copies field declarations into a new struct declaration.
 
@@ -250,7 +239,7 @@ This is not inheritance.
 
 Conflicting expanded fields are semantic errors.
 
-## 7.15 Enums
+## 7.14 Enums
 
 Enums are nominal discriminant types.
 
@@ -278,7 +267,7 @@ Default base type is `i32`.
 
 Enum-to-integer conversion requires explicit cast.
 
-## 7.16 Choices
+## 7.15 Choices
 
 A choice is a nominal tagged union.
 
@@ -305,7 +294,7 @@ choice Asset {
 }
 ```
 
-## 7.17 Weak Fields
+## 7.16 Weak Fields
 
 A field may be weak.
 
@@ -326,11 +315,11 @@ struct Node {
 }
 ```
 
-## 7.18 Complex Assignment
+## 7.17 Complex Assignment
 
 Primitive scalar values are copied by value.
 
-Complex values are shared by assignment.
+Complex values preserve their identity by assignment.
 
 ```galfus
 var user = new(User) {
@@ -342,7 +331,7 @@ var other = user
 
 `user` and `other` reference the same value graph.
 
-## 7.19 Copy
+## 7.18 Copy
 
 `copy` performs explicit deep copy.
 
@@ -362,7 +351,7 @@ var token2 = copy token // invalid
 
 A fieldless struct behaves like an opaque runtime identity or unique handle.
 
-## 7.20 Contract
+## 7.19 Contract
 
 The checker MUST:
 

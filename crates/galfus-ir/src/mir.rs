@@ -1,4 +1,4 @@
-use galfus_core::{FunctionId, StorageMetadata, SymbolId, TypeId};
+use galfus_core::{FunctionId, SymbolId, TypeId};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -146,7 +146,6 @@ pub enum RValue {
     NewStruct {
         struct_type: TypeId,
         fields: Vec<Operand>,
-        storage_meta: StorageMetadata,
     },
     NewArray(TypeId, Vec<Operand>),
     NewArrayDynamic(TypeId, Vec<ArrayLiteralElement>),
@@ -158,14 +157,12 @@ pub enum RValue {
         array_type: TypeId,
         element_type: TypeId,
         size: usize,
-        storage: StorageMetadata,
     },
     /// Zero-initialised allocation with runtime length.
     NewArrayZeroedDynamic {
         array_type: TypeId,
         element_type: TypeId,
         length: Operand,
-        storage: StorageMetadata,
     },
     NewTuple(TypeId, Vec<Operand>),
     MemberAccess(Operand, String),

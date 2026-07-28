@@ -209,7 +209,7 @@ var cloned = copy user
 
 ```txt
 duplicate owning topology
-preserve shared topology inside the copy
+preserve ownership topology inside the copy
 validate weak observers
 respect resource copy policy
 reject non-copyable values
