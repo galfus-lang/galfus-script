@@ -2,7 +2,7 @@ use std::collections;
 
 use super::function::FunctionBuilder;
 use crate::mir::*;
-use galfus_core::{NodeId, StorageMetadata, TypeId};
+use galfus_core::{NodeId, TypeId};
 use galfus_frontend::{SyntaxNode, SyntaxNodeKind, TypeKind};
 
 impl<'b, 'a> FunctionBuilder<'b, 'a> {
@@ -113,7 +113,6 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     RValue::NewStruct {
                         struct_type,
                         fields,
-                        storage_meta: StorageMetadata::Local,
                     },
                 ),
                 None,
@@ -282,11 +281,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
         Operand::Local(temp_id)
     }
 
-    /// Lower `new([T], size)` / `new([T], size, shared)`.
-    ///
-    /// child 0: `ArrayType` node
-    /// child 1: length expression
-    /// child 2: optional storage-tag `Identifier`, for example `shared`.
+    /// Lower `new([T], size)`.
     pub(super) fn lower_new_array_expression(
         &mut self,
         expr_id: NodeId,
@@ -321,33 +316,6 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
             _ => return Operand::Constant(Constant::Null),
         };
 
-        let storage = if let Some(metadata_list_node) = self
-            .builder
-            .graph
-            .syntax()
-            .first_child_of_kind(expr_id, SyntaxNodeKind::KeywordMetadataList)
-        {
-            let mut found_shared = false;
-            if let Some(metadata_list) = self.builder.graph.syntax().node(metadata_list_node) {
-                for child in metadata_list.children() {
-                    if let Some(child_node) = self.builder.graph.syntax().node(*child)
-                        && child_node.kind() == SyntaxNodeKind::KeywordMetadataFlag
-                        && let Some(flag_ident) = self.builder.graph.syntax().child(*child, 0)
-                        && self.builder.node_text(flag_ident) == "shared"
-                    {
-                        found_shared = true;
-                    }
-                }
-            }
-            if found_shared {
-                StorageMetadata::Shared
-            } else {
-                StorageMetadata::Local
-            }
-        } else {
-            StorageMetadata::Local
-        };
-
         let temp_id = self.declare_local(None, array_type);
 
         let NewArrayZeroedAllocation::Dynamic {
@@ -358,7 +326,6 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
             array_type,
             element_type,
             length,
-            storage,
         };
 
         self.current_instructions

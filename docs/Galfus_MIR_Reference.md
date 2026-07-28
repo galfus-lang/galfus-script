@@ -10,7 +10,7 @@ Based on the compiler requirements and design goals, the MIR is specified as:
 
 1. **SSA (Static Single Assignment) with Block Parameters**: Every virtual register is assigned exactly once. Merging control flow uses block parameters (arguments passed to blocks) rather than traditional $\phi$ (phi) nodes, which simplifies liveness calculations.
 2. **Structured Control Flow**: Instead of an entirely flattened Control Flow Graph (CFG) of raw jumps, the MIR retains hierarchical blocks (`Block`, `If`, `Loop`). This preserves lexical scope boundaries, making lifetime analysis for the Owner Graph direct and precise.
-3. **Implicit Owner Graph Integration**: The MIR focuses on pure computation and generic `Drop(x)` statements where lifetimes end. The VM and the bytecode generator infer ownership graph updates (anchors, edges, weak links) using variable type metadata and allocation policies (e.g., local heap vs. shared thread memory).
+3. **Implicit Owner Graph Integration**: The MIR focuses on pure computation and generic `Drop(x)` statements where lifetimes end. The VM and the bytecode generator infer ownership graph updates (anchors, edges, weak links) for values allocated in the current thread's private heap.
 
 ---
 
@@ -103,23 +103,20 @@ pub enum RValue {
     /// Deep copy value
     Copy(Operand),
 
-    /// Instantiate structures (with metadata parameters like allocation space)
+    /// Instantiate structures in the current thread's private heap
     NewStruct {
         struct_type: TypeId,
         fields: Vec<Operand>,
-        /// Metadata describing the storage class (e.g. thread-shared vs thread-local)
-        storage_meta: StorageMetadata,
     },
     /// Data-initialized array creation from array literal elements: `[a, b, c]`
     NewArray(TypeId, Vec<Operand>),
     /// Dynamic data-initialized array creation with spreads: `[a, ...b, c]`
     NewArrayDynamic(TypeId, Vec<ArrayLiteralElement>),
-    /// Zero-initialised allocation: `new([T], size)` or `new([T], size, shared)`
+    /// Zero-initialised allocation: `new([T], size)`
     NewArrayZeroed {
         array_type: TypeId,
         element_type: TypeId,
         size: Operand,
-        storage: StorageMetadata,
     },
     /// Create tuple: `(a, b)`
     NewTuple(TypeId, Vec<Operand>),
@@ -184,7 +181,7 @@ pub enum Terminator {
 
 The Owner Graph is managed implicitly by the VM and the bytecode generator using **Type Metadata** and **Life Boundaries**:
 
-1. **Allocation Metadata**: Instructions like `NewStruct` hold metadata (`StorageMetadata`) telling the VM whether to allocate on the thread-local heap, stack, or shared concurrent heap.
+1. **Allocation**: Instructions like `NewStruct` allocate exclusively on the current thread's private heap.
 2. **Deterministic Drops**: The compiler inserts `Drop(local)` at the exact point in the MIR where the local variable's virtual register is no longer alive (computed via SSA liveness analysis).
 3. **VM Execution**: The VM interprets `Drop(local)` and implicitly:
    - Breaks any outgoing ownership edges (`edges`).

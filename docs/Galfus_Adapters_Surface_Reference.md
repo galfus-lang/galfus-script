@@ -444,7 +444,7 @@ borrowed buffer
 owned buffer
 ```
 
-The adapter must define how memory is shared, copied, borrowed, pinned, invalidated, or released.
+The adapter must define how memory is copied, borrowed, pinned, invalidated, or released.
 
 ---
 
@@ -457,7 +457,6 @@ A `.gfp` may define resource policies such as:
 ```txt
 owned
 borrowed
-shared
 host-owned
 adapter-owned
 manual-drop

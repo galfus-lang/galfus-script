@@ -138,19 +138,15 @@ impl RunnableTask for RuntimeTask {
                             func_idx,
                         }) => {
                             let copied_arg = if matches!(&arg, galfus_vm::VmValue::Null) {
-                                Ok(empty_thread_args(
+                                Some(empty_thread_args(
                                     &self.vm,
                                     &mut target_thread.heap,
                                     module_id,
                                 ))
                             } else {
-                                galfus_vm::thread::deep_copy_value(
-                                    &self.thread.heap,
-                                    &mut target_thread.heap,
-                                    &arg,
-                                )
+                                copy_thread_args(&self.thread.heap, &mut target_thread.heap, &arg)
                             };
-                            copied_arg.is_ok_and(|copied_arg| {
+                            copied_arg.is_some_and(|copied_arg| {
                                 self.vm
                                     .prepare_function(
                                         &mut target_thread,
@@ -245,7 +241,7 @@ impl RunnableTask for RuntimeTask {
                                 _ => None,
                             };
                             if let Some(method) = method_opt {
-                                let p_opt = self.vm.shared_providers();
+                                let p_opt = self.vm.providers();
                                 if let Some(providers) = &p_opt {
                                     let mut p_lock = providers.lock().unwrap();
                                     if let Some(host) = p_lock.host_mut() {
@@ -413,6 +409,57 @@ fn empty_thread_args(
         element_ty,
         elements: vec![],
     }))
+}
+
+fn copy_thread_args(
+    src_heap: &galfus_vm::thread::PrivateHeap,
+    dst_heap: &mut galfus_vm::thread::PrivateHeap,
+    value: &galfus_vm::VmValue,
+) -> Option<galfus_vm::VmValue> {
+    let galfus_vm::VmValue::Object(args_ref) = value else {
+        return None;
+    };
+    let galfus_vm::HeapObject::Array {
+        element_ty,
+        elements,
+    } = src_heap.get_object(*args_ref).ok()?
+    else {
+        return None;
+    };
+
+    let mut copied_args = Vec::with_capacity(elements.len());
+    for argument in elements {
+        let galfus_vm::VmValue::Object(bytes_ref) = argument else {
+            return None;
+        };
+        let galfus_vm::HeapObject::Array {
+            element_ty,
+            elements,
+        } = src_heap.get_object(*bytes_ref).ok()?
+        else {
+            return None;
+        };
+        let bytes = elements
+            .iter()
+            .map(|element| match element {
+                galfus_vm::VmValue::Uint8(byte) => Some(galfus_vm::VmValue::Uint8(*byte)),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()?;
+        copied_args.push(galfus_vm::VmValue::Object(dst_heap.alloc(
+            galfus_vm::HeapObject::Array {
+                element_ty: *element_ty,
+                elements: bytes,
+            },
+        )));
+    }
+
+    Some(galfus_vm::VmValue::Object(dst_heap.alloc(
+        galfus_vm::HeapObject::Array {
+            element_ty: *element_ty,
+            elements: copied_args,
+        },
+    )))
 }
 
 use galfus_contract::HostValue;

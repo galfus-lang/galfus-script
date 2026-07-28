@@ -282,7 +282,6 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
             RValue::NewStruct {
                 struct_type,
                 fields,
-                storage_meta: _,
             } => {
                 let type_idx = lower::types::lower_type(self.ctx, *struct_type);
                 self.instructions

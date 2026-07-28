@@ -26,7 +26,7 @@ Memory is completely isolated per thread to guarantee safety, local garbage coll
 * Owned exclusively by a single `VirtualThread`.
 * Managed by the single-threaded, highly optimized `owner_graph_core`.
 * Requires no mutexes, atomics, or cross-thread synchronization.
-* Eliminates the need for a global Shared Heap or Software Transactional Memory (STM).
+* Has no global heap or software transactional memory.
 
 ---
 
@@ -37,25 +37,25 @@ Since there is no shared memory, threads communicate exclusively by sending and 
 ### Core Concepts
 
 * **Mailbox**: Every thread has a dedicated concurrent queue (Mailbox) where it receives messages.
-* **Deep Copy (`copy_value_between_heaps`)**: When a message is sent from Thread A to Thread B, the Galfus runtime traverses the ownership graph of the message and deep-copies it from A`s PrivateHeap into B`s PrivateHeap.
+* **Byte Sequences Only**: Mailboxes transport `[u8]` values. Structured values must be explicitly serialized before sending and deserialized after receiving.
 * **Non-Blocking Send**: Sending a message never blocks the sender.
 * **Blocking Receive**: Receiving a message blocks the thread (`ThreadResult::Blocked`) if its mailbox is empty. The thread is parked in the `BlockedQueue` until a message arrives.
 
 ### Syntax Demonstration
 
 ```galfus
-fn worker(id: i32): null {
+fn worker(): null {
   loop {
     let msg = receive()
-    println("Worker " + id + " received: " + msg)
+    println(msg)
   }
 }
 
 fn main(): i32 {
   // Spawn a new virtual thread (actor)
-  let target_thread = spawn(worker, 1)
+  let target_thread = spawn(worker)
   
-  // Send a deep-copied message to the actor
+  // Send bytes to the actor
   send(target_thread, "Hello from main!")
   
   return 0

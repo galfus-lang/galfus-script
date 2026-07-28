@@ -221,16 +221,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "galfus-jit"
-version = "0.0.0"
-dependencies = [
- "galfus-core",
- "galfus-ir",
- "galfus-vm",
- "thiserror",
-]
-
-[[package]]
 name = "galfus-playground"
 version = "0.0.0"
 dependencies = [

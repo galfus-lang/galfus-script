@@ -161,7 +161,7 @@ impl Runtime {
         }
 
         let mut thread = galfus_vm::thread::VirtualThread::new();
-        let vm = VirtualMachine::new(graph.clone()).with_shared_providers(self.providers.clone());
+        let vm = VirtualMachine::new(graph.clone()).with_provider_handle(self.providers.clone());
 
         for initialized_module_id in graph.initialization_order(module_id)? {
             if thread.is_module_initialized(initialized_module_id) {

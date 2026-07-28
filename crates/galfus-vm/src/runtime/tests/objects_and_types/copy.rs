@@ -261,7 +261,7 @@ fn test_copy_nulls_external_weak_observer_target() {
 }
 
 #[test]
-fn test_copy_preserves_shared_strong_topology() {
+fn test_copy_preserves_strong_ownership_topology() {
     let instrs = vec![
         Instruction::AllocLocal {
             dest: Reg(1),

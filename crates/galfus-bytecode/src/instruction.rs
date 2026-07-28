@@ -301,10 +301,6 @@ pub enum Instruction {
         dest: Reg,
         type_idx: TypeIdx,
     },
-    AllocShared {
-        dest: Reg,
-        type_idx: TypeIdx,
-    },
     LoadField {
         dest: Reg,
         obj: Reg,

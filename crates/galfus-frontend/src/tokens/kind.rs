@@ -43,7 +43,6 @@ pub enum TokenKind {
     New,
     Copy,
 
-    Rollback,
     SelfKw,
 
     // Delimiters

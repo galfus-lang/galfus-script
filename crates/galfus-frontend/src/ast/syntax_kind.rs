@@ -81,8 +81,6 @@ pub enum SyntaxNodeKind {
     LoopStatement,
     AssignmentStatement,
 
-    RollbackStatement,
-
     // Patterns
     BindingPattern,
     TypePattern,
@@ -208,7 +206,6 @@ impl SyntaxNodeKind {
                 | SyntaxNodeKind::ForStatement
                 | SyntaxNodeKind::LoopStatement
                 | SyntaxNodeKind::AssignmentStatement
-                | SyntaxNodeKind::RollbackStatement
         )
     }
 

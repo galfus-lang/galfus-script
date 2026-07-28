@@ -94,12 +94,11 @@ Control flow uses relative bytecode jumps. Jumps are offset by instructions/byte
 
 ### Category D: Heaps, Structs & Collections
 
-Handles allocation on both Local and Shared heaps, object instantiations, and property/index reads/writes.
+Handles allocation in the current thread's private heap, object instantiations, and property/index reads/writes.
 
 | Opcode             | Hex    | Arguments                                                            | Behavior                                                       |
 | :----------------- | :----- | :------------------------------------------------------------------- | :------------------------------------------------------------- |
 | **`ALLOC_LOCAL`**  | `0x40` | `dest: Reg`, `type_idx: TypeIdx`                                     | Allocate a struct on the **Local Heap**.                       |
-| **`ALLOC_SHARED`** | `0x41` | `dest: Reg`, `type_idx: TypeIdx`                                     | Allocate a struct on the **Shared Heap** (future-proof).       |
 | **`LOAD_FIELD`**   | `0x42` | `dest: Reg`, `obj: Reg`, `field: FieldIdx`                           | Read field from a local struct/object.                         |
 | **`STORE_FIELD`**  | `0x43` | `obj: Reg`, `field: FieldIdx`, `val: Reg`                            | Write value to local struct/object field.                      |
 | **`NEW_ARRAY`**    | `0x44` | `dest: Reg`, `type_idx: TypeIdx`, `len_reg: Reg`                     | Create array of length `len_reg`.                              |

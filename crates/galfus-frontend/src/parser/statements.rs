@@ -51,10 +51,6 @@ impl Parser {
             return self.parse_typeof_statement();
         }
 
-        if self.at(&TokenKind::Rollback) {
-            return self.parse_rollback_statement();
-        }
-
         if self.can_start_expression() {
             return self.parse_expression_or_assignment_statement();
         }
@@ -423,17 +419,5 @@ impl Parser {
             .unwrap_or_else(|| self.node_span(pattern));
 
         Some(self.add_node(SyntaxNodeKind::TypeofArm, span, vec![pattern, body]))
-    }
-
-    pub(super) fn parse_rollback_statement(&mut self) -> Option<NodeId> {
-        let rollback_token = self.expect(TokenKind::Rollback)?;
-
-        self.expect_statement_end();
-
-        Some(self.add_node(
-            SyntaxNodeKind::RollbackStatement,
-            rollback_token.span(),
-            Vec::new(),
-        ))
     }
 }

@@ -56,8 +56,6 @@ loop
 break
 continue
 return
-transaction
-rollback
 true
 false
 null
@@ -129,7 +127,6 @@ The following names may be ordinary identifiers outside valid metadata positions
 
 ```txt
 stamp
-shared
 after
 name
 ```

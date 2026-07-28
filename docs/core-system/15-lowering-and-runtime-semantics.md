@@ -122,7 +122,6 @@ fn(stamp) -> callsite expansion/lowering-time specialization candidate
 loop(after) -> condition-after loop shape
 loop(name: X) -> named loop target
 for(name: X) -> named for target
-new(T, shared) -> shared-capable ownership/runtime marker
 enum(T) -> enum discriminant representation
 ```
 
@@ -234,7 +233,7 @@ cache ??= createCache()
 
 ```txt
 duplicate owning topology
-preserve shared topology inside the copy
+preserve ownership topology inside the copy
 validate weak observers
 respect resource policies
 reject non-copyable values
