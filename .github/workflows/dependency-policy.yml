@@ -47,4 +47,4 @@ jobs:
 
       - name: Validate dependency policy
         working-directory: scripts
-        run: bun run check dependencies
+        run: bun cmd check dependencies
