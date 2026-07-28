@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "cmd": "bun src/cmd.ts",
+    "check-dependencies": "bun cmd check dependencies",
     "setup-vscode": "bun cmd setup extension --vscode",
     "setup-antigravity": "bun cmd setup extension --antigravity",
     "setup-all": "bun cmd setup extension --all"

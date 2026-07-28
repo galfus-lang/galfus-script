@@ -1,0 +1,50 @@
+name: Dependency Policy
+
+on:
+  pull_request:
+    paths:
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'crates/**'
+      - 'scripts/src/**'
+      - 'scripts/package.json'
+      - 'scripts/bun.lock'
+      - '.github/workflows/dependency-policy.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'crates/**'
+      - 'scripts/src/**'
+      - 'scripts/package.json'
+      - 'scripts/bun.lock'
+      - '.github/workflows/dependency-policy.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check forbidden crate dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install script dependencies
+        working-directory: scripts
+        run: bun install --frozen-lockfile
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Validate dependency policy
+        working-directory: scripts
+        run: bun run check dependencies

@@ -152,7 +152,6 @@ version = "0.0.0"
 dependencies = [
  "galfus-core",
  "galfus-frontend",
- "galfus-runtime",
  "thiserror",
 ]
 
@@ -226,6 +225,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "galfus-contract",
+ "galfus-runtime",
  "galfus-workspace",
  "js-sys",
  "serde_json",
@@ -238,6 +238,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "galfus-contract",
+ "galfus-runtime",
  "galfus-workspace",
 ]
 
@@ -246,7 +247,6 @@ name = "galfus-runtime"
 version = "0.0.0"
 dependencies = [
  "galfus-bytecode",
- "galfus-compiler",
  "galfus-contract",
  "galfus-core",
  "galfus-vm",
