@@ -109,6 +109,111 @@ fn test_mir_builder_lowers_named_function_as_a_function_constant() {
 }
 
 #[test]
+fn test_mir_builder_lowers_named_expression_function_body() {
+    let source_id = SourceId::new(0);
+    let code = r#"
+        fn double(value: i32): i32 => value * 2
+    "#;
+    let source = SourceFile::new(source_id, "test.gfs".to_string(), code.to_string());
+
+    let parse_result = parse(&source);
+    let resolve_result = resolve(&source, parse_result.into_graph());
+    let graph = resolve_result.into_graph();
+    assert!(!graph.has_errors(), "Parse or resolve errors occurred");
+
+    let type_result = check_definition_types(
+        &source,
+        &graph,
+        check_declaration_types(&source, &graph),
+    );
+    assert!(
+        !type_result.has_errors(),
+        "Typecheck errors occurred: {:?}",
+        type_result.diagnostics()
+    );
+
+    let mir_module = builder::MirBuilder::new(&graph, &type_result, code).build();
+    let function = mir_module
+        .functions
+        .iter()
+        .find(|function| function.name == "double")
+        .expect("expression function should be lowered");
+
+    assert!(function.blocks.iter().any(|block| {
+        matches!(
+            block.terminator.0,
+            Terminator::Return(Some(Operand::Local(_)))
+        )
+    }));
+    assert!(function.blocks.iter().any(|block| {
+        block.instructions.iter().any(|(instruction, _)| {
+            matches!(
+                instruction,
+                Instruction::Assign(_, RValue::BinaryOp(MirBinaryOp::Multiply, _, _))
+            )
+        })
+    }));
+}
+
+#[test]
+fn test_mir_builder_lowers_expression_and_block_function_expressions() {
+    let source_id = SourceId::new(0);
+    let code = r#"
+        fn main(): i32 {
+            var double = fn (value: i32): i32 => value * 2
+            var one = fn (): i32 {
+                return 1
+            }
+            return double(one())
+        }
+    "#;
+    let source = SourceFile::new(source_id, "test.gfs".to_string(), code.to_string());
+
+    let parse_result = parse(&source);
+    let resolve_result = resolve(&source, parse_result.into_graph());
+    let graph = resolve_result.into_graph();
+    assert!(!graph.has_errors(), "Parse or resolve errors occurred");
+
+    let type_result = check_definition_types(
+        &source,
+        &graph,
+        check_declaration_types(&source, &graph),
+    );
+    assert!(
+        !type_result.has_errors(),
+        "Typecheck errors occurred: {:?}",
+        type_result.diagnostics()
+    );
+
+    let mir_module = builder::MirBuilder::new(&graph, &type_result, code).build();
+    let functions = mir_module
+        .functions
+        .iter()
+        .filter(|function| function.name.starts_with("__anon_func_"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(functions.len(), 2);
+    assert!(functions.iter().any(|function| {
+        function.blocks.iter().any(|block| {
+            block.instructions.iter().any(|(instruction, _)| {
+                matches!(
+                    instruction,
+                    Instruction::Assign(_, RValue::BinaryOp(MirBinaryOp::Multiply, _, _))
+                )
+            })
+        })
+    }));
+    assert!(functions.iter().any(|function| {
+        function.blocks.iter().any(|block| {
+            matches!(
+                block.terminator.0,
+                Terminator::Return(Some(Operand::Constant(Constant::Int32(1))))
+            )
+        })
+    }));
+}
+
+#[test]
 fn test_mir_builder_lowers_copy_expression() {
     let source_id = SourceId::new(0);
     let code = r#"
@@ -481,4 +586,3 @@ fn test_mir_builder_phase2() {
         .any(|b| matches!(b.terminator.0, Terminator::Return(_)));
     assert!(has_return, "Return statement not found in MIR");
 }
-

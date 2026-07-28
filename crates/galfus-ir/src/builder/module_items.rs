@@ -144,11 +144,16 @@ impl<'a> MirBuilder<'a> {
             }
         }
 
-        // Look for the block of the function body
-        if let Some(block_node_id) = syntax.first_child_of_kind(item, SyntaxNodeKind::Block) {
-            builder_ctx.lower_block(block_node_id);
+        let body = syntax.node(item)?.last_child()?;
+
+        if syntax
+            .node(body)
+            .is_some_and(|body| body.kind() == SyntaxNodeKind::Block)
+        {
+            builder_ctx.lower_block(body);
         } else {
-            builder_ctx.terminate_block(Terminator::Return(None));
+            let operand = builder_ctx.lower_expression(body);
+            builder_ctx.terminate_block(Terminator::Return(Some(operand)));
         }
         builder_ctx.flush_current_instructions();
 
