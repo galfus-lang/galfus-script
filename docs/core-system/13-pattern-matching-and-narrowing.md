@@ -34,6 +34,20 @@ All arms must produce compatible result types.
 
 Arms are comma-separated. The comma is required between arms even when an arm body is a block.
 
+An expression arm uses `=>`. A block arm follows its pattern directly; blocks do not implicitly yield their last expression.
+
+```galfus
+fn label(result: Result): i32 {
+  return match result {
+    Result::Ok(value) => value,
+    Result::Err(error) {
+      report(error)
+      return 0
+    },
+  }
+}
+```
+
 ## 13.3 Wildcard Arm Position
 
 If `_` appears in an arm list, it must be the final arm.
@@ -65,12 +79,14 @@ The same rule applies to `instanceof`.
 Pattern bindings inside `match` and `instanceof` are constant by default.
 
 ```galfus
-match result {
-  Result::Ok(value) => {
-    value = 10 // invalid
-    value
-  },
-  Result::Err(error) => 0,
+fn inspect(result: Result): i32 {
+  return match result {
+    Result::Ok(value) {
+      value = 10 // invalid
+      return value
+    },
+    Result::Err(error) => 0,
+  }
 }
 ```
 
@@ -201,12 +217,14 @@ var size = instanceof value {
 Fallback binding:
 
 ```galfus
-var value = instanceof entry {
-  i32 x => 1,
-  i16 x => {
-    return 2
-  },
-  x => 0,
+fn narrow(entry: i32 | i16): i32 {
+  return instanceof entry {
+    i32 x => 1,
+    i16 x {
+      return 2
+    },
+    x => 0,
+  }
 }
 ```
 

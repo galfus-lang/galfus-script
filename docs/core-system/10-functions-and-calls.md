@@ -4,7 +4,7 @@ Previous: [Mutation, Assignment and Ownership](./09-mutation-assignment-and-owne
 
 # 10. Functions and Calls
 
-This document defines function declarations, return types, parameters, defaults, rest parameters, calls, anchor functions, stamped functions, arrows, closures, and function types.
+This document defines function declarations, return types, expression and block bodies, parameters, defaults, rest parameters, calls, anchor functions, stamped functions, closures, and function types.
 
 ## 10.1 Function Declaration
 
@@ -13,6 +13,14 @@ fn sum(a: i32, b: i32): i32 {
   return a + b
 }
 ```
+
+A function body is either one expression introduced by `=>` or a direct block.
+
+```galfus
+fn sum(a: i32, b: i32): i32 => a + b
+```
+
+Block bodies do not implicitly return their last expression. Use `return` for every value-producing path.
 
 Every function MUST declare a return type.
 
