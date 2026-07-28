@@ -57,7 +57,7 @@ impl<'a> DeclarationTypeChecker<'a> {
                 self.check_weak_struct_field(node, owner_struct, seen_edges);
             }
 
-            SyntaxNodeKind::ArrowFunctionExpression => {
+            SyntaxNodeKind::ExpressionFunction | SyntaxNodeKind::BlockFunction => {
                 self.collect_closure_capture_metadata(node, seen_captures);
             }
 
@@ -109,7 +109,9 @@ impl<'a> DeclarationTypeChecker<'a> {
 
             SyntaxNodeKind::ForBinding => (AnchorKind::BlockLocal, &[SymbolKind::ForBinding][..]),
 
-            SyntaxNodeKind::ArrowFunctionExpression => (AnchorKind::Closure, &[][..]),
+            SyntaxNodeKind::ExpressionFunction | SyntaxNodeKind::BlockFunction => {
+                (AnchorKind::Closure, &[][..])
+            }
 
             _ => return,
         };
@@ -323,7 +325,7 @@ impl<'a> DeclarationTypeChecker<'a> {
             return;
         };
 
-        if !is_root && syntax_node.kind() == SyntaxNodeKind::ArrowFunctionExpression {
+        if !is_root && syntax_node.kind().is_function_expression() {
             return;
         }
 
@@ -357,7 +359,7 @@ impl<'a> DeclarationTypeChecker<'a> {
             return;
         };
 
-        if !is_root && syntax_node.kind() == SyntaxNodeKind::ArrowFunctionExpression {
+        if !is_root && syntax_node.kind().is_function_expression() {
             return;
         }
 

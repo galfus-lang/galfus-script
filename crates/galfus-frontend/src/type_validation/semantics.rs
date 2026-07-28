@@ -23,7 +23,9 @@ impl<'a> DeclarationTypeChecker<'a> {
         };
 
         match syntax_node.kind() {
-            SyntaxNodeKind::FunctionItem | SyntaxNodeKind::ArrowFunctionExpression => {
+            SyntaxNodeKind::FunctionItem
+            | SyntaxNodeKind::ExpressionFunction
+            | SyntaxNodeKind::BlockFunction => {
                 for child in syntax_node.children() {
                     self.check_return_context(*child, true);
                 }

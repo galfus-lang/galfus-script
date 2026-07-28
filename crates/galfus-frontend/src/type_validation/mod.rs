@@ -1,5 +1,4 @@
 mod access;
-mod arrow_functions;
 mod assignability;
 mod assignments;
 mod builtin_constraints;
@@ -13,6 +12,7 @@ mod diagnostics;
 mod diagnostics_extra;
 mod enums;
 mod expressions;
+mod function_expressions;
 mod function_stamps;
 mod generic_expressions;
 mod inferred_structs;

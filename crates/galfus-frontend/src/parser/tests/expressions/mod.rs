@@ -1,9 +1,9 @@
 mod array_literals;
-mod arrow_functions;
 mod binary;
 mod calls_and_members;
 mod cast;
 mod copy;
+mod function_expressions;
 mod generic;
 mod index;
 mod inferred_struct_literals;

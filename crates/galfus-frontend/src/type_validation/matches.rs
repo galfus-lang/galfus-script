@@ -83,7 +83,12 @@ impl<'a> DeclarationTypeChecker<'a> {
                 continue;
             }
 
-            let body = self.graph.syntax().child(arm, 1).unwrap_or(arm);
+            let body = self
+                .graph
+                .syntax()
+                .child(arm, 1)
+                .and_then(|body| self.graph.syntax().child(body, 0))
+                .unwrap_or(arm);
             self.report_incompatible_match_arm_type(body, expected, actual);
             has_error = true;
         }
@@ -139,7 +144,11 @@ impl<'a> DeclarationTypeChecker<'a> {
         expected: Option<TypeId>,
     ) -> Option<TypeId> {
         let pattern = self.graph.syntax().child(arm, 0)?;
-        let body = self.graph.syntax().child(arm, 1)?;
+        let body = self
+            .graph
+            .syntax()
+            .child(arm, 1)
+            .and_then(|body| self.graph.syntax().child(body, 0))?;
 
         self.check_match_pattern_type(pattern, subject_type);
 

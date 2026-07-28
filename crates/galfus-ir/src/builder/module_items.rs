@@ -165,7 +165,7 @@ impl<'a> MirBuilder<'a> {
         Some(func)
     }
 
-    pub(super) fn build_arrow_function(
+    pub(super) fn build_function_expression(
         &mut self,
         item: NodeId,
         expr_ty: TypeId,

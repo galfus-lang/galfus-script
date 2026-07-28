@@ -125,7 +125,18 @@ impl Parser {
 
         let span = Span::cover(start, self.node_span(body)).unwrap_or(start);
 
-        Some(self.add_node(SyntaxNodeKind::ArrowFunctionExpression, span, children))
+        let kind = if self
+            .graph
+            .syntax()
+            .node(body)
+            .is_some_and(|node| node.kind() == SyntaxNodeKind::Block)
+        {
+            SyntaxNodeKind::BlockFunction
+        } else {
+            SyntaxNodeKind::ExpressionFunction
+        };
+
+        Some(self.add_node(kind, span, children))
     }
 
     pub(super) fn parse_function_body(&mut self) -> Option<NodeId> {

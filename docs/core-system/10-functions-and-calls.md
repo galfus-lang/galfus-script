@@ -225,23 +225,23 @@ identity<i64>(10)
 
 Explicit generic argument lists must be complete or omitted initially.
 
-## 10.10 Arrow Functions and Closures
+## 10.10 Function Expressions and Closures
 
 Expression body:
 
 ```galfus
-var double = (value: i32): i32 => value * 2
+var double = fn (value: i32): i32 => value * 2
 ```
 
 Block body:
 
 ```galfus
-var double = (value: i32): i32 => {
+var double = fn (value: i32): i32 {
   return value * 2
 }
 ```
 
-Arrow functions may capture surrounding values.
+Function expressions may capture surrounding values.
 
 Captured complex values participate in ownership.
 

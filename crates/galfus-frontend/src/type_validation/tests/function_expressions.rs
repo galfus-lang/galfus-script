@@ -2,50 +2,53 @@ use super::*;
 use crate::type_validation::check_definition_types;
 
 #[test]
-fn check_infers_arrow_function_expression_body_type() {
+fn check_infers_expression_function_body_type() {
     let (source, graph, result) = check_source(
         r#"
-        var double = (value: i32): i32 => value * 2
+        var double = fn (value: i32): i32 => value * 2
         "#,
     );
 
-    let arrow = find_node_by_kind(&graph, SyntaxNodeKind::ArrowFunctionExpression).unwrap();
+    let function = find_node_by_kind(&graph, SyntaxNodeKind::ExpressionFunction).unwrap();
 
-    let ty = result.layer().node_type(arrow).unwrap();
+    let ty = result.layer().node_type(function).unwrap();
 
-    let TypeKind::Function(function) = result.layer().table().kind(ty).unwrap() else {
+    let TypeKind::Function(function_type) = result.layer().table().kind(ty).unwrap() else {
         panic!("expected function type");
     };
 
-    assert_eq!(function.parameters().len(), 1);
+    assert_eq!(function_type.parameters().len(), 1);
 
     assert_eq!(
-        result.layer().table().kind(function.parameters()[0].ty()),
+        result
+            .layer()
+            .table()
+            .kind(function_type.parameters()[0].ty()),
         Some(&TypeKind::Primitive(PrimitiveType::Int32))
     );
 
     assert_eq!(
-        result.layer().table().kind(function.return_type()),
+        result.layer().table().kind(function_type.return_type()),
         Some(&TypeKind::Primitive(PrimitiveType::Int32))
     );
 
     assert_eq!(
-        source.slice(graph.syntax().node(arrow).unwrap().span()),
-        Some("(value: i32): i32 => value * 2")
+        source.slice(graph.syntax().node(function).unwrap().span()),
+        Some("fn (value: i32): i32 => value * 2")
     );
 }
 
 #[test]
-fn check_infers_arrow_function_return_type_without_annotation() {
+fn check_infers_expression_function_return_type_without_annotation() {
     let (_source, graph, result) = check_source(
         r#"
-        var double = (value: i32) => value * 2
+        var double = fn (value: i32) => value * 2
         "#,
     );
 
-    let arrow = find_node_by_kind(&graph, SyntaxNodeKind::ArrowFunctionExpression).unwrap();
+    let function = find_node_by_kind(&graph, SyntaxNodeKind::ExpressionFunction).unwrap();
 
-    let ty = result.layer().node_type(arrow).unwrap();
+    let ty = result.layer().node_type(function).unwrap();
 
     let TypeKind::Function(function) = result.layer().table().kind(ty).unwrap() else {
         panic!("expected function type");
@@ -58,10 +61,10 @@ fn check_infers_arrow_function_return_type_without_annotation() {
 }
 
 #[test]
-fn check_accepts_arrow_function_block_body() {
+fn check_accepts_block_function_body() {
     let (_source, _graph, result) = check_source(
         r#"
-        var printer = (value: i32): null => {
+        var printer = fn (value: i32): null {
           return
         }
         "#,
@@ -71,14 +74,14 @@ fn check_accepts_arrow_function_block_body() {
 }
 
 #[test]
-fn check_accepts_arrow_function_as_call_argument() {
+fn check_accepts_expression_function_as_call_argument() {
     let (_source, _graph, result) = check_source(
         r#"
         fn apply(callback: fn(i32): i32): i32 {
           return callback(1)
         }
 
-        var result = apply((value: i32): i32 => value * 2)
+        var result = apply(fn (value: i32): i32 => value * 2)
         "#,
     );
 
@@ -94,17 +97,17 @@ fn check_collects_closure_capture_ownership_metadata() {
         }
 
         var captured: Box = new(Box) { value: 2 }
-        var make = (): Box => captured
+        var make = fn (): Box => captured
         "#,
     );
 
-    let arrow = find_node_by_kind(&graph, SyntaxNodeKind::ArrowFunctionExpression).unwrap();
+    let function = find_node_by_kind(&graph, SyntaxNodeKind::ExpressionFunction).unwrap();
     let captured = symbol_by_name_and_kind(&graph, "captured", SymbolKind::Var);
 
     let captures = result.ownership_metadata().captures();
 
     assert_eq!(captures.len(), 1);
-    assert_eq!(captures[0].closure(), arrow);
+    assert_eq!(captures[0].closure(), function);
     assert_eq!(captures[0].symbol(), captured);
 
     assert!(
@@ -120,10 +123,10 @@ fn check_collects_closure_capture_ownership_metadata() {
 }
 
 #[test]
-fn check_does_not_capture_arrow_local_parameter() {
+fn check_does_not_capture_function_expression_local_parameter() {
     let (_source, _graph, result) = check_source(
         r#"
-        var double = (value: i32): i32 => value * 2
+        var double = fn (value: i32): i32 => value * 2
         "#,
     );
 
@@ -131,11 +134,11 @@ fn check_does_not_capture_arrow_local_parameter() {
 }
 
 #[test]
-fn check_does_not_leak_arrow_block_return_to_outer_function() {
+fn check_does_not_leak_block_function_return_to_outer_function() {
     let (_source, _graph, result) = check_source(
         r#"
         fn main(): null {
-          var callback = (value: i32): i32 => {
+          var callback = fn (value: i32): i32 {
             return value
           }
 
@@ -148,10 +151,10 @@ fn check_does_not_leak_arrow_block_return_to_outer_function() {
 }
 
 #[test]
-fn check_reports_arrow_function_expression_body_return_mismatch() {
+fn check_reports_expression_function_body_return_mismatch() {
     let source = source(
         r#"
-        var bad = (value: i32): bool => value * 2
+        var bad = fn (value: i32): bool => value * 2
         "#,
     );
 
@@ -181,10 +184,10 @@ fn check_reports_arrow_function_expression_body_return_mismatch() {
 }
 
 #[test]
-fn check_reports_arrow_function_assignment_mismatch() {
+fn check_reports_expression_function_assignment_mismatch() {
     let source = source(
         r#"
-        var callback: fn(i32): bool = (value: i32): i32 => value * 2
+        var callback: fn(i32): bool = fn (value: i32): i32 => value * 2
         "#,
     );
 

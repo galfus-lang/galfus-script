@@ -1,11 +1,11 @@
 mod access;
-mod arrow_functions;
 mod assignments;
 mod calls;
 mod constraints;
 mod control_flow;
 mod declarations;
 mod decorators;
+mod function_expressions;
 mod function_stamps;
 mod generic_expressions;
 mod hardening;
