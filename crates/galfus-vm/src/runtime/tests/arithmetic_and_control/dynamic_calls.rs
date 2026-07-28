@@ -1,7 +1,3 @@
-use std::sync;
-
-use crate::thread;
-
 #[test]
 fn test_dynamic_call_returns_to_destination() {
     let image = BytecodeModule {
