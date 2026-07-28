@@ -29,67 +29,7 @@ permissions:
   issues: write
 
 jobs:
-  labels:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Install script dependencies
-        working-directory: scripts
-        run: bun install --frozen-lockfile
-
-      - name: Label PR by changed files
-        uses: actions/labeler@v5
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          configuration-path: .github/labeler.yml
-          sync-labels: true
-
-      - name: Label PR size
-        uses: codelytv/pr-size-labeler@v1
-        with:
-          xs_label: size/xs
-          xs_max_size: '30'
-          s_label: size/sm
-          s_max_size: '100'
-          m_label: size/md
-          m_max_size: '300'
-          l_label: size/lg
-          l_max_size: '800'
-          xl_label: size/xl
-          fail_if_xl: 'false'
-          github_api_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Sync changelog labels from checked checklist
-        working-directory: scripts
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bun run cmd github sync-changelog-labels
-
-  validate:
-    needs:
-      - labels
-    if: github.event.pull_request.draft == false
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-      issues: read
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Install script dependencies
-        working-directory: scripts
-        run: bun install --frozen-lockfile
-
-      - name: Validate PR policy
-        working-directory: scripts
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bun run cmd github validate-pr-policy
+  shared-validate:
+    uses: galfus-lang/.github/.github/workflows/pr-labels-n-validate.yml@main
+    secrets:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
