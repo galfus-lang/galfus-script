@@ -96,7 +96,7 @@ fn parse_return_statement_inside_block() {
 
 #[test]
 fn parse_reports_expected_statement_inside_block() {
-    let source = source("fn main(): null { fn }");
+    let source = source("fn main(): null { export }");
 
     let result = parse(&source);
 
@@ -105,7 +105,7 @@ fn parse_reports_expected_statement_inside_block() {
     let diagnostic = result.diagnostics().iter().next().unwrap();
 
     assert_eq!(diagnostic.code().as_str(), "P0005");
-    assert_eq!(diagnostic.message(), "expected statement, found `Fn`");
+    assert_eq!(diagnostic.message(), "expected statement, found `Export`");
 }
 
 #[test]
@@ -241,6 +241,25 @@ fn parse_stamp_function_item() {
 
     assert!(find_first_of_kind(syntax, root, SyntaxNodeKind::FunctionItem).is_some());
     assert!(find_first_of_kind(syntax, root, SyntaxNodeKind::KeywordMetadataList).is_some());
+}
+
+#[test]
+fn parse_named_function_expression_body() {
+    let source = source("fn double(value: i32): i32 => value * 2");
+
+    let result = parse(&source);
+
+    assert!(!result.has_errors(), "{:?}", result.diagnostics());
+
+    let syntax = result.graph().syntax();
+    let root = syntax.root().unwrap();
+    let function = syntax.node(root).unwrap().first_child().unwrap();
+    let body = syntax.node(function).unwrap().last_child().unwrap();
+
+    assert_eq!(
+        syntax.node(body).unwrap().kind(),
+        SyntaxNodeKind::BinaryExpression
+    );
 }
 
 #[test]

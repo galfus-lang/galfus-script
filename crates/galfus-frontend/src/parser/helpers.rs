@@ -27,6 +27,7 @@ impl Parser {
                 | TokenKind::Match
                 | TokenKind::Instanceof
                 | TokenKind::Typeof
+                | TokenKind::Fn
         )
     }
 
@@ -127,45 +128,18 @@ impl Parser {
         ));
     }
 
-    pub(super) fn is_arrow_function_start(&self) -> bool {
+    pub(super) fn is_function_metadata_start(&self) -> bool {
         if !self.at(&TokenKind::LeftParen) {
             return false;
         }
 
-        let mut position = self.position;
-        let mut depth = 0usize;
-
-        while position < self.tokens.len() {
-            match self.tokens[position].kind() {
-                TokenKind::LeftParen => {
-                    depth += 1;
-                }
-                TokenKind::RightParen => {
-                    depth -= 1;
-
-                    if depth == 0 {
-                        position += 1;
-
-                        while position < self.tokens.len()
-                            && self.tokens[position].kind() == &TokenKind::Newline
-                        {
-                            position += 1;
-                        }
-
-                        return matches!(
-                            self.tokens.get(position).map(|token| token.kind()),
-                            Some(TokenKind::Arrow) | Some(TokenKind::Colon)
-                        );
-                    }
-                }
-                TokenKind::Eof => return false,
-                _ => {}
-            }
-
-            position += 1;
+        let mut offset = 1;
+        while self.peek(offset).kind() == &TokenKind::Newline {
+            offset += 1;
         }
 
-        false
+        self.peek(offset).kind() == &TokenKind::Identifier
+            && matches!(self.token_text(self.peek(offset)), "stamp" | "after")
     }
 
     pub(super) fn at_type_argument_close(&self) -> bool {

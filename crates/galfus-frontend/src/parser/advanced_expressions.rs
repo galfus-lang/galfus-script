@@ -72,7 +72,25 @@ impl Parser {
         Some(self.add_node(SyntaxNodeKind::StructLiteral, span, vec![type_node, fields]))
     }
 
-    pub(super) fn parse_arrow_function_expression(&mut self) -> Option<NodeId> {
+    pub(super) fn parse_anonymous_function_expression(&mut self) -> Option<NodeId> {
+        let fn_token = self.expect(TokenKind::Fn)?;
+
+        self.skip_newlines();
+
+        let metadata = if self.is_function_metadata_start() {
+            self.parse_optional_keyword_metadata(false)
+        } else {
+            None
+        };
+
+        self.parse_anonymous_function_after_metadata(metadata, fn_token.span())
+    }
+
+    fn parse_anonymous_function_after_metadata(
+        &mut self,
+        metadata: Option<NodeId>,
+        start: Span,
+    ) -> Option<NodeId> {
         let parameters = self.parse_parameter_list()?;
 
         self.skip_newlines();
@@ -89,17 +107,15 @@ impl Parser {
 
         self.skip_newlines();
 
-        self.expect(TokenKind::Arrow)?;
+        let body = self.parse_function_body()?;
 
-        self.skip_newlines();
+        let mut children = Vec::new();
 
-        let body = if self.at(&TokenKind::LeftBrace) {
-            self.parse_block()?
-        } else {
-            self.parse_expression()?
-        };
+        if let Some(metadata) = metadata {
+            children.push(metadata);
+        }
 
-        let mut children = vec![parameters];
+        children.push(parameters);
 
         if let Some(return_type) = return_type {
             children.push(return_type);
@@ -107,10 +123,31 @@ impl Parser {
 
         children.push(body);
 
-        let span = Span::cover(self.node_span(parameters), self.node_span(body))
-            .unwrap_or_else(|| self.node_span(parameters));
+        let span = Span::cover(start, self.node_span(body)).unwrap_or(start);
 
         Some(self.add_node(SyntaxNodeKind::ArrowFunctionExpression, span, children))
+    }
+
+    pub(super) fn parse_function_body(&mut self) -> Option<NodeId> {
+        if self.at(&TokenKind::LeftBrace) {
+            return self.parse_block();
+        }
+
+        self.expect(TokenKind::Arrow)?;
+        self.skip_newlines();
+
+        if self.at(&TokenKind::LeftBrace) {
+            let block = self.current().span();
+            self.graph.push_diagnostic(Diagnostic::error_with_message(
+                ParserDiagnosticCode::ArrowMustIntroduceExpression,
+                "a block body must follow the return type directly; remove `=>`".to_string(),
+                block,
+            ));
+            let _ = self.parse_block();
+            return None;
+        }
+
+        self.parse_expression()
     }
 
     pub(super) fn parse_copy_expression(&mut self, boundary: ExpressionBoundary) -> Option<NodeId> {
