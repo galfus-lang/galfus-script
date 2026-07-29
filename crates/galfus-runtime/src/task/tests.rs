@@ -10,7 +10,7 @@ use galfus_bytecode::{
 use galfus_contract::{RunnableTask, ThreadExecutor, ThreadResult};
 use galfus_core::{ModuleId, ModulePath, SemanticRevision};
 use galfus_vm::thread::VirtualThread;
-use galfus_vm::{ExecutionStep, HeapObject, VirtualMachine, VmValue};
+use galfus_vm::{HeapObject, VirtualMachine, VmEffect, VmStep, VmValue};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -144,7 +144,10 @@ fn receive_timeout_resumes_with_null() {
         .expect("timeout register exists");
     assert!(matches!(
         vm.execute_with_budget(&mut waiting_thread, 10),
-        Ok(ExecutionStep::ReceiveFilter { .. })
+        Ok(VmStep::Suspend {
+            effect: VmEffect::ReceiveFilter { .. },
+            ..
+        })
     ));
 
     let registry = Arc::new(Mutex::new(ThreadRegistry::new()));

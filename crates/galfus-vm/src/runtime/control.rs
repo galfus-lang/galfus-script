@@ -7,7 +7,7 @@ impl VirtualMachine {
         &self,
         thread: &mut thread::VirtualThread,
         instr: Instruction,
-    ) -> Result<ExecutionStep, VmError> {
+    ) -> Result<VmStep, VmError> {
         match instr {
             // Category C: Control Flow & Subroutines
             Instruction::Jump { offset } => {
@@ -167,7 +167,7 @@ impl VirtualMachine {
                     self.execute_array_iterator_method(thread, obj, method_name.as_str())?
                 {
                     thread.write_reg(dest, value)?;
-                    return Ok(ExecutionStep::Continue);
+                    return Ok(VmStep::Continue);
                 }
 
                 if method_name == "compare" {
@@ -176,7 +176,7 @@ impl VirtualMachine {
                         let arg_val = thread.read_reg(Reg(args_start.raw() + 1))?;
                         let is_equal = obj_val == arg_val;
                         thread.write_reg(dest, Value::Bool(is_equal))?;
-                        return Ok(ExecutionStep::Continue);
+                        return Ok(VmStep::Continue);
                     }
                 }
 
@@ -467,14 +467,16 @@ impl VirtualMachine {
                         elements: data.into_iter().map(Value::Uint8).collect(),
                     }));
                     let _ = thread.write_reg(dest, message);
-                    return Ok(ExecutionStep::Continue);
+                    return Ok(VmStep::Continue);
                 } else {
                     // Revert PC so we try again after waking up
                     thread.call_stack.last_mut().unwrap().pc -= 1;
-                    return Ok(ExecutionStep::ReceiveFilter {
-                        dest,
-                        sender_id,
-                        timeout: timeout_val,
+                    return Ok(VmStep::Suspend {
+                        effect: VmEffect::ReceiveFilter {
+                            sender_id,
+                            timeout: timeout_val,
+                        },
+                        continuation: Continuation { dest: Some(dest) },
                     });
                 }
             }
@@ -506,19 +508,23 @@ impl VirtualMachine {
                     }
                 };
 
-                return Ok(ExecutionStep::SendMsg {
-                    dest,
-                    target: target_id,
-                    msg: msg_val,
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::SendMsg {
+                        target: target_id,
+                        msg: msg_val,
+                    },
+                    continuation: Continuation { dest: Some(dest) },
                 });
             }
             Instruction::CreateThread { dest, func, key } => {
                 let func_val = thread.read_reg(func)?.clone();
                 let key_val = thread.read_reg(key)?.clone();
-                return Ok(ExecutionStep::CreateThread {
-                    dest,
-                    func: func_val,
-                    key: key_val,
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::CreateThread {
+                        func: func_val,
+                        key: key_val,
+                    },
+                    continuation: Continuation { dest: Some(dest) },
                 });
             }
 
@@ -537,32 +543,45 @@ impl VirtualMachine {
                     }
                 };
                 let arg_val = thread.read_reg(arg)?.clone();
-                return Ok(ExecutionStep::StartThread {
-                    dest,
-                    thread_id: tid_val,
-                    arg: arg_val,
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::StartThread {
+                        thread_id: tid_val,
+                        arg: arg_val,
+                    },
+                    continuation: Continuation { dest: Some(dest) },
                 });
             }
             Instruction::GetThread { dest, key } => {
-                return Ok(ExecutionStep::GetThread {
-                    dest,
-                    key: thread.read_reg(key)?.clone(),
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::GetThread {
+                        key: thread.read_reg(key)?.clone(),
+                    },
+                    continuation: Continuation { dest: Some(dest) },
                 });
             }
 
             Instruction::ThreadIsRunning { dest, thread_id } => {
                 let thread_id = thread_id_value(thread, thread_id)?;
-                return Ok(ExecutionStep::ThreadIsRunning { dest, thread_id });
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::ThreadIsRunning { thread_id },
+                    continuation: Continuation { dest: Some(dest) },
+                });
             }
 
             Instruction::ThreadIsExited { dest, thread_id } => {
                 let thread_id = thread_id_value(thread, thread_id)?;
-                return Ok(ExecutionStep::ThreadIsExited { dest, thread_id });
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::ThreadIsExited { thread_id },
+                    continuation: Continuation { dest: Some(dest) },
+                });
             }
 
             Instruction::ThreadExitReason { dest, thread_id } => {
                 let thread_id = thread_id_value(thread, thread_id)?;
-                return Ok(ExecutionStep::ThreadExitReason { dest, thread_id });
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::ThreadExitReason { thread_id },
+                    continuation: Continuation { dest: Some(dest) },
+                });
             }
 
             Instruction::Ret { src } => {
@@ -574,7 +593,7 @@ impl VirtualMachine {
                         thread.write_reg(dest, val)?;
                     }
                     None => {
-                        return Ok(ExecutionStep::Return(val));
+                        return Ok(VmStep::Return(val));
                     }
                 }
             }
@@ -586,7 +605,7 @@ impl VirtualMachine {
                         thread.write_reg(dest, Value::Null)?;
                     }
                     None => {
-                        return Ok(ExecutionStep::Return(Value::Null));
+                        return Ok(VmStep::Return(Value::Null));
                     }
                 }
             }
@@ -609,7 +628,7 @@ impl VirtualMachine {
             _ => unreachable!("instruction routed to the wrong runtime handler"),
         }
 
-        Ok(ExecutionStep::Continue)
+        Ok(VmStep::Continue)
     }
 
     fn execute_array_iterator_method(

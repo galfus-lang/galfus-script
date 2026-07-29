@@ -21,46 +21,52 @@ use galfus_core::ModuleId;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-pub enum ExecutionStep {
-    Continue,
-    Return(Value),
-    Blocked,
-    ReceiveFilter {
-        dest: Reg,
-        sender_id: u64,
-        timeout: Option<u64>,
-    },
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Continuation {
+    pub dest: Option<Reg>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum VmEffect {
     SendMsg {
-        dest: Reg,
         target: u64,
         msg: Value,
     },
+    ReceiveFilter {
+        sender_id: u64,
+        timeout: Option<u64>,
+    },
     CreateThread {
-        dest: Reg,
         func: Value,
         key: Value,
     },
     StartThread {
-        dest: Reg,
         thread_id: u64,
         arg: Value,
     },
     GetThread {
-        dest: Reg,
         key: Value,
     },
     ThreadIsRunning {
-        dest: Reg,
         thread_id: u64,
     },
     ThreadIsExited {
-        dest: Reg,
         thread_id: u64,
     },
     ThreadExitReason {
-        dest: Reg,
         thread_id: u64,
     },
+    Blocked,
+}
+
+pub enum VmStep {
+    Continue,
+    Return(Value),
+    Suspend {
+        effect: VmEffect,
+        continuation: Continuation,
+    },
+    Failed(galfus_contract::ExecutionFailure),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -296,52 +302,11 @@ impl VirtualMachine {
         &self,
         thread: &mut thread::VirtualThread,
         mut budget: usize,
-    ) -> Result<ExecutionStep, VmPanic> {
+    ) -> Result<VmStep, VmPanic> {
         while budget > 0 {
             match self.step(thread) {
-                Ok(ExecutionStep::Continue) => budget -= 1,
-                Ok(ExecutionStep::Return(val)) => return Ok(ExecutionStep::Return(val)),
-                Ok(ExecutionStep::Blocked) => return Ok(ExecutionStep::Blocked),
-                Ok(ExecutionStep::SendMsg { dest, target, msg }) => {
-                    return Ok(ExecutionStep::SendMsg { dest, target, msg });
-                }
-                Ok(ExecutionStep::ReceiveFilter {
-                    dest,
-                    sender_id,
-                    timeout,
-                }) => {
-                    return Ok(ExecutionStep::ReceiveFilter {
-                        dest,
-                        sender_id,
-                        timeout,
-                    });
-                }
-                Ok(ExecutionStep::CreateThread { dest, func, key }) => {
-                    return Ok(ExecutionStep::CreateThread { dest, func, key });
-                }
-                Ok(ExecutionStep::StartThread {
-                    dest,
-                    thread_id,
-                    arg,
-                }) => {
-                    return Ok(ExecutionStep::StartThread {
-                        dest,
-                        thread_id,
-                        arg,
-                    });
-                }
-                Ok(ExecutionStep::GetThread { dest, key }) => {
-                    return Ok(ExecutionStep::GetThread { dest, key });
-                }
-                Ok(ExecutionStep::ThreadIsRunning { dest, thread_id }) => {
-                    return Ok(ExecutionStep::ThreadIsRunning { dest, thread_id });
-                }
-                Ok(ExecutionStep::ThreadIsExited { dest, thread_id }) => {
-                    return Ok(ExecutionStep::ThreadIsExited { dest, thread_id });
-                }
-                Ok(ExecutionStep::ThreadExitReason { dest, thread_id }) => {
-                    return Ok(ExecutionStep::ThreadExitReason { dest, thread_id });
-                }
+                Ok(VmStep::Continue) => budget -= 1,
+                Ok(step) => return Ok(step),
                 Err(err) => {
                     let mut stack_trace = Vec::new();
                     for frame in thread.call_stack.iter().rev() {
@@ -358,10 +323,10 @@ impl VirtualMachine {
                 }
             }
         }
-        Ok(ExecutionStep::Continue)
+        Ok(VmStep::Continue)
     }
 
-    pub fn step(&self, thread: &mut thread::VirtualThread) -> Result<ExecutionStep, VmError> {
+    pub fn step(&self, thread: &mut thread::VirtualThread) -> Result<VmStep, VmError> {
         let instr = {
             let frame = thread
                 .call_stack
@@ -445,7 +410,7 @@ impl VirtualMachine {
             | Instruction::CopyArray { .. } => self.execute_system_instruction(thread, instr)?,
         };
 
-        if matches!(step, ExecutionStep::Continue) {
+        if matches!(step, VmStep::Continue) {
             self.release_unreachable_if_needed(thread, instr);
         }
 
@@ -455,21 +420,10 @@ impl VirtualMachine {
     fn execute_loop(&self, thread: &mut thread::VirtualThread) -> Result<Value, VmError> {
         loop {
             match self.step(thread)? {
-                ExecutionStep::Continue => {}
-                ExecutionStep::Return(value) => return Ok(value),
-                ExecutionStep::Blocked => return Err(VmError::UnresolvedHostBlocked),
-                ExecutionStep::SendMsg { .. } => return Err(VmError::UnresolvedHostBlocked),
-                ExecutionStep::ReceiveFilter { .. } => return Err(VmError::UnresolvedHostBlocked),
-                ExecutionStep::CreateThread { .. } => return Err(VmError::UnresolvedHostBlocked),
-                ExecutionStep::StartThread { .. } => return Err(VmError::UnresolvedHostBlocked),
-                ExecutionStep::GetThread { .. } => return Err(VmError::UnresolvedHostBlocked),
-                ExecutionStep::ThreadIsRunning { .. } => {
-                    return Err(VmError::UnresolvedHostBlocked);
-                }
-                ExecutionStep::ThreadIsExited { .. } => return Err(VmError::UnresolvedHostBlocked),
-                ExecutionStep::ThreadExitReason { .. } => {
-                    return Err(VmError::UnresolvedHostBlocked);
-                }
+                VmStep::Continue => {}
+                VmStep::Return(value) => return Ok(value),
+                VmStep::Suspend { .. } => return Err(VmError::UnresolvedHostBlocked),
+                VmStep::Failed(_) => return Err(VmError::UnresolvedHostBlocked),
             }
         }
     }

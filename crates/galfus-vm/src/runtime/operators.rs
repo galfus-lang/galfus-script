@@ -102,7 +102,7 @@ impl VirtualMachine {
         &self,
         thread: &mut thread::VirtualThread,
         instr: Instruction,
-    ) -> Result<ExecutionStep, VmError> {
+    ) -> Result<VmStep, VmError> {
         match instr {
             // Category B: Unary & Binary Operations
             Instruction::Add { dest, lhs, rhs } => {
@@ -409,6 +409,6 @@ impl VirtualMachine {
             _ => unreachable!("instruction routed to the wrong runtime handler"),
         }
 
-        Ok(ExecutionStep::Continue)
+        Ok(VmStep::Continue)
     }
 }

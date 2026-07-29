@@ -8,7 +8,7 @@ impl HostProvider for DummyHost {
         &mut self,
         _thread_id: usize,
         _method: &str,
-        _args: &[HostValue],
+        _args: &[BoundaryValue],
         _injector: Arc<dyn MessageInjector>,
     ) {
         // dummy

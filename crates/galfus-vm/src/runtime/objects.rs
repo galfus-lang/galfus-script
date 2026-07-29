@@ -8,7 +8,7 @@ impl VirtualMachine {
         &self,
         thread: &mut thread::VirtualThread,
         instr: Instruction,
-    ) -> Result<ExecutionStep, VmError> {
+    ) -> Result<VmStep, VmError> {
         match instr {
             // Category D: Heaps, Structs & Collections
             Instruction::AllocLocal { dest, type_idx } => {
@@ -319,7 +319,7 @@ impl VirtualMachine {
             _ => unreachable!("instruction routed to the wrong runtime handler"),
         }
 
-        Ok(ExecutionStep::Continue)
+        Ok(VmStep::Continue)
     }
 
     fn deep_copy_value(

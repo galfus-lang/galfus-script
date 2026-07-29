@@ -7,7 +7,7 @@ impl VirtualMachine {
         &self,
         thread: &mut thread::VirtualThread,
         instr: Instruction,
-    ) -> Result<ExecutionStep, VmError> {
+    ) -> Result<VmStep, VmError> {
         match instr {
             // Category E: Memory Ownership
             Instruction::Drop { reg } => {
@@ -22,7 +22,7 @@ impl VirtualMachine {
             } => {
                 if let Some(resp) = thread.system_response.take() {
                     thread.write_reg(dest, resp)?;
-                    return Ok(ExecutionStep::Continue);
+                    return Ok(VmStep::Continue);
                 } else {
                     let frame = thread.call_stack.last_mut().unwrap();
                     frame.pc -= 1; // repeat this instruction upon resume
@@ -57,10 +57,9 @@ impl VirtualMachine {
                         elements,
                     }));
 
-                    return Ok(ExecutionStep::SendMsg {
-                        dest,
-                        target: 0,
-                        msg,
+                    return Ok(VmStep::Suspend {
+                        effect: VmEffect::SendMsg { target: 0, msg },
+                        continuation: Continuation { dest: Some(dest) },
                     });
                 }
             }
@@ -156,6 +155,6 @@ impl VirtualMachine {
             _ => unreachable!("instruction routed to the wrong runtime handler"),
         }
 
-        Ok(ExecutionStep::Continue)
+        Ok(VmStep::Continue)
     }
 }

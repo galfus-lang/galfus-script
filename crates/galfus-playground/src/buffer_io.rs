@@ -3,7 +3,9 @@ mod tests;
 
 use std::mem;
 
-use galfus_contract::{HostProvider, HostResponse, HostValue, MessageInjector};
+use galfus_contract::{
+    BoundaryValue, ExecutionFailure, ExecutionFailureKind, HostProvider, MessageInjector,
+};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
@@ -70,10 +72,7 @@ impl BufferIoProvider {
                 let len = input.len();
                 state.input.drain(0..len);
                 input.truncate(len - terminator.len());
-                injector.inject_system_response(
-                    thread_id,
-                    HostResponse::Success(HostValue::Bytes(input)),
-                );
+                injector.inject_system_response(thread_id, Ok(BoundaryValue::Bytes(input)));
             } else {
                 state.pending_read = Some((thread_id, terminator, injector));
             }
@@ -91,12 +90,12 @@ impl HostProvider for BufferIoProvider {
         &mut self,
         thread_id: usize,
         method: &str,
-        args: &[HostValue],
+        args: &[BoundaryValue],
         injector: Arc<dyn MessageInjector>,
     ) {
         match method {
             "write" => {
-                if let Some(HostValue::Bytes(bytes)) = args.first() {
+                if let Some(BoundaryValue::Bytes(bytes)) = args.first() {
                     #[cfg(feature = "wasm")]
                     let callback = {
                         let mut state = self.state.lock().expect("buffer I/O state");
@@ -117,27 +116,35 @@ impl HostProvider for BufferIoProvider {
                         if let Err(e) = callback.call1(&JsValue::UNDEFINED, &value.into()) {
                             injector.inject_system_response(
                                 thread_id,
-                                HostResponse::Error(format!("{:?}", e)),
+                                Err(ExecutionFailure::new(
+                                    ExecutionFailureKind::ProviderFailure,
+                                    format!("{:?}", e),
+                                )),
                             );
                             return;
                         }
                     }
-                    injector
-                        .inject_system_response(thread_id, HostResponse::Success(HostValue::Null));
+                    injector.inject_system_response(thread_id, Ok(BoundaryValue::Null));
                 } else {
                     injector.inject_system_response(
                         thread_id,
-                        HostResponse::Error("Invalid arguments for write".to_string()),
+                        Err(ExecutionFailure::new(
+                            ExecutionFailureKind::ProviderFailure,
+                            "Invalid arguments for write".to_string(),
+                        )),
                     );
                 }
             }
             "read" => {
-                let terminator = if let Some(HostValue::Bytes(b)) = args.first() {
+                let terminator = if let Some(BoundaryValue::Bytes(b)) = args.first() {
                     b.clone()
                 } else {
                     injector.inject_system_response(
                         thread_id,
-                        HostResponse::Error("Invalid arguments for read".to_string()),
+                        Err(ExecutionFailure::new(
+                            ExecutionFailureKind::ProviderFailure,
+                            "Invalid arguments for read".to_string(),
+                        )),
                     );
                     return;
                 };
@@ -145,7 +152,10 @@ impl HostProvider for BufferIoProvider {
                 if terminator.is_empty() {
                     injector.inject_system_response(
                         thread_id,
-                        HostResponse::Error("input terminator must not be empty".to_string()),
+                        Err(ExecutionFailure::new(
+                            ExecutionFailureKind::ProviderFailure,
+                            "input terminator must not be empty".to_string(),
+                        )),
                     );
                     return;
                 }
@@ -165,10 +175,7 @@ impl HostProvider for BufferIoProvider {
                     let len = input.len();
                     state.input.drain(0..len);
                     input.truncate(len - terminator.len());
-                    injector.inject_system_response(
-                        thread_id,
-                        HostResponse::Success(HostValue::Bytes(input)),
-                    );
+                    injector.inject_system_response(thread_id, Ok(BoundaryValue::Bytes(input)));
                 } else {
                     state.pending_read = Some((thread_id, terminator, injector));
                 }
@@ -176,7 +183,10 @@ impl HostProvider for BufferIoProvider {
             _ => {
                 injector.inject_system_response(
                     thread_id,
-                    HostResponse::Error(format!("Method {} not found", method)),
+                    Err(ExecutionFailure::new(
+                        ExecutionFailureKind::ProviderFailure,
+                        format!("Method {} not found", method),
+                    )),
                 );
             }
         }

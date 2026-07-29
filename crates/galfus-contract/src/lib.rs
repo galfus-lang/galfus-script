@@ -8,23 +8,97 @@ use std::sync;
 
 pub use thread::*;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HostValue {
+/// A typed value that crosses the execution boundary safely.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BoundaryValue {
     Null,
-    Int32(i32),
-    String(String),
+    Bool(bool),
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+    F32(f32),
+    F64(f64),
     Bytes(Vec<u8>),
-    Array(Vec<HostValue>),
+    Array {
+        element_type: String, // Temporarily simplified, should be BoundaryType
+        values: Vec<BoundaryValue>,
+    },
+    Tuple(Vec<BoundaryValue>),
+    Choice {
+        variant: usize, // Simplified from ChoiceVariantId
+        payload: Option<Box<BoundaryValue>>,
+    },
+    Handle {
+        kind: String, // ExternalHandleKind
+        id: u64,      // ExternalHandleId
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HostResponse {
-    Success(HostValue),
-    Error(String),
+pub enum BoundaryCodecError {
+    TypeMismatch { expected: String, found: String },
+    UnsupportedType,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExecutionFailureKind {
+    VmPanic,
+    InvalidBytecode,
+    MissingProvider,
+    ProviderFailure,
+    MissingAdapter,
+    AdapterLoadFailure,
+    ExternalSymbolFailure,
+    BoundaryCodecFailure,
+    InitializationFailure,
+    Timeout,
+    Cancelled,
+    InvalidContinuation,
+    DuplicateCompletion,
+    DriverFailure,
+    InternalRuntimeFailure,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutionFailure {
+    pub kind: ExecutionFailureKind,
+    pub message: String,
+    pub thread_id: Option<u64>,
+    pub future_id: Option<u64>,
+    pub request_id: Option<u64>,
+    pub module_id: Option<u64>,
+    pub function_id: Option<u64>,
+    // Stack omitted for now to avoid coupling with VM internals in contract
+    // pub stack: Vec<ExecutionFrame>,
+    pub cause: Option<Box<ExecutionFailure>>,
+}
+
+impl ExecutionFailure {
+    pub fn new(kind: ExecutionFailureKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            thread_id: None,
+            future_id: None,
+            request_id: None,
+            module_id: None,
+            function_id: None,
+            cause: None,
+        }
+    }
 }
 
 pub trait MessageInjector: Send + Sync {
-    fn inject_system_response(&self, thread_id: usize, response: HostResponse);
+    fn inject_system_response(
+        &self,
+        thread_id: usize,
+        result: Result<BoundaryValue, ExecutionFailure>,
+    );
 }
 
 pub trait HostProvider: Send {
@@ -32,7 +106,7 @@ pub trait HostProvider: Send {
         &mut self,
         thread_id: usize,
         name: &str,
-        args: &[HostValue],
+        args: &[BoundaryValue],
         injector: sync::Arc<dyn MessageInjector>,
     );
 }
