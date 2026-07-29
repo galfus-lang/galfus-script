@@ -593,7 +593,18 @@ impl VirtualMachine {
                         thread.write_reg(dest, val)?;
                     }
                     None => {
-                        return Ok(VmStep::Return(val));
+                        let return_type = self
+                            .graph
+                            .get(completed_frame.module_id)
+                            .expect("call frame module is loaded")
+                            .module
+                            .functions[completed_frame.func_idx.raw() as usize]
+                            .return_ty;
+                        return Ok(VmStep::Return {
+                            value: val,
+                            module_id: completed_frame.module_id,
+                            return_type,
+                        });
                     }
                 }
             }
@@ -605,7 +616,18 @@ impl VirtualMachine {
                         thread.write_reg(dest, Value::Null)?;
                     }
                     None => {
-                        return Ok(VmStep::Return(Value::Null));
+                        let return_type = self
+                            .graph
+                            .get(completed_frame.module_id)
+                            .expect("call frame module is loaded")
+                            .module
+                            .functions[completed_frame.func_idx.raw() as usize]
+                            .return_ty;
+                        return Ok(VmStep::Return {
+                            value: Value::Null,
+                            module_id: completed_frame.module_id,
+                            return_type,
+                        });
                     }
                 }
             }

@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use crate::event::{EventSink, RuntimeEvent};
 use galfus_contract::{
     BoundaryValue, ExecutionFailure, ExecutionFailureKind, ExecutorStepResult, KernelDriver,
@@ -8,7 +11,6 @@ use std::rc::Rc;
 /// Owns one running program and drives its orchestrator cooperatively.
 pub struct Execution {
     root: Option<Box<dyn RunnableTask>>,
-    root_thread_id: u64,
     driver: Rc<dyn KernelDriver>,
     sink: EventSink,
     result: Option<Result<BoundaryValue, ExecutionFailure>>,
@@ -20,6 +22,7 @@ pub enum ExecutionState {
     Created,
     Running,
     Waiting,
+    Cancelling,
     Completed,
     Failed,
     Cancelled,
@@ -28,13 +31,11 @@ pub enum ExecutionState {
 impl Execution {
     pub(crate) fn new(
         root: Box<dyn RunnableTask>,
-        root_thread_id: u64,
         driver: Rc<dyn KernelDriver>,
         sink: EventSink,
     ) -> Self {
         Self {
             root: Some(root),
-            root_thread_id,
             driver,
             sink,
             result: None,
@@ -45,7 +46,6 @@ impl Execution {
     pub fn handle(&self) -> ExecutionHandle {
         ExecutionHandle {
             sink: self.sink.clone(),
-            continuation: None,
         }
     }
 
@@ -63,6 +63,11 @@ impl Execution {
         self.result.as_ref()
     }
 
+    /// Advances virtual time; the change is applied by the main-thread orchestrator on poll.
+    pub fn tick_timeouts(&self, delta_ms: u64) {
+        self.sink.send(RuntimeEvent::Tick { delta_ms });
+    }
+
     pub fn poll(&mut self, budget: usize) -> Result<ExecutorStepResult, ExecutionFailure> {
         if matches!(self.state, ExecutionState::Created) {
             self.state = ExecutionState::Running;
@@ -75,8 +80,12 @@ impl Execution {
                     self.state = ExecutionState::Completed;
                 }
                 ThreadResult::Failed(error) => {
+                    self.state = if error.kind == ExecutionFailureKind::Cancelled {
+                        ExecutionState::Cancelled
+                    } else {
+                        ExecutionState::Failed
+                    };
                     self.result = Some(Err(error));
-                    self.state = ExecutionState::Failed;
                 }
                 ThreadResult::Blocked { .. } => {
                     self.state = ExecutionState::Waiting;
@@ -129,13 +138,12 @@ impl Execution {
     }
 
     pub fn cancel(&mut self) {
-        if let Some(thread_id) = crate::registry::ThreadId::from_raw(self.root_thread_id) {
-            self.sink.send(RuntimeEvent::CancelThread { thread_id });
-            self.state = ExecutionState::Cancelled;
-            self.result = Some(Err(ExecutionFailure::new(
-                ExecutionFailureKind::Cancelled,
-                "execution cancelled",
-            )));
+        if matches!(
+            self.state,
+            ExecutionState::Created | ExecutionState::Running | ExecutionState::Waiting
+        ) {
+            self.sink.send(RuntimeEvent::CancelExecution);
+            self.state = ExecutionState::Cancelling;
         }
     }
 }
@@ -144,15 +152,11 @@ impl Execution {
 #[derive(Clone)]
 pub struct ExecutionHandle {
     sink: EventSink,
-    continuation: Option<galfus_vm::Continuation>,
 }
 
 impl ExecutionHandle {
-    pub(crate) fn for_continuation(sink: EventSink, continuation: galfus_vm::Continuation) -> Self {
-        Self {
-            sink,
-            continuation: Some(continuation),
-        }
+    pub(crate) fn new(sink: EventSink) -> Self {
+        Self { sink }
     }
 
     pub fn cancel_thread(&self, thread_id: usize) {
@@ -166,17 +170,15 @@ impl galfus_contract::MessageInjector for ExecutionHandle {
     fn inject_system_response(
         &self,
         thread_id: usize,
+        request_id: u64,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
         let Some(thread_id) = crate::registry::ThreadId::from_raw(thread_id as u64) else {
             return;
         };
-        let Some(continuation) = &self.continuation else {
-            return;
-        };
         self.sink.send(RuntimeEvent::EffectCompleted {
             thread_id,
-            continuation: continuation.clone(),
+            request_id,
             result,
         });
     }

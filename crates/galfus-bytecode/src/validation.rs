@@ -129,7 +129,7 @@ pub fn validate_bytecode_module(
         let max_regs = func.param_count as u16 + func.local_count + func.temp_count;
         let func_name = &func.name;
 
-        for (instr_idx, &instr) in func.instructions.iter().enumerate() {
+        for (instr_idx, instr) in func.instructions.iter().cloned().enumerate() {
             let check_reg = |reg: Reg, errors: &mut Vec<BytecodeValidationError>| {
                 if reg.raw() >= max_regs {
                     errors.push(BytecodeValidationError::InvalidRegister {
@@ -560,9 +560,23 @@ pub fn validate_bytecode_module(
                     name_const,
                     args_start,
                     arg_count,
+                    arg_types,
+                    return_type,
                 } => {
                     check_reg(dest, &mut errors);
                     check_const(name_const, &mut errors);
+                    check_type(return_type, &mut errors);
+                    if arg_types.len() != arg_count as usize {
+                        errors.push(BytecodeValidationError::TupleCountMismatch {
+                            func_name: func_name.clone(),
+                            instr_idx,
+                            expected_count: arg_count as usize,
+                            found_count: arg_types.len(),
+                        });
+                    }
+                    for arg_type in arg_types {
+                        check_type(arg_type, &mut errors);
+                    }
                     if arg_count > 0 {
                         check_reg(Reg(args_start.raw() + arg_count as u16 - 1), &mut errors);
                     }

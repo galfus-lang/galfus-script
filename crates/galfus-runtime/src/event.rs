@@ -1,10 +1,13 @@
+#[cfg(test)]
+mod tests;
+
 use crate::registry::ThreadId;
 use galfus_vm::thread::VirtualThread;
 use galfus_vm::{Continuation, VmEffect};
 use std::sync::mpsc;
 use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
+    Arc, Mutex,
+    atomic::{AtomicU64, AtomicUsize, Ordering},
 };
 
 pub enum RuntimeEvent {
@@ -25,6 +28,12 @@ pub enum RuntimeEvent {
         thread: VirtualThread,
         code: i32,
     },
+    /// A module initializer completed and the startup sequence can advance.
+    Initialized {
+        thread_id: ThreadId,
+        thread: VirtualThread,
+        module_id: galfus_core::ModuleId,
+    },
     /// A thread panicked or encountered a fatal error.
     Failed {
         thread_id: ThreadId,
@@ -33,9 +42,15 @@ pub enum RuntimeEvent {
     /// Completes a previously suspended provider effect.
     EffectCompleted {
         thread_id: ThreadId,
-        continuation: Continuation,
+        request_id: u64,
         result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
     },
+    /// Advances the virtual clock for blocked threads.
+    Tick {
+        delta_ms: u64,
+    },
+    /// Requests coordinated shutdown of every thread in this execution.
+    CancelExecution,
     CancelThread {
         thread_id: ThreadId,
     },
@@ -43,21 +58,27 @@ pub enum RuntimeEvent {
 
 #[derive(Clone)]
 pub struct EventSink {
-    sender: mpsc::Sender<RuntimeEvent>,
+    sender: mpsc::Sender<(u64, RuntimeEvent)>,
     pending: Arc<AtomicUsize>,
+    next_event_id: Arc<AtomicU64>,
+    send_lock: Arc<Mutex<()>>,
 }
 
 impl EventSink {
-    pub fn new(sender: mpsc::Sender<RuntimeEvent>) -> Self {
+    pub fn new(sender: mpsc::Sender<(u64, RuntimeEvent)>) -> Self {
         Self {
             sender,
             pending: Arc::new(AtomicUsize::new(0)),
+            next_event_id: Arc::new(AtomicU64::new(1)),
+            send_lock: Arc::new(Mutex::new(())),
         }
     }
 
     pub fn send(&self, event: RuntimeEvent) {
+        let _send_guard = self.send_lock.lock().unwrap();
+        let event_id = self.next_event_id.fetch_add(1, Ordering::Relaxed);
         self.pending.fetch_add(1, Ordering::Release);
-        if self.sender.send(event).is_err() {
+        if self.sender.send((event_id, event)).is_err() {
             self.pending.fetch_sub(1, Ordering::Release);
         }
     }

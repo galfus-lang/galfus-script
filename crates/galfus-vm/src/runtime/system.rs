@@ -19,43 +19,39 @@ impl VirtualMachine {
                 name_const,
                 args_start,
                 arg_count,
+                arg_types,
+                return_type,
             } => {
+                let name = match self.current_image(thread)?.constants.constants
+                    [name_const.raw() as usize]
                 {
-                    let name = match self.current_image(thread)?.constants.constants
-                        [name_const.raw() as usize]
-                    {
-                        Constant::String(ref s) => s.clone(),
-                        _ => {
-                            return Err(VmError::TypeMismatch {
-                                expected: "String constant".to_string(),
-                                found: "other".to_string(),
-                            });
-                        }
-                    };
-
-                    let mut elements = Vec::new();
-                    // First element is the method name as a string (array of bytes)
-                    let name_chars = name.into_bytes().into_iter().map(Value::Uint8).collect();
-                    let name_val = Value::Object(thread.heap.alloc(HeapObject::Array {
-                        element_ty: TypeIdx(0),
-                        elements: name_chars,
-                    }));
-                    elements.push(name_val);
-
-                    for i in 0..arg_count {
-                        elements.push(thread.read_reg(Reg(args_start.raw() + i as u16))?);
+                    Constant::String(ref s) => s.clone(),
+                    _ => {
+                        return Err(VmError::TypeMismatch {
+                            expected: "String constant".to_string(),
+                            found: "other".to_string(),
+                        });
                     }
+                };
+                let module_id = thread
+                    .call_stack
+                    .last()
+                    .ok_or(VmError::EmptyCallStack)?
+                    .module_id;
+                let args = (0..arg_count)
+                    .map(|index| thread.read_reg(Reg(args_start.raw() + index as u16)))
+                    .collect::<Result<Vec<_>, _>>()?;
 
-                    let msg = Value::Object(thread.heap.alloc(HeapObject::Array {
-                        element_ty: TypeIdx(0), // dummy for system messages
-                        elements,
-                    }));
-
-                    return Ok(VmStep::Suspend {
-                        effect: VmEffect::SendMsg { target: 0, msg },
-                        continuation: Continuation::new(Some(dest)),
-                    });
-                }
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::ProviderCall {
+                        module_id,
+                        name,
+                        args,
+                        arg_types,
+                        return_type,
+                    },
+                    continuation: Continuation::for_provider(dest, module_id, return_type),
+                });
             }
             Instruction::Len { dest, src } => {
                 let val = thread.read_reg(src)?;

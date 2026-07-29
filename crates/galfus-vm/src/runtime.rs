@@ -25,6 +25,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[derive(Debug, Clone)]
 pub struct Continuation {
     dest: Option<Reg>,
+    expected_result: Option<(ModuleId, TypeIdx)>,
     resumed: Arc<AtomicBool>,
 }
 
@@ -32,6 +33,15 @@ impl Continuation {
     pub(crate) fn new(dest: Option<Reg>) -> Self {
         Self {
             dest,
+            expected_result: None,
+            resumed: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub(crate) fn for_provider(dest: Reg, module_id: ModuleId, return_type: TypeIdx) -> Self {
+        Self {
+            dest: Some(dest),
+            expected_result: Some((module_id, return_type)),
             resumed: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -42,6 +52,13 @@ pub enum VmEffect {
     SendMsg {
         target: u64,
         msg: Value,
+    },
+    ProviderCall {
+        module_id: ModuleId,
+        name: String,
+        args: Vec<Value>,
+        arg_types: Vec<TypeIdx>,
+        return_type: TypeIdx,
     },
     ReceiveFilter {
         sender_id: u64,
@@ -72,7 +89,11 @@ pub enum VmEffect {
 
 pub enum VmStep {
     Continue,
-    Return(Value),
+    Return {
+        value: Value,
+        module_id: ModuleId,
+        return_type: TypeIdx,
+    },
     Suspend {
         effect: VmEffect,
         continuation: Continuation,
@@ -135,6 +156,10 @@ pub enum HeapObject {
         variant_idx: u16,
         payload: Value,
     },
+    ExternalHandle {
+        kind: String,
+        id: u64,
+    },
 }
 
 #[derive(Clone)]
@@ -184,6 +209,14 @@ impl VirtualMachine {
                 "continuation was already resumed",
             ));
         }
+        if let Some((module_id, expected_type)) = continuation.expected_result
+            && !self.value_matches_type(thread, value.clone(), module_id, expected_type)
+        {
+            return Err(galfus_contract::ExecutionFailure::new(
+                galfus_contract::ExecutionFailureKind::InvalidContinuation,
+                "continuation result does not match its declared type",
+            ));
+        }
         if let Some(dest) = continuation.dest {
             thread.write_reg(dest, value).map_err(|error| {
                 galfus_contract::ExecutionFailure::new(
@@ -193,6 +226,89 @@ impl VirtualMachine {
             })?;
         }
         Ok(())
+    }
+
+    fn value_matches_type(
+        &self,
+        thread: &thread::VirtualThread,
+        value: Value,
+        module_id: ModuleId,
+        type_idx: TypeIdx,
+    ) -> bool {
+        let Some(module) = self.graph.get(module_id).map(|node| &node.module) else {
+            return false;
+        };
+        let Some(expected) = module.types.get(type_idx.raw() as usize) else {
+            return false;
+        };
+        match (expected, value) {
+            (BytecodeType::Null, Value::Null)
+            | (BytecodeType::Bool, Value::Bool(_))
+            | (BytecodeType::Int8, Value::Int8(_))
+            | (BytecodeType::Int16, Value::Int16(_))
+            | (BytecodeType::Int32, Value::Int32(_))
+            | (BytecodeType::Int64, Value::Int64(_))
+            | (BytecodeType::Uint8, Value::Uint8(_))
+            | (BytecodeType::Uint16, Value::Uint16(_))
+            | (BytecodeType::Uint32, Value::Uint32(_))
+            | (BytecodeType::Uint64, Value::Uint64(_))
+            | (BytecodeType::Float32, Value::Float32(_))
+            | (BytecodeType::Float64, Value::Float64(_)) => true,
+            (BytecodeType::Array(element_type), Value::Object(reference)) => {
+                let Ok(HeapObject::Array {
+                    element_ty,
+                    elements,
+                }) = thread.heap.get_object(reference)
+                else {
+                    return false;
+                };
+                element_ty == element_type
+                    && elements.iter().cloned().all(|value| {
+                        self.value_matches_type(thread, value, module_id, *element_type)
+                    })
+            }
+            (BytecodeType::Tuple(element_types), Value::Object(reference)) => {
+                let Ok(HeapObject::Tuple { elements }) = thread.heap.get_object(reference) else {
+                    return false;
+                };
+                elements.len() == element_types.len()
+                    && elements
+                        .iter()
+                        .cloned()
+                        .zip(element_types)
+                        .all(|(value, type_idx)| {
+                            self.value_matches_type(thread, value, module_id, *type_idx)
+                        })
+            }
+            (BytecodeType::Choice(layout_idx), Value::Object(reference)) => {
+                let Ok(HeapObject::Choice {
+                    module_id: value_module,
+                    layout_idx: actual_layout,
+                    variant_idx,
+                    payload,
+                }) = thread.heap.get_object(reference)
+                else {
+                    return false;
+                };
+                if *value_module != module_id || actual_layout != layout_idx {
+                    return false;
+                }
+                let Some(variant) = module
+                    .choice_layouts
+                    .get(layout_idx.raw() as usize)
+                    .and_then(|layout| layout.variants.get(*variant_idx as usize))
+                else {
+                    return false;
+                };
+                match variant.payload_ty {
+                    Some(type_idx) => {
+                        self.value_matches_type(thread, payload.clone(), module_id, type_idx)
+                    }
+                    None => matches!(payload, Value::Null),
+                }
+            }
+            _ => false,
+        }
     }
     pub fn providers(&self) -> Option<Arc<Mutex<Providers>>> {
         self.context.providers.clone()
@@ -371,11 +487,12 @@ impl VirtualMachine {
             if frame.pc >= func.instructions.len() {
                 return Err(VmError::InstructionPointerOutOfBounds { pc: frame.pc });
             }
-            let instr = func.instructions[frame.pc];
+            let instr = func.instructions[frame.pc].clone();
             frame.pc += 1;
             instr
         };
 
+        let release_instruction = instr.clone();
         let step = match instr {
             Instruction::LoadConst { .. }
             | Instruction::Move { .. }
@@ -445,7 +562,7 @@ impl VirtualMachine {
         };
 
         if matches!(step, VmStep::Continue) {
-            self.release_unreachable_if_needed(thread, instr);
+            self.release_unreachable_if_needed(thread, release_instruction);
         }
 
         Ok(step)
@@ -455,7 +572,7 @@ impl VirtualMachine {
         loop {
             match self.step(thread)? {
                 VmStep::Continue => {}
-                VmStep::Return(value) => return Ok(value),
+                VmStep::Return { value, .. } => return Ok(value),
                 VmStep::Suspend { .. } => return Err(VmError::UnresolvedHostBlocked),
                 VmStep::Failed(_) => return Err(VmError::UnresolvedHostBlocked),
             }

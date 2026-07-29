@@ -98,6 +98,7 @@ pub struct VirtualThread {
     pub state: ThreadState,
     pub key: Option<String>,
     pub entry_func: Option<runtime::Value>,
+    pub initializing_module: Option<ModuleId>,
 }
 
 impl Default for VirtualThread {
@@ -134,6 +135,7 @@ impl VirtualThread {
             state: ThreadState::Created,
             key: None,
             entry_func: None,
+            initializing_module: None,
         }
     }
 
@@ -166,6 +168,18 @@ impl VirtualThread {
 
     pub fn mark_module_initialized(&mut self, module_id: ModuleId) {
         self.module_states.entry(module_id).or_default().initialized = true;
+    }
+
+    pub fn begin_module_initialization(&mut self, module_id: ModuleId) {
+        self.initializing_module = Some(module_id);
+    }
+
+    pub fn finish_module_initialization(&mut self) -> Option<ModuleId> {
+        self.initializing_module.take()
+    }
+
+    pub fn initializing_module(&self) -> Option<ModuleId> {
+        self.initializing_module
     }
 
     pub fn read_reg(&self, reg: Reg) -> Result<Value, VmError> {

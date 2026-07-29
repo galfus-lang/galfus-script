@@ -69,13 +69,22 @@ impl VirtualKernel {
         self.registry.cancel(id)
     }
 
+    /// Removes every thread from runnable and blocked state during execution shutdown.
+    pub fn cancel_all(&mut self) {
+        let thread_ids = self
+            .registry
+            .debug_states()
+            .into_iter()
+            .map(|(thread_id, _)| thread_id)
+            .collect::<Vec<_>>();
+        for thread_id in thread_ids {
+            self.cancel(thread_id);
+        }
+    }
+
     /// Returns the next runnable ThreadId.
     pub fn next_runnable(&mut self) -> Option<ThreadId> {
         self.runnable.dequeue()
-    }
-
-    pub fn debug_states(&self) -> Vec<(crate::registry::ThreadId, galfus_vm::thread::ThreadState)> {
-        self.registry.debug_states()
     }
 
     pub fn active_count(&self) -> usize {
@@ -86,6 +95,7 @@ impl VirtualKernel {
         self.registry.get_exit_code(id)
     }
 
+    #[cfg(test)]
     pub fn runnable_count(&self) -> usize {
         self.runnable.len()
     }

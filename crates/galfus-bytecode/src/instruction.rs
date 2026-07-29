@@ -78,7 +78,7 @@ impl ChoiceLayoutIdx {
 // Opcode Instruction Set
 // =========================================================================
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Instruction {
     // Category A: Data Movement & Constants
     LoadConst {
@@ -364,6 +364,8 @@ pub enum Instruction {
         name_const: ConstIdx,
         args_start: Reg,
         arg_count: u8,
+        arg_types: Vec<TypeIdx>,
+        return_type: TypeIdx,
     },
     Len {
         dest: Reg,

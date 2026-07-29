@@ -1,22 +1,20 @@
 pub mod driver;
 pub mod event;
 pub mod execution;
-pub mod kernel;
-pub mod orchestrator;
+mod kernel;
+mod orchestrator;
 pub mod queue;
 pub mod registry;
 pub mod task;
 #[cfg(test)]
 mod tests;
 
+use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync;
 
-use galfus_bytecode::BytecodeModule;
-use galfus_contract::Providers;
-use galfus_vm::thread::VirtualThread;
-use galfus_vm::{HeapObject, VirtualMachine, VmPanic, VmValue};
-use registry::ThreadId;
+use galfus_contract::{BoundaryType, BoundaryValue, Providers};
+use galfus_vm::{VirtualMachine, VmPanic, VmValue};
 
 pub use driver::CooperativeDriver;
 pub use execution::{Execution, ExecutionHandle, ExecutionState};
@@ -84,7 +82,6 @@ impl EntryAbi {
 pub struct Runtime {
     graph: sync::Arc<galfus_bytecode::BytecodeGraph>,
     providers: Option<sync::Arc<sync::Mutex<Providers>>>,
-    orchestrator: crate::orchestrator::Orchestrator,
 }
 
 impl Runtime {
@@ -95,42 +92,18 @@ impl Runtime {
         Self {
             graph,
             providers: providers.map(|p| sync::Arc::new(sync::Mutex::new(p))),
-            orchestrator: crate::orchestrator::Orchestrator::new(),
         }
-    }
-
-    /// Cria uma nova thread a partir de um módulo e função de entrada
-    pub fn spawn_thread(&mut self, thread: VirtualThread) -> ThreadId {
-        let token = self.orchestrator.main_thread_token();
-        let kernel = self.orchestrator.kernel_mut(token);
-        let id = kernel.spawn(thread);
-        let thread = kernel
-            .take_thread(id)
-            .expect("spawned thread is registered");
-        kernel.enqueue_runnable(id, thread);
-        id
-    }
-
-    /// O Host deve chamar esta função para bombear os cronômetros das threads bloqueadas
-    pub fn tick_timeouts(&mut self, delta_ms: u64) {
-        let token = self.orchestrator.main_thread_token();
-        self.orchestrator.kernel_mut(token).tick(delta_ms);
-    }
-
-    /// Retorna o próximo ThreadId pronto para executar
-    pub fn next_runnable(&mut self) -> Option<ThreadId> {
-        let token = self.orchestrator.main_thread_token();
-        self.orchestrator.kernel_mut(token).next_runnable()
     }
 
     /// Starts a persistent execution from an exported entry point.
     pub fn start(
-        mut self,
+        self,
         module_id: galfus_core::ModuleId,
         entry_name: &str,
         args: &[Vec<u8>],
         driver: Rc<dyn galfus_contract::KernelDriver>,
     ) -> Result<Execution, RuntimeError> {
+        let mut orchestrator = crate::orchestrator::Orchestrator::new();
         let graph = self.graph.clone();
         let image = &graph.get(module_id).unwrap().module;
         let abi = EntryAbi::default_app();
@@ -162,6 +135,7 @@ impl Runtime {
         let mut thread = galfus_vm::thread::VirtualThread::new();
         let vm = VirtualMachine::new(graph.clone()).with_provider_handle(self.providers.clone());
 
+        let mut initializers = VecDeque::new();
         for initialized_module_id in graph.initialization_order(module_id)? {
             if thread.is_module_initialized(initialized_module_id) {
                 continue;
@@ -172,45 +146,55 @@ impl Runtime {
                 .module
                 .init_func_idx
             {
-                vm.run_function(&mut thread, initialized_module_id, init_idx, vec![])?;
+                initializers.push_back((initialized_module_id, init_idx));
+            } else {
+                thread.mark_module_initialized(initialized_module_id);
             }
-            thread.mark_module_initialized(initialized_module_id);
         }
 
         let entry_args = build_entry_args(&mut thread, &vm, module_id, args)?;
-        vm.prepare_function(&mut thread, module_id, entry_idx, vec![entry_args])
-            .map_err(RuntimeError::VmPanic)?;
+        let startup_plan =
+            if let Some((initializer_module_id, initializer_func)) = initializers.pop_front() {
+                thread.begin_module_initialization(initializer_module_id);
+                vm.prepare_function(&mut thread, initializer_module_id, initializer_func, vec![])
+                    .map_err(RuntimeError::VmPanic)?;
+                Some(crate::orchestrator::StartupPlan {
+                    initializers,
+                    entry_module_id: module_id,
+                    entry_func: entry_idx,
+                    entry_args,
+                })
+            } else {
+                vm.prepare_function(&mut thread, module_id, entry_idx, vec![entry_args])
+                    .map_err(RuntimeError::VmPanic)?;
+                None
+            };
 
-        let main_thread_id = self.spawn_thread(thread);
+        let token = orchestrator.main_thread_token();
+        let main_thread_id = orchestrator.kernel_mut(token).spawn(thread);
 
-        let token = self.orchestrator.main_thread_token();
-        let _ = self
-            .orchestrator
-            .kernel_mut(token)
-            .mark_running(main_thread_id);
-        let main_thread = self
-            .orchestrator
+        if let Some(startup_plan) = startup_plan {
+            orchestrator.set_startup_plan(main_thread_id, startup_plan);
+        }
+
+        let _ = orchestrator.kernel_mut(token).mark_running(main_thread_id);
+        let main_thread = orchestrator
             .kernel_mut(token)
             .take_thread(main_thread_id)
             .unwrap();
 
         let vm = sync::Arc::new(vm);
 
-        self.orchestrator.set_vm(vm.clone());
-        self.orchestrator.set_driver(driver.clone());
-
-        // Wait, the orchestrator IS the task now!
-        // We enqueue the main thread back, and return the orchestrator!
-        self.orchestrator
+        orchestrator.set_vm(vm);
+        orchestrator.set_driver(driver.clone());
+        orchestrator
             .kernel_mut(token)
             .enqueue_runnable(main_thread_id, main_thread);
 
-        // We must return the orchestrator as the task!
-        // But `self` consumes `self.orchestrator`.
-        let sink = self.orchestrator.sink();
-        let task = Box::new(self.orchestrator);
+        let sink = orchestrator.sink();
+        let task = Box::new(orchestrator);
 
-        Ok(Execution::new(task, main_thread_id.raw(), driver, sink))
+        Ok(Execution::new(task, driver, sink))
     }
 }
 
@@ -220,21 +204,6 @@ fn build_entry_args(
     module_id: galfus_core::ModuleId,
     args: &[Vec<u8>],
 ) -> Result<VmValue, RuntimeError> {
-    let uint8_ty = find_type(&vm.graph.get(module_id).unwrap().module, |ty| {
-        matches!(ty, galfus_bytecode::BytecodeType::Uint8)
-    })
-    .ok_or(RuntimeError::MissingArgumentType("u8"))?;
-    let byte_array_ty = vm
-        .graph.get(module_id).unwrap().module
-        .types
-        .iter()
-        .enumerate()
-        .find(|(_, ty)| {
-            matches!(ty, galfus_bytecode::BytecodeType::Array(element)
-                if matches!(vm.graph.get(module_id).unwrap().module.types.get(element.raw() as usize), Some(galfus_bytecode::BytecodeType::Uint8)))
-        })
-        .map(|(index, _)| galfus_bytecode::instruction::TypeIdx(index as u16))
-        .ok_or(RuntimeError::MissingArgumentType("[u8]"))?;
     let args_array_ty = vm
         .graph.get(module_id).unwrap().module
         .types
@@ -248,34 +217,32 @@ fn build_entry_args(
         .map(|(index, _)| galfus_bytecode::instruction::TypeIdx(index as u16))
         .ok_or(RuntimeError::MissingArgumentType("[[u8]]"))?;
 
-    let mut arg_values = Vec::with_capacity(args.len());
-    for arg in args {
-        let elements = arg.iter().copied().map(VmValue::Uint8).collect();
-        let arg_ref = thread.heap.alloc(HeapObject::Array {
-            element_ty: uint8_ty,
-            elements,
-        });
-        arg_values.push(VmValue::Object(arg_ref));
-    }
-
-    let args_ref = thread.heap.alloc(HeapObject::Array {
-        element_ty: byte_array_ty,
-        elements: arg_values,
-    });
-
-    let _args_array_ty = args_array_ty;
-    Ok(VmValue::Object(args_ref))
-}
-
-fn find_type(
-    module: &BytecodeModule,
-    predicate: impl Fn(&galfus_bytecode::BytecodeType) -> bool,
-) -> Option<galfus_bytecode::instruction::TypeIdx> {
-    module
-        .types
-        .iter()
-        .position(predicate)
-        .map(|index| galfus_bytecode::instruction::TypeIdx(index as u16))
+    let value = BoundaryValue::Array {
+        element_type: BoundaryType::Array(Box::new(BoundaryType::U8)),
+        values: args
+            .iter()
+            .map(|arg| BoundaryValue::Array {
+                element_type: BoundaryType::U8,
+                values: arg.iter().copied().map(BoundaryValue::U8).collect(),
+            })
+            .collect(),
+    };
+    crate::task::encode_into_thread_heap(
+        &mut thread.heap,
+        value,
+        args_array_ty,
+        module_id,
+        &vm.graph.get(module_id).unwrap().module,
+    )
+    .map_err(|error| {
+        RuntimeError::VmPanic(VmPanic {
+            error: galfus_vm::VmError::TypeMismatch {
+                expected: "entry arguments".to_string(),
+                found: format!("{error:?}"),
+            },
+            stack_trace: vec![],
+        })
+    })
 }
 
 pub fn format_panic(graph: &galfus_bytecode::BytecodeGraph, panic: &VmPanic) -> String {

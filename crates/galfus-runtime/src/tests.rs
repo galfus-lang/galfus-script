@@ -26,7 +26,10 @@ fn run_initializes_dependencies_before_the_entry_module() {
     let dependency = BytecodeModule {
         name: "dependency.gfs".to_string(),
         constants: ConstantPool {
-            constants: vec![Constant::Int32(42)],
+            constants: vec![
+                Constant::Int32(42),
+                Constant::String("initialize".to_string()),
+            ],
         },
         functions: vec![BytecodeFunction {
             name: "__init_module".to_string(),
@@ -35,6 +38,14 @@ fn run_initializes_dependencies_before_the_entry_module() {
             temp_count: 1,
             return_ty: TypeIdx(1),
             instructions: vec![
+                Instruction::CallNative {
+                    dest: Reg(0),
+                    name_const: ConstIdx(1),
+                    args_start: Reg(0),
+                    arg_count: 0,
+                    arg_types: vec![],
+                    return_type: TypeIdx(1),
+                },
                 Instruction::LoadConst {
                     dest: Reg(0),
                     const_idx: ConstIdx(0),
@@ -117,6 +128,23 @@ fn run_initializes_dependencies_before_the_entry_module() {
     struct TestExecutor {
         queue: sync::Mutex<collections::VecDeque<galfus_contract::KernelTask>>,
     }
+    struct ImmediateProvider;
+    impl galfus_contract::HostProvider for ImmediateProvider {
+        fn dispatch(
+            &mut self,
+            thread_id: usize,
+            request_id: u64,
+            _name: &str,
+            _args: &[galfus_contract::BoundaryValue],
+            injector: sync::Arc<dyn galfus_contract::MessageInjector>,
+        ) {
+            injector.inject_system_response(
+                thread_id,
+                request_id,
+                Ok(galfus_contract::BoundaryValue::Null),
+            );
+        }
+    }
     impl galfus_contract::KernelDriver for TestExecutor {
         fn on_exit(
             &self,
@@ -133,10 +161,15 @@ fn run_initializes_dependencies_before_the_entry_module() {
         queue: sync::Mutex::new(collections::VecDeque::new()),
     });
 
-    let task = Runtime::new(sync::Arc::new(graph.clone()), None)
-        .start(entry_id, "main", &[], executor.clone())
-        .expect("entry execution succeeds")
-        .into_task();
+    let task = Runtime::new(
+        sync::Arc::new(graph.clone()),
+        Some(galfus_contract::Providers::with_host(Box::new(
+            ImmediateProvider,
+        ))),
+    )
+    .start(entry_id, "main", &[], executor.clone())
+    .expect("entry execution succeeds")
+    .into_task();
     galfus_contract::KernelDriver::dispatch(
         executor.as_ref(),
         galfus_contract::KernelTask::Main(task),

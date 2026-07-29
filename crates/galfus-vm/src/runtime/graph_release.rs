@@ -87,6 +87,7 @@ impl VirtualMachine {
                                 }
                             }
                         }
+                        HeapObject::ExternalHandle { .. } => {}
                     }
                 }
             }

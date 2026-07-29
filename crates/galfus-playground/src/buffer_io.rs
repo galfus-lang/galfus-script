@@ -4,7 +4,8 @@ mod tests;
 use std::mem;
 
 use galfus_contract::{
-    BoundaryValue, ExecutionFailure, ExecutionFailureKind, HostProvider, MessageInjector,
+    BoundaryType, BoundaryValue, ExecutionFailure, ExecutionFailureKind, HostProvider,
+    MessageInjector,
 };
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -24,9 +25,26 @@ pub struct BufferIoProvider {
 struct BufferIoState {
     input: VecDeque<u8>,
     output: Vec<u8>,
-    pending_read: Option<(usize, Vec<u8>, Arc<dyn MessageInjector>)>,
+    pending_read: Option<(usize, u64, Vec<u8>, Arc<dyn MessageInjector>)>,
     #[cfg(feature = "wasm")]
     write_callback: Option<WriteCallback>,
+}
+
+fn boundary_bytes(value: &BoundaryValue) -> Option<Vec<u8>> {
+    match value {
+        BoundaryValue::Bytes(bytes) => Some(bytes.clone()),
+        BoundaryValue::Array {
+            element_type: BoundaryType::U8,
+            values,
+        } => values
+            .iter()
+            .map(|value| match value {
+                BoundaryValue::U8(byte) => Some(*byte),
+                _ => None,
+            })
+            .collect(),
+        _ => None,
+    }
 }
 
 #[cfg(feature = "wasm")]
@@ -58,7 +76,7 @@ impl BufferIoProvider {
         let mut state = self.state.lock().expect("buffer I/O state");
         state.input.extend(bytes);
 
-        if let Some((thread_id, terminator, injector)) = state.pending_read.take() {
+        if let Some((thread_id, request_id, terminator, injector)) = state.pending_read.take() {
             let mut input = Vec::new();
             let mut found = false;
             for &byte in state.input.iter() {
@@ -72,9 +90,13 @@ impl BufferIoProvider {
                 let len = input.len();
                 state.input.drain(0..len);
                 input.truncate(len - terminator.len());
-                injector.inject_system_response(thread_id, Ok(BoundaryValue::Bytes(input)));
+                injector.inject_system_response(
+                    thread_id,
+                    request_id,
+                    Ok(BoundaryValue::Bytes(input)),
+                );
             } else {
-                state.pending_read = Some((thread_id, terminator, injector));
+                state.pending_read = Some((thread_id, request_id, terminator, injector));
             }
         }
     }
@@ -89,17 +111,18 @@ impl HostProvider for BufferIoProvider {
     fn dispatch(
         &mut self,
         thread_id: usize,
+        request_id: u64,
         method: &str,
         args: &[BoundaryValue],
         injector: Arc<dyn MessageInjector>,
     ) {
         match method {
             "write" => {
-                if let Some(BoundaryValue::Bytes(bytes)) = args.first() {
+                if let Some(bytes) = args.first().and_then(boundary_bytes) {
                     #[cfg(feature = "wasm")]
                     let callback = {
                         let mut state = self.state.lock().expect("buffer I/O state");
-                        state.output.extend_from_slice(bytes);
+                        state.output.extend_from_slice(&bytes);
                         state.write_callback.clone()
                     };
 
@@ -108,7 +131,7 @@ impl HostProvider for BufferIoProvider {
                         .lock()
                         .expect("buffer I/O state")
                         .output
-                        .extend_from_slice(bytes);
+                        .extend_from_slice(&bytes);
 
                     #[cfg(feature = "wasm")]
                     if let Some(WriteCallback(callback)) = callback {
@@ -116,6 +139,7 @@ impl HostProvider for BufferIoProvider {
                         if let Err(e) = callback.call1(&JsValue::UNDEFINED, &value.into()) {
                             injector.inject_system_response(
                                 thread_id,
+                                request_id,
                                 Err(ExecutionFailure::new(
                                     ExecutionFailureKind::ProviderFailure,
                                     format!("{:?}", e),
@@ -124,10 +148,11 @@ impl HostProvider for BufferIoProvider {
                             return;
                         }
                     }
-                    injector.inject_system_response(thread_id, Ok(BoundaryValue::Null));
+                    injector.inject_system_response(thread_id, request_id, Ok(BoundaryValue::Null));
                 } else {
                     injector.inject_system_response(
                         thread_id,
+                        request_id,
                         Err(ExecutionFailure::new(
                             ExecutionFailureKind::ProviderFailure,
                             "Invalid arguments for write".to_string(),
@@ -136,11 +161,12 @@ impl HostProvider for BufferIoProvider {
                 }
             }
             "read" => {
-                let terminator = if let Some(BoundaryValue::Bytes(b)) = args.first() {
-                    b.clone()
+                let terminator = if let Some(bytes) = args.first().and_then(boundary_bytes) {
+                    bytes
                 } else {
                     injector.inject_system_response(
                         thread_id,
+                        request_id,
                         Err(ExecutionFailure::new(
                             ExecutionFailureKind::ProviderFailure,
                             "Invalid arguments for read".to_string(),
@@ -152,6 +178,7 @@ impl HostProvider for BufferIoProvider {
                 if terminator.is_empty() {
                     injector.inject_system_response(
                         thread_id,
+                        request_id,
                         Err(ExecutionFailure::new(
                             ExecutionFailureKind::ProviderFailure,
                             "input terminator must not be empty".to_string(),
@@ -175,14 +202,19 @@ impl HostProvider for BufferIoProvider {
                     let len = input.len();
                     state.input.drain(0..len);
                     input.truncate(len - terminator.len());
-                    injector.inject_system_response(thread_id, Ok(BoundaryValue::Bytes(input)));
+                    injector.inject_system_response(
+                        thread_id,
+                        request_id,
+                        Ok(BoundaryValue::Bytes(input)),
+                    );
                 } else {
-                    state.pending_read = Some((thread_id, terminator, injector));
+                    state.pending_read = Some((thread_id, request_id, terminator, injector));
                 }
             }
             _ => {
                 injector.inject_system_response(
                     thread_id,
+                    request_id,
                     Err(ExecutionFailure::new(
                         ExecutionFailureKind::ProviderFailure,
                         format!("Method {} not found", method),

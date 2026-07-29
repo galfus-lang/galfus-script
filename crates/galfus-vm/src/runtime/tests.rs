@@ -82,3 +82,36 @@ fn create_test_module(instructions: Vec<Instruction>, constants: Vec<Constant>) 
         init_func_idx: None,
     }
 }
+
+#[test]
+fn provider_continuation_rejects_a_result_that_violates_its_declared_type() {
+    let module_id = galfus_core::ModuleId::new(1);
+    let graph = graph_with_node(BytecodeNode {
+        id: module_id,
+        path: galfus_core::ModulePath::new("test.gfs").expect("valid module path"),
+        semantic_revision: galfus_core::SemanticRevision::new(0),
+        module: create_test_module(vec![Instruction::RetNull], vec![]),
+        metadata: None,
+    });
+    let vm = VirtualMachine::new(std::sync::Arc::new(graph));
+    let mut thread = thread::VirtualThread::new();
+    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![])
+        .expect("function is valid");
+
+    let continuation = Continuation::for_provider(Reg(0), module_id, TypeIdx(0));
+    let error = vm
+        .resume(&mut thread, continuation.clone(), Value::Bool(true))
+        .expect_err("bool does not satisfy the declared int64 result type");
+    assert_eq!(
+        error.kind,
+        galfus_contract::ExecutionFailureKind::InvalidContinuation
+    );
+
+    let duplicate = vm
+        .resume(&mut thread, continuation, Value::Int64(1))
+        .expect_err("a failed resume attempt consumes the continuation");
+    assert_eq!(
+        duplicate.kind,
+        galfus_contract::ExecutionFailureKind::DuplicateCompletion
+    );
+}

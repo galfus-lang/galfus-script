@@ -6,10 +6,26 @@ use crate::kernel::VirtualKernel;
 use crate::task::RuntimeTask;
 use galfus_contract::{KernelDriver, KernelTask};
 use galfus_vm::VirtualMachine;
+use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::{Arc, mpsc};
 use std::thread::{self, ThreadId};
+
+struct PendingContinuation {
+    continuation: galfus_vm::Continuation,
+    module_id: galfus_core::ModuleId,
+    return_type: galfus_bytecode::instruction::TypeIdx,
+    request_id: u64,
+}
+
+pub(crate) struct StartupPlan {
+    pub(crate) initializers:
+        VecDeque<(galfus_core::ModuleId, galfus_bytecode::instruction::FuncIdx)>,
+    pub(crate) entry_module_id: galfus_core::ModuleId,
+    pub(crate) entry_func: galfus_bytecode::instruction::FuncIdx,
+    pub(crate) entry_args: galfus_vm::VmValue,
+}
 
 /// Proof that we are running on the main thread, since this cannot be sent across threads.
 #[derive(Clone, Copy)]
@@ -39,13 +55,16 @@ impl MainThreadToken {
 /// It owns the VirtualKernel and the Receiver for RuntimeEvents.
 pub struct Orchestrator {
     kernel: VirtualKernel,
-    receiver: mpsc::Receiver<RuntimeEvent>,
+    receiver: mpsc::Receiver<(u64, RuntimeEvent)>,
     sink: EventSink,
     driver: Option<Rc<dyn KernelDriver>>,
     vm: Option<Arc<VirtualMachine>>,
     main_thread_id: ThreadId,
     _not_send_sync: PhantomData<Rc<()>>,
     failure: Option<galfus_contract::ExecutionFailure>,
+    pending_continuations: HashMap<crate::registry::ThreadId, PendingContinuation>,
+    startup_plans: HashMap<crate::registry::ThreadId, StartupPlan>,
+    next_request_id: u64,
 }
 
 impl Orchestrator {
@@ -60,6 +79,9 @@ impl Orchestrator {
             main_thread_id: thread::current().id(),
             _not_send_sync: PhantomData,
             failure: None,
+            pending_continuations: HashMap::new(),
+            startup_plans: HashMap::new(),
+            next_request_id: 1,
         }
     }
 
@@ -92,6 +114,7 @@ impl Orchestrator {
         &mut self.kernel
     }
 
+    #[cfg(test)]
     pub fn kernel(&self, token: MainThreadToken) -> &VirtualKernel {
         token.assert_current();
         self.assert_main_thread();
@@ -100,6 +123,108 @@ impl Orchestrator {
 
     pub fn sink(&self) -> EventSink {
         self.sink.clone()
+    }
+
+    pub(crate) fn set_startup_plan(
+        &mut self,
+        thread_id: crate::registry::ThreadId,
+        plan: StartupPlan,
+    ) {
+        self.assert_main_thread();
+        self.startup_plans.insert(thread_id, plan);
+    }
+
+    fn advance_startup(
+        &mut self,
+        thread_id: crate::registry::ThreadId,
+        mut thread: galfus_vm::thread::VirtualThread,
+        initialized_module_id: galfus_core::ModuleId,
+    ) {
+        thread.mark_module_initialized(initialized_module_id);
+        let Some(mut plan) = self.startup_plans.remove(&thread_id) else {
+            self.failure = Some(
+                galfus_contract::ExecutionFailure::new(
+                    galfus_contract::ExecutionFailureKind::InitializationFailure,
+                    "module initializer completed without a startup plan",
+                )
+                .with_thread_id(thread_id.raw())
+                .with_module_id(initialized_module_id.raw().into()),
+            );
+            self.kernel.cancel(thread_id);
+            return;
+        };
+
+        let (module_id, function, args) = match plan.initializers.pop_front() {
+            Some((module_id, function)) => {
+                thread.begin_module_initialization(module_id);
+                self.startup_plans.insert(thread_id, plan);
+                (module_id, function, vec![])
+            }
+            None => (plan.entry_module_id, plan.entry_func, vec![plan.entry_args]),
+        };
+        let vm = self.vm.as_ref().expect("VM is configured before execution");
+        if let Err(error) = vm.prepare_function(&mut thread, module_id, function, args) {
+            self.failure = Some(
+                galfus_contract::ExecutionFailure::new(
+                    galfus_contract::ExecutionFailureKind::InitializationFailure,
+                    error.to_string(),
+                )
+                .with_thread_id(thread_id.raw())
+                .with_module_id(initialized_module_id.raw().into()),
+            );
+            self.startup_plans.remove(&thread_id);
+            self.kernel.cancel(thread_id);
+            return;
+        }
+        self.kernel.enqueue_runnable(thread_id, thread);
+    }
+
+    fn resume_or_fail(
+        &mut self,
+        thread_id: crate::registry::ThreadId,
+        mut thread: galfus_vm::thread::VirtualThread,
+        continuation: galfus_vm::Continuation,
+        value: galfus_vm::VmValue,
+    ) {
+        let result = self
+            .vm
+            .as_ref()
+            .expect("VM is configured before execution")
+            .resume(&mut thread, continuation, value);
+        match result {
+            Ok(()) => self.kernel.enqueue_runnable(thread_id, thread),
+            Err(error) => {
+                self.failure = Some(error.with_thread_id(thread_id.raw()));
+                self.kernel.cancel(thread_id);
+            }
+        }
+    }
+
+    fn cancel_pending_continuation(&mut self, thread_id: crate::registry::ThreadId) {
+        let Some(pending) = self.pending_continuations.remove(&thread_id) else {
+            return;
+        };
+        let Some(vm) = self.vm.as_ref() else {
+            return;
+        };
+        let Some(providers) = vm.providers() else {
+            return;
+        };
+        let mut providers = providers.lock().unwrap();
+        if let Some(host) = providers.host_mut() {
+            host.cancel(thread_id.raw() as usize, pending.request_id);
+        }
+    }
+
+    fn cancel_all_pending_continuations(&mut self) {
+        let thread_ids = self
+            .pending_continuations
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
+        for thread_id in thread_ids {
+            self.cancel_pending_continuation(thread_id);
+        }
     }
 
     /// Dispatches all currently runnable threads from the VirtualKernel to the driver.
@@ -130,7 +255,7 @@ impl Orchestrator {
     pub fn process_events(&mut self, token: MainThreadToken) {
         token.assert_current();
         self.assert_main_thread();
-        while let Ok(event) = self.receiver.try_recv() {
+        while let Ok((_event_id, event)) = self.receiver.try_recv() {
             self.sink.mark_received();
             match event {
                 RuntimeEvent::ThreadSpawned { thread } => {
@@ -148,84 +273,177 @@ impl Orchestrator {
                 } => {
                     self.kernel.mark_exited(thread_id, thread, code);
                 }
+                RuntimeEvent::Initialized {
+                    thread_id,
+                    thread,
+                    module_id,
+                } => self.advance_startup(thread_id, thread, module_id),
                 RuntimeEvent::Failed { thread_id, error } => {
-                    self.failure = Some(error);
+                    self.failure = Some(error.with_thread_id(thread_id.raw()));
+                    self.cancel_pending_continuation(thread_id);
+                    self.startup_plans.remove(&thread_id);
                     self.kernel.cancel(thread_id);
                 }
                 RuntimeEvent::EffectCompleted {
                     thread_id,
-                    continuation,
+                    request_id,
                     result,
                 } => {
+                    let Some(pending) = self.pending_continuations.remove(&thread_id) else {
+                        continue;
+                    };
+                    if pending.request_id != request_id {
+                        self.pending_continuations.insert(thread_id, pending);
+                        continue;
+                    }
                     if let Some(mut thread) = self.kernel.take_thread(thread_id) {
-                        let vm = self.vm.as_ref().unwrap();
+                        let vm = self
+                            .vm
+                            .as_ref()
+                            .expect("VM is configured before execution")
+                            .clone();
                         match result {
                             Ok(value) => {
-                                let value =
-                                    crate::task::from_boundary_value(&mut thread.heap, value, vm);
-                                if vm.resume(&mut thread, continuation, value).is_ok() {
-                                    self.kernel.enqueue_runnable(thread_id, thread);
-                                } else {
-                                    self.kernel.cancel(thread_id);
-                                }
+                                let module = &vm
+                                    .graph
+                                    .get(pending.module_id)
+                                    .expect("provider call module is loaded")
+                                    .module;
+                                let value = match crate::task::encode_into_thread_heap(
+                                    &mut thread.heap,
+                                    value,
+                                    pending.return_type,
+                                    pending.module_id,
+                                    module,
+                                ) {
+                                    Ok(value) => value,
+                                    Err(error) => {
+                                        self.failure = Some(galfus_contract::ExecutionFailure::new(
+                                            galfus_contract::ExecutionFailureKind::BoundaryCodecFailure,
+                                            format!("invalid provider result: {error:?}"),
+                                        ).with_thread_id(thread_id.raw()).with_request_id(pending.request_id).with_module_id(pending.module_id.raw().into()));
+                                        self.kernel.cancel(thread_id);
+                                        continue;
+                                    }
+                                };
+                                self.resume_or_fail(thread_id, thread, pending.continuation, value);
                             }
-                            Err(_) => {
+                            Err(error) => {
+                                self.failure = Some(
+                                    error
+                                        .with_thread_id(thread_id.raw())
+                                        .with_request_id(pending.request_id)
+                                        .with_module_id(pending.module_id.raw().into()),
+                                );
                                 self.kernel.cancel(thread_id);
                             }
                         }
                     }
                 }
+                RuntimeEvent::Tick { delta_ms } => {
+                    self.kernel.tick(delta_ms);
+                }
+                RuntimeEvent::CancelExecution => {
+                    self.cancel_all_pending_continuations();
+                    self.startup_plans.clear();
+                    self.kernel.cancel_all();
+                    self.failure = Some(galfus_contract::ExecutionFailure::new(
+                        galfus_contract::ExecutionFailureKind::Cancelled,
+                        "execution cancelled",
+                    ));
+                }
                 RuntimeEvent::Syscall {
                     thread_id,
-                    mut thread,
+                    thread,
                     effect,
                     continuation,
                 } => match effect {
+                    galfus_vm::VmEffect::ProviderCall {
+                        module_id,
+                        name,
+                        args,
+                        arg_types,
+                        return_type,
+                    } => {
+                        let vm = self.vm.as_ref().expect("VM is configured before execution");
+                        let module = &vm
+                            .graph
+                            .get(module_id)
+                            .expect("provider call module is loaded")
+                            .module;
+                        let args = args
+                            .into_iter()
+                            .zip(arg_types)
+                            .map(|(value, ty)| {
+                                crate::task::decode_from_thread_heap(
+                                    &thread.heap,
+                                    value,
+                                    ty,
+                                    module,
+                                )
+                            })
+                            .collect::<Result<Vec<_>, _>>();
+                        let args = match args {
+                            Ok(args) => args,
+                            Err(error) => {
+                                self.failure = Some(
+                                    galfus_contract::ExecutionFailure::new(
+                                        galfus_contract::ExecutionFailureKind::BoundaryCodecFailure,
+                                        format!("invalid provider argument: {error:?}"),
+                                    )
+                                    .with_thread_id(thread_id.raw())
+                                    .with_module_id(module_id.raw().into()),
+                                );
+                                self.kernel.cancel(thread_id);
+                                continue;
+                            }
+                        };
+                        if let Some(providers) = vm.providers() {
+                            let mut providers = providers.lock().unwrap();
+                            if let Some(host) = providers.host_mut() {
+                                let request_id = self.next_request_id;
+                                self.next_request_id += 1;
+                                self.pending_continuations.insert(
+                                    thread_id,
+                                    PendingContinuation {
+                                        continuation,
+                                        module_id,
+                                        return_type,
+                                        request_id,
+                                    },
+                                );
+                                let injector =
+                                    Arc::new(crate::ExecutionHandle::new(self.sink.clone()));
+                                self.kernel.block(thread_id, thread, None);
+                                host.dispatch(
+                                    thread_id.raw() as usize,
+                                    request_id,
+                                    &name,
+                                    &args,
+                                    injector,
+                                );
+                                continue;
+                            }
+                        }
+                        self.failure = Some(
+                            galfus_contract::ExecutionFailure::new(
+                                galfus_contract::ExecutionFailureKind::MissingProvider,
+                                "HostProvider missing",
+                            )
+                            .with_thread_id(thread_id.raw())
+                            .with_module_id(module_id.raw().into()),
+                        );
+                        self.kernel.cancel(thread_id);
+                    }
                     galfus_vm::VmEffect::SendMsg { target, msg } => {
                         if target == 0 {
-                            let host_val = crate::task::to_boundary_value(&thread.heap, msg);
-                            if let Some(galfus_contract::BoundaryValue::Array {
-                                mut values, ..
-                            }) = host_val
-                            {
-                                if !values.is_empty() {
-                                    let method_opt = match values.remove(0) {
-                                        galfus_contract::BoundaryValue::Bytes(b) => {
-                                            String::from_utf8(b).ok()
-                                        }
-                                        _ => None,
-                                    };
-                                    if let Some(method) = method_opt {
-                                        let vm = self.vm.as_ref().unwrap();
-                                        if let Some(providers) = vm.providers() {
-                                            let mut p_lock = providers.lock().unwrap();
-                                            if let Some(host) = p_lock.host_mut() {
-                                                let injector = Arc::new(
-                                                    crate::ExecutionHandle::for_continuation(
-                                                        self.sink.clone(),
-                                                        continuation.clone(),
-                                                    ),
-                                                );
-                                                let tid = thread_id.raw() as usize;
-                                                self.kernel.block(thread_id, thread, None);
-                                                host.dispatch(tid, &method, &values, injector);
-                                                continue;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            let _ = self.vm.as_ref().unwrap().resume(
-                                &mut thread,
-                                continuation,
-                                galfus_vm::VmValue::Bool(false),
-                            );
                             self.sink.send(RuntimeEvent::Failed {
                                 thread_id,
                                 error: galfus_contract::ExecutionFailure::new(
-                                    galfus_contract::ExecutionFailureKind::MissingProvider,
-                                    "HostProvider missing",
-                                ),
+                                    galfus_contract::ExecutionFailureKind::InvalidBytecode,
+                                    "host calls must use the ProviderCall VM effect",
+                                )
+                                .with_thread_id(thread_id.raw()),
                             });
                             continue;
                         }
@@ -253,12 +471,12 @@ impl Orchestrator {
                                 success = true;
                             }
                         }
-                        let _ = self.vm.as_ref().unwrap().resume(
-                            &mut thread,
+                        self.resume_or_fail(
+                            thread_id,
+                            thread,
                             continuation,
                             galfus_vm::VmValue::Bool(success),
                         );
-                        self.kernel.enqueue_runnable(thread_id, thread);
                     }
                     galfus_vm::VmEffect::ReceiveFilter {
                         sender_id: _,
@@ -277,12 +495,12 @@ impl Orchestrator {
                             new_thread.key = Some(k);
                         }
                         let new_id = self.kernel.spawn(new_thread);
-                        let _ = self.vm.as_ref().unwrap().resume(
-                            &mut thread,
+                        self.resume_or_fail(
+                            thread_id,
+                            thread,
                             continuation,
                             galfus_vm::VmValue::Int64(new_id.raw() as i64),
                         );
-                        self.kernel.enqueue_runnable(thread_id, thread);
                     }
                     galfus_vm::VmEffect::StartThread {
                         thread_id: target_id,
@@ -323,24 +541,19 @@ impl Orchestrator {
                             }
                         }
 
-                        let _ = self.vm.as_ref().unwrap().resume(
-                            &mut thread,
+                        self.resume_or_fail(
+                            thread_id,
+                            thread,
                             continuation,
                             galfus_vm::VmValue::Bool(success),
                         );
-                        self.kernel.enqueue_runnable(thread_id, thread);
                     }
                     galfus_vm::VmEffect::GetThread { key } => {
                         let val = crate::task::thread_key(&thread, key)
                             .and_then(|k| self.kernel.lookup_key(k.as_str()))
                             .map(|id| galfus_vm::VmValue::Int64(id.raw() as i64))
                             .unwrap_or(galfus_vm::VmValue::Int64(-1));
-                        let _ = self
-                            .vm
-                            .as_ref()
-                            .unwrap()
-                            .resume(&mut thread, continuation, val);
-                        self.kernel.enqueue_runnable(thread_id, thread);
+                        self.resume_or_fail(thread_id, thread, continuation, val);
                     }
                     galfus_vm::VmEffect::ThreadIsRunning {
                         thread_id: target_id,
@@ -354,12 +567,12 @@ impl Orchestrator {
                                 })
                             })
                             .is_some_and(|state| state.is_running());
-                        let _ = self.vm.as_ref().unwrap().resume(
-                            &mut thread,
+                        self.resume_or_fail(
+                            thread_id,
+                            thread,
                             continuation,
                             galfus_vm::VmValue::Bool(running),
                         );
-                        self.kernel.enqueue_runnable(thread_id, thread);
                     }
                     galfus_vm::VmEffect::ThreadIsExited {
                         thread_id: target_id,
@@ -373,12 +586,12 @@ impl Orchestrator {
                                 })
                             })
                             .is_some_and(|state| state.is_exited());
-                        let _ = self.vm.as_ref().unwrap().resume(
-                            &mut thread,
+                        self.resume_or_fail(
+                            thread_id,
+                            thread,
                             continuation,
                             galfus_vm::VmValue::Bool(exited),
                         );
-                        self.kernel.enqueue_runnable(thread_id, thread);
                     }
                     galfus_vm::VmEffect::ThreadExitReason {
                         thread_id: target_id,
@@ -394,18 +607,15 @@ impl Orchestrator {
                             .and_then(|state| state.exit_reason())
                             .map(galfus_vm::VmValue::Int32)
                             .unwrap_or(galfus_vm::VmValue::Null);
-                        let _ = self
-                            .vm
-                            .as_ref()
-                            .unwrap()
-                            .resume(&mut thread, continuation, reason);
-                        self.kernel.enqueue_runnable(thread_id, thread);
+                        self.resume_or_fail(thread_id, thread, continuation, reason);
                     }
                     galfus_vm::VmEffect::Blocked => {
                         self.kernel.enqueue_runnable(thread_id, thread);
                     }
                 },
                 RuntimeEvent::CancelThread { thread_id } => {
+                    self.cancel_pending_continuation(thread_id);
+                    self.startup_plans.remove(&thread_id);
                     self.kernel.cancel(thread_id);
                 }
             }

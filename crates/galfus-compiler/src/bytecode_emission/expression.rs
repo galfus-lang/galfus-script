@@ -709,7 +709,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
         }
     }
 
-    fn get_operand_type(&self, operand: &Operand) -> TypeId {
+    pub(crate) fn get_operand_type(&self, operand: &Operand) -> TypeId {
         match operand {
             Operand::Local(local_id) => {
                 let local_decl = self.func.locals.iter().find(|l| l.id == *local_id).unwrap();

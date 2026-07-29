@@ -117,6 +117,21 @@ impl ExecutionFailure {
             cause: None,
         }
     }
+
+    pub fn with_thread_id(mut self, thread_id: u64) -> Self {
+        self.thread_id = Some(thread_id);
+        self
+    }
+
+    pub fn with_module_id(mut self, module_id: u64) -> Self {
+        self.module_id = Some(module_id);
+        self
+    }
+
+    pub fn with_request_id(mut self, request_id: u64) -> Self {
+        self.request_id = Some(request_id);
+        self
+    }
 }
 
 impl std::fmt::Display for ExecutionFailure {
@@ -131,6 +146,7 @@ pub trait MessageInjector: Send + Sync {
     fn inject_system_response(
         &self,
         thread_id: usize,
+        request_id: u64,
         result: Result<BoundaryValue, ExecutionFailure>,
     );
 }
@@ -139,10 +155,14 @@ pub trait HostProvider: Send {
     fn dispatch(
         &mut self,
         thread_id: usize,
+        request_id: u64,
         name: &str,
         args: &[BoundaryValue],
         injector: sync::Arc<dyn MessageInjector>,
     );
+
+    /// Notifies the provider that a pending request no longer has an execution owner.
+    fn cancel(&mut self, _thread_id: usize, _request_id: u64) {}
 }
 
 /// Optional host capabilities supplied for one execution.

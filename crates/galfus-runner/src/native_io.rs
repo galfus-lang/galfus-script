@@ -13,6 +13,7 @@ impl HostProvider for NativeIoProvider {
     fn dispatch(
         &mut self,
         thread_id: usize,
+        request_id: u64,
         method: &str,
         args: &[BoundaryValue],
         injector: Arc<dyn MessageInjector>,
@@ -25,6 +26,7 @@ impl HostProvider for NativeIoProvider {
                     if let Err(e) = handle.write_all(bytes).and_then(|()| handle.flush()) {
                         injector.inject_system_response(
                             thread_id,
+                            request_id,
                             Err(ExecutionFailure::new(
                                 ExecutionFailureKind::ProviderFailure,
                                 e.to_string(),
@@ -32,10 +34,11 @@ impl HostProvider for NativeIoProvider {
                         );
                         return;
                     }
-                    injector.inject_system_response(thread_id, Ok(BoundaryValue::Null));
+                    injector.inject_system_response(thread_id, request_id, Ok(BoundaryValue::Null));
                 } else {
                     injector.inject_system_response(
                         thread_id,
+                        request_id,
                         Err(ExecutionFailure::new(
                             ExecutionFailureKind::ProviderFailure,
                             "Invalid arguments for write".to_string(),
@@ -49,6 +52,7 @@ impl HostProvider for NativeIoProvider {
                 } else {
                     injector.inject_system_response(
                         thread_id,
+                        request_id,
                         Err(ExecutionFailure::new(
                             ExecutionFailureKind::ProviderFailure,
                             "Invalid arguments for read".to_string(),
@@ -60,6 +64,7 @@ impl HostProvider for NativeIoProvider {
                 if terminator.is_empty() {
                     injector.inject_system_response(
                         thread_id,
+                        request_id,
                         Err(ExecutionFailure::new(
                             ExecutionFailureKind::ProviderFailure,
                             "input terminator must not be empty".to_string(),
@@ -78,13 +83,17 @@ impl HostProvider for NativeIoProvider {
                         Ok(0) if input.is_empty() => {
                             injector.inject_system_response(
                                 thread_id,
+                                request_id,
                                 Ok(BoundaryValue::Bytes(Vec::new())),
                             );
                             return;
                         }
                         Ok(0) => {
-                            injector
-                                .inject_system_response(thread_id, Ok(BoundaryValue::Bytes(input)));
+                            injector.inject_system_response(
+                                thread_id,
+                                request_id,
+                                Ok(BoundaryValue::Bytes(input)),
+                            );
                             return;
                         }
                         Ok(_) => {
@@ -93,6 +102,7 @@ impl HostProvider for NativeIoProvider {
                                 input.truncate(input.len() - terminator.len());
                                 injector.inject_system_response(
                                     thread_id,
+                                    request_id,
                                     Ok(BoundaryValue::Bytes(input)),
                                 );
                                 return;
@@ -101,6 +111,7 @@ impl HostProvider for NativeIoProvider {
                         Err(error) => {
                             injector.inject_system_response(
                                 thread_id,
+                                request_id,
                                 Err(ExecutionFailure::new(
                                     ExecutionFailureKind::ProviderFailure,
                                     error.to_string(),
@@ -114,6 +125,7 @@ impl HostProvider for NativeIoProvider {
             _ => {
                 injector.inject_system_response(
                     thread_id,
+                    request_id,
                     Err(ExecutionFailure::new(
                         ExecutionFailureKind::ProviderFailure,
                         format!("Method {} not found", method),

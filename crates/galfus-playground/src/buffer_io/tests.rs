@@ -2,16 +2,17 @@ use super::*;
 use std::sync::{Arc, Mutex};
 
 struct MockInjector {
-    response: Arc<Mutex<Option<Result<BoundaryValue, ExecutionFailure>>>>,
+    response: Arc<Mutex<Option<(u64, Result<BoundaryValue, ExecutionFailure>)>>>,
 }
 
 impl MessageInjector for MockInjector {
     fn inject_system_response(
         &self,
         _thread_id: usize,
+        request_id: u64,
         response: Result<BoundaryValue, ExecutionFailure>,
     ) {
-        *self.response.lock().unwrap() = Some(response);
+        *self.response.lock().unwrap() = Some((request_id, response));
     }
 }
 
@@ -24,8 +25,12 @@ fn call_dispatch(
     let injector = Arc::new(MockInjector {
         response: Arc::clone(&response),
     });
-    provider.dispatch(0, method, args, injector);
-    response.lock().unwrap().take()
+    provider.dispatch(0, 1, method, args, injector);
+    response
+        .lock()
+        .unwrap()
+        .take()
+        .map(|(_, response)| response)
 }
 
 #[test]
@@ -83,6 +88,29 @@ fn rejects_an_empty_terminator() {
         call_dispatch(&mut provider, "read", &[BoundaryValue::Bytes(b"".to_vec())]).unwrap();
 
     assert!(matches!(error, Err(e) if e.message == "input terminator must not be empty"));
+}
+
+#[test]
+fn pending_reads_preserve_the_provider_request_id() {
+    let mut provider = BufferIoProvider::default();
+    let response = Arc::new(Mutex::new(None));
+    let injector = Arc::new(MockInjector {
+        response: Arc::clone(&response),
+    });
+
+    provider.dispatch(
+        7,
+        42,
+        "read",
+        &[BoundaryValue::Bytes(b"\n".to_vec())],
+        injector,
+    );
+    provider.send_read_data(b"value\n");
+
+    assert_eq!(
+        response.lock().unwrap().take(),
+        Some((42, Ok(BoundaryValue::Bytes(b"value".to_vec()))))
+    );
 }
 
 #[test]

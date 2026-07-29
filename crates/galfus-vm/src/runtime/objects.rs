@@ -395,6 +395,7 @@ impl VirtualMachine {
                 HeapObject::Choice { payload, .. } => {
                     self.enqueue_copy_target(thread, payload, &mut closure, &mut pending)?;
                 }
+                HeapObject::ExternalHandle { .. } => {}
             }
         }
 
@@ -479,6 +480,7 @@ impl VirtualMachine {
                     variant_idx,
                     payload: Value::Null,
                 },
+                HeapObject::ExternalHandle { kind, id } => HeapObject::ExternalHandle { kind, id },
             };
 
             let copied_ref = thread.heap.alloc(placeholder);
@@ -601,6 +603,7 @@ impl VirtualMachine {
                         }
                     }
                 }
+                HeapObject::ExternalHandle { .. } => {}
             }
         }
 
