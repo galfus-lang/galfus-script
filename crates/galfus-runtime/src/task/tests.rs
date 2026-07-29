@@ -7,7 +7,7 @@ use galfus_bytecode::instruction::{FuncIdx, Reg, TypeIdx};
 use galfus_bytecode::{
     BytecodeFunction, BytecodeGraph, BytecodeModule, BytecodeNode, BytecodeType, Instruction,
 };
-use galfus_contract::{RunnableTask, ThreadExecutor, ThreadResult};
+use galfus_contract::{KernelDriver, RunnableTask, ThreadResult};
 use galfus_core::{ModuleId, ModulePath, SemanticRevision};
 use galfus_vm::thread::VirtualThread;
 use galfus_vm::{HeapObject, VirtualMachine, VmEffect, VmStep, VmValue};
@@ -16,23 +16,20 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 struct TestExecutor {
-    tasks: Mutex<VecDeque<Box<dyn RunnableTask>>>,
+    tasks: Mutex<VecDeque<galfus_contract::KernelTask>>,
 }
 
 impl TestExecutor {
-    fn take_task(&self) -> Option<Box<dyn RunnableTask>> {
+    fn take_task(&self) -> Option<galfus_contract::KernelTask> {
         self.tasks.lock().unwrap().pop_front()
     }
 }
 
-impl ThreadExecutor for TestExecutor {
+impl KernelDriver for TestExecutor {
     fn on_exit(&self, _cb: Box<dyn Fn(Result<i32, String>) + Send + Sync>) {}
     fn run(&self) {}
-    fn allocate_thread_id(&self) -> u64 {
-        1
-    }
 
-    fn spawn(&self, task: Box<dyn RunnableTask>) {
+    fn dispatch(&self, task: galfus_contract::KernelTask) {
         self.tasks.lock().unwrap().push_back(task);
     }
 }
@@ -161,14 +158,17 @@ fn receive_timeout_resumes_with_null() {
         thread_id,
         thread: VirtualThread::new(),
         vm,
-        registry,
-        blocked,
-        executor: executor.clone(),
+        kernel: Arc::new(Mutex::new(crate::kernel::VirtualKernel::new())),
+        driver: executor.clone(),
     };
 
     task.schedule_receive_timeout(Reg(0), 1);
     thread::sleep(Duration::from_millis(20));
 
     let timed_out_task = executor.take_task().expect("timeout wakes the task");
-    assert!(matches!(timed_out_task.run(10), ThreadResult::Completed(0)));
+    let runnable = match timed_out_task {
+        galfus_contract::KernelTask::Main(t) => t,
+        galfus_contract::KernelTask::Any(t) => t,
+    };
+    assert!(matches!(runnable.run(10), ThreadResult::Completed(0)));
 }

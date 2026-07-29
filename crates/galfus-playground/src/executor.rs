@@ -1,6 +1,6 @@
 use std::sync;
 
-use galfus_contract::{ExecutorStepResult, RunnableTask, ThreadExecutor, ThreadResult};
+use galfus_contract::{ExecutorStepResult, KernelDriver, KernelTask, ThreadResult};
 use std::collections::VecDeque;
 use std::sync::{
     Mutex,
@@ -8,7 +8,7 @@ use std::sync::{
 };
 
 pub struct PlaygroundExecutor {
-    queue: Mutex<VecDeque<Box<dyn RunnableTask>>>,
+    queue: Mutex<VecDeque<KernelTask>>,
     next_thread_id: AtomicU64,
     exit_code: sync::Mutex<i32>,
     exit_callback: Mutex<Option<Box<dyn Fn(Result<i32, String>) + Send + Sync>>>,
@@ -25,12 +25,8 @@ impl PlaygroundExecutor {
     }
 }
 
-impl ThreadExecutor for PlaygroundExecutor {
-    fn allocate_thread_id(&self) -> u64 {
-        self.next_thread_id.fetch_add(1, Ordering::Relaxed)
-    }
-
-    fn spawn(&self, task: Box<dyn RunnableTask>) {
+impl KernelDriver for PlaygroundExecutor {
+    fn dispatch(&self, task: KernelTask) {
         self.queue.lock().unwrap().push_back(task);
     }
 
@@ -39,25 +35,27 @@ impl ThreadExecutor for PlaygroundExecutor {
     }
 
     fn run(&self) {
-        // NON-BLOCKING:
-        // Do nothing!
-        // The tasks are already spawned in the queue.
-        // The environment (WASM) will drive the execution by calling `step()` periodically.
+        // NON-BLOCKING
     }
 
     fn step(&self) -> Result<ExecutorStepResult, String> {
-        let task = {
+        let task_entry = {
             let mut q = self.queue.lock().unwrap();
             q.pop_front()
         };
 
-        let Some(task) = task else {
+        let Some(task_entry) = task_entry else {
             return Ok(ExecutorStepResult::Blocked { timeout: None });
         };
 
-        match task.run(100) {
+        let runnable = match task_entry {
+            KernelTask::Main(t) => t,
+            KernelTask::Any(t) => t,
+        };
+
+        match runnable.run(100) {
             ThreadResult::Yielded(t) => {
-                self.queue.lock().unwrap().push_back(t);
+                self.queue.lock().unwrap().push_back(KernelTask::Main(t));
                 Ok(ExecutorStepResult::Running)
             }
             ThreadResult::Blocked { timeout } => {

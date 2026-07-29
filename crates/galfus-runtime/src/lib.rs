@@ -1,4 +1,5 @@
-pub mod executor;
+pub mod driver;
+pub mod kernel;
 pub mod queue;
 pub mod registry;
 pub mod task;
@@ -14,7 +15,7 @@ use galfus_vm::{HeapObject, VirtualMachine, VmPanic, VmValue};
 use queue::{BlockedQueue, RunnableQueue};
 use registry::{ThreadId, ThreadRegistry};
 
-pub use executor::SingleThreadExecutor;
+pub use driver::CooperativeDriver;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
@@ -79,9 +80,7 @@ impl EntryAbi {
 pub struct Runtime {
     graph: sync::Arc<galfus_bytecode::BytecodeGraph>,
     providers: Option<sync::Arc<sync::Mutex<Providers>>>,
-    registry: ThreadRegistry,
-    runnable: RunnableQueue,
-    blocked: BlockedQueue,
+    kernel: crate::kernel::VirtualKernel,
 }
 
 impl Runtime {
@@ -92,39 +91,23 @@ impl Runtime {
         Self {
             graph,
             providers: providers.map(|p| sync::Arc::new(sync::Mutex::new(p))),
-            registry: ThreadRegistry::new(),
-            runnable: RunnableQueue::new(),
-            blocked: BlockedQueue::new(),
+            kernel: crate::kernel::VirtualKernel::new(),
         }
     }
 
     /// Cria uma nova thread a partir de um módulo e função de entrada
-    pub fn spawn_thread(
-        &mut self,
-        thread: VirtualThread,
-        executor: &dyn galfus_contract::ThreadExecutor,
-    ) -> ThreadId {
-        let id = ThreadId::from_executor(executor.allocate_thread_id())
-            .expect("thread executor returned the reserved thread ID 0");
-        self.registry.register(id, thread);
-        self.runnable.enqueue(id);
-        id
+    pub fn spawn_thread(&mut self, thread: VirtualThread) -> ThreadId {
+        self.kernel.spawn(thread)
     }
 
     /// O Host deve chamar esta função para bombear os cronômetros das threads bloqueadas
     pub fn tick_timeouts(&mut self, delta_ms: u64) {
-        let woke_up = self.blocked.tick_timeouts(delta_ms);
-        for id in woke_up {
-            // Se a thread ainda existir, mandamos de volta para runnable
-            if self.registry.contains(id) {
-                self.runnable.enqueue(id);
-            }
-        }
+        self.kernel.tick(delta_ms);
     }
 
     /// Retorna o próximo ThreadId pronto para executar
     pub fn next_runnable(&mut self) -> Option<ThreadId> {
-        self.runnable.dequeue()
+        self.kernel.next_runnable()
     }
 
     /// Execute an entry exported by a module loaded in the given BytecodeGraph.
@@ -133,7 +116,7 @@ impl Runtime {
         module_id: galfus_core::ModuleId,
         entry_name: &str,
         args: &[Vec<u8>],
-        executor: sync::Arc<dyn galfus_contract::ThreadExecutor>,
+        driver: sync::Arc<dyn galfus_contract::KernelDriver>,
     ) -> Result<Box<dyn galfus_contract::RunnableTask>, RuntimeError> {
         let graph = self.graph.clone();
         let image = &graph.get(module_id).unwrap().module;
@@ -185,17 +168,16 @@ impl Runtime {
         vm.prepare_function(&mut thread, module_id, entry_idx, vec![entry_args])
             .map_err(RuntimeError::VmPanic)?;
 
-        let main_thread_id = self.spawn_thread(thread, executor.as_ref());
-        let _ = self.registry.mark_running(main_thread_id);
-        let main_thread = self.registry.take(main_thread_id).unwrap();
+        let main_thread_id = self.spawn_thread(thread);
+        let _ = self.kernel.mark_running(main_thread_id);
+        let main_thread = self.kernel.take_thread(main_thread_id).unwrap();
 
         let task = Box::new(task::RuntimeTask {
             thread_id: main_thread_id,
             thread: main_thread,
             vm,
-            registry: sync::Arc::new(sync::Mutex::new(self.registry)),
-            blocked: sync::Arc::new(sync::Mutex::new(self.blocked)),
-            executor,
+            kernel: sync::Arc::new(sync::Mutex::new(self.kernel)),
+            driver,
         });
 
         Ok(task)

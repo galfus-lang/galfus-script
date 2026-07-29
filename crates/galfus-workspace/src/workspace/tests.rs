@@ -1,7 +1,7 @@
 use super::*;
-use galfus_contract::ThreadExecutor;
+use galfus_contract::KernelDriver;
 use galfus_contract::{BoundaryValue, HostProvider, MessageInjector, Providers};
-use galfus_runtime::SingleThreadExecutor;
+use galfus_runtime::CooperativeDriver;
 use std::sync::{Arc, Mutex};
 
 struct TerminatorIo {

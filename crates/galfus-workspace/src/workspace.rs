@@ -482,7 +482,7 @@ impl Workspace {
         &mut self,
         args: &[Vec<u8>],
         providers: Option<Providers>,
-        executor: Arc<dyn galfus_contract::ThreadExecutor>,
+        driver: Arc<dyn galfus_contract::KernelDriver>,
     ) -> Result<(), RunBlocked> {
         let graph = match &self.bytecode_state.compile_state {
             CompileState::Ready { graph, .. } => Arc::clone(graph),
@@ -505,7 +505,7 @@ impl Workspace {
             .run_entry
             .clone();
         let task = Runtime::new(graph.clone(), providers)
-            .build_module_entry(entry_id, entry_name.as_str(), args, executor.clone())
+            .build_module_entry(entry_id, entry_name.as_str(), args, driver.clone())
             .map_err(|error| {
                 if let RuntimeError::VmPanic(panic) = &error {
                     RunBlocked::RuntimeError(format_panic(&graph, panic))
@@ -513,8 +513,8 @@ impl Workspace {
                     RunBlocked::RuntimeError(error.to_string())
                 }
             })?;
-        executor.spawn(task);
-        executor.run();
+        driver.dispatch(galfus_contract::KernelTask::Main(task));
+        driver.run();
 
         Ok(())
     }

@@ -36,23 +36,26 @@ pub enum ExecutorStepResult {
     Completed(i32),
 }
 
+/// A unit of work for the kernel driver to execute.
+pub enum KernelTask {
+    /// Work that must be pinned to the main thread (e.g. Orchestrator loop)
+    Main(Box<dyn RunnableTask>),
+    /// Work that can run on any available background thread
+    Any(Box<dyn RunnableTask + Send>),
+}
+
 /// The Host must implement this trait to dictate how tasks are scheduled.
-pub trait ThreadExecutor: Send + Sync {
-    /// Allocates a unique, non-zero identity for a virtual thread.
-    ///
-    /// Implementations must never reuse an allocated value during one execution.
-    fn allocate_thread_id(&self) -> u64;
+pub trait KernelDriver: Send + Sync {
+    /// The Kernel or Orchestrator calls this to submit work.
+    fn dispatch(&self, task: KernelTask);
 
-    /// The Runtime calls this whenever a new thread is born or "woken up".
-    fn spawn(&self, task: Box<dyn RunnableTask>);
-
-    /// Sets the callback to be invoked when the executor completes its execution.
+    /// Sets the callback to be invoked when the driver completes its execution.
     fn on_exit(&self, callback: Box<dyn Fn(Result<i32, String>) + Send + Sync>);
 
-    /// Runs the executor loop. Behavior (blocking vs non-blocking) depends on the implementation.
+    /// Runs the driver loop. Behavior (blocking vs non-blocking) depends on the implementation.
     fn run(&self);
 
-    /// Executes a single task step from the queue, returning the current status.
+    /// Executes a single step, returning the current status.
     fn step(&self) -> Result<ExecutorStepResult, String> {
         unimplemented!("step is not implemented by default")
     }

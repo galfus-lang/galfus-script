@@ -1,41 +1,29 @@
-#[cfg(test)]
-mod tests;
-
 use std::collections::VecDeque;
 use std::sync;
-use std::sync::{
-    Mutex,
-    atomic::{AtomicU64, Ordering},
-};
+use std::sync::Mutex;
 use std::thread;
 
-use galfus_contract::{ExecutorStepResult, RunnableTask, ThreadExecutor, ThreadResult};
+use galfus_contract::{ExecutorStepResult, KernelDriver, KernelTask, ThreadResult};
 
-/// Runs Galfus tasks on the calling host thread.
-pub struct SingleThreadExecutor {
-    queue: Mutex<VecDeque<Box<dyn RunnableTask>>>,
-    next_thread_id: AtomicU64,
+/// Runs Galfus tasks cooperatively on the calling host thread.
+pub struct CooperativeDriver {
+    queue: Mutex<VecDeque<KernelTask>>,
     exit_code: sync::Mutex<i32>,
     exit_callback: Mutex<Option<Box<dyn Fn(Result<i32, String>) + Send + Sync>>>,
 }
 
-impl SingleThreadExecutor {
+impl CooperativeDriver {
     pub fn new() -> Self {
         Self {
             queue: Mutex::new(VecDeque::new()),
-            next_thread_id: AtomicU64::new(1),
             exit_code: sync::Mutex::new(0),
             exit_callback: Mutex::new(None),
         }
     }
 }
 
-impl ThreadExecutor for SingleThreadExecutor {
-    fn allocate_thread_id(&self) -> u64 {
-        self.next_thread_id.fetch_add(1, Ordering::Relaxed)
-    }
-
-    fn spawn(&self, task: Box<dyn RunnableTask>) {
+impl KernelDriver for CooperativeDriver {
+    fn dispatch(&self, task: KernelTask) {
         self.queue.lock().unwrap().push_back(task);
     }
 
@@ -46,9 +34,9 @@ impl ThreadExecutor for SingleThreadExecutor {
     fn run(&self) {
         let mut pending_timeout = None;
         loop {
-            let task = self.queue.lock().unwrap().pop_front();
+            let task_entry = self.queue.lock().unwrap().pop_front();
 
-            let Some(task) = task else {
+            let Some(task_entry) = task_entry else {
                 let Some(timeout) = pending_timeout.take() else {
                     break;
                 };
@@ -56,8 +44,15 @@ impl ThreadExecutor for SingleThreadExecutor {
                 continue;
             };
 
-            match task.run(100) {
-                ThreadResult::Yielded(task) => self.queue.lock().unwrap().push_back(task),
+            let runnable = match task_entry {
+                KernelTask::Main(task) => task,
+                KernelTask::Any(task) => task,
+            };
+
+            match runnable.run(100) {
+                ThreadResult::Yielded(task) => {
+                    self.queue.lock().unwrap().push_back(KernelTask::Main(task))
+                }
                 ThreadResult::Blocked { timeout } => {
                     pending_timeout = match (pending_timeout, timeout) {
                         (Some(current), Some(next)) => Some(current.min(next)),
@@ -81,15 +76,20 @@ impl ThreadExecutor for SingleThreadExecutor {
     }
 
     fn step(&self) -> Result<ExecutorStepResult, String> {
-        let task = self.queue.lock().unwrap().pop_front();
+        let task_entry = self.queue.lock().unwrap().pop_front();
 
-        let Some(task) = task else {
+        let Some(task_entry) = task_entry else {
             return Ok(ExecutorStepResult::Blocked { timeout: None });
         };
 
-        match task.run(100) {
+        let runnable = match task_entry {
+            KernelTask::Main(task) => task,
+            KernelTask::Any(task) => task,
+        };
+
+        match runnable.run(100) {
             ThreadResult::Yielded(task) => {
-                self.queue.lock().unwrap().push_back(task);
+                self.queue.lock().unwrap().push_back(KernelTask::Main(task));
                 Ok(ExecutorStepResult::Running)
             }
             ThreadResult::Blocked { timeout } => {
@@ -114,7 +114,7 @@ impl ThreadExecutor for SingleThreadExecutor {
     }
 }
 
-impl Default for SingleThreadExecutor {
+impl Default for CooperativeDriver {
     fn default() -> Self {
         Self::new()
     }

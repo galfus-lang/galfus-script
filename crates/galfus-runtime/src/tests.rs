@@ -115,18 +115,14 @@ fn run_initializes_dependencies_before_the_entry_module() {
     .expect("valid graph");
 
     struct TestExecutor {
-        queue: sync::Mutex<collections::VecDeque<Box<dyn galfus_contract::RunnableTask>>>,
+        queue: sync::Mutex<collections::VecDeque<galfus_contract::KernelTask>>,
         next_thread_id: sync::atomic::AtomicU64,
     }
-    impl galfus_contract::ThreadExecutor for TestExecutor {
+    impl galfus_contract::KernelDriver for TestExecutor {
         fn on_exit(&self, _cb: Box<dyn Fn(Result<i32, String>) + Send + Sync>) {}
         fn run(&self) {}
-        fn allocate_thread_id(&self) -> u64 {
-            self.next_thread_id
-                .fetch_add(1, sync::atomic::Ordering::Relaxed)
-        }
 
-        fn spawn(&self, task: Box<dyn galfus_contract::RunnableTask>) {
+        fn dispatch(&self, task: galfus_contract::KernelTask) {
             self.queue.lock().unwrap().push_back(task);
         }
     }
@@ -138,16 +134,25 @@ fn run_initializes_dependencies_before_the_entry_module() {
     let task = Runtime::new(sync::Arc::new(graph.clone()), None)
         .build_module_entry(entry_id, "main", &[], executor.clone())
         .expect("entry execution succeeds");
-    galfus_contract::ThreadExecutor::spawn(executor.as_ref(), task);
+    galfus_contract::KernelDriver::dispatch(
+        executor.as_ref(),
+        galfus_contract::KernelTask::Main(task),
+    ); //executor.as_ref(), task);
 
     let mut exit_code = 0;
     loop {
         let t = executor.queue.lock().unwrap().pop_front();
         let Some(t) = t else { break };
-        match t.run(100) {
-            galfus_contract::ThreadResult::Yielded(t) => {
-                executor.queue.lock().unwrap().push_back(t)
-            }
+        let runnable = match t {
+            galfus_contract::KernelTask::Main(x) => x,
+            galfus_contract::KernelTask::Any(x) => x,
+        };
+        match runnable.run(100) {
+            galfus_contract::ThreadResult::Yielded(t) => executor
+                .queue
+                .lock()
+                .unwrap()
+                .push_back(galfus_contract::KernelTask::Main(t)),
             galfus_contract::ThreadResult::Completed(code) => exit_code = code,
             _ => {}
         }

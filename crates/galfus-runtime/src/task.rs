@@ -6,9 +6,9 @@ use std::time;
 
 use crate::registry;
 
-use crate::queue::BlockedQueue;
-use crate::registry::{ThreadId, ThreadRegistry};
-use galfus_contract::{RunnableTask, ThreadExecutor, ThreadResult};
+use crate::kernel::VirtualKernel;
+use crate::registry::ThreadId;
+use galfus_contract::{KernelDriver, KernelTask, RunnableTask, ThreadResult};
 use galfus_vm::VirtualMachine;
 use galfus_vm::thread::VirtualThread;
 use std::sync::{Arc, Mutex};
@@ -17,9 +17,8 @@ pub struct RuntimeTask {
     pub thread_id: registry::ThreadId,
     pub thread: VirtualThread,
     pub vm: VirtualMachine,
-    pub registry: Arc<Mutex<ThreadRegistry>>,
-    pub blocked: Arc<Mutex<BlockedQueue>>,
-    pub executor: Arc<dyn ThreadExecutor>,
+    pub kernel: Arc<Mutex<VirtualKernel>>,
+    pub driver: Arc<dyn KernelDriver>,
 }
 
 impl RunnableTask for RuntimeTask {
@@ -41,10 +40,10 @@ impl RunnableTask for RuntimeTask {
                     _ => 0,
                 };
                 let _ = self
-                    .registry
+                    .kernel
                     .lock()
                     .unwrap()
-                    .mark_exited(self.thread_id, code);
+                    .mark_exited(self.thread_id, self.thread, code);
                 ThreadResult::Completed(code)
             }
             galfus_vm::VmStep::Failed(f) => ThreadResult::Failed(f.message),
@@ -62,20 +61,17 @@ impl RunnableTask for RuntimeTask {
                     // We should add this thread to blocked queue.
                     // If timeout is Some, we must set a timeout.
                     if let Some(ms) = timeout {
-                        self.blocked
+                        self.schedule_receive_timeout(dest, ms);
+                        self.kernel
                             .lock()
                             .unwrap()
-                            .block_with_timeout(self.thread_id, ms);
-                        self.schedule_receive_timeout(dest, ms);
+                            .block(self.thread_id, self.thread, Some(ms));
                     } else {
-                        self.blocked.lock().unwrap().block(self.thread_id);
+                        self.kernel
+                            .lock()
+                            .unwrap()
+                            .block(self.thread_id, self.thread, None);
                     }
-
-                    // We must put the thread back into the registry so others can send messages to it.
-                    self.registry
-                        .lock()
-                        .unwrap()
-                        .register_with_id(self.thread_id, self.thread);
                     ThreadResult::Blocked {
                         timeout: timeout.map(time::Duration::from_millis),
                     }
@@ -113,9 +109,7 @@ impl RunnableTask for RuntimeTask {
                     new_thread.entry_func = Some(func);
 
                     // The thread remains suspended until StartThread succeeds.
-                    let new_id = ThreadId::from_executor(self.executor.allocate_thread_id())
-                        .expect("thread executor returned the reserved thread ID 0");
-                    self.registry.lock().unwrap().register(new_id, new_thread);
+                    let new_id = self.kernel.lock().unwrap().spawn(new_thread);
                     let _ = self
                         .thread
                         .write_reg(dest, galfus_vm::VmValue::Int64(new_id.raw() as i64));
@@ -132,7 +126,12 @@ impl RunnableTask for RuntimeTask {
                         return ThreadResult::Yielded(self);
                     };
 
-                    let target_thread = self.registry.lock().unwrap().take_created(target_id);
+                    let target_thread = self
+                        .kernel
+                        .lock()
+                        .unwrap()
+                        .take_thread(target_id)
+                        .filter(|t| t.state == galfus_vm::thread::ThreadState::Created);
 
                     if let Some(mut target_thread) = target_thread {
                         let prepared = match target_thread.entry_func.clone() {
@@ -169,29 +168,28 @@ impl RunnableTask for RuntimeTask {
 
                         if prepared {
                             if target_thread.mark_running()
-                                && self.registry.lock().unwrap().mark_running(target_id)
+                                && self.kernel.lock().unwrap().mark_running(target_id)
                             {
                                 let new_task = Box::new(RuntimeTask {
                                     thread_id: target_id,
                                     thread: target_thread,
                                     vm: self.vm.clone(),
-                                    registry: self.registry.clone(),
-                                    blocked: self.blocked.clone(),
-                                    executor: self.executor.clone(),
+                                    kernel: self.kernel.clone(),
+                                    driver: self.driver.clone(),
                                 });
-                                self.executor.spawn(new_task);
+                                self.driver.dispatch(KernelTask::Main(new_task));
                                 success = true;
                             } else {
-                                self.registry
+                                self.kernel
                                     .lock()
                                     .unwrap()
-                                    .register_with_id(target_id, target_thread);
+                                    .park_running(target_id, target_thread);
                             }
                         } else {
-                            self.registry
+                            self.kernel
                                 .lock()
                                 .unwrap()
-                                .register_with_id(target_id, target_thread);
+                                .park_running(target_id, target_thread);
                         }
                     }
 
@@ -203,7 +201,7 @@ impl RunnableTask for RuntimeTask {
                 galfus_vm::VmEffect::GetThread { key } => {
                     let dest = continuation.dest.unwrap();
                     let thread_id = thread_key(&self.thread, key)
-                        .and_then(|key| self.registry.lock().unwrap().lookup_key(&key))
+                        .and_then(|key| self.kernel.lock().unwrap().lookup_key(&key))
                         .map(|thread_id| thread_id.raw() as i64)
                         .unwrap_or(-1);
                     let _ = self
@@ -214,7 +212,13 @@ impl RunnableTask for RuntimeTask {
                 galfus_vm::VmEffect::ThreadIsRunning { thread_id } => {
                     let dest = continuation.dest.unwrap();
                     let running = ThreadId::from_raw(thread_id)
-                        .and_then(|thread_id| self.registry.lock().unwrap().state(thread_id))
+                        .and_then(|thread_id| {
+                            self.kernel.lock().unwrap().take_thread(thread_id).map(|t| {
+                                let state = t.state;
+                                self.kernel.lock().unwrap().park_running(thread_id, t);
+                                state
+                            })
+                        })
                         .is_some_and(|state| state.is_running());
                     let _ = self
                         .thread
@@ -224,7 +228,13 @@ impl RunnableTask for RuntimeTask {
                 galfus_vm::VmEffect::ThreadIsExited { thread_id } => {
                     let dest = continuation.dest.unwrap();
                     let exited = ThreadId::from_raw(thread_id)
-                        .and_then(|thread_id| self.registry.lock().unwrap().state(thread_id))
+                        .and_then(|thread_id| {
+                            self.kernel.lock().unwrap().take_thread(thread_id).map(|t| {
+                                let state = t.state;
+                                self.kernel.lock().unwrap().park_running(thread_id, t);
+                                state
+                            })
+                        })
                         .is_some_and(|state| state.is_exited());
                     let _ = self
                         .thread
@@ -234,7 +244,13 @@ impl RunnableTask for RuntimeTask {
                 galfus_vm::VmEffect::ThreadExitReason { thread_id } => {
                     let dest = continuation.dest.unwrap();
                     let reason = ThreadId::from_raw(thread_id)
-                        .and_then(|thread_id| self.registry.lock().unwrap().state(thread_id))
+                        .and_then(|thread_id| {
+                            self.kernel.lock().unwrap().take_thread(thread_id).map(|t| {
+                                let state = t.state;
+                                self.kernel.lock().unwrap().park_running(thread_id, t);
+                                state
+                            })
+                        })
                         .and_then(|state| state.exit_reason())
                         .map(galfus_vm::VmValue::Int32)
                         .unwrap_or(galfus_vm::VmValue::Null);
@@ -261,17 +277,16 @@ impl RunnableTask for RuntimeTask {
                                         let mut p_lock = providers.lock().unwrap();
                                         if let Some(host) = p_lock.host_mut() {
                                             let injector = Arc::new(RuntimeInjector {
-                                                registry: self.registry.clone(),
-                                                blocked: self.blocked.clone(),
-                                                executor: self.executor.clone(),
+                                                kernel: self.kernel.clone(),
+                                                driver: self.driver.clone(),
                                                 vm: self.vm.clone(),
                                             });
                                             let tid = self.thread_id.raw() as usize;
-                                            self.registry
-                                                .lock()
-                                                .unwrap()
-                                                .register_with_id(self.thread_id, self.thread);
-                                            self.blocked.lock().unwrap().block(self.thread_id);
+                                            self.kernel.lock().unwrap().block(
+                                                self.thread_id,
+                                                self.thread,
+                                                None,
+                                            );
                                             host.dispatch(tid, &method, &values, injector);
                                             return ThreadResult::Blocked { timeout: None };
                                         }
@@ -294,7 +309,7 @@ impl RunnableTask for RuntimeTask {
                         return ThreadResult::Yielded(self);
                     };
 
-                    let mailbox = self.registry.lock().unwrap().get_mailbox(target_id);
+                    let mailbox = self.kernel.lock().unwrap().get_mailbox(target_id);
                     let Some(mailbox) = mailbox else {
                         let _ = self.thread.write_reg(dest, galfus_vm::VmValue::Bool(false));
                         return ThreadResult::Yielded(self);
@@ -307,20 +322,19 @@ impl RunnableTask for RuntimeTask {
                             data,
                         });
 
-                    let was_blocked = self.blocked.lock().unwrap().unblock(target_id);
+                    let was_blocked = self.kernel.lock().unwrap().unblock(target_id);
                     let target_thread = was_blocked
-                        .then(|| self.registry.lock().unwrap().take(target_id))
+                        .then(|| self.kernel.lock().unwrap().take_thread(target_id))
                         .flatten();
                     if let Some(target_thread) = target_thread {
                         let new_task = Box::new(RuntimeTask {
                             thread_id: target_id,
                             thread: target_thread,
                             vm: self.vm.clone(),
-                            registry: self.registry.clone(),
-                            blocked: self.blocked.clone(),
-                            executor: self.executor.clone(),
+                            kernel: self.kernel.clone(),
+                            driver: self.driver.clone(),
                         });
-                        self.executor.spawn(new_task);
+                        self.driver.dispatch(KernelTask::Main(new_task));
                     }
                     let _ = self.thread.write_reg(dest, galfus_vm::VmValue::Bool(true));
                     ThreadResult::Yielded(self)
@@ -333,32 +347,30 @@ impl RunnableTask for RuntimeTask {
 impl RuntimeTask {
     fn schedule_receive_timeout(&self, dest: galfus_bytecode::instruction::Reg, timeout_ms: u64) {
         let thread_id = self.thread_id;
-        let registry = self.registry.clone();
-        let blocked = self.blocked.clone();
-        let executor = self.executor.clone();
+        let kernel = self.kernel.clone();
+        let driver = self.driver.clone();
         let vm = self.vm.clone();
 
         thread::spawn(move || {
             thread::sleep(time::Duration::from_millis(timeout_ms));
 
-            if !blocked.lock().unwrap().unblock(thread_id) {
+            if !kernel.lock().unwrap().unblock(thread_id) {
                 return;
             }
-            let Some(mut thread) = registry.lock().unwrap().take(thread_id) else {
+            let Some(mut thread) = kernel.lock().unwrap().take_thread(thread_id) else {
                 return;
             };
             let _ = thread.write_reg(dest, galfus_vm::VmValue::Null);
             if let Some(frame) = thread.call_stack.last_mut() {
                 frame.pc += 1;
             }
-            executor.spawn(Box::new(RuntimeTask {
+            driver.dispatch(KernelTask::Main(Box::new(RuntimeTask {
                 thread_id,
                 thread,
                 vm,
-                registry,
-                blocked,
-                executor: executor.clone(),
-            }));
+                kernel,
+                driver: driver.clone(),
+            })));
         });
     }
 }
@@ -553,9 +565,8 @@ fn from_boundary_value(heap: &mut PrivateHeap, val: BoundaryValue, vm: &VirtualM
 }
 
 struct RuntimeInjector {
-    registry: Arc<Mutex<ThreadRegistry>>,
-    blocked: Arc<Mutex<BlockedQueue>>,
-    executor: Arc<dyn ThreadExecutor>,
+    kernel: Arc<Mutex<VirtualKernel>>,
+    driver: Arc<dyn KernelDriver>,
     vm: VirtualMachine,
 }
 
@@ -565,9 +576,9 @@ impl galfus_contract::MessageInjector for RuntimeInjector {
         thread_id: usize,
         response: Result<BoundaryValue, ExecutionFailure>,
     ) {
-        let mut registry_lock = self.registry.lock().unwrap();
-        if let Some(mut target_thread) =
-            ThreadId::from_raw(thread_id as u64).and_then(|thread_id| registry_lock.take(thread_id))
+        let mut kernel_lock = self.kernel.lock().unwrap();
+        if let Some(mut target_thread) = ThreadId::from_raw(thread_id as u64)
+            .and_then(|thread_id| kernel_lock.take_thread(thread_id))
         {
             let val = match response {
                 Ok(v) => from_boundary_value(&mut target_thread.heap, v, &self.vm),
@@ -580,7 +591,7 @@ impl galfus_contract::MessageInjector for RuntimeInjector {
             target_thread.system_response = Some(val);
 
             // Re-spawn the thread
-            self.blocked.lock().unwrap().unblock(
+            kernel_lock.unblock(
                 ThreadId::from_raw(thread_id as u64).expect("host response thread ID is non-zero"),
             );
 
@@ -589,11 +600,10 @@ impl galfus_contract::MessageInjector for RuntimeInjector {
                     .expect("host response thread ID is non-zero"),
                 thread: target_thread,
                 vm: self.vm.clone(),
-                registry: self.registry.clone(),
-                blocked: self.blocked.clone(),
-                executor: self.executor.clone(),
+                kernel: self.kernel.clone(),
+                driver: self.driver.clone(),
             });
-            self.executor.spawn(new_task);
+            self.driver.dispatch(KernelTask::Main(new_task));
         }
     }
 }

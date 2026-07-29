@@ -32,7 +32,7 @@ fn run_passes_read_terminator_to_the_io_provider() {
     let providers = Providers::with_host(Box::new(TerminatorIo {
         terminator: Arc::clone(&terminator),
     }));
-    let executor = Arc::new(SingleThreadExecutor::new());
+    let executor = Arc::new(CooperativeDriver::new());
     let exit_code = Arc::new(Mutex::new(0));
     let ec = Arc::clone(&exit_code);
     executor.on_exit(Box::new(move |res: Result<i32, String>| {
@@ -85,7 +85,7 @@ fn run_specializes_nested_generic_types_across_modules() {
     let check = workspace.check();
     assert!(check.is_valid, "check diagnostics: {:?}", check.diagnostics);
     workspace.compile().expect("workspace compiles");
-    let executor = Arc::new(SingleThreadExecutor::new());
+    let executor = Arc::new(CooperativeDriver::new());
     let exit_code = Arc::new(Mutex::new(0));
     let ec = Arc::clone(&exit_code);
     executor.on_exit(Box::new(move |res: Result<i32, String>| {
@@ -137,7 +137,7 @@ fn run_specializes_explicit_imported_generic_typeof_parameter() {
     let check = workspace.check();
     assert!(check.is_valid, "check diagnostics: {:?}", check.diagnostics);
     workspace.compile().expect("workspace compiles");
-    let executor = Arc::new(SingleThreadExecutor::new());
+    let executor = Arc::new(CooperativeDriver::new());
     let exit_code = Arc::new(Mutex::new(0));
     let ec = Arc::clone(&exit_code);
     executor.on_exit(Box::new(move |res: Result<i32, String>| {
@@ -178,7 +178,7 @@ fn run_specializes_generic_anchored_range_iterator_methods() {
     let check = workspace.check();
     assert!(check.is_valid, "check diagnostics: {:?}", check.diagnostics);
     workspace.compile().expect("workspace compiles");
-    let executor = Arc::new(SingleThreadExecutor::new());
+    let executor = Arc::new(CooperativeDriver::new());
     let exit_code = Arc::new(Mutex::new(0));
     let ec = Arc::clone(&exit_code);
     executor.on_exit(Box::new(move |res: Result<i32, String>| {
@@ -221,7 +221,7 @@ fn run_synchronizes_the_runtime_module_graph() {
         .modules()
         .find(|image| image.path().as_str() == "helper.gfs")
         .expect("helper image");
-    let executor = Arc::new(SingleThreadExecutor::new());
+    let executor = Arc::new(CooperativeDriver::new());
     let exit_code = Arc::new(Mutex::new(0));
     let ec = Arc::clone(&exit_code);
     executor.on_exit(Box::new(move |res: Result<i32, String>| {
@@ -242,7 +242,7 @@ fn run_synchronizes_the_runtime_module_graph() {
         .expect("valid entry module");
     assert!(workspace.check().is_valid);
     workspace.compile().expect("workspace recompiles");
-    let executor2 = Arc::new(SingleThreadExecutor::new());
+    let executor2 = Arc::new(CooperativeDriver::new());
     let exit_code2 = Arc::new(Mutex::new(0));
     let ec2 = Arc::clone(&exit_code2);
     executor2.on_exit(Box::new(move |res: Result<i32, String>| {
