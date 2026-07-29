@@ -131,6 +131,7 @@ impl Orchestrator {
         token.assert_current();
         self.assert_main_thread();
         while let Ok(event) = self.receiver.try_recv() {
+            self.sink.mark_received();
             match event {
                 RuntimeEvent::ThreadSpawned { thread } => {
                     let id = self.kernel.spawn(thread);

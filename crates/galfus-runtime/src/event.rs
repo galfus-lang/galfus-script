@@ -2,6 +2,10 @@ use crate::registry::ThreadId;
 use galfus_vm::thread::VirtualThread;
 use galfus_vm::{Continuation, VmEffect};
 use std::sync::mpsc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 
 pub enum RuntimeEvent {
     /// A thread created outside the kernel must be registered on the main thread.
@@ -40,14 +44,29 @@ pub enum RuntimeEvent {
 #[derive(Clone)]
 pub struct EventSink {
     sender: mpsc::Sender<RuntimeEvent>,
+    pending: Arc<AtomicUsize>,
 }
 
 impl EventSink {
     pub fn new(sender: mpsc::Sender<RuntimeEvent>) -> Self {
-        Self { sender }
+        Self {
+            sender,
+            pending: Arc::new(AtomicUsize::new(0)),
+        }
     }
 
     pub fn send(&self, event: RuntimeEvent) {
-        let _ = self.sender.send(event);
+        self.pending.fetch_add(1, Ordering::Release);
+        if self.sender.send(event).is_err() {
+            self.pending.fetch_sub(1, Ordering::Release);
+        }
+    }
+
+    pub fn has_pending(&self) -> bool {
+        self.pending.load(Ordering::Acquire) != 0
+    }
+
+    pub(crate) fn mark_received(&self) {
+        self.pending.fetch_sub(1, Ordering::AcqRel);
     }
 }

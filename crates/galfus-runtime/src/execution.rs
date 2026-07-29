@@ -91,6 +91,9 @@ impl Execution {
             };
         }
         let state = self.driver.step()?;
+        if matches!(state, ExecutorStepResult::Completed(_)) && self.root.is_some() {
+            return Ok(ExecutorStepResult::Running);
+        }
         if matches!(state, ExecutorStepResult::Blocked { .. }) {
             self.state = ExecutionState::Waiting;
         }
@@ -113,10 +116,12 @@ impl Execution {
                     return self.result.take().unwrap_or(Ok(BoundaryValue::Null));
                 }
                 ExecutorStepResult::Blocked { .. } => {
-                    return Err(ExecutionFailure::new(
-                        ExecutionFailureKind::InternalRuntimeFailure,
-                        "execution is blocked",
-                    ));
+                    if !self.sink.has_pending() {
+                        return Err(ExecutionFailure::new(
+                            ExecutionFailureKind::InternalRuntimeFailure,
+                            "execution is blocked",
+                        ));
+                    }
                 }
                 ExecutorStepResult::Running => {}
             }
