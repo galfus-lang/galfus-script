@@ -1,12 +1,10 @@
 use std::collections;
 
-use crate::lower;
-
 use super::LowerCtx;
-use crate::mir::MirModule;
 use galfus_bytecode::*;
 use galfus_core::SymbolId;
 use galfus_frontend::{ModuleGraph, SyntaxNodeKind, TypeCheckResult};
+use galfus_ir::mir::MirModule;
 use std::collections::HashSet;
 
 pub fn lower_module(
@@ -41,18 +39,22 @@ pub fn lower_module(
             init_func_idx = Some(FuncIdx(i as u16));
         }
 
-        let return_ty = lower::types::lower_type(&mut ctx, mir_func.return_type);
+        let return_ty = crate::bytecode_emission::types::lower_type(&mut ctx, mir_func.return_type);
         for &param_ty in &mir_func.parameter_types {
-            lower::types::lower_type(&mut ctx, param_ty);
+            crate::bytecode_emission::types::lower_type(&mut ctx, param_ty);
         }
         for local_decl in &mir_func.locals {
-            lower::types::lower_type(&mut ctx, local_decl.ty);
+            crate::bytecode_emission::types::lower_type(&mut ctx, local_decl.ty);
         }
         let param_count = mir_func.parameter_types.len() as u16;
         let local_count = (mir_func.locals.len() as u16).saturating_sub(param_count);
 
-        let mut emitter =
-            lower::function::FnEmitter::new(&mut ctx, mir_func, param_count, local_count);
+        let mut emitter = crate::bytecode_emission::function::FnEmitter::new(
+            &mut ctx,
+            mir_func,
+            param_count,
+            local_count,
+        );
         let (instructions, function_spans) = emitter.emit();
         execution_metadata
             .spans

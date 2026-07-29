@@ -8,11 +8,9 @@ pub mod pattern;
 
 use std::collections;
 
-use crate::lower;
-
-use crate::mir::*;
 use galfus_core::{FunctionId, ModuleId, NodeId, SymbolId, TypeId};
 use galfus_frontend::{ModuleGraph, SymbolKind, SyntaxNodeKind, TypeCheckResult, TypeKind};
+use galfus_ir::mir::*;
 use std::collections::{HashMap, HashSet};
 
 pub struct MirBuilder<'a> {
@@ -245,7 +243,7 @@ impl<'a> MirBuilder<'a> {
             blocks: builder_ctx.blocks,
             type_substitutions: HashMap::new(),
         };
-        lower::ssa::convert_to_ssa(&mut func);
+        crate::bytecode_emission::ssa::convert_to_ssa(&mut func);
         Some(func)
     }
 

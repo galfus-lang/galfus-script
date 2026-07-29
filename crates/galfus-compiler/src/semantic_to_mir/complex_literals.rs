@@ -1,9 +1,9 @@
 use std::collections;
 
 use super::function::FunctionBuilder;
-use crate::mir::*;
 use galfus_core::{NodeId, TypeId};
 use galfus_frontend::{SyntaxNode, SyntaxNodeKind, TypeKind};
+use galfus_ir::mir::*;
 
 impl<'b, 'a> FunctionBuilder<'b, 'a> {
     pub(super) fn lower_struct_literal(&mut self, expr_id: NodeId, node: &SyntaxNode) -> Operand {

@@ -1,7 +1,5 @@
 use std::collections;
 
-use crate::lower;
-
 use super::*;
 use std::collections::HashMap;
 
@@ -166,7 +164,7 @@ impl<'a> MirBuilder<'a> {
             blocks: builder_ctx.blocks,
             type_substitutions,
         };
-        lower::ssa::convert_to_ssa(&mut func);
+        crate::bytecode_emission::ssa::convert_to_ssa(&mut func);
         Some(func)
     }
 
@@ -264,7 +262,7 @@ impl<'a> MirBuilder<'a> {
             blocks: builder_ctx.blocks,
             type_substitutions: collections::HashMap::new(),
         };
-        lower::ssa::convert_to_ssa(&mut func);
+        crate::bytecode_emission::ssa::convert_to_ssa(&mut func);
         Some(func)
     }
 

@@ -74,11 +74,14 @@ pub fn compile_changed_modules(
                 module.path().as_str()
             )
         })?;
-        let mir =
-            galfus_ir::builder::MirBuilder::new(module.graph(), type_res, module.source().text())
-                .with_workspace_module_id(module.id())
-                .with_workspace_ctx(&mut ws_ctx)
-                .build();
+        let mir = crate::semantic_to_mir::MirBuilder::new(
+            module.graph(),
+            type_res,
+            module.source().text(),
+        )
+        .with_workspace_module_id(module.id())
+        .with_workspace_ctx(&mut ws_ctx)
+        .build();
         mir_modules[module_index] = Some(mir);
 
         for (module_id, specialized) in ws_ctx.state.specialised_functions.iter() {
@@ -301,7 +304,7 @@ fn compile_single_module(
         .type_result()
         .ok_or_else(|| anyhow::anyhow!("Missing type result for {}", module.path().as_str()))?;
 
-    let mut ctx = galfus_ir::lower::LowerCtx::new(
+    let mut ctx = crate::bytecode_emission::LowerCtx::new(
         type_res,
         module.graph(),
         module.source().text(),
@@ -340,15 +343,15 @@ fn compile_single_module(
 
         ctx.active_substitutions = mir_func.type_substitutions.clone();
 
-        let return_ty = galfus_ir::lower::types::lower_type(&mut ctx, mir_func.return_type);
+        let return_ty = crate::bytecode_emission::types::lower_type(&mut ctx, mir_func.return_type);
         for &param_ty in &mir_func.parameter_types {
-            galfus_ir::lower::types::lower_type(&mut ctx, param_ty);
+            crate::bytecode_emission::types::lower_type(&mut ctx, param_ty);
         }
 
         let param_count = mir_func.parameter_types.len() as u16;
         let local_count = image_local_count(mir_func, param_count);
 
-        let mut emitter = galfus_ir::lower::function::FnEmitter::new(
+        let mut emitter = crate::bytecode_emission::function::FnEmitter::new(
             &mut ctx,
             mir_func,
             param_count,

@@ -1,7 +1,7 @@
 use super::function::FunctionBuilder;
-use crate::mir::*;
 use galfus_core::{NodeId, SymbolId, TypeId};
 use galfus_frontend::{SymbolKind, SyntaxNodeKind, TypeKind};
+use galfus_ir::mir::*;
 
 impl<'b, 'a> FunctionBuilder<'b, 'a> {
     pub(super) fn variant_pattern_symbols(&self, pattern: NodeId) -> Option<(SymbolId, SymbolId)> {

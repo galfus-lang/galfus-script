@@ -1,5 +1,10 @@
+pub mod bytecode_emission;
 pub mod compile;
 pub mod input;
+pub mod semantic_to_mir;
+
+#[cfg(test)]
+mod mir_tests;
 
 pub use compile::module::{compile_changed_modules, compile_modules, compile_transaction};
 pub use input::CompiledModule;

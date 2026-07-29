@@ -61,7 +61,7 @@ fn test_mir_builder_phase3() {
         type_result.diagnostics()
     );
 
-    let builder = builder::MirBuilder::new(&graph, &type_result, code);
+    let builder = MirBuilder::new(&graph, &type_result, code);
     let mir_module = builder.build();
 
     assert!(mir_module.functions.len() >= 2);

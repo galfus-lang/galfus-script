@@ -1,15 +1,14 @@
 use std::collections;
 use std::mem;
 
-use crate::lower;
-use crate::mir;
+use galfus_ir::mir;
 
 use super::LowerCtx;
-use crate::mir::{
-    Constant as MirConstant, Instruction as MirInstruction, MirFunction, Operand, Terminator,
-};
 use galfus_bytecode::Instruction;
 use galfus_bytecode::instruction::{GlobalIdx, Reg};
+use galfus_ir::mir::{
+    Constant as MirConstant, Instruction as MirInstruction, MirFunction, Operand, Terminator,
+};
 
 #[allow(dead_code)]
 pub enum JumpKind {
@@ -378,10 +377,11 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                     reg
                                 };
 
-                                let name_idx = lower::constants::get_or_create_constant(
-                                    self.ctx,
-                                    &mir::Constant::String(native_name.to_string()),
-                                );
+                                let name_idx =
+                                    crate::bytecode_emission::constants::get_or_create_constant(
+                                        self.ctx,
+                                        &mir::Constant::String(native_name.to_string()),
+                                    );
 
                                 self.instructions.push(Instruction::CallNative {
                                     dest: Reg(destination.raw() as u16),
@@ -437,10 +437,11 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                             self.load_operand_to(arg_op, extra_regs[i]);
                         }
 
-                        let name_const = lower::constants::get_or_create_constant(
-                            self.ctx,
-                            &MirConstant::String(method_name.clone()),
-                        );
+                        let name_const =
+                            crate::bytecode_emission::constants::get_or_create_constant(
+                                self.ctx,
+                                &MirConstant::String(method_name.clone()),
+                            );
 
                         self.instructions.push(Instruction::CallMethod {
                             dest: Reg(destination.raw() as u16),
@@ -501,7 +502,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                 }
 
                 Terminator::Panic(msg) => {
-                    let const_idx = lower::constants::get_or_create_constant(
+                    let const_idx = crate::bytecode_emission::constants::get_or_create_constant(
                         self.ctx,
                         &MirConstant::String(msg.clone()),
                     );

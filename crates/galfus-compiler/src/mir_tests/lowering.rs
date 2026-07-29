@@ -1,4 +1,8 @@
-use super::*;
+use crate::bytecode_emission::*;
+use crate::semantic_to_mir::*;
+use galfus_core::{SourceFile, SourceId};
+use galfus_frontend::{check_declaration_types, check_definition_types, parse, resolve};
+use galfus_ir::mir::*;
 
 #[test]
 fn test_mir_builder_phase4() {
@@ -89,7 +93,7 @@ fn test_mir_builder_phase4() {
     );
 
     // Verify validator accepts the module
-    let validation = validate_module(&mir_module, &type_result);
+    let validation = galfus_ir::validator::validate_module(&mir_module);
     assert!(
         validation.is_ok(),
         "Expected validation to succeed, but found errors: {:?}",

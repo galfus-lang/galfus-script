@@ -213,9 +213,7 @@ dependencies = [
 name = "galfus-ir"
 version = "0.0.0"
 dependencies = [
- "galfus-bytecode",
  "galfus-core",
- "galfus-frontend",
  "thiserror",
 ]
 

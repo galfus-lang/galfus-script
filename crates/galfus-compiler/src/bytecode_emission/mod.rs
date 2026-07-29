@@ -6,12 +6,12 @@ mod module;
 pub mod ssa;
 pub mod types;
 
-use crate::lower::constants::HashableConstant;
-use crate::mir::Constant as MirConstant;
+use crate::bytecode_emission::constants::HashableConstant;
 use galfus_bytecode::instruction::{ConstIdx, FuncIdx, TypeIdx};
 use galfus_bytecode::*;
 use galfus_core::{FunctionId, SymbolId, TypeId};
 use galfus_frontend::{ModuleGraph, TypeCheckResult};
+use galfus_ir::mir::Constant as MirConstant;
 pub use module::*;
 use std::collections::HashMap;
 

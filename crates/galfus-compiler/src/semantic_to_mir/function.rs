@@ -1,12 +1,12 @@
 use std::collections;
 use std::mem;
 
-use crate::mir;
+use galfus_ir::mir;
 
 use super::MirBuilder;
-use crate::mir::*;
 use galfus_core::{NodeId, SymbolId, TypeId};
 use galfus_frontend::{SymbolKind, SyntaxNodeKind, TypeKind};
+use galfus_ir::mir::*;
 use std::collections::HashMap;
 
 pub struct FunctionBuilder<'b, 'a> {
