@@ -199,11 +199,12 @@ impl Orchestrator {
                                         if let Some(providers) = vm.providers() {
                                             let mut p_lock = providers.lock().unwrap();
                                             if let Some(host) = p_lock.host_mut() {
-                                                let injector =
-                                                    Arc::new(crate::task::RuntimeInjector::new(
+                                                let injector = Arc::new(
+                                                    crate::ExecutionHandle::for_continuation(
                                                         self.sink.clone(),
                                                         continuation.clone(),
-                                                    ));
+                                                    ),
+                                                );
                                                 let tid = thread_id.raw() as usize;
                                                 self.kernel.block(thread_id, thread, None);
                                                 host.dispatch(tid, &method, &values, injector);

@@ -1,5 +1,6 @@
 pub mod driver;
 pub mod event;
+pub mod execution;
 pub mod kernel;
 pub mod orchestrator;
 pub mod queue;
@@ -18,6 +19,7 @@ use galfus_vm::{HeapObject, VirtualMachine, VmPanic, VmValue};
 use registry::ThreadId;
 
 pub use driver::CooperativeDriver;
+pub use execution::{Execution, ExecutionHandle, ExecutionState};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
@@ -121,14 +123,14 @@ impl Runtime {
         self.orchestrator.kernel_mut(token).next_runnable()
     }
 
-    /// Execute an entry exported by a module loaded in the given BytecodeGraph.
-    pub fn build_module_entry(
+    /// Starts a persistent execution from an exported entry point.
+    pub fn start(
         mut self,
         module_id: galfus_core::ModuleId,
         entry_name: &str,
         args: &[Vec<u8>],
         driver: Rc<dyn galfus_contract::KernelDriver>,
-    ) -> Result<Box<dyn galfus_contract::RunnableTask>, RuntimeError> {
+    ) -> Result<Execution, RuntimeError> {
         let graph = self.graph.clone();
         let image = &graph.get(module_id).unwrap().module;
         let abi = EntryAbi::default_app();
@@ -205,9 +207,10 @@ impl Runtime {
 
         // We must return the orchestrator as the task!
         // But `self` consumes `self.orchestrator`.
+        let sink = self.orchestrator.sink();
         let task = Box::new(self.orchestrator);
 
-        Ok(task)
+        Ok(Execution::new(task, main_thread_id.raw(), driver, sink))
     }
 }
 

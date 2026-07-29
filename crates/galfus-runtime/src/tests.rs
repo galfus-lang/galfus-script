@@ -134,8 +134,9 @@ fn run_initializes_dependencies_before_the_entry_module() {
     });
 
     let task = Runtime::new(sync::Arc::new(graph.clone()), None)
-        .build_module_entry(entry_id, "main", &[], executor.clone())
-        .expect("entry execution succeeds");
+        .start(entry_id, "main", &[], executor.clone())
+        .expect("entry execution succeeds")
+        .into_task();
     galfus_contract::KernelDriver::dispatch(
         executor.as_ref(),
         galfus_contract::KernelTask::Main(task),

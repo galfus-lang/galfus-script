@@ -9,6 +9,32 @@ use std::sync;
 pub use thread::*;
 
 /// A typed value that crosses the execution boundary safely.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BoundaryType {
+    Null,
+    Bool,
+    I8,
+    I16,
+    I32,
+    I64,
+    U8,
+    U16,
+    U32,
+    U64,
+    F32,
+    F64,
+    Bytes,
+    Array(Box<BoundaryType>),
+    Tuple(Vec<BoundaryType>),
+    Choice {
+        variant: usize,
+        payload: Option<Box<BoundaryType>>,
+    },
+    Handle {
+        kind: String,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BoundaryValue {
     Null,
@@ -25,7 +51,7 @@ pub enum BoundaryValue {
     F64(f64),
     Bytes(Vec<u8>),
     Array {
-        element_type: String, // Temporarily simplified, should be BoundaryType
+        element_type: BoundaryType,
         values: Vec<BoundaryValue>,
     },
     Tuple(Vec<BoundaryValue>),

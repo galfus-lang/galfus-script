@@ -505,14 +505,15 @@ impl Workspace {
             .run_entry
             .clone();
         let task = Runtime::new(graph.clone(), providers)
-            .build_module_entry(entry_id, entry_name.as_str(), args, driver.clone())
+            .start(entry_id, entry_name.as_str(), args, driver.clone())
             .map_err(|error| {
                 if let RuntimeError::VmPanic(panic) = &error {
                     RunBlocked::RuntimeError(format_panic(&graph, panic))
                 } else {
                     RunBlocked::RuntimeError(error.to_string())
                 }
-            })?;
+            })?
+            .into_task();
         driver.dispatch(galfus_contract::KernelTask::Main(task));
         driver.run();
 

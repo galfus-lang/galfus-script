@@ -144,7 +144,7 @@ pub(crate) fn to_boundary_value(
                     }
                 }
                 Some(galfus_contract::BoundaryValue::Array {
-                    element_type: String::from("u8"),
+                    element_type: galfus_contract::BoundaryType::U8,
                     values: mapped,
                 })
             }
@@ -187,35 +187,5 @@ pub(crate) fn from_boundary_value(
             galfus_vm::VmValue::Object(obj)
         }
         _ => galfus_vm::VmValue::Null,
-    }
-}
-
-pub(crate) struct RuntimeInjector {
-    sink: crate::event::EventSink,
-    continuation: galfus_vm::Continuation,
-}
-
-impl RuntimeInjector {
-    pub(crate) fn new(
-        sink: crate::event::EventSink,
-        continuation: galfus_vm::Continuation,
-    ) -> Self {
-        Self { sink, continuation }
-    }
-}
-
-impl galfus_contract::MessageInjector for RuntimeInjector {
-    fn inject_system_response(
-        &self,
-        thread_id: usize,
-        response: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
-    ) {
-        if let Some(tid) = registry::ThreadId::from_raw(thread_id as u64) {
-            self.sink.send(crate::event::RuntimeEvent::EffectCompleted {
-                thread_id: tid,
-                continuation: self.continuation.clone(),
-                result: response,
-            });
-        }
     }
 }
