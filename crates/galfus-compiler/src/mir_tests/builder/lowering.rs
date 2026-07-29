@@ -19,7 +19,7 @@ fn test_mir_builder_basic() {
     assert!(!type_result.has_errors(), "Typecheck errors occurred");
 
     // Build MIR
-    let builder = builder::MirBuilder::new(&graph, &type_result, code);
+    let builder = MirBuilder::new(&graph, &type_result, code);
     let mir_module = builder.build();
 
     assert_eq!(mir_module.functions.len(), 1);
@@ -86,7 +86,7 @@ fn test_mir_builder_lowers_named_function_as_a_function_constant() {
         type_result.diagnostics()
     );
 
-    let mir_module = builder::MirBuilder::new(&graph, &type_result, code).build();
+    let mir_module = MirBuilder::new(&graph, &type_result, code).build();
     let worker = mir_module
         .functions
         .iter()
@@ -132,7 +132,7 @@ fn test_mir_builder_lowers_named_expression_function_body() {
         type_result.diagnostics()
     );
 
-    let mir_module = builder::MirBuilder::new(&graph, &type_result, code).build();
+    let mir_module = MirBuilder::new(&graph, &type_result, code).build();
     let function = mir_module
         .functions
         .iter()
@@ -185,7 +185,7 @@ fn test_mir_builder_lowers_expression_and_block_function_expressions() {
         type_result.diagnostics()
     );
 
-    let mir_module = builder::MirBuilder::new(&graph, &type_result, code).build();
+    let mir_module = MirBuilder::new(&graph, &type_result, code).build();
     let functions = mir_module
         .functions
         .iter()
@@ -240,7 +240,7 @@ fn test_mir_builder_lowers_copy_expression() {
         type_result.diagnostics()
     );
 
-    let builder = builder::MirBuilder::new(&graph, &type_result, code);
+    let builder = MirBuilder::new(&graph, &type_result, code);
     let mir_module = builder.build();
     let func = mir_module
         .functions
@@ -273,7 +273,7 @@ fn test_mir_builder_applies_default_parameter_when_argument_is_null() {
 
     assert!(!type_result.has_errors(), "Typecheck errors occurred");
 
-    let builder = builder::MirBuilder::new(&graph, &type_result, code);
+    let builder = MirBuilder::new(&graph, &type_result, code);
     let mir_module = builder.build();
     let function = mir_module
         .functions
@@ -321,7 +321,7 @@ fn test_mir_builder_lowers_concrete_typeof_branch() {
     let type_result = check_declaration_types(&source, &graph);
     assert!(!type_result.has_errors(), "Typecheck errors occurred");
 
-    let builder = builder::MirBuilder::new(&graph, &type_result, code);
+    let builder = MirBuilder::new(&graph, &type_result, code);
     let mir_module = builder.build();
 
     let func = &mir_module.functions[0];
@@ -359,7 +359,7 @@ fn test_mir_builder_specializes_generic_typeof_call() {
         type_result.diagnostics()
     );
 
-    let builder = builder::MirBuilder::new(&graph, &type_result, code);
+    let builder = MirBuilder::new(&graph, &type_result, code);
     let mir_module = builder.build();
 
     let main = mir_module
@@ -409,7 +409,7 @@ fn test_mir_builder_specializes_typeof_generic_parameter() {
         type_result.diagnostics()
     );
 
-    let builder = builder::MirBuilder::new(&graph, &type_result, code);
+    let builder = MirBuilder::new(&graph, &type_result, code);
     let mir_module = builder.build();
     let main = mir_module
         .functions
@@ -483,7 +483,7 @@ fn test_mir_builder_phase1() {
     let type_result = check_declaration_types(&source, &graph);
     assert!(!type_result.has_errors(), "Typecheck errors occurred");
 
-    let builder = builder::MirBuilder::new(&graph, &type_result, code);
+    let builder = MirBuilder::new(&graph, &type_result, code);
     let mir_module = builder.build();
 
     assert_eq!(mir_module.functions.len(), 1);
@@ -569,7 +569,7 @@ fn test_mir_builder_phase2() {
         type_result.diagnostics()
     );
 
-    let builder = builder::MirBuilder::new(&graph, &type_result, code);
+    let builder = MirBuilder::new(&graph, &type_result, code);
     let mir_module = builder.build();
 
     assert_eq!(mir_module.functions.len(), 2);

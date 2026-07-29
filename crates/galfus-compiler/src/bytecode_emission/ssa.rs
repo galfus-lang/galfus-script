@@ -1,8 +1,8 @@
 use std::collections;
 
-use crate::mir;
+use galfus_ir::mir;
 
-use crate::mir::*;
+use galfus_ir::mir::*;
 use std::collections::HashMap;
 
 pub fn convert_to_ssa(func: &mut MirFunction) {

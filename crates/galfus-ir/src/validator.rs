@@ -2,7 +2,6 @@ use crate::mir;
 
 use crate::LocalId;
 use crate::mir::*;
-use galfus_frontend::TypeCheckResult;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10,10 +9,7 @@ pub struct ValidationError {
     pub message: String,
 }
 
-pub fn validate_module(
-    module: &MirModule,
-    _type_result: &TypeCheckResult,
-) -> Result<(), Vec<ValidationError>> {
+pub fn validate_module(module: &MirModule) -> Result<(), Vec<ValidationError>> {
     let mut errors = Vec::new();
 
     for func in &module.functions {

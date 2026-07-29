@@ -1,10 +1,10 @@
 use super::function::FunctionBuilder;
 use super::function_helpers::parse_int;
-use crate::mir::*;
 use galfus_core::{FunctionId, NodeId, SymbolId, TypeId};
 use galfus_frontend::{
     PathReferenceKind, RangeDesugarTarget, SymbolKind, SyntaxNodeKind, TypeKind,
 };
+use galfus_ir::mir::*;
 use std::collections::HashMap;
 
 impl<'b, 'a> FunctionBuilder<'b, 'a> {

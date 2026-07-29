@@ -3,11 +3,11 @@ use std::collections;
 use super::resolve::resolve_import_target;
 use crate::CompilerState;
 use crate::input::CompiledModule;
+use crate::semantic_to_mir::WorkspaceContext;
 use galfus_core::{FunctionId, NodeId, SymbolId, TypeId};
 use galfus_frontend::{
     FunctionParameterType, FunctionType, SymbolKind, SyntaxNodeKind, TypeKind, TypeTable,
 };
-use galfus_ir::builder::WorkspaceContext;
 use std::collections::HashMap;
 
 pub(super) struct MyWorkspaceContext<'a> {
@@ -272,7 +272,7 @@ impl<'a> WorkspaceContext for MyWorkspaceContext<'a> {
     ) -> Option<Vec<SymbolId>> {
         let target_module = &self.modules[target_mod_idx];
         let type_res = target_module.type_result().unwrap();
-        let builder = galfus_ir::builder::MirBuilder::new(
+        let builder = crate::semantic_to_mir::MirBuilder::new(
             target_module.graph(),
             type_res,
             target_module.source().text(),
@@ -371,7 +371,7 @@ impl<'a> WorkspaceContext for MyWorkspaceContext<'a> {
 
         let target_module = &self.modules[target_mod_idx];
         let type_res = target_module.type_result().unwrap();
-        let mut builder = galfus_ir::builder::MirBuilder::new(
+        let mut builder = crate::semantic_to_mir::MirBuilder::new(
             target_module.graph(),
             type_res,
             target_module.source().text(),
@@ -467,7 +467,7 @@ impl<'a> MyWorkspaceContext<'a> {
     ) {
         let target_module = &self.modules[target_mod_idx];
         let type_res = target_module.type_result().unwrap();
-        let mut builder = galfus_ir::builder::MirBuilder::new(
+        let mut builder = crate::semantic_to_mir::MirBuilder::new(
             target_module.graph(),
             type_res,
             target_module.source().text(),

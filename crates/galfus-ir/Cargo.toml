@@ -6,7 +6,5 @@ license.workspace = true
 
 [dependencies]
 galfus-core = { path = "../galfus-core" }
-galfus-frontend = { path = "../galfus-frontend" }
-galfus-bytecode = { path = "../galfus-bytecode" }
 
 thiserror.workspace = true
