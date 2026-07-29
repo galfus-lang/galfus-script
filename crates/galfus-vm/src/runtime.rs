@@ -20,10 +20,21 @@ use galfus_contract::Providers;
 use galfus_core::ModuleId;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Continuation {
-    pub dest: Option<Reg>,
+    dest: Option<Reg>,
+    resumed: Arc<AtomicBool>,
+}
+
+impl Continuation {
+    pub(crate) fn new(dest: Option<Reg>) -> Self {
+        Self {
+            dest,
+            resumed: Arc::new(AtomicBool::new(false)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -160,6 +171,29 @@ pub struct VirtualMachine {
 }
 
 impl VirtualMachine {
+    /// Resumes a suspended VM operation exactly once without exposing register layout.
+    pub fn resume(
+        &self,
+        thread: &mut thread::VirtualThread,
+        continuation: Continuation,
+        value: Value,
+    ) -> Result<(), galfus_contract::ExecutionFailure> {
+        if continuation.resumed.swap(true, Ordering::AcqRel) {
+            return Err(galfus_contract::ExecutionFailure::new(
+                galfus_contract::ExecutionFailureKind::DuplicateCompletion,
+                "continuation was already resumed",
+            ));
+        }
+        if let Some(dest) = continuation.dest {
+            thread.write_reg(dest, value).map_err(|error| {
+                galfus_contract::ExecutionFailure::new(
+                    galfus_contract::ExecutionFailureKind::InvalidContinuation,
+                    error.to_string(),
+                )
+            })?;
+        }
+        Ok(())
+    }
     pub fn providers(&self) -> Option<Arc<Mutex<Providers>>> {
         self.context.providers.clone()
     }

@@ -20,7 +20,7 @@ pub use buffer_io::BufferIoProvider;
 pub struct Playground {
     workspace: Workspace,
     io: BufferIoProvider,
-    executor: Option<sync::Arc<executor::PlaygroundExecutor>>,
+    executor: Option<std::rc::Rc<executor::PlaygroundExecutor>>,
 }
 
 pub struct PlaygroundCheckResult {
@@ -96,10 +96,10 @@ impl Playground {
 
     pub fn run(&mut self, args: &[Vec<u8>]) -> Result<i32> {
         use galfus_contract::KernelDriver;
-        let executor = sync::Arc::new(CooperativeDriver::new());
+        let executor = std::rc::Rc::new(CooperativeDriver::new());
         let exit_code = sync::Arc::new(sync::Mutex::new(0));
         let ec = sync::Arc::clone(&exit_code);
-        executor.on_exit(Box::new(move |res: Result<i32, String>| {
+        executor.on_exit(Box::new(move |res| {
             *ec.lock().unwrap() = res.unwrap();
         }));
         self.workspace
@@ -114,7 +114,7 @@ impl Playground {
     }
 
     pub fn start(&mut self, args: &[Vec<u8>]) -> Result<()> {
-        let executor = sync::Arc::new(executor::PlaygroundExecutor::new());
+        let executor = std::rc::Rc::new(executor::PlaygroundExecutor::new());
         self.workspace
             .run(
                 args,

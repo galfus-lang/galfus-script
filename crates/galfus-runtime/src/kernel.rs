@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 pub struct VirtualKernel {
     next_thread_id: AtomicU64,
     registry: ThreadRegistry,
-    runnable: RunnableQueue,
+    pub(crate) runnable: RunnableQueue,
     blocked: BlockedQueue,
 }
 
@@ -29,11 +29,15 @@ impl VirtualKernel {
         let raw_id = self.next_thread_id.fetch_add(1, Ordering::Relaxed);
         let id = ThreadId::from_raw(raw_id).expect("thread id should be non-zero");
         self.registry.register(id, thread);
-        self.runnable.enqueue(id);
         id
     }
 
     /// Parks a currently running thread without blocking it.
+    pub fn enqueue_runnable(&mut self, id: ThreadId, thread: VirtualThread) {
+        self.registry.register_with_id(id, thread);
+        self.runnable.enqueue(id);
+    }
+
     pub fn park_running(&mut self, id: ThreadId, thread: VirtualThread) {
         self.registry.park(id, thread);
     }
@@ -58,9 +62,32 @@ impl VirtualKernel {
         }
     }
 
+    /// Removes a thread from every schedulable state.
+    pub fn cancel(&mut self, id: ThreadId) -> bool {
+        self.runnable.remove(id);
+        self.blocked.remove(id);
+        self.registry.cancel(id)
+    }
+
     /// Returns the next runnable ThreadId.
     pub fn next_runnable(&mut self) -> Option<ThreadId> {
         self.runnable.dequeue()
+    }
+
+    pub fn debug_states(&self) -> Vec<(crate::registry::ThreadId, galfus_vm::thread::ThreadState)> {
+        self.registry.debug_states()
+    }
+
+    pub fn active_count(&self) -> usize {
+        self.registry.active_count()
+    }
+
+    pub fn get_exit_code(&self, id: ThreadId) -> Option<i32> {
+        self.registry.get_exit_code(id)
+    }
+
+    pub fn runnable_count(&self) -> usize {
+        self.runnable.len()
     }
 
     /// Ticks timeouts and makes threads runnable if their timers expire.

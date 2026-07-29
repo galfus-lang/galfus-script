@@ -20,13 +20,7 @@ impl VirtualMachine {
                 args_start,
                 arg_count,
             } => {
-                if let Some(resp) = thread.system_response.take() {
-                    thread.write_reg(dest, resp)?;
-                    return Ok(VmStep::Continue);
-                } else {
-                    let frame = thread.call_stack.last_mut().unwrap();
-                    frame.pc -= 1; // repeat this instruction upon resume
-
+                {
                     let name = match self.current_image(thread)?.constants.constants
                         [name_const.raw() as usize]
                     {
@@ -59,7 +53,7 @@ impl VirtualMachine {
 
                     return Ok(VmStep::Suspend {
                         effect: VmEffect::SendMsg { target: 0, msg },
-                        continuation: Continuation { dest: Some(dest) },
+                        continuation: Continuation::new(Some(dest)),
                     });
                 }
             }

@@ -1,19 +1,21 @@
 pub mod driver;
+pub mod event;
 pub mod kernel;
+pub mod orchestrator;
 pub mod queue;
 pub mod registry;
 pub mod task;
 #[cfg(test)]
 mod tests;
 
+use std::rc::Rc;
 use std::sync;
 
 use galfus_bytecode::BytecodeModule;
 use galfus_contract::Providers;
 use galfus_vm::thread::VirtualThread;
 use galfus_vm::{HeapObject, VirtualMachine, VmPanic, VmValue};
-use queue::{BlockedQueue, RunnableQueue};
-use registry::{ThreadId, ThreadRegistry};
+use registry::ThreadId;
 
 pub use driver::CooperativeDriver;
 
@@ -80,7 +82,7 @@ impl EntryAbi {
 pub struct Runtime {
     graph: sync::Arc<galfus_bytecode::BytecodeGraph>,
     providers: Option<sync::Arc<sync::Mutex<Providers>>>,
-    kernel: crate::kernel::VirtualKernel,
+    orchestrator: crate::orchestrator::Orchestrator,
 }
 
 impl Runtime {
@@ -91,23 +93,32 @@ impl Runtime {
         Self {
             graph,
             providers: providers.map(|p| sync::Arc::new(sync::Mutex::new(p))),
-            kernel: crate::kernel::VirtualKernel::new(),
+            orchestrator: crate::orchestrator::Orchestrator::new(),
         }
     }
 
     /// Cria uma nova thread a partir de um módulo e função de entrada
     pub fn spawn_thread(&mut self, thread: VirtualThread) -> ThreadId {
-        self.kernel.spawn(thread)
+        let token = self.orchestrator.main_thread_token();
+        let kernel = self.orchestrator.kernel_mut(token);
+        let id = kernel.spawn(thread);
+        let thread = kernel
+            .take_thread(id)
+            .expect("spawned thread is registered");
+        kernel.enqueue_runnable(id, thread);
+        id
     }
 
     /// O Host deve chamar esta função para bombear os cronômetros das threads bloqueadas
     pub fn tick_timeouts(&mut self, delta_ms: u64) {
-        self.kernel.tick(delta_ms);
+        let token = self.orchestrator.main_thread_token();
+        self.orchestrator.kernel_mut(token).tick(delta_ms);
     }
 
     /// Retorna o próximo ThreadId pronto para executar
     pub fn next_runnable(&mut self) -> Option<ThreadId> {
-        self.kernel.next_runnable()
+        let token = self.orchestrator.main_thread_token();
+        self.orchestrator.kernel_mut(token).next_runnable()
     }
 
     /// Execute an entry exported by a module loaded in the given BytecodeGraph.
@@ -116,7 +127,7 @@ impl Runtime {
         module_id: galfus_core::ModuleId,
         entry_name: &str,
         args: &[Vec<u8>],
-        driver: sync::Arc<dyn galfus_contract::KernelDriver>,
+        driver: Rc<dyn galfus_contract::KernelDriver>,
     ) -> Result<Box<dyn galfus_contract::RunnableTask>, RuntimeError> {
         let graph = self.graph.clone();
         let image = &graph.get(module_id).unwrap().module;
@@ -169,16 +180,32 @@ impl Runtime {
             .map_err(RuntimeError::VmPanic)?;
 
         let main_thread_id = self.spawn_thread(thread);
-        let _ = self.kernel.mark_running(main_thread_id);
-        let main_thread = self.kernel.take_thread(main_thread_id).unwrap();
 
-        let task = Box::new(task::RuntimeTask {
-            thread_id: main_thread_id,
-            thread: main_thread,
-            vm,
-            kernel: sync::Arc::new(sync::Mutex::new(self.kernel)),
-            driver,
-        });
+        let token = self.orchestrator.main_thread_token();
+        let _ = self
+            .orchestrator
+            .kernel_mut(token)
+            .mark_running(main_thread_id);
+        let main_thread = self
+            .orchestrator
+            .kernel_mut(token)
+            .take_thread(main_thread_id)
+            .unwrap();
+
+        let vm = sync::Arc::new(vm);
+
+        self.orchestrator.set_vm(vm.clone());
+        self.orchestrator.set_driver(driver.clone());
+
+        // Wait, the orchestrator IS the task now!
+        // We enqueue the main thread back, and return the orchestrator!
+        self.orchestrator
+            .kernel_mut(token)
+            .enqueue_runnable(main_thread_id, main_thread);
+
+        // We must return the orchestrator as the task!
+        // But `self` consumes `self.orchestrator`.
+        let task = Box::new(self.orchestrator);
 
         Ok(task)
     }

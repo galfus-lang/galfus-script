@@ -62,6 +62,22 @@ impl ThreadRegistry {
         self.mailboxes.get(&id).cloned()
     }
 
+    pub fn active_count(&self) -> usize {
+        self.states.values().filter(|s| !s.is_exited()).count()
+    }
+
+    pub fn get_exit_code(&self, id: ThreadId) -> Option<i32> {
+        if let Some(galfus_vm::thread::ThreadState::Exited(code)) = self.states.get(&id) {
+            Some(*code)
+        } else {
+            None
+        }
+    }
+
+    pub fn debug_states(&self) -> Vec<(ThreadId, ThreadState)> {
+        self.states.iter().map(|(&k, &v)| (k, v)).collect()
+    }
+
     pub fn lookup_key(&self, key: &str) -> Option<ThreadId> {
         self.keys.get(key).copied()
     }
@@ -122,6 +138,14 @@ impl ThreadRegistry {
 
     pub fn remove(&mut self, id: ThreadId) -> Option<VirtualThread> {
         self.take(id)
+    }
+
+    pub fn cancel(&mut self, id: ThreadId) -> bool {
+        let removed = self.threads.remove(&id).is_some() || self.states.contains_key(&id);
+        self.states.remove(&id);
+        self.mailboxes.remove(&id);
+        self.keys.retain(|_, thread_id| *thread_id != id);
+        removed
     }
 }
 

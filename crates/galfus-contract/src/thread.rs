@@ -2,7 +2,7 @@ use std::time;
 
 /// Represents an encapsulated virtual thread, ready to run.
 /// The host environment does not know its internals.
-pub trait RunnableTask: Send {
+pub trait RunnableTask {
     /// The host calls this method and provides a "budget" (e.g., number of instructions).
     /// The task runs until the budget is exhausted or it needs to pause.
     fn run(self: Box<Self>, budget: usize) -> ThreadResult;
@@ -18,7 +18,7 @@ pub enum ThreadResult {
     Completed(i32),
 
     /// The thread encountered a critical error (panic).
-    Failed(String),
+    Failed(crate::ExecutionFailure),
 
     /// The thread needs to call a Provider or is waiting for a message.
     /// The Host should discard the task. The Runtime Orchestrator will
@@ -45,18 +45,18 @@ pub enum KernelTask {
 }
 
 /// The Host must implement this trait to dictate how tasks are scheduled.
-pub trait KernelDriver: Send + Sync {
+pub trait KernelDriver {
     /// The Kernel or Orchestrator calls this to submit work.
     fn dispatch(&self, task: KernelTask);
 
     /// Sets the callback to be invoked when the driver completes its execution.
-    fn on_exit(&self, callback: Box<dyn Fn(Result<i32, String>) + Send + Sync>);
+    fn on_exit(&self, callback: Box<dyn Fn(Result<i32, crate::ExecutionFailure>) + Send + Sync>);
 
     /// Runs the driver loop. Behavior (blocking vs non-blocking) depends on the implementation.
     fn run(&self);
 
     /// Executes a single step, returning the current status.
-    fn step(&self) -> Result<ExecutorStepResult, String> {
+    fn step(&self) -> Result<ExecutorStepResult, crate::ExecutionFailure> {
         unimplemented!("step is not implemented by default")
     }
 }

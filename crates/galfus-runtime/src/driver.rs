@@ -3,13 +3,15 @@ use std::sync;
 use std::sync::Mutex;
 use std::thread;
 
-use galfus_contract::{ExecutorStepResult, KernelDriver, KernelTask, ThreadResult};
+use galfus_contract::{
+    ExecutionFailure, ExecutorStepResult, KernelDriver, KernelTask, ThreadResult,
+};
 
 /// Runs Galfus tasks cooperatively on the calling host thread.
 pub struct CooperativeDriver {
     queue: Mutex<VecDeque<KernelTask>>,
     exit_code: sync::Mutex<i32>,
-    exit_callback: Mutex<Option<Box<dyn Fn(Result<i32, String>) + Send + Sync>>>,
+    exit_callback: Mutex<Option<Box<dyn Fn(Result<i32, ExecutionFailure>) + Send + Sync>>>,
 }
 
 impl CooperativeDriver {
@@ -27,7 +29,7 @@ impl KernelDriver for CooperativeDriver {
         self.queue.lock().unwrap().push_back(task);
     }
 
-    fn on_exit(&self, callback: Box<dyn Fn(Result<i32, String>) + Send + Sync>) {
+    fn on_exit(&self, callback: Box<dyn Fn(Result<i32, ExecutionFailure>) + Send + Sync>) {
         *self.exit_callback.lock().unwrap() = Some(callback);
     }
 
@@ -75,7 +77,7 @@ impl KernelDriver for CooperativeDriver {
         }
     }
 
-    fn step(&self) -> Result<ExecutorStepResult, String> {
+    fn step(&self) -> Result<ExecutorStepResult, ExecutionFailure> {
         let task_entry = self.queue.lock().unwrap().pop_front();
 
         let Some(task_entry) = task_entry else {

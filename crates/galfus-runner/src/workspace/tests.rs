@@ -65,10 +65,10 @@ fn load_workspace_accepts_standalone_source_file() {
     assert!(workspace.check().is_valid);
     workspace.compile().expect("compiles standalone source");
     use galfus_contract::KernelDriver;
-    let executor = sync::Arc::new(CooperativeDriver::new());
+    let executor = std::rc::Rc::new(CooperativeDriver::new());
     let exit_code = sync::Arc::new(sync::Mutex::new(0));
     let ec = sync::Arc::clone(&exit_code);
-    executor.on_exit(Box::new(move |res: Result<i32, String>| {
+    executor.on_exit(Box::new(move |res| {
         *ec.lock().unwrap() = res.unwrap();
     }));
     workspace

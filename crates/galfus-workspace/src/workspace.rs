@@ -482,7 +482,7 @@ impl Workspace {
         &mut self,
         args: &[Vec<u8>],
         providers: Option<Providers>,
-        driver: Arc<dyn galfus_contract::KernelDriver>,
+        driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
     ) -> Result<(), RunBlocked> {
         let graph = match &self.bytecode_state.compile_state {
             CompileState::Ready { graph, .. } => Arc::clone(graph),

@@ -1,24 +1,21 @@
 use std::sync;
 
-use galfus_contract::{ExecutorStepResult, KernelDriver, KernelTask, ThreadResult};
-use std::collections::VecDeque;
-use std::sync::{
-    Mutex,
-    atomic::{AtomicU64, Ordering},
+use galfus_contract::{
+    ExecutionFailure, ExecutorStepResult, KernelDriver, KernelTask, ThreadResult,
 };
+use std::collections::VecDeque;
+use std::sync::Mutex;
 
 pub struct PlaygroundExecutor {
     queue: Mutex<VecDeque<KernelTask>>,
-    next_thread_id: AtomicU64,
     exit_code: sync::Mutex<i32>,
-    exit_callback: Mutex<Option<Box<dyn Fn(Result<i32, String>) + Send + Sync>>>,
+    exit_callback: Mutex<Option<Box<dyn Fn(Result<i32, ExecutionFailure>) + Send + Sync>>>,
 }
 
 impl PlaygroundExecutor {
     pub fn new() -> Self {
         Self {
             queue: Mutex::new(VecDeque::new()),
-            next_thread_id: AtomicU64::new(1),
             exit_code: sync::Mutex::new(0),
             exit_callback: Mutex::new(None),
         }
@@ -30,7 +27,7 @@ impl KernelDriver for PlaygroundExecutor {
         self.queue.lock().unwrap().push_back(task);
     }
 
-    fn on_exit(&self, callback: Box<dyn Fn(Result<i32, String>) + Send + Sync>) {
+    fn on_exit(&self, callback: Box<dyn Fn(Result<i32, ExecutionFailure>) + Send + Sync>) {
         *self.exit_callback.lock().unwrap() = Some(callback);
     }
 
@@ -38,7 +35,7 @@ impl KernelDriver for PlaygroundExecutor {
         // NON-BLOCKING
     }
 
-    fn step(&self) -> Result<ExecutorStepResult, String> {
+    fn step(&self) -> Result<ExecutorStepResult, ExecutionFailure> {
         let task_entry = {
             let mut q = self.queue.lock().unwrap();
             q.pop_front()

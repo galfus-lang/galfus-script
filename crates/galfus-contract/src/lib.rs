@@ -93,6 +93,14 @@ impl ExecutionFailure {
     }
 }
 
+impl std::fmt::Display for ExecutionFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{:?}: {}", self.kind, self.message)
+    }
+}
+
+impl std::error::Error for ExecutionFailure {}
+
 pub trait MessageInjector: Send + Sync {
     fn inject_system_response(
         &self,

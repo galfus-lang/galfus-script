@@ -19,6 +19,14 @@ impl RunnableQueue {
     pub fn dequeue(&mut self) -> Option<ThreadId> {
         self.queue.pop_front()
     }
+
+    pub fn len(&self) -> usize {
+        self.queue.len()
+    }
+
+    pub fn remove(&mut self, id: ThreadId) {
+        self.queue.retain(|queued| *queued != id);
+    }
 }
 
 impl Default for RunnableQueue {
@@ -52,6 +60,11 @@ impl BlockedQueue {
     pub fn unblock(&mut self, id: ThreadId) -> bool {
         self.timeouts.remove(&id);
         self.blocked.remove(&id)
+    }
+
+    pub fn remove(&mut self, id: ThreadId) {
+        self.timeouts.remove(&id);
+        self.blocked.remove(&id);
     }
 
     /// Reduces the timeout of all blocked threads by delta_ms.

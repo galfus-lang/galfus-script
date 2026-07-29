@@ -476,7 +476,7 @@ impl VirtualMachine {
                             sender_id,
                             timeout: timeout_val,
                         },
-                        continuation: Continuation { dest: Some(dest) },
+                        continuation: Continuation::new(Some(dest)),
                     });
                 }
             }
@@ -513,7 +513,7 @@ impl VirtualMachine {
                         target: target_id,
                         msg: msg_val,
                     },
-                    continuation: Continuation { dest: Some(dest) },
+                    continuation: Continuation::new(Some(dest)),
                 });
             }
             Instruction::CreateThread { dest, func, key } => {
@@ -524,7 +524,7 @@ impl VirtualMachine {
                         func: func_val,
                         key: key_val,
                     },
-                    continuation: Continuation { dest: Some(dest) },
+                    continuation: Continuation::new(Some(dest)),
                 });
             }
 
@@ -548,7 +548,7 @@ impl VirtualMachine {
                         thread_id: tid_val,
                         arg: arg_val,
                     },
-                    continuation: Continuation { dest: Some(dest) },
+                    continuation: Continuation::new(Some(dest)),
                 });
             }
             Instruction::GetThread { dest, key } => {
@@ -556,7 +556,7 @@ impl VirtualMachine {
                     effect: VmEffect::GetThread {
                         key: thread.read_reg(key)?.clone(),
                     },
-                    continuation: Continuation { dest: Some(dest) },
+                    continuation: Continuation::new(Some(dest)),
                 });
             }
 
@@ -564,7 +564,7 @@ impl VirtualMachine {
                 let thread_id = thread_id_value(thread, thread_id)?;
                 return Ok(VmStep::Suspend {
                     effect: VmEffect::ThreadIsRunning { thread_id },
-                    continuation: Continuation { dest: Some(dest) },
+                    continuation: Continuation::new(Some(dest)),
                 });
             }
 
@@ -572,7 +572,7 @@ impl VirtualMachine {
                 let thread_id = thread_id_value(thread, thread_id)?;
                 return Ok(VmStep::Suspend {
                     effect: VmEffect::ThreadIsExited { thread_id },
-                    continuation: Continuation { dest: Some(dest) },
+                    continuation: Continuation::new(Some(dest)),
                 });
             }
 
@@ -580,7 +580,7 @@ impl VirtualMachine {
                 let thread_id = thread_id_value(thread, thread_id)?;
                 return Ok(VmStep::Suspend {
                     effect: VmEffect::ThreadExitReason { thread_id },
-                    continuation: Continuation { dest: Some(dest) },
+                    continuation: Continuation::new(Some(dest)),
                 });
             }
 

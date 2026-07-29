@@ -116,19 +116,21 @@ fn run_initializes_dependencies_before_the_entry_module() {
 
     struct TestExecutor {
         queue: sync::Mutex<collections::VecDeque<galfus_contract::KernelTask>>,
-        next_thread_id: sync::atomic::AtomicU64,
     }
     impl galfus_contract::KernelDriver for TestExecutor {
-        fn on_exit(&self, _cb: Box<dyn Fn(Result<i32, String>) + Send + Sync>) {}
+        fn on_exit(
+            &self,
+            _cb: Box<dyn Fn(Result<i32, galfus_contract::ExecutionFailure>) + Send + Sync>,
+        ) {
+        }
         fn run(&self) {}
 
         fn dispatch(&self, task: galfus_contract::KernelTask) {
             self.queue.lock().unwrap().push_back(task);
         }
     }
-    let executor = sync::Arc::new(TestExecutor {
+    let executor = std::rc::Rc::new(TestExecutor {
         queue: sync::Mutex::new(collections::VecDeque::new()),
-        next_thread_id: sync::atomic::AtomicU64::new(1),
     });
 
     let task = Runtime::new(sync::Arc::new(graph.clone()), None)

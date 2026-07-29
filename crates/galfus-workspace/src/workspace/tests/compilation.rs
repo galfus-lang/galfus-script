@@ -346,7 +346,7 @@ fn compile_removes_unreachable_modules() {
 fn run_requires_compile_and_executes_the_configured_entry() {
     let mut workspace = Workspace::new();
     assert!(matches!(
-        workspace.run(&[], None, Arc::new(CooperativeDriver::new())),
+        workspace.run(&[], None, std::rc::Rc::new(CooperativeDriver::new())),
         Err(RunBlocked::CompileRequired)
     ));
 
@@ -377,10 +377,10 @@ fn run_requires_compile_and_executes_the_configured_entry() {
     ));
     assert!(workspace.check().is_valid);
     workspace.compile().expect("workspace compiles");
-    let executor = Arc::new(CooperativeDriver::new());
+    let executor = std::rc::Rc::new(CooperativeDriver::new());
     let exit_code = Arc::new(Mutex::new(0));
     let ec = Arc::clone(&exit_code);
-    executor.on_exit(Box::new(move |res: Result<i32, String>| {
+    executor.on_exit(Box::new(move |res| {
         *ec.lock().unwrap() = res.unwrap();
     }));
     workspace.run(&[], None, executor).expect("entry executes");
@@ -417,16 +417,15 @@ fn run_reports_missing_io_provider_only_when_io_is_executed() {
     assert!(workspace.check().is_valid);
     workspace.compile().expect("workspace compiles");
 
-    let executor = Arc::new(CooperativeDriver::new());
+    let executor = std::rc::Rc::new(CooperativeDriver::new());
     let exit_error = Arc::new(Mutex::new(String::new()));
     let ee = Arc::clone(&exit_error);
     executor.on_exit(Box::new(move |res| {
         if let Err(e) = res {
-            *ee.lock().unwrap() = e;
+            *ee.lock().unwrap() = e.to_string();
         }
     }));
     workspace.run(&[], None, executor).unwrap();
     let error = exit_error.lock().unwrap().clone();
     assert!(error.contains("HostProvider missing"));
 }
-
