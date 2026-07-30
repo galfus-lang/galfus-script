@@ -4,7 +4,7 @@ mod tests;
 use crate::event::{EventSink, RuntimeEvent};
 use galfus_contract::{
     BoundaryValue, ExecutionFailure, ExecutionFailureKind, ExecutorStepResult, KernelDriver,
-    RunnableTask, ThreadResult,
+    ThreadResult,
 };
 use std::rc::Rc;
 use std::sync::{
@@ -12,9 +12,8 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-/// Owns one running program and drives its orchestrator cooperatively.
 pub struct Execution {
-    root: Option<Box<dyn RunnableTask>>,
+    orchestrator: Option<crate::orchestrator::Orchestrator>,
     driver: Rc<dyn KernelDriver>,
     sink: EventSink,
     result: Option<Result<BoundaryValue, ExecutionFailure>>,
@@ -36,17 +35,16 @@ pub enum ExecutionState {
     ShuttingDown,
     Stopped,
 }
-
 impl Execution {
     pub(crate) fn new(
-        root: Box<dyn RunnableTask>,
+        orchestrator: crate::orchestrator::Orchestrator,
         driver: Rc<dyn KernelDriver>,
         sink: EventSink,
         initialization_complete: Arc<AtomicBool>,
         is_initializing: bool,
     ) -> Self {
         Self {
-            root: Some(root),
+            orchestrator: Some(orchestrator),
             driver,
             sink,
             result: None,
@@ -64,13 +62,6 @@ impl Execution {
         ExecutionHandle {
             sink: self.sink.clone(),
         }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn into_task(mut self) -> Box<dyn RunnableTask> {
-        self.root
-            .take()
-            .expect("execution task is available before polling")
     }
 
     pub fn status(&self) -> ExecutionState {
@@ -98,20 +89,23 @@ impl Execution {
         {
             self.state = ExecutionState::Running;
         }
-        if let Some(root) = self.root.take() {
-            match root.run(budget) {
-                ThreadResult::Yielded(root) => self.root = Some(root),
+        if let Some(orchestrator) = &mut self.orchestrator {
+            match orchestrator.step(budget) {
+                ThreadResult::Discarded => {
+                    if let Some(failure) = orchestrator.failure.take() {
+                        self.state =
+                            if failure.kind == galfus_contract::ExecutionFailureKind::Cancelled {
+                                ExecutionState::Cancelled
+                            } else {
+                                ExecutionState::Failed
+                            };
+                        self.result = Some(Err(failure));
+                        self.orchestrator = None;
+                    }
+                }
                 ThreadResult::Completed(code) => {
                     self.result = Some(Ok(BoundaryValue::I32(code)));
                     self.state = ExecutionState::Completed;
-                }
-                ThreadResult::Failed(error) => {
-                    self.state = if error.kind == ExecutionFailureKind::Cancelled {
-                        ExecutionState::Cancelled
-                    } else {
-                        ExecutionState::Failed
-                    };
-                    self.result = Some(Err(error));
                 }
                 ThreadResult::Blocked { .. } => {
                     self.state = ExecutionState::Waiting;
@@ -133,8 +127,8 @@ impl Execution {
                 Err(error) => Err(error.clone()),
             };
         }
-        let state = self.driver.step()?;
-        if matches!(state, ExecutorStepResult::Completed(_)) && self.root.is_some() {
+        let state = self.driver.step();
+        if matches!(state, ExecutorStepResult::Completed(_)) && self.orchestrator.is_some() {
             return Ok(ExecutorStepResult::Running);
         }
         if matches!(state, ExecutorStepResult::Blocked { .. }) {

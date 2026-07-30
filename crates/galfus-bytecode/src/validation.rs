@@ -365,6 +365,10 @@ pub fn validate_bytecode_module(
                 | Instruction::ThreadExitReason {
                     dest: _,
                     thread_id: _,
+                }
+                | Instruction::WaitThread {
+                    dest: _,
+                    thread_id: _,
                 } => {
                     // Requires no validation
                 }

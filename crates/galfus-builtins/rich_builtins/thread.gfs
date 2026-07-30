@@ -1,13 +1,14 @@
-fn __builtin_create_thread(func: fn([[u8]]): i32, key: [u8] | null): i64 { return -1 }
-fn __builtin_get_thread(key: [u8]): i64 { return -1 }
-fn __builtin_spawn_thread(id: i64, args: [[u8]] | null): bool { return false }
-fn __builtin_is_thread_running(id: i64): bool { return false }
-fn __builtin_is_thread_exited(id: i64): bool { return false }
-fn __builtin_thread_exit_reason(id: i64): i32 | null { return null }
-fn __builtin_send(id: i64, data: [u8]): bool { return false }
-fn __builtin_receive(id: i64, timeout: i32): [u8] | null { return null }
-fn __builtin_has_messages(): bool { return false }
-fn __builtin_get_message(): [u8] | null { return null }
+fn __internal_thread_create(func: fn([[u8]]): i32, key: [u8] | null): i64 { return -1 }
+fn __internal_thread_get(key: [u8]): i64 { return -1 }
+fn __internal_thread_spawn(id: i64, args: [[u8]] | null): bool { return false }
+fn __internal_thread_is_running(id: i64): bool { return false }
+fn __internal_thread_is_exited(id: i64): bool { return false }
+fn __internal_thread_exit_reason(id: i64): i32 | null { return null }
+fn __internal_thread_send(id: i64, data: [u8]): bool { return false }
+fn __internal_thread_receive(id: i64, timeout: i32): [u8] | null { return null }
+fn __internal_thread_has_messages(): bool { return false }
+fn __internal_thread_get_message(): [u8] | null { return null }
+fn __internal_thread_wait(id: i64): i32 | null { return null }
 
 export struct Thread {
     id: i64,
@@ -16,13 +17,13 @@ export struct Thread {
 
 export fn createThread(func: fn([[u8]]): i32, key: [u8] | null = null): Thread {
     return new(Thread) { 
-        id: __builtin_create_thread(func, key), 
+        id: __internal_thread_create(func, key), 
         key: key 
     }
 }
 
 export fn getThread(key: [u8]): Thread | null {
-    const id = __builtin_get_thread(key)
+    const id = __internal_thread_get(key)
     if id == -1 {
         return null
     }
@@ -30,33 +31,37 @@ export fn getThread(key: [u8]): Thread | null {
 }
 
 export fn hasMessages(): bool {
-    return __builtin_has_messages()
+    return __internal_thread_has_messages()
 }
 
 export fn getMessage(): [u8] | null {
-    return __builtin_get_message()
+    return __internal_thread_get_message()
 }
 
 fn Thread::spawn(self, args: [[u8]] | null = null): bool {
-    return __builtin_spawn_thread(self.id, args)
+    return __internal_thread_spawn(self.id, args)
 }
 
 fn Thread::isRunning(self): bool {
-    return __builtin_is_thread_running(self.id)
+    return __internal_thread_is_running(self.id)
 }
 
 fn Thread::isExited(self): bool {
-    return __builtin_is_thread_exited(self.id)
+    return __internal_thread_is_exited(self.id)
 }
 
 fn Thread::exitReason(self): i32 | null {
-    return __builtin_thread_exit_reason(self.id)
+    return __internal_thread_exit_reason(self.id)
 }
 
 fn Thread::send(self, data: [u8]): bool {
-    return __builtin_send(self.id, data)
+    return __internal_thread_send(self.id, data)
 }
 
 fn Thread::tryReceiveMessage(self, timeout: i32): [u8] | null {
-    return __builtin_receive(self.id, timeout)
+    return __internal_thread_receive(self.id, timeout)
+}
+
+fn Thread::wait(self): i32 | null {
+    return __internal_thread_wait(self.id)
 }

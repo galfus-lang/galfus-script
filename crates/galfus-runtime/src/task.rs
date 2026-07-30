@@ -6,7 +6,7 @@ use galfus_contract::{
     ExecutionFailure, ExecutionFailureKind, ExecutionFrame, RunnableTask, ThreadResult,
 };
 use galfus_vm::VirtualMachine;
-use galfus_vm::thread::VirtualThread;
+
 use std::sync::Arc;
 
 pub(crate) fn decode_from_thread_heap(
@@ -62,6 +62,19 @@ pub(crate) fn decode_from_thread_heap(
             else {
                 return Err(mismatch());
             };
+            if let Some(BytecodeType::Uint8) = module.types.get(element_type.raw() as usize) {
+                let bytes: Result<Vec<u8>, _> = elements
+                    .iter()
+                    .map(|element| {
+                        if let galfus_vm::VmValue::Uint8(b) = element {
+                            Ok(*b)
+                        } else {
+                            Err(mismatch())
+                        }
+                    })
+                    .collect();
+                return Ok(BoundaryValue::Bytes(bytes?));
+            }
             let values = elements
                 .iter()
                 .cloned()
@@ -278,7 +291,7 @@ pub(crate) fn boundary_type(
 
 pub struct RuntimeTask {
     pub thread_id: registry::ThreadId,
-    pub thread: Option<VirtualThread>,
+    pub thread: Option<galfus_vm::thread::VmThreadState>,
     pub vm: Arc<VirtualMachine>,
     pub events: crate::event::EventSink,
 }
@@ -286,7 +299,7 @@ pub struct RuntimeTask {
 impl RuntimeTask {
     pub(crate) fn new(
         thread_id: registry::ThreadId,
-        thread: VirtualThread,
+        thread: galfus_vm::thread::VmThreadState,
         vm: Arc<VirtualMachine>,
         events: crate::event::EventSink,
     ) -> Self {
@@ -300,7 +313,7 @@ impl RuntimeTask {
 }
 
 fn with_initialization_context(
-    thread: &VirtualThread,
+    thread: &galfus_vm::thread::VmThreadState,
     failure: ExecutionFailure,
 ) -> ExecutionFailure {
     match thread.initializing_module() {
@@ -319,7 +332,7 @@ fn with_initialization_context(
     }
 }
 
-pub(crate) fn execution_stack(thread: &VirtualThread) -> Vec<ExecutionFrame> {
+pub(crate) fn execution_stack(thread: &galfus_vm::thread::VmThreadState) -> Vec<ExecutionFrame> {
     thread
         .call_stack
         .iter()
@@ -372,14 +385,17 @@ impl RunnableTask for RuntimeTask {
                     thread_id: self.thread_id,
                     error: failure.clone(),
                 });
-                return ThreadResult::Failed(failure);
+                return ThreadResult::Discarded;
             }
         };
 
         match step {
             galfus_vm::VmStep::Continue => {
-                self.thread = Some(thread);
-                ThreadResult::Yielded(self)
+                self.events.send(crate::event::RuntimeEvent::Yielded {
+                    thread_id: self.thread_id,
+                    thread,
+                });
+                ThreadResult::Discarded
             }
             galfus_vm::VmStep::Return {
                 value,
@@ -415,7 +431,7 @@ impl RunnableTask for RuntimeTask {
                             thread_id: self.thread_id,
                             error: failure.clone(),
                         });
-                        return ThreadResult::Failed(failure);
+                        return ThreadResult::Discarded;
                     }
                     Err(error) => {
                         let failure = ExecutionFailure::new(
@@ -429,7 +445,7 @@ impl RunnableTask for RuntimeTask {
                             thread_id: self.thread_id,
                             error: failure.clone(),
                         });
-                        return ThreadResult::Failed(failure);
+                        return ThreadResult::Discarded;
                     }
                 };
                 self.events.send(crate::event::RuntimeEvent::Exited {
@@ -441,8 +457,9 @@ impl RunnableTask for RuntimeTask {
             }
             galfus_vm::VmStep::Suspend {
                 effect,
-                continuation,
+                mut continuation,
             } => {
+                continuation.origin_thread_id = Some(self.thread_id.raw());
                 self.events.send(crate::event::RuntimeEvent::Syscall {
                     thread_id: self.thread_id,
                     thread,
@@ -463,7 +480,7 @@ impl RunnableTask for RuntimeTask {
                     thread_id: self.thread_id,
                     error: err.clone(),
                 });
-                ThreadResult::Failed(err)
+                ThreadResult::Discarded
             }
         }
     }
@@ -473,14 +490,17 @@ impl RunnableTask for RuntimeTask {
     }
 }
 
-pub(crate) fn thread_key(thread: &VirtualThread, value: galfus_vm::VmValue) -> Option<String> {
+pub(crate) fn thread_key(
+    thread: &galfus_vm::thread::VmThreadState,
+    value: galfus_vm::VmValue,
+) -> Option<String> {
     match value {
         galfus_vm::VmValue::Object(r) => match thread.heap.get_object(r).ok() {
             Some(galfus_vm::HeapObject::Array { elements, .. }) => {
                 let mut s = String::new();
                 for e in elements {
                     if let galfus_vm::VmValue::Uint8(b) = e {
-                        s.push(*b as char);
+                        s.push((*b) as char);
                     }
                 }
                 Some(s)

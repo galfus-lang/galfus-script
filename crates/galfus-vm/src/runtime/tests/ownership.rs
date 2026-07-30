@@ -72,7 +72,7 @@ fn test_ownership_deterministic_release() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let res = vm
         .run_function(
             &mut thread,
@@ -173,7 +173,7 @@ fn test_ownership_cycle_release() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let res = vm
         .run_function(
             &mut thread,
@@ -284,7 +284,7 @@ fn test_ownership_weak_invalidation() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let res = vm
         .run_function(
             &mut thread,

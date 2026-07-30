@@ -2,12 +2,18 @@
 mod tests;
 
 use crate::queue::{BlockedQueue, RunnableQueue};
+use crate::registry::MailboxMessage;
 use crate::registry::{ThreadId, ThreadRegistry};
-use galfus_vm::thread::MailboxMessage;
-use galfus_vm::thread::VirtualThread;
-use std::collections::VecDeque;
+use galfus_vm::Continuation;
+use galfus_vm::thread::VmThreadState;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+
+pub struct WaiterEntry {
+    pub waiter_id: ThreadId,
+    pub continuation: Continuation,
+}
 
 /// Manages thread lifecycle, scheduling queues, and timers.
 pub struct VirtualKernel {
@@ -15,6 +21,7 @@ pub struct VirtualKernel {
     registry: ThreadRegistry,
     pub(crate) runnable: RunnableQueue,
     blocked: BlockedQueue,
+    waiters: HashMap<ThreadId, Vec<WaiterEntry>>,
 }
 
 impl VirtualKernel {
@@ -24,30 +31,36 @@ impl VirtualKernel {
             registry: ThreadRegistry::new(),
             runnable: RunnableQueue::new(),
             blocked: BlockedQueue::new(),
+            waiters: HashMap::new(),
         }
     }
 
     /// Allocates a new ThreadId and registers the thread as runnable.
-    pub fn spawn(&mut self, thread: VirtualThread) -> ThreadId {
+    pub fn spawn(&mut self, thread: VmThreadState, key: Option<String>) -> ThreadId {
         let raw_id = self.next_thread_id.fetch_add(1, Ordering::Relaxed);
         let id = ThreadId::from_raw(raw_id).expect("thread id should be non-zero");
-        self.registry.register(id, thread);
+        self.registry.register(id, thread, key);
         id
     }
 
     /// Parks a currently running thread without blocking it.
-    pub fn enqueue_runnable(&mut self, id: ThreadId, thread: VirtualThread) {
-        self.registry.register_with_id(id, thread);
+    pub fn enqueue_runnable(&mut self, id: ThreadId, thread: VmThreadState) {
+        self.registry.restore_vm_state(id, thread);
         self.runnable.enqueue(id);
     }
 
-    pub fn park_running(&mut self, id: ThreadId, thread: VirtualThread) {
-        self.registry.park(id, thread);
+    pub fn enqueue_runnable_front(&mut self, id: ThreadId, thread: VmThreadState) {
+        self.registry.restore_vm_state(id, thread);
+        self.runnable.enqueue_front(id);
+    }
+
+    pub fn park_running(&mut self, id: ThreadId, thread: VmThreadState) {
+        self.registry.restore_vm_state(id, thread);
     }
 
     /// Blocks a thread, optionally with a timeout.
-    pub fn block(&mut self, id: ThreadId, thread: VirtualThread, timeout: Option<u64>) {
-        self.registry.park(id, thread);
+    pub fn block(&mut self, id: ThreadId, thread: VmThreadState, timeout: Option<u64>) {
+        self.registry.restore_vm_state(id, thread);
         if let Some(ms) = timeout {
             self.blocked.block_with_timeout(id, ms);
         } else {
@@ -86,8 +99,13 @@ impl VirtualKernel {
     }
 
     /// Returns the next runnable ThreadId.
+    #[allow(dead_code)]
     pub fn next_runnable(&mut self) -> Option<ThreadId> {
         self.runnable.dequeue()
+    }
+
+    pub fn next_runnable_detailed(&mut self) -> Option<(ThreadId, bool)> {
+        self.runnable.dequeue_detailed()
     }
 
     pub fn active_count(&self) -> usize {
@@ -116,16 +134,20 @@ impl VirtualKernel {
 
     // Pass-through methods for tasks
 
-    pub fn take_thread(&mut self, id: ThreadId) -> Option<VirtualThread> {
+    pub fn take_thread(&mut self, id: ThreadId) -> Option<VmThreadState> {
         self.registry.take(id)
+    }
+
+    pub fn state(&self, id: ThreadId) -> Option<crate::registry::ThreadState> {
+        self.registry.state(id)
     }
 
     pub fn mark_running(&mut self, id: ThreadId) -> bool {
         self.registry.mark_running(id)
     }
 
-    pub fn mark_exited(&mut self, id: ThreadId, thread: VirtualThread, code: i32) -> bool {
-        self.registry.register_with_id(id, thread);
+    pub fn mark_exited(&mut self, id: ThreadId, thread: VmThreadState, code: i32) -> bool {
+        self.registry.restore_vm_state(id, thread);
         self.registry.mark_exited(id, code)
     }
 
@@ -135,6 +157,27 @@ impl VirtualKernel {
 
     pub fn get_mailbox(&self, id: ThreadId) -> Option<Arc<Mutex<VecDeque<MailboxMessage>>>> {
         self.registry.get_mailbox(id)
+    }
+
+    /// Registers `waiter_id` to be unblocked when `target_id` exits.
+    pub fn register_waiter(
+        &mut self,
+        target_id: ThreadId,
+        waiter_id: ThreadId,
+        continuation: Continuation,
+    ) {
+        self.waiters
+            .entry(target_id)
+            .or_default()
+            .push(WaiterEntry {
+                waiter_id,
+                continuation,
+            });
+    }
+
+    /// Drains all waiters registered for `target_id`, returning their entries.
+    pub fn drain_waiters(&mut self, target_id: ThreadId) -> Vec<WaiterEntry> {
+        self.waiters.remove(&target_id).unwrap_or_default()
     }
 }
 

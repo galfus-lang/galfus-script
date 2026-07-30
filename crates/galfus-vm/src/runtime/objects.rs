@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 impl VirtualMachine {
     pub(super) fn execute_object_instruction(
         &self,
-        thread: &mut thread::VirtualThread,
+        thread: &mut thread::VmThreadState,
         instr: Instruction,
     ) -> Result<VmStep, VmError> {
         match instr {
@@ -324,7 +324,7 @@ impl VirtualMachine {
 
     fn deep_copy_value(
         &self,
-        thread: &mut thread::VirtualThread,
+        thread: &mut thread::VmThreadState,
         value: &Value,
     ) -> Result<Value, VmError> {
         let Value::Object(obj_ref) = value else {
@@ -347,7 +347,7 @@ impl VirtualMachine {
 
     fn discover_strong_copy_closure(
         &self,
-        thread: &thread::VirtualThread,
+        thread: &thread::VmThreadState,
         root_ref: ObjectRef,
     ) -> Result<HashSet<usize>, VmError> {
         let mut closure = HashSet::new();
@@ -404,7 +404,7 @@ impl VirtualMachine {
 
     fn enqueue_copy_target(
         &self,
-        thread: &thread::VirtualThread,
+        thread: &thread::VmThreadState,
         value: &Value,
         closure: &mut HashSet<usize>,
         pending: &mut VecDeque<ObjectRef>,
@@ -422,7 +422,7 @@ impl VirtualMachine {
 
     fn allocate_copy_placeholders(
         &self,
-        thread: &mut thread::VirtualThread,
+        thread: &mut thread::VmThreadState,
         strong_closure: &HashSet<usize>,
     ) -> Result<HashMap<usize, ObjectRef>, VmError> {
         let mut copied = HashMap::new();
@@ -492,7 +492,7 @@ impl VirtualMachine {
 
     fn fill_copy_placeholders(
         &self,
-        thread: &mut thread::VirtualThread,
+        thread: &mut thread::VmThreadState,
         strong_closure: &HashSet<usize>,
         copied: &HashMap<usize, ObjectRef>,
     ) -> Result<(), VmError> {
@@ -612,7 +612,7 @@ impl VirtualMachine {
 
     fn copy_strong_value(
         &self,
-        _thread: &thread::VirtualThread,
+        _thread: &thread::VmThreadState,
         value: &Value,
         copied: &HashMap<usize, ObjectRef>,
     ) -> Result<Value, VmError> {
@@ -645,7 +645,7 @@ impl VirtualMachine {
     /// Returns the default `Value` for element types that can be safely default-initialized.
     fn zero_value_for_type(
         &self,
-        thread: &thread::VirtualThread,
+        thread: &thread::VmThreadState,
         type_idx: TypeIdx,
     ) -> Result<Value, VmError> {
         let ty = self

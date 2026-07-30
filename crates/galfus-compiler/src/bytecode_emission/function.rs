@@ -246,10 +246,8 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     } => {
                         let builtin_name = self.ctx.function_names.get(func).map(|s| s.to_string());
                         if let Some(name) = builtin_name {
-                            if name.starts_with("__builtin_") {
-                                let native_name = &name["__builtin_".len()..];
-
-                                if native_name == "create_thread" {
+                            if let Some(native_name) = name.strip_prefix("__internal_thread_") {
+                                if native_name == "create" {
                                     let func_reg = self.alloc_temp();
                                     self.load_operand_to(&args[0], func_reg);
                                     let key_reg = self.alloc_temp();
@@ -264,7 +262,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                     continue;
                                 }
 
-                                if native_name == "spawn_thread" {
+                                if native_name == "spawn" {
                                     let thread_id_reg = self.alloc_temp();
                                     self.load_operand_to(&args[0], thread_id_reg);
                                     let arg_reg = self.alloc_temp();
@@ -279,7 +277,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                     continue;
                                 }
 
-                                if native_name == "get_thread" {
+                                if native_name == "get" {
                                     let key_reg = self.alloc_temp();
                                     self.load_operand_to(&args[0], key_reg);
 
@@ -291,23 +289,23 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                     continue;
                                 }
 
-                                if native_name == "is_thread_running"
-                                    || native_name == "is_thread_exited"
-                                    || native_name == "thread_exit_reason"
+                                if native_name == "is_running"
+                                    || native_name == "is_exited"
+                                    || native_name == "exit_reason"
                                 {
                                     let thread_id_reg = self.alloc_temp();
                                     self.load_operand_to(&args[0], thread_id_reg);
                                     let dest = Reg(destination.raw() as u16);
                                     let instruction = match native_name {
-                                        "is_thread_running" => Instruction::ThreadIsRunning {
+                                        "is_running" => Instruction::ThreadIsRunning {
                                             dest,
                                             thread_id: thread_id_reg,
                                         },
-                                        "is_thread_exited" => Instruction::ThreadIsExited {
+                                        "is_exited" => Instruction::ThreadIsExited {
                                             dest,
                                             thread_id: thread_id_reg,
                                         },
-                                        "thread_exit_reason" => Instruction::ThreadExitReason {
+                                        "exit_reason" => Instruction::ThreadExitReason {
                                             dest,
                                             thread_id: thread_id_reg,
                                         },
@@ -362,6 +360,24 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                     continue;
                                 }
 
+                                if native_name == "wait" {
+                                    let thread_id_reg = self.alloc_temp();
+                                    self.load_operand_to(&args[0], thread_id_reg);
+
+                                    self.instructions.push(Instruction::WaitThread {
+                                        dest: Reg(destination.raw() as u16),
+                                        thread_id: thread_id_reg,
+                                    });
+                                    self.free_temps(1);
+                                    continue;
+                                }
+                            }
+
+                            let native_provider_name = name
+                                .strip_prefix("__provider_")
+                                .or_else(|| name.strip_prefix("__builtin_"));
+
+                            if let Some(native_name) = native_provider_name {
                                 let start_reg = if args.is_empty() {
                                     Reg(0) // Dummy if no args
                                 } else {

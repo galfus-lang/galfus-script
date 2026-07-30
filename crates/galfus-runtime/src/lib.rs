@@ -139,7 +139,7 @@ impl Runtime {
             });
         }
 
-        let mut thread = galfus_vm::thread::VirtualThread::new();
+        let mut thread = galfus_vm::thread::VmThreadState::new();
         let vm = VirtualMachine::new(graph.clone()).with_provider_handle(self.providers.clone());
 
         let mut initializers = VecDeque::new();
@@ -178,7 +178,8 @@ impl Runtime {
             };
 
         let token = orchestrator.main_thread_token();
-        let main_thread_id = orchestrator.kernel_mut(token).spawn(thread);
+        let main_thread_id = orchestrator.kernel_mut(token).spawn(thread, None);
+        orchestrator.set_root_thread(main_thread_id);
 
         let is_initializing = startup_plan.is_some();
         if let Some(startup_plan) = startup_plan {
@@ -202,10 +203,8 @@ impl Runtime {
 
         let sink = orchestrator.sink();
         let initialization_complete = orchestrator.initialization_complete();
-        let task = Box::new(orchestrator);
-
         Ok(Execution::new(
-            task,
+            orchestrator,
             driver,
             sink,
             initialization_complete,
@@ -215,7 +214,7 @@ impl Runtime {
 }
 
 fn build_entry_args(
-    thread: &mut galfus_vm::thread::VirtualThread,
+    thread: &mut galfus_vm::thread::VmThreadState,
     vm: &VirtualMachine,
     module_id: galfus_core::ModuleId,
     args: &[Vec<u8>],

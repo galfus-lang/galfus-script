@@ -292,6 +292,10 @@ pub enum Instruction {
         dest: Reg,
         thread_id: Reg,
     },
+    WaitThread {
+        dest: Reg,
+        thread_id: Reg,
+    },
     Panic {
         const_idx: ConstIdx,
     },

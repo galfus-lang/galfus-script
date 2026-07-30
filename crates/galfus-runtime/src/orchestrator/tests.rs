@@ -1,5 +1,9 @@
 use super::*;
-use galfus_contract::{BoundaryValue, HostProvider, MessageInjector, Providers, RunnableTask};
+use crate::orchestrator::external::ProviderDispatchTask;
+use galfus_contract::{
+    BoundaryValue, HostProvider, MessageInjector, Providers, RunnableTask, TaskAffinity,
+    ThreadResult,
+};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -54,7 +58,7 @@ fn provider_dispatch_tasks_use_the_declared_driver_lane() {
     let KernelTask::Main(task) = task.into_kernel_task(TaskAffinity::Main) else {
         panic!("main-affine provider must receive a main task");
     };
-    assert!(matches!(task.run(1), ThreadResult::Completed(0)));
+    assert!(matches!(task.run(1), ThreadResult::Discarded));
     assert!(called.load(Ordering::Acquire));
 
     let task = provider_dispatch_task(Arc::new(AtomicBool::new(false)));
@@ -70,7 +74,7 @@ fn cancelled_provider_dispatch_tasks_do_not_start_external_work() {
     let task = provider_dispatch_task(called.clone());
     task.active.store(false, Ordering::Release);
 
-    assert!(matches!(Box::new(task).run(1), ThreadResult::Completed(0)));
+    assert!(matches!(Box::new(task).run(1), ThreadResult::Discarded));
     assert!(!called.load(Ordering::Acquire));
 }
 
@@ -104,7 +108,7 @@ fn orchestrator_rejects_a_different_thread_binding() {
 fn spawned_event_is_registered_and_queued_on_the_main_thread() {
     let mut orchestrator = Orchestrator::new();
     orchestrator.sink().send(RuntimeEvent::ThreadSpawned {
-        thread: galfus_vm::thread::VirtualThread::new(),
+        thread: galfus_vm::thread::VmThreadState::new(),
     });
 
     let token = orchestrator.main_thread_token();
@@ -120,7 +124,7 @@ fn cancellation_event_removes_a_queued_thread() {
     let token = orchestrator.main_thread_token();
     let thread_id = {
         let kernel = orchestrator.kernel_mut(token);
-        let thread_id = kernel.spawn(galfus_vm::thread::VirtualThread::new());
+        let thread_id = kernel.spawn(galfus_vm::thread::VmThreadState::new(), None);
         let thread = kernel
             .take_thread(thread_id)
             .expect("spawned thread is registered");
@@ -143,7 +147,7 @@ fn execution_cancellation_removes_every_thread_and_returns_a_structured_failure(
     let token = orchestrator.main_thread_token();
     for _ in 0..2 {
         let kernel = orchestrator.kernel_mut(token);
-        let thread_id = kernel.spawn(galfus_vm::thread::VirtualThread::new());
+        let thread_id = kernel.spawn(galfus_vm::thread::VmThreadState::new(), None);
         let thread = kernel
             .take_thread(thread_id)
             .expect("spawned thread is registered");
@@ -151,10 +155,8 @@ fn execution_cancellation_removes_every_thread_and_returns_a_structured_failure(
     }
     orchestrator.sink().send(RuntimeEvent::CancelExecution);
 
-    match Box::new(orchestrator).run(100) {
-        galfus_contract::ThreadResult::Failed(error) => {
-            assert_eq!(error.kind, galfus_contract::ExecutionFailureKind::Cancelled);
-        }
+    match orchestrator.step(100) {
+        galfus_contract::ThreadResult::Discarded => {}
         _ => panic!("execution cancellation must fail with Cancelled"),
     }
 }
@@ -165,7 +167,7 @@ fn late_provider_completions_after_thread_cancellation_are_ignored() {
     let token = orchestrator.main_thread_token();
     let thread_id = orchestrator
         .kernel_mut(token)
-        .spawn(galfus_vm::thread::VirtualThread::new());
+        .spawn(galfus_vm::thread::VmThreadState::new(), None);
     let sink = orchestrator.sink();
     sink.send(RuntimeEvent::CancelThread { thread_id });
     for _ in 0..2 {

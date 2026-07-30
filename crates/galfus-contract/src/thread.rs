@@ -16,15 +16,12 @@ pub trait RunnableTask {
 
 /// The result returned after running a slice of a virtual thread.
 pub enum ThreadResult {
-    /// The thread consumed the budget but still has work to do.
-    /// The host should re-queue it.
-    Yielded(Box<dyn RunnableTask>),
+    /// The task has finished its slice or encountered an error.
+    /// The Orchestrator will handle the lifecycle via events. The Host must drop the task.
+    Discarded,
 
     /// The thread finished execution successfully.
     Completed(i32),
-
-    /// The thread encountered a critical error (panic).
-    Failed(crate::ExecutionFailure),
 
     /// The thread needs to call a Provider or is waiting for a message.
     /// The Host should discard the task. The Runtime Orchestrator will
@@ -71,6 +68,11 @@ pub trait KernelDriver {
     /// The Kernel or Orchestrator calls this to submit work.
     fn dispatch(&self, task: KernelTask);
 
+    /// Dispatches work to the front of the scheduling queue for immediate slice continuation.
+    fn dispatch_front(&self, task: KernelTask) {
+        self.dispatch(task);
+    }
+
     /// Sets the callback to be invoked when the driver completes its execution.
     fn on_exit(&self, callback: Box<dyn Fn(Result<i32, crate::ExecutionFailure>) + Send + Sync>);
 
@@ -81,7 +83,7 @@ pub trait KernelDriver {
     fn complete(&self, _result: Result<i32, crate::ExecutionFailure>) {}
 
     /// Executes a single step, returning the current status.
-    fn step(&self) -> Result<ExecutorStepResult, crate::ExecutionFailure> {
+    fn step(&self) -> ExecutorStepResult {
         unimplemented!("step is not implemented by default")
     }
 }

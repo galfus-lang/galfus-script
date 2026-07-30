@@ -17,7 +17,7 @@ impl HostProvider for TerminatorIo {
         args: &[BoundaryValue],
         injector: Arc<dyn MessageInjector>,
     ) {
-        if method == "read" {
+        if method == "read" || method == "io_read" {
             if let Some(BoundaryValue::Array {
                 element_type: BoundaryType::U8,
                 values,
@@ -31,6 +31,8 @@ impl HostProvider for TerminatorIo {
                     })
                     .collect::<Option<Vec<_>>>()
                     .expect("typed byte array");
+            } else if let Some(BoundaryValue::Bytes(b)) = args.first() {
+                *self.terminator.lock().expect("terminator state") = b.clone();
             }
             injector.inject_system_response(
                 thread_id,

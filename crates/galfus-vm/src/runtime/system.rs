@@ -5,7 +5,7 @@ use super::*;
 impl VirtualMachine {
     pub(super) fn execute_system_instruction(
         &self,
-        thread: &mut thread::VirtualThread,
+        thread: &mut thread::VmThreadState,
         instr: Instruction,
     ) -> Result<VmStep, VmError> {
         match instr {

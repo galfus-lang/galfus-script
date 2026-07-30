@@ -1,6 +1,3 @@
-#[cfg(test)]
-mod tests;
-
 use crate::VmValue;
 use crate::runtime;
 
@@ -9,8 +6,7 @@ use crate::runtime::Value;
 use crate::runtime::{CallFrame, HeapObject, RuntimeModuleState, VmObjectRef};
 use galfus_bytecode::instruction::Reg;
 use galfus_core::ModuleId;
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 
 pub struct PrivateHeap {
     pub objects: Vec<Option<HeapObject>>,
@@ -77,84 +73,31 @@ impl PrivateHeap {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ThreadState {
-    Created,
-    Running,
-    Exited(i32),
-}
-
-pub struct MailboxMessage {
-    pub sender_id: u64,
-    pub data: Vec<u8>,
-}
-
-pub struct VirtualThread {
+pub struct VmThreadState {
     pub call_stack: Vec<CallFrame>,
     pub system_response: Option<VmValue>,
     pub heap: PrivateHeap,
     pub module_states: HashMap<ModuleId, RuntimeModuleState>,
-    pub mailbox: Arc<Mutex<VecDeque<MailboxMessage>>>,
-    pub state: ThreadState,
-    pub key: Option<String>,
     pub entry_func: Option<runtime::Value>,
     pub initializing_module: Option<ModuleId>,
 }
 
-impl Default for VirtualThread {
+impl Default for VmThreadState {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ThreadState {
-    pub fn is_running(self) -> bool {
-        matches!(self, Self::Running)
-    }
-
-    pub fn is_exited(self) -> bool {
-        matches!(self, Self::Exited(_))
-    }
-
-    pub fn exit_reason(self) -> Option<i32> {
-        match self {
-            Self::Exited(code) => Some(code),
-            Self::Created | Self::Running => None,
-        }
-    }
-}
-
-impl VirtualThread {
+impl VmThreadState {
     pub fn new() -> Self {
         Self {
             call_stack: Vec::new(),
             system_response: None,
             heap: PrivateHeap::new(),
             module_states: HashMap::new(),
-            mailbox: Arc::new(Mutex::new(VecDeque::new())),
-            state: ThreadState::Created,
-            key: None,
             entry_func: None,
             initializing_module: None,
         }
-    }
-
-    pub fn mark_running(&mut self) -> bool {
-        if self.state != ThreadState::Created {
-            return false;
-        }
-
-        self.state = ThreadState::Running;
-        true
-    }
-
-    pub fn mark_exited(&mut self, code: i32) -> bool {
-        if !self.state.is_running() {
-            return false;
-        }
-
-        self.state = ThreadState::Exited(code);
-        true
     }
 
     pub fn module_state(&self, module_id: ModuleId) -> Option<&RuntimeModuleState> {

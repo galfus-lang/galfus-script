@@ -65,7 +65,7 @@ fn globals_with_the_same_index_are_isolated_by_module() {
         vec![node(first, first_module), node(second, second_module)],
     );
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
 
     assert_eq!(
         vm.run_function(&mut thread, first, FuncIdx(0), vec![]),

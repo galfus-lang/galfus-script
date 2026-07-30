@@ -2,7 +2,7 @@
 mod tests;
 
 use crate::registry::ThreadId;
-use galfus_vm::thread::VirtualThread;
+use galfus_vm::thread::VmThreadState;
 use galfus_vm::{Continuation, VmEffect};
 use std::sync::mpsc;
 use std::sync::{
@@ -13,31 +13,36 @@ use std::sync::{
 pub enum RuntimeEvent {
     /// A thread created outside the kernel must be registered on the main thread.
     ThreadSpawned {
-        thread: VirtualThread,
+        thread: VmThreadState,
     },
     /// A thread encountered a VM effect that requires kernel intervention.
     Syscall {
         thread_id: ThreadId,
-        thread: VirtualThread,
+        thread: VmThreadState,
         effect: VmEffect,
         continuation: Continuation,
     },
     /// A thread has completed its execution naturally.
     Exited {
         thread_id: ThreadId,
-        thread: VirtualThread,
+        thread: VmThreadState,
         code: i32,
     },
     /// A module initializer completed and the startup sequence can advance.
     Initialized {
         thread_id: ThreadId,
-        thread: VirtualThread,
+        thread: VmThreadState,
         module_id: galfus_core::ModuleId,
     },
     /// A thread panicked or encountered a fatal error.
     Failed {
         thread_id: ThreadId,
         error: galfus_contract::ExecutionFailure,
+    },
+    /// A thread exhausted its budget and yielded to the kernel.
+    Yielded {
+        thread_id: ThreadId,
+        thread: VmThreadState,
     },
     /// Completes a previously suspended provider effect.
     EffectCompleted {

@@ -94,13 +94,13 @@ fn provider_continuation_rejects_a_result_that_violates_its_declared_type() {
         metadata: None,
     });
     let vm = VirtualMachine::new(std::sync::Arc::new(graph));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![])
         .expect("function is valid");
 
-    let continuation = Continuation::for_provider(Reg(0), module_id, TypeIdx(0));
+    let continuation = Continuation::for_provider(Reg(0), module_id, TypeIdx(0)).with_origin(1);
     let error = vm
-        .resume(&mut thread, continuation.clone(), Value::Bool(true))
+        .resume(1, &mut thread, continuation.clone(), Value::Bool(true))
         .expect_err("bool does not satisfy the declared int64 result type");
     assert_eq!(
         error.kind,
@@ -108,7 +108,7 @@ fn provider_continuation_rejects_a_result_that_violates_its_declared_type() {
     );
 
     let duplicate = vm
-        .resume(&mut thread, continuation, Value::Int64(1))
+        .resume(1, &mut thread, continuation, Value::Int64(1))
         .expect_err("a failed resume attempt consumes the continuation");
     assert_eq!(
         duplicate.kind,
@@ -141,7 +141,7 @@ fn await_future_suspends_and_resumes_through_a_vm_owned_continuation() {
         metadata: None,
     });
     let vm = VirtualMachine::new(std::sync::Arc::new(graph));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![])
         .expect("function is valid");
 
@@ -163,7 +163,7 @@ fn await_future_suspends_and_resumes_through_a_vm_owned_continuation() {
     assert_eq!(effect_module_id, module_id);
     assert_eq!(return_type, TypeIdx(0));
 
-    vm.resume(&mut thread, continuation, Value::Int64(7))
+    vm.resume(1, &mut thread, continuation.with_origin(1), Value::Int64(7))
         .expect("future result resumes the continuation");
     assert!(matches!(
         vm.execute_with_budget(&mut thread, 1),

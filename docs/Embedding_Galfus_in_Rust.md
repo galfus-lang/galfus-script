@@ -1,17 +1,12 @@
 # Embedding Galfus in a Rust Application
 
-Galfus can be embedded at two levels:
+Galfus provides the `galfus-workspace` API to manage, compile, and execute Galfus source code embedded inside a Rust application.
 
-- `galfus-workspace` compiles Galfus source managed by the host.
-- `galfus-runtime` executes an existing `BytecodeGraph`.
-
-Use the workspace API when the host owns source files. Use the runtime API when
-another part of the application already creates and validates bytecode.
+The host application owns the source files and configuration, while `Workspace` manages incremental compilation and persistent execution states.
 
 ## Add dependencies
 
-For source-based embedding, depend on the workspace and contract crates from
-the same Galfus revision:
+Add the Galfus crates to your `Cargo.toml`:
 
 ```toml
 [dependencies]
@@ -20,16 +15,16 @@ galfus-contract = { path = "../galfus-script/crates/galfus-contract" }
 galfus-runtime = { path = "../galfus-script/crates/galfus-runtime" }
 ```
 
-## Compile source with `Workspace`
+## Configure and compile source with `Workspace`
 
-Load configuration and modules, then check and compile them. A source or
-configuration update invalidates later stages, so check and compile again after
-each change.
+Load workspace configuration and source modules, check them for semantic errors, and compile into bytecode.
 
 ```rust
 use galfus_workspace::{LoadResult, Workspace};
 
 let mut workspace = Workspace::new();
+
+// Load workspace configuration defining module target and entry points
 assert!(matches!(
     workspace.load_config(br#"
         [module]
@@ -42,38 +37,38 @@ assert!(matches!(
     "#)?,
     LoadResult::Success
 ));
+
+// Load source modules
 assert!(matches!(
-    workspace.load_module("main.gfs", b"export fn main(args: [[u8]]): i32 { 0 }")?,
+    workspace.load_module("main.gfs", b"export fn main(args: [[u8]]): i32 { return 0 }")?,
     LoadResult::Success
 ));
 
+// Check semantics
 let checked = workspace.check();
 if !checked.is_valid {
-    // Present checked.diagnostics to the application.
+    // Present checked.diagnostics to the application
     return Err("Galfus source is invalid".into());
 }
 
-let compiled = workspace.compile()?;
-let graph = compiled.graph;
+// Compile workspace
+workspace.compile()?;
 ```
 
-The exact source syntax and configuration fields should follow the examples in
-this repository. The important integration boundary is the resulting
-`Arc<BytecodeGraph>`; the runtime does not parse or compile source.
+Updating source modules or configuration invalidates internal compilation state, so call `workspace.check()` and `workspace.compile()` again after any changes.
 
-## Run an execution
+## Start and run an execution
 
-`Runtime::start` creates a persistent `Execution`. The host controls polling,
-timeouts, cancellation, and the driver used to run kernel tasks.
+`workspace.start_execution` resolves the entry module and entry function directly from the workspace configuration and initializes a persistent `Execution`.
 
 ```rust
 use std::rc::Rc;
-
-use galfus_runtime::{CooperativeDriver, Runtime};
+use galfus_runtime::CooperativeDriver;
 
 let driver = Rc::new(CooperativeDriver::new());
-let mut execution = Runtime::new(graph, None)
-    .start(entry_module_id, "main", &[], driver)?;
+
+// Arguments, optional providers, and driver
+let mut execution = workspace.start_execution(&[], None, driver)?;
 
 match execution.run_to_completion() {
     Ok(value) => println!("program returned {value:?}"),
@@ -81,16 +76,17 @@ match execution.run_to_completion() {
 }
 ```
 
-`CooperativeDriver` is a small native driver suitable for simple integrations.
-Applications with an existing event loop should implement `KernelDriver` and
-schedule `KernelTask::Main` on the host main thread and `KernelTask::Any` on a
-compatible worker executor. Main-affine tasks are intentionally not `Send`.
+For simple executions that do not require explicit handle management during execution, `workspace.run` is a convenience wrapper:
+
+```rust
+workspace.run(&[], None, driver)?;
+```
+
+`CooperativeDriver` is a minimal native driver suitable for simple host integrations. For applications with an existing event loop, implement `KernelDriver` to schedule main-thread vs worker-thread kernel tasks.
 
 ## Add host capabilities
 
-Galfus source reaches host functionality through `HostProvider`. The provider
-can complete immediately or retain the injector and complete later. It must not
-mutate runtime state directly; use the supplied injector instead.
+Galfus source accesses native host capabilities through `HostProvider`. Providers process requests dispatched by Galfus code using a `MessageInjector`.
 
 ```rust
 use std::sync::Arc;
@@ -118,43 +114,29 @@ impl HostProvider for Host {
 }
 
 let providers = Providers::with_host(Box::new(Host));
-let runtime = Runtime::new(graph, Some(providers));
+let mut execution = workspace.start_execution(&[], Some(providers), driver)?;
 ```
 
-Providers default to main-thread affinity. Return `TaskAffinity::Any` only when
-the provider can safely run on the driver's worker lane. If no provider is
-configured, programs that do not make native calls can still run; a reached
-native call fails with `ExecutionFailureKind::MissingProvider`.
+Host providers default to main-thread affinity (`TaskAffinity::Main`). Override `HostProvider::affinity` to return `TaskAffinity::Any` only when the provider can safely run on worker executor lanes.
 
 ## Cancellation and external completion
 
-`Execution::cancel` requests shutdown of the entire execution. An
-`ExecutionHandle` can be retained by host callbacks to cancel a thread, cancel
-the execution, or resolve a pending request/future. Completion after a request
-has been cancelled is ignored by the orchestrator.
+`Execution::cancel` requests shutdown of the entire execution. Host callbacks can retain an `ExecutionHandle` to cancel threads, cancel execution, or resolve pending requests asynchronously.
 
 ```rust
 let handle = execution.handle();
 handle.cancel();
-// Or, from a host callback:
+// Or from a host callback:
 // handle.resolve_request(thread_id, request_id, Ok(BoundaryValue::Null));
 ```
 
-The future completion APIs and `AwaitFuture` bytecode are runtime preparation
-for future asynchronous language support. The Galfus compiler does not yet emit
-that instruction from source.
-
-## Adapters and handles
-
-`Adapters` is an optional registry for typed host adapters. An adapter declares
-its affinity, dispatches calls through `MessageInjector`, can observe
-cancellation, and may own nominal external handles. The current compiler does
-not emit adapter calls from Galfus source, so this API is intended for hosts
-that construct compatible bytecode directly or are preparing an integration.
-
 ## Error handling
 
-`ExecutionFailure` is structured. Inspect `kind`, IDs, `stack`, and `cause`
-instead of parsing its display text. The VM and runtime preserve asynchronous
-call frames where they are available. Source spans remain optional bytecode
-metadata and are not currently exposed as a field on `ExecutionFailure`.
+Errors during loading, checking, compiling, and running are structured:
+
+- `workspace.check()` provides diagnostic messages via `checked.diagnostics`.
+- `workspace.compile()` returns `Result<CompileReport, CompileBlocked>`.
+- `workspace.start_execution()` returns `Result<Execution, RunBlocked>`.
+- `execution.run_to_completion()` returns `Result<BoundaryValue, ExecutionFailure>`.
+
+Inspect the fields of `ExecutionFailure` (`kind`, IDs, `stack`, `cause`) for structured error diagnosis.

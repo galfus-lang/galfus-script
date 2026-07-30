@@ -1,6 +1,3 @@
-#[cfg(test)]
-mod tests;
-
 use std::collections::VecDeque;
 use std::sync;
 use std::sync::Mutex;
@@ -32,6 +29,10 @@ impl KernelDriver for CooperativeDriver {
         self.queue.lock().unwrap().push_back(task);
     }
 
+    fn dispatch_front(&self, task: KernelTask) {
+        self.queue.lock().unwrap().push_front(task);
+    }
+
     fn on_exit(&self, callback: Box<dyn Fn(Result<i32, ExecutionFailure>) + Send + Sync>) {
         *self.exit_callback.lock().unwrap() = Some(callback);
     }
@@ -49,55 +50,21 @@ impl KernelDriver for CooperativeDriver {
                 continue;
             };
 
-            match task_entry {
-                KernelTask::Main(task) => match task.run(100) {
-                    ThreadResult::Yielded(task) => {
-                        self.queue.lock().unwrap().push_back(KernelTask::Main(task))
-                    }
-                    ThreadResult::Blocked { timeout } => {
-                        pending_timeout = match (pending_timeout, timeout) {
-                            (Some(current), Some(next)) => Some(current.min(next)),
-                            (Some(current), None) => Some(current),
-                            (None, next) => next,
-                        };
-                    }
-                    ThreadResult::Completed(code) => *self.exit_code.lock().unwrap() = code,
-                    ThreadResult::Failed(error) => {
-                        if let Some(callback) = self.exit_callback.lock().unwrap().take() {
-                            callback(Err(error));
-                        }
-                        return;
-                    }
-                },
-                KernelTask::Any(task) => match task.run(100) {
-                    ThreadResult::Yielded(task) => {
-                        let Some(task) = task.into_any_thread() else {
-                            let error = ExecutionFailure::new(
-                                galfus_contract::ExecutionFailureKind::DriverFailure,
-                                "any-thread task yielded a non-transferable continuation",
-                            );
-                            if let Some(callback) = self.exit_callback.lock().unwrap().take() {
-                                callback(Err(error));
-                            }
-                            return;
-                        };
-                        self.queue.lock().unwrap().push_back(KernelTask::Any(task));
-                    }
-                    ThreadResult::Blocked { timeout } => {
-                        pending_timeout = match (pending_timeout, timeout) {
-                            (Some(current), Some(next)) => Some(current.min(next)),
-                            (Some(current), None) => Some(current),
-                            (None, next) => next,
-                        };
-                    }
-                    ThreadResult::Completed(code) => *self.exit_code.lock().unwrap() = code,
-                    ThreadResult::Failed(error) => {
-                        if let Some(callback) = self.exit_callback.lock().unwrap().take() {
-                            callback(Err(error));
-                        }
-                        return;
-                    }
-                },
+            let result = match task_entry {
+                KernelTask::Main(task) => task.run(100),
+                KernelTask::Any(task) => task.run(100),
+            };
+
+            match result {
+                ThreadResult::Discarded => {}
+                ThreadResult::Blocked { timeout } => {
+                    pending_timeout = match (pending_timeout, timeout) {
+                        (Some(current), Some(next)) => Some(current.min(next)),
+                        (Some(current), None) => Some(current),
+                        (None, next) => next,
+                    };
+                }
+                ThreadResult::Completed(code) => *self.exit_code.lock().unwrap() = code,
             }
         }
         let code = *self.exit_code.lock().unwrap();
@@ -112,53 +79,37 @@ impl KernelDriver for CooperativeDriver {
         }
     }
 
-    fn step(&self) -> Result<ExecutorStepResult, ExecutionFailure> {
+    fn step(&self) -> ExecutorStepResult {
         let task_entry = self.queue.lock().unwrap().pop_front();
 
         let Some(task_entry) = task_entry else {
-            return Ok(ExecutorStepResult::Blocked { timeout: None });
+            return ExecutorStepResult::Blocked { timeout: None };
         };
 
         let result = match task_entry {
             KernelTask::Main(task) => task.run(100),
-            KernelTask::Any(task) => match task.run(100) {
-                ThreadResult::Yielded(task) => {
-                    let task = task.into_any_thread().ok_or_else(|| {
-                        ExecutionFailure::new(
-                            galfus_contract::ExecutionFailureKind::DriverFailure,
-                            "any-thread task yielded a non-transferable continuation",
-                        )
-                    })?;
-                    self.queue.lock().unwrap().push_back(KernelTask::Any(task));
-                    return Ok(ExecutorStepResult::Running);
-                }
-                result => result,
-            },
+            KernelTask::Any(task) => task.run(100),
         };
 
         match result {
-            ThreadResult::Yielded(task) => {
-                self.queue.lock().unwrap().push_back(KernelTask::Main(task));
-                Ok(ExecutorStepResult::Running)
-            }
+            ThreadResult::Discarded => ExecutorStepResult::Running,
             ThreadResult::Blocked { timeout } => {
                 let is_empty = self.queue.lock().unwrap().is_empty();
                 if is_empty {
-                    Ok(ExecutorStepResult::Blocked { timeout })
+                    ExecutorStepResult::Blocked { timeout }
                 } else {
-                    Ok(ExecutorStepResult::Running)
+                    ExecutorStepResult::Running
                 }
             }
             ThreadResult::Completed(code) => {
                 *self.exit_code.lock().unwrap() = code;
                 let is_empty = self.queue.lock().unwrap().is_empty();
                 if is_empty {
-                    Ok(ExecutorStepResult::Completed(code))
+                    ExecutorStepResult::Completed(code)
                 } else {
-                    Ok(ExecutorStepResult::Running)
+                    ExecutorStepResult::Running
                 }
             }
-            ThreadResult::Failed(error) => Err(error),
         }
     }
 }

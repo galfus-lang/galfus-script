@@ -106,7 +106,7 @@ impl VirtualMachine {
 
     pub(super) fn check_value_type(
         &self,
-        thread: &thread::VirtualThread,
+        thread: &thread::VmThreadState,
         val: &Value,
         expected_ty: TypeIdx,
     ) -> bool {
@@ -231,7 +231,7 @@ impl VirtualMachine {
 
     fn type_idx_matches(
         &self,
-        thread: &thread::VirtualThread,
+        thread: &thread::VmThreadState,
         actual: TypeIdx,
         expected: TypeIdx,
     ) -> bool {
@@ -240,7 +240,7 @@ impl VirtualMachine {
 
     fn type_idx_matches_inner(
         &self,
-        thread: &thread::VirtualThread,
+        thread: &thread::VmThreadState,
         actual: TypeIdx,
         expected: TypeIdx,
         seen: &mut collections::HashSet<(u16, u16)>,
