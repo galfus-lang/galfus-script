@@ -4,6 +4,9 @@ Previous: [Decorators and Keyword Metadata](./14-decorators-and-keyword-metadata
 
 # 15. Lowering and Runtime Semantics
 
+> **Status note:** `.gfp` proxy descriptors and distribution behavior mentioned
+> here are planned; they are not implemented by the current workspace.
+
 This document defines how validated Galfus source semantics lower into the
 current in-memory runtime representation. Bundle generation is planned and is
 not part of the implemented pipeline.

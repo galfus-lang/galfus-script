@@ -4,6 +4,10 @@ Previous: [Reserved Words and Lexical Rules](./01-reserved-words-and-lexical-rul
 
 # 2. Source, Names and Modules
 
+> **Status note:** `.gfs` source modules are implemented. References to `.gfp`
+> proxy modules describe planned tooling and are not accepted by the current
+> workspace loader.
+
 This document defines source files, top-level declarations, imports, exports, module addresses, names, and visibility.
 
 ## 2.1 Source Files
