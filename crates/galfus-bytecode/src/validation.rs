@@ -581,6 +581,15 @@ pub fn validate_bytecode_module(
                         check_reg(Reg(args_start.raw() + arg_count as u16 - 1), &mut errors);
                     }
                 }
+                Instruction::AwaitFuture {
+                    dest,
+                    future_id,
+                    return_type,
+                } => {
+                    check_reg(dest, &mut errors);
+                    check_reg(future_id, &mut errors);
+                    check_type(return_type, &mut errors);
+                }
                 Instruction::Len { dest, src } => {
                     check_reg(dest, &mut errors);
                     check_reg(src, &mut errors);

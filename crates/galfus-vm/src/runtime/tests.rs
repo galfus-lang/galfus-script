@@ -115,3 +115,61 @@ fn provider_continuation_rejects_a_result_that_violates_its_declared_type() {
         galfus_contract::ExecutionFailureKind::DuplicateCompletion
     );
 }
+
+#[test]
+fn await_future_suspends_and_resumes_through_a_vm_owned_continuation() {
+    let module_id = galfus_core::ModuleId::new(1);
+    let graph = graph_with_node(BytecodeNode {
+        id: module_id,
+        path: galfus_core::ModulePath::new("test.gfs").expect("valid module path"),
+        semantic_revision: galfus_core::SemanticRevision::new(0),
+        module: create_test_module(
+            vec![
+                Instruction::LoadConst {
+                    dest: Reg(0),
+                    const_idx: ConstIdx(0),
+                },
+                Instruction::AwaitFuture {
+                    dest: Reg(1),
+                    future_id: Reg(0),
+                    return_type: TypeIdx(0),
+                },
+                Instruction::Ret { src: Reg(1) },
+            ],
+            vec![Constant::Int64(42)],
+        ),
+        metadata: None,
+    });
+    let vm = VirtualMachine::new(std::sync::Arc::new(graph));
+    let mut thread = thread::VirtualThread::new();
+    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![])
+        .expect("function is valid");
+
+    let VmStep::Suspend {
+        effect:
+            VmEffect::FutureWait {
+                future_id,
+                module_id: effect_module_id,
+                return_type,
+            },
+        continuation,
+    } = vm
+        .execute_with_budget(&mut thread, 2)
+        .expect("await reaches the suspension point")
+    else {
+        panic!("await instruction must suspend as a future effect");
+    };
+    assert_eq!(future_id, 42);
+    assert_eq!(effect_module_id, module_id);
+    assert_eq!(return_type, TypeIdx(0));
+
+    vm.resume(&mut thread, continuation, Value::Int64(7))
+        .expect("future result resumes the continuation");
+    assert!(matches!(
+        vm.execute_with_budget(&mut thread, 1),
+        Ok(VmStep::Return {
+            value: Value::Int64(7),
+            ..
+        })
+    ));
+}

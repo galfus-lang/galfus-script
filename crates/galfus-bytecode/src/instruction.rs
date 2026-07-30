@@ -367,6 +367,11 @@ pub enum Instruction {
         arg_types: Vec<TypeIdx>,
         return_type: TypeIdx,
     },
+    AwaitFuture {
+        dest: Reg,
+        future_id: Reg,
+        return_type: TypeIdx,
+    },
     Len {
         dest: Reg,
         src: Reg,

@@ -87,6 +87,9 @@ impl Execution {
     }
 
     pub fn poll(&mut self, budget: usize) -> Result<ExecutorStepResult, ExecutionFailure> {
+        if matches!(self.state, ExecutionState::Cancelling) {
+            self.state = ExecutionState::ShuttingDown;
+        }
         if matches!(self.state, ExecutionState::Created) {
             self.state = ExecutionState::Running;
         }
@@ -171,7 +174,10 @@ impl Execution {
     pub fn cancel(&mut self) {
         if matches!(
             self.state,
-            ExecutionState::Created | ExecutionState::Running | ExecutionState::Waiting
+            ExecutionState::Created
+                | ExecutionState::Initializing
+                | ExecutionState::Running
+                | ExecutionState::Waiting
         ) {
             self.sink.send(RuntimeEvent::CancelExecution);
             self.state = ExecutionState::Cancelling;
@@ -212,6 +218,22 @@ impl ExecutionHandle {
         self.sink.send(RuntimeEvent::EffectCompleted {
             thread_id,
             request_id,
+            result,
+        });
+    }
+
+    pub fn resolve_future(
+        &self,
+        thread_id: usize,
+        future_id: u64,
+        result: Result<BoundaryValue, ExecutionFailure>,
+    ) {
+        let Some(thread_id) = crate::registry::ThreadId::from_raw(thread_id as u64) else {
+            return;
+        };
+        self.sink.send(RuntimeEvent::FutureCompleted {
+            thread_id,
+            future_id,
             result,
         });
     }

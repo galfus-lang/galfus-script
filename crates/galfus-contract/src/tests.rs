@@ -103,6 +103,44 @@ fn execution_failures_preserve_asynchronous_frames() {
     assert_eq!(failure.stack, stack);
 }
 
+struct CancellationRecordingAdapter(std::sync::Arc<std::sync::atomic::AtomicU64>);
+
+impl HostAdapter for CancellationRecordingAdapter {
+    fn dispatch(
+        &mut self,
+        _thread_id: usize,
+        _request_id: u64,
+        _args: &[BoundaryValue],
+        _injector: std::sync::Arc<dyn MessageInjector>,
+    ) {
+    }
+
+    fn cancel(&mut self, thread_id: usize, request_id: u64) {
+        self.0.store(
+            ((thread_id as u64) << 32) | request_id,
+            std::sync::atomic::Ordering::Release,
+        );
+    }
+}
+
+#[test]
+fn adapters_route_cancellation_to_the_owning_symbol() {
+    let cancellation = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let mut adapters = Adapters::default();
+    adapters.register(
+        "io",
+        "read",
+        Box::new(CancellationRecordingAdapter(cancellation.clone())),
+    );
+
+    adapters.cancel("io", "read", 3, 4);
+
+    assert_eq!(
+        cancellation.load(std::sync::atomic::Ordering::Acquire),
+        (3_u64 << 32) | 4
+    );
+}
+
 struct MainThreadOnlyTask(Rc<()>);
 
 impl RunnableTask for MainThreadOnlyTask {

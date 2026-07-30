@@ -45,6 +45,12 @@ pub enum RuntimeEvent {
         request_id: u64,
         result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
     },
+    /// Completes a previously suspended future effect.
+    FutureCompleted {
+        thread_id: ThreadId,
+        future_id: u64,
+        result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
+    },
     /// Advances the virtual clock for blocked threads.
     Tick {
         delta_ms: u64,

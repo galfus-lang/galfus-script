@@ -573,6 +573,7 @@ impl VirtualMachine {
 
             Instruction::Drop { .. }
             | Instruction::CallNative { .. }
+            | Instruction::AwaitFuture { .. }
             | Instruction::Len { .. }
             | Instruction::CopyArray { .. } => self.execute_system_instruction(thread, instr)?,
         };

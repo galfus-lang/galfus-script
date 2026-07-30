@@ -53,6 +53,37 @@ impl VirtualMachine {
                     continuation: Continuation::for_provider(dest, module_id, return_type),
                 });
             }
+            Instruction::AwaitFuture {
+                dest,
+                future_id,
+                return_type,
+            } => {
+                let future_id = match thread.read_reg(future_id)? {
+                    Value::Uint64(id) => id,
+                    Value::Uint32(id) => id.into(),
+                    Value::Int64(id) if id >= 0 => id as u64,
+                    Value::Int32(id) if id >= 0 => id as u64,
+                    value => {
+                        return Err(VmError::TypeMismatch {
+                            expected: "non-negative future ID".to_string(),
+                            found: format!("{value:?}"),
+                        });
+                    }
+                };
+                let module_id = thread
+                    .call_stack
+                    .last()
+                    .ok_or(VmError::EmptyCallStack)?
+                    .module_id;
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::FutureWait {
+                        future_id,
+                        module_id,
+                        return_type,
+                    },
+                    continuation: Continuation::for_provider(dest, module_id, return_type),
+                });
+            }
             Instruction::Len { dest, src } => {
                 let val = thread.read_reg(src)?;
                 if let Value::Object(obj_ref) = val {

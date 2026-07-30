@@ -43,6 +43,7 @@ fn provider_dispatch_task(called: Arc<AtomicBool>) -> ProviderDispatchTask {
         name: "operation".to_string(),
         args: vec![],
         injector: Arc::new(NoopInjector),
+        active: Arc::new(AtomicBool::new(true)),
     }
 }
 
@@ -61,6 +62,16 @@ fn provider_dispatch_tasks_use_the_declared_driver_lane() {
         task.into_kernel_task(TaskAffinity::Any),
         KernelTask::Any(_)
     ));
+}
+
+#[test]
+fn cancelled_provider_dispatch_tasks_do_not_start_external_work() {
+    let called = Arc::new(AtomicBool::new(false));
+    let task = provider_dispatch_task(called.clone());
+    task.active.store(false, Ordering::Release);
+
+    assert!(matches!(Box::new(task).run(1), ThreadResult::Completed(0)));
+    assert!(!called.load(Ordering::Acquire));
 }
 
 #[test]
@@ -173,4 +184,5 @@ fn late_provider_completions_after_thread_cancellation_are_ignored() {
     assert_eq!(orchestrator.kernel(token).active_count(), 0);
     assert!(orchestrator.failure.is_none());
     assert!(orchestrator.pending_continuations.is_empty());
+    assert_eq!(orchestrator.late_completion_count(), 2);
 }

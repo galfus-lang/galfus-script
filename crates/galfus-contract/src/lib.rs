@@ -142,6 +142,11 @@ impl ExecutionFailure {
         self
     }
 
+    pub fn with_future_id(mut self, future_id: u64) -> Self {
+        self.future_id = Some(future_id);
+        self
+    }
+
     pub fn with_cause(mut self, cause: ExecutionFailure) -> Self {
         self.cause = Some(Box::new(cause));
         self
@@ -235,6 +240,13 @@ impl Adapters {
             .entries
             .get_mut(&(module.to_string(), symbol.to_string()))?;
         Some(&mut **adapter)
+    }
+
+    /// Notifies the owning adapter that a request no longer has an execution owner.
+    pub fn cancel(&mut self, module: &str, symbol: &str, thread_id: usize, request_id: u64) {
+        if let Some(adapter) = self.get_mut(module, symbol) {
+            adapter.cancel(thread_id, request_id);
+        }
     }
 
     pub fn register_handle(

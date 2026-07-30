@@ -26,7 +26,29 @@ struct PendingContinuation {
     return_type: galfus_bytecode::instruction::TypeIdx,
     request_id: u64,
     stack: Vec<galfus_contract::ExecutionFrame>,
+    operation: PendingOperation,
+    active: Arc<AtomicBool>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum PendingKey {
+    Request(u64),
+    Future(u64),
+}
+
+enum PendingOperation {
+    Provider,
+    Adapter { module: String, symbol: String },
+    Future,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LateCompletion {
+    thread_id: crate::registry::ThreadId,
+    request_id: u64,
+}
+
+const MAX_LATE_COMPLETIONS: usize = 64;
 
 struct ProviderDispatchTask {
     providers: Arc<std::sync::Mutex<galfus_contract::Providers>>,
@@ -35,6 +57,7 @@ struct ProviderDispatchTask {
     name: String,
     args: Vec<BoundaryValue>,
     injector: Arc<dyn MessageInjector>,
+    active: Arc<AtomicBool>,
 }
 
 struct AdapterDispatchTask {
@@ -45,10 +68,14 @@ struct AdapterDispatchTask {
     symbol: String,
     args: Vec<BoundaryValue>,
     injector: Arc<dyn MessageInjector>,
+    active: Arc<AtomicBool>,
 }
 
 impl RunnableTask for AdapterDispatchTask {
     fn run(self: Box<Self>, _budget: usize) -> ThreadResult {
+        if !self.active.load(Ordering::Acquire) {
+            return ThreadResult::Completed(0);
+        }
         let mut adapters = self.adapters.lock().unwrap();
         let Some(adapter) = adapters.get_mut(&self.module, &self.symbol) else {
             self.injector.inject_system_response(
@@ -85,6 +112,9 @@ impl ProviderDispatchTask {
 
 impl RunnableTask for ProviderDispatchTask {
     fn run(self: Box<Self>, _budget: usize) -> ThreadResult {
+        if !self.active.load(Ordering::Acquire) {
+            return ThreadResult::Completed(0);
+        }
         let mut providers = self.providers.lock().unwrap();
         let Some(host) = providers.host_mut() else {
             self.injector.inject_system_response(
@@ -158,11 +188,13 @@ pub(crate) struct Orchestrator {
     main_thread_id: ThreadId,
     _not_send_sync: PhantomData<Rc<()>>,
     failure: Option<galfus_contract::ExecutionFailure>,
-    pending_continuations: HashMap<u64, PendingContinuation>,
+    pending_continuations: HashMap<PendingKey, PendingContinuation>,
     startup_plans: HashMap<crate::registry::ThreadId, StartupPlan>,
     next_request_id: u64,
     adapters: Option<Arc<std::sync::Mutex<galfus_contract::Adapters>>>,
     initialization_complete: Arc<AtomicBool>,
+    shutting_down: bool,
+    late_completions: VecDeque<LateCompletion>,
 }
 
 impl Orchestrator {
@@ -182,6 +214,8 @@ impl Orchestrator {
             next_request_id: 1,
             adapters: None,
             initialization_complete: Arc::new(AtomicBool::new(true)),
+            shutting_down: false,
+            late_completions: VecDeque::new(),
         }
     }
 
@@ -320,39 +354,157 @@ impl Orchestrator {
         }
     }
 
-    fn cancel_pending_continuation(&mut self, thread_id: crate::registry::ThreadId) {
-        let request_id = self
+    fn cancel_pending_continuations(&mut self, thread_id: crate::registry::ThreadId) {
+        let mut request_ids = self
             .pending_continuations
             .iter()
-            .find_map(|(&request_id, pending)| {
-                (pending.thread_id == thread_id).then_some(request_id)
-            });
-        let Some(request_id) = request_id else {
-            return;
-        };
-        let Some(pending) = self.pending_continuations.remove(&request_id) else {
-            return;
-        };
-        let Some(vm) = self.vm.as_ref() else {
-            return;
-        };
-        let Some(providers) = vm.providers() else {
-            return;
-        };
-        let mut providers = providers.lock().unwrap();
-        if let Some(host) = providers.host_mut() {
-            host.cancel(thread_id.raw() as usize, pending.request_id);
+            .filter_map(|(&key, pending)| (pending.thread_id == thread_id).then_some(key))
+            .collect::<Vec<_>>();
+        request_ids.sort_unstable();
+        for key in request_ids {
+            let Some(pending) = self.pending_continuations.remove(&key) else {
+                continue;
+            };
+            pending.active.store(false, Ordering::Release);
+            match pending.operation {
+                PendingOperation::Provider => {
+                    let Some(vm) = self.vm.as_ref() else {
+                        continue;
+                    };
+                    let Some(providers) = vm.providers() else {
+                        continue;
+                    };
+                    let mut providers = providers.lock().unwrap();
+                    if let Some(host) = providers.host_mut() {
+                        host.cancel(thread_id.raw() as usize, pending.request_id);
+                    }
+                }
+                PendingOperation::Adapter { module, symbol } => {
+                    if let Some(adapters) = &self.adapters {
+                        adapters.lock().unwrap().cancel(
+                            &module,
+                            &symbol,
+                            thread_id.raw() as usize,
+                            pending.request_id,
+                        );
+                    }
+                }
+                PendingOperation::Future => {}
+            }
         }
     }
 
     fn cancel_all_pending_continuations(&mut self) {
-        let thread_ids = self
+        let mut thread_ids = self
             .pending_continuations
             .values()
             .map(|pending| pending.thread_id)
             .collect::<Vec<_>>();
+        thread_ids.sort_unstable_by_key(|thread_id| thread_id.raw());
+        thread_ids.dedup();
         for thread_id in thread_ids {
-            self.cancel_pending_continuation(thread_id);
+            self.cancel_pending_continuations(thread_id);
+        }
+    }
+
+    fn record_late_completion(&mut self, thread_id: crate::registry::ThreadId, request_id: u64) {
+        if self.late_completions.len() == MAX_LATE_COMPLETIONS {
+            self.late_completions.pop_front();
+        }
+        self.late_completions.push_back(LateCompletion {
+            thread_id,
+            request_id,
+        });
+    }
+
+    #[cfg(test)]
+    fn late_completion_count(&self) -> usize {
+        self.late_completions.len()
+    }
+
+    fn complete_pending(
+        &mut self,
+        thread_id: crate::registry::ThreadId,
+        key: PendingKey,
+        result: Result<BoundaryValue, ExecutionFailure>,
+    ) {
+        let Some(pending) = self.pending_continuations.remove(&key) else {
+            let id = match key {
+                PendingKey::Request(id) | PendingKey::Future(id) => id,
+            };
+            self.record_late_completion(thread_id, id);
+            return;
+        };
+        if pending.thread_id != thread_id {
+            self.pending_continuations.insert(key, pending);
+            let id = match key {
+                PendingKey::Request(id) | PendingKey::Future(id) => id,
+            };
+            self.record_late_completion(thread_id, id);
+            return;
+        }
+        let Some(mut thread) = self.kernel.take_thread(thread_id) else {
+            return;
+        };
+        let vm = self
+            .vm
+            .as_ref()
+            .expect("VM is configured before execution")
+            .clone();
+        let with_pending_id = |failure: ExecutionFailure| match key {
+            PendingKey::Request(request_id) => failure.with_request_id(request_id),
+            PendingKey::Future(future_id) => failure.with_future_id(future_id),
+        };
+        match result {
+            Ok(value) => {
+                let module = &vm
+                    .graph
+                    .get(pending.module_id)
+                    .expect("asynchronous call module is loaded")
+                    .module;
+                let value = match crate::task::encode_into_thread_heap(
+                    &mut thread.heap,
+                    value,
+                    pending.return_type,
+                    pending.module_id,
+                    module,
+                ) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        self.failure = Some(
+                            with_pending_id(ExecutionFailure::new(
+                                ExecutionFailureKind::BoundaryCodecFailure,
+                                format!("invalid asynchronous result: {error:?}"),
+                            ))
+                            .with_thread_id(thread_id.raw())
+                            .with_module_id(pending.module_id.raw().into())
+                            .with_stack(pending.stack.clone()),
+                        );
+                        self.kernel.cancel(thread_id);
+                        return;
+                    }
+                };
+                self.resume_or_fail(thread_id, thread, pending.continuation, value);
+            }
+            Err(error) => {
+                let error = with_execution_stack(
+                    with_pending_id(error)
+                        .with_thread_id(thread_id.raw())
+                        .with_module_id(pending.module_id.raw().into()),
+                    pending.stack,
+                );
+                self.failure = Some(match thread.initializing_module() {
+                    Some(initializing_module_id) => ExecutionFailure::new(
+                        ExecutionFailureKind::InitializationFailure,
+                        "module initializer asynchronous request failed",
+                    )
+                    .with_thread_id(thread_id.raw())
+                    .with_module_id(initializing_module_id.raw().into())
+                    .with_cause(error),
+                    None => error,
+                });
+                self.kernel.cancel(thread_id);
+            }
         }
     }
 
@@ -409,7 +561,7 @@ impl Orchestrator {
                 } => self.advance_startup(thread_id, thread, module_id),
                 RuntimeEvent::Failed { thread_id, error } => {
                     self.failure = Some(error.with_thread_id(thread_id.raw()));
-                    self.cancel_pending_continuation(thread_id);
+                    self.cancel_pending_continuations(thread_id);
                     self.startup_plans.remove(&thread_id);
                     self.kernel.cancel(thread_id);
                 }
@@ -417,73 +569,17 @@ impl Orchestrator {
                     thread_id,
                     request_id,
                     result,
-                } => {
-                    let Some(pending) = self.pending_continuations.remove(&request_id) else {
-                        continue;
-                    };
-                    if pending.thread_id != thread_id {
-                        self.pending_continuations.insert(request_id, pending);
-                        continue;
-                    }
-                    if let Some(mut thread) = self.kernel.take_thread(thread_id) {
-                        let vm = self
-                            .vm
-                            .as_ref()
-                            .expect("VM is configured before execution")
-                            .clone();
-                        match result {
-                            Ok(value) => {
-                                let module = &vm
-                                    .graph
-                                    .get(pending.module_id)
-                                    .expect("provider call module is loaded")
-                                    .module;
-                                let value = match crate::task::encode_into_thread_heap(
-                                    &mut thread.heap,
-                                    value,
-                                    pending.return_type,
-                                    pending.module_id,
-                                    module,
-                                ) {
-                                    Ok(value) => value,
-                                    Err(error) => {
-                                        self.failure = Some(galfus_contract::ExecutionFailure::new(
-                                            galfus_contract::ExecutionFailureKind::BoundaryCodecFailure,
-                                            format!("invalid provider result: {error:?}"),
-                                        ).with_thread_id(thread_id.raw()).with_request_id(pending.request_id).with_module_id(pending.module_id.raw().into()).with_stack(pending.stack.clone()));
-                                        self.kernel.cancel(thread_id);
-                                        continue;
-                                    }
-                                };
-                                self.resume_or_fail(thread_id, thread, pending.continuation, value);
-                            }
-                            Err(error) => {
-                                let error = with_execution_stack(
-                                    error
-                                        .with_thread_id(thread_id.raw())
-                                        .with_request_id(pending.request_id)
-                                        .with_module_id(pending.module_id.raw().into()),
-                                    pending.stack,
-                                );
-                                self.failure = Some(match thread.initializing_module() {
-                                    Some(initializing_module_id) => ExecutionFailure::new(
-                                        ExecutionFailureKind::InitializationFailure,
-                                        "module initializer provider request failed",
-                                    )
-                                    .with_thread_id(thread_id.raw())
-                                    .with_module_id(initializing_module_id.raw().into())
-                                    .with_cause(error),
-                                    None => error,
-                                });
-                                self.kernel.cancel(thread_id);
-                            }
-                        }
-                    }
-                }
+                } => self.complete_pending(thread_id, PendingKey::Request(request_id), result),
+                RuntimeEvent::FutureCompleted {
+                    thread_id,
+                    future_id,
+                    result,
+                } => self.complete_pending(thread_id, PendingKey::Future(future_id), result),
                 RuntimeEvent::Tick { delta_ms } => {
                     self.kernel.tick(delta_ms);
                 }
                 RuntimeEvent::CancelExecution => {
+                    self.shutting_down = true;
                     self.cancel_all_pending_continuations();
                     self.startup_plans.clear();
                     self.kernel.cancel_all();
@@ -491,6 +587,9 @@ impl Orchestrator {
                         galfus_contract::ExecutionFailureKind::Cancelled,
                         "execution cancelled",
                     ));
+                }
+                RuntimeEvent::Syscall { thread_id, .. } if self.shutting_down => {
+                    self.kernel.cancel(thread_id);
                 }
                 RuntimeEvent::Syscall {
                     thread_id,
@@ -572,8 +671,9 @@ impl Orchestrator {
                         };
                         let request_id = self.next_request_id;
                         self.next_request_id += 1;
+                        let active = Arc::new(AtomicBool::new(true));
                         self.pending_continuations.insert(
-                            request_id,
+                            PendingKey::Request(request_id),
                             PendingContinuation {
                                 thread_id,
                                 continuation,
@@ -581,6 +681,8 @@ impl Orchestrator {
                                 return_type,
                                 request_id,
                                 stack,
+                                operation: PendingOperation::Provider,
+                                active: active.clone(),
                             },
                         );
                         let injector = Arc::new(crate::ExecutionHandle::new(self.sink.clone()));
@@ -592,6 +694,7 @@ impl Orchestrator {
                             name,
                             args,
                             injector,
+                            active,
                         };
                         self.driver
                             .as_ref()
@@ -705,8 +808,9 @@ impl Orchestrator {
                         };
                         let request_id = self.next_request_id;
                         self.next_request_id += 1;
+                        let active = Arc::new(AtomicBool::new(true));
                         self.pending_continuations.insert(
-                            request_id,
+                            PendingKey::Request(request_id),
                             PendingContinuation {
                                 thread_id,
                                 continuation,
@@ -714,6 +818,11 @@ impl Orchestrator {
                                 return_type,
                                 request_id,
                                 stack,
+                                operation: PendingOperation::Adapter {
+                                    module: adapter.clone(),
+                                    symbol: symbol.clone(),
+                                },
+                                active: active.clone(),
                             },
                         );
                         self.kernel.block(thread_id, thread, None);
@@ -725,6 +834,7 @@ impl Orchestrator {
                             symbol,
                             args,
                             injector: Arc::new(crate::ExecutionHandle::new(self.sink.clone())),
+                            active,
                         };
                         self.driver.as_ref().unwrap().dispatch(match affinity {
                             TaskAffinity::Main => KernelTask::Main(Box::new(task)),
@@ -735,16 +845,39 @@ impl Orchestrator {
                     galfus_vm::VmEffect::TimerWait { delay_ms } => {
                         self.kernel.block(thread_id, thread, Some(delay_ms));
                     }
-                    galfus_vm::VmEffect::FutureWait { .. } => {
-                        self.failure = Some(
-                            ExecutionFailure::new(
-                                ExecutionFailureKind::InternalRuntimeFailure,
-                                "future waits require a future registry",
-                            )
-                            .with_thread_id(thread_id.raw())
-                            .with_stack(execution_stack(&thread)),
+                    galfus_vm::VmEffect::FutureWait {
+                        future_id,
+                        module_id,
+                        return_type,
+                    } => {
+                        let key = PendingKey::Future(future_id);
+                        if self.pending_continuations.contains_key(&key) {
+                            self.failure = Some(
+                                ExecutionFailure::new(
+                                    ExecutionFailureKind::InvalidContinuation,
+                                    "future is already awaited",
+                                )
+                                .with_thread_id(thread_id.raw())
+                                .with_future_id(future_id)
+                                .with_stack(execution_stack(&thread)),
+                            );
+                            self.kernel.cancel(thread_id);
+                            continue;
+                        }
+                        self.pending_continuations.insert(
+                            key,
+                            PendingContinuation {
+                                thread_id,
+                                continuation,
+                                module_id,
+                                return_type,
+                                request_id: future_id,
+                                stack: execution_stack(&thread),
+                                operation: PendingOperation::Future,
+                                active: Arc::new(AtomicBool::new(true)),
+                            },
                         );
-                        self.kernel.cancel(thread_id);
+                        self.kernel.block(thread_id, thread, None);
                     }
                     galfus_vm::VmEffect::ReceiveFilter {
                         sender_id: _,
@@ -882,7 +1015,7 @@ impl Orchestrator {
                     }
                 },
                 RuntimeEvent::CancelThread { thread_id } => {
-                    self.cancel_pending_continuation(thread_id);
+                    self.cancel_pending_continuations(thread_id);
                     self.startup_plans.remove(&thread_id);
                     self.kernel.cancel(thread_id);
                 }
