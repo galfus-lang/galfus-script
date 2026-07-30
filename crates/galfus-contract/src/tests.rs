@@ -50,6 +50,7 @@ impl RunnableTask for MainThreadOnlyTask {
 #[test]
 fn main_kernel_tasks_accept_non_send_state() {
     let task = KernelTask::Main(Box::new(MainThreadOnlyTask(Rc::new(()))));
+    assert_eq!(task.affinity(), TaskAffinity::Main);
     let KernelTask::Main(task) = task else {
         panic!("main task must preserve its affinity");
     };

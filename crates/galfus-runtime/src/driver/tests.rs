@@ -30,6 +30,11 @@ fn yielded_any_thread_work_keeps_its_affinity() {
         yielded: Arc::new(AtomicBool::new(false)),
     })));
 
+    assert_eq!(
+        driver.queue.lock().unwrap().front().unwrap().affinity(),
+        galfus_contract::TaskAffinity::Any
+    );
+
     assert!(matches!(driver.step(), Ok(ExecutorStepResult::Running)));
     assert!(matches!(
         driver.queue.lock().unwrap().pop_front(),
