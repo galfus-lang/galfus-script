@@ -508,10 +508,37 @@ impl VirtualMachine {
                     }
                 };
 
+                let bytes = match msg_val {
+                    Value::Object(reference) => match thread.heap.get_object(reference)? {
+                        HeapObject::Array { elements, .. } => elements
+                            .iter()
+                            .map(|value| match value {
+                                Value::Uint8(byte) => Ok(*byte),
+                                _ => Err(VmError::TypeMismatch {
+                                    expected: "Array<Uint8>".into(),
+                                    found: "other".into(),
+                                }),
+                            })
+                            .collect::<Result<Vec<_>, _>>()?,
+                        _ => {
+                            return Err(VmError::TypeMismatch {
+                                expected: "Array<Uint8>".into(),
+                                found: "other".into(),
+                            });
+                        }
+                    },
+                    _ => {
+                        return Err(VmError::TypeMismatch {
+                            expected: "Array<Uint8>".into(),
+                            found: "other".into(),
+                        });
+                    }
+                };
+
                 return Ok(VmStep::Suspend {
                     effect: VmEffect::SendMsg {
                         target: target_id,
-                        msg: msg_val,
+                        bytes,
                     },
                     continuation: Continuation::new(Some(dest)),
                 });

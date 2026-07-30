@@ -51,13 +51,29 @@ impl Continuation {
 pub enum VmEffect {
     SendMsg {
         target: u64,
-        msg: Value,
+        bytes: Vec<u8>,
     },
     ProviderCall {
         module_id: ModuleId,
         name: String,
         args: Vec<Value>,
         arg_types: Vec<TypeIdx>,
+        return_type: TypeIdx,
+    },
+    AdapterCall {
+        module_id: ModuleId,
+        adapter: String,
+        symbol: String,
+        args: Vec<Value>,
+        arg_types: Vec<TypeIdx>,
+        return_type: TypeIdx,
+    },
+    TimerWait {
+        delay_ms: u64,
+    },
+    FutureWait {
+        future_id: u64,
+        module_id: ModuleId,
         return_type: TypeIdx,
     },
     ReceiveFilter {

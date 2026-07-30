@@ -514,7 +514,7 @@ impl Orchestrator {
                             .dispatch(task.into_kernel_task(affinity));
                         continue;
                     }
-                    galfus_vm::VmEffect::SendMsg { target, msg } => {
+                    galfus_vm::VmEffect::SendMsg { target, bytes } => {
                         if target == 0 {
                             self.sink.send(RuntimeEvent::Failed {
                                 thread_id,
@@ -533,17 +533,7 @@ impl Orchestrator {
                                 mailbox.lock().unwrap().push_back(
                                     galfus_vm::thread::MailboxMessage {
                                         sender_id: thread_id.raw(),
-                                        data: {
-                                            let host_val =
-                                                crate::task::to_boundary_value(&thread.heap, msg);
-                                            if let Some(galfus_contract::BoundaryValue::Bytes(b)) =
-                                                host_val
-                                            {
-                                                b
-                                            } else {
-                                                vec![]
-                                            }
-                                        },
+                                        data: bytes,
                                     },
                                 );
                                 self.kernel.unblock(target_id);
@@ -556,6 +546,29 @@ impl Orchestrator {
                             continuation,
                             galfus_vm::VmValue::Bool(success),
                         );
+                    }
+                    galfus_vm::VmEffect::AdapterCall { .. } => {
+                        self.failure = Some(
+                            ExecutionFailure::new(
+                                ExecutionFailureKind::MissingAdapter,
+                                "adapter calls require an adapter registry",
+                            )
+                            .with_thread_id(thread_id.raw()),
+                        );
+                        self.kernel.cancel(thread_id);
+                    }
+                    galfus_vm::VmEffect::TimerWait { delay_ms } => {
+                        self.kernel.block(thread_id, thread, Some(delay_ms));
+                    }
+                    galfus_vm::VmEffect::FutureWait { .. } => {
+                        self.failure = Some(
+                            ExecutionFailure::new(
+                                ExecutionFailureKind::InternalRuntimeFailure,
+                                "future waits require a future registry",
+                            )
+                            .with_thread_id(thread_id.raw()),
+                        );
+                        self.kernel.cancel(thread_id);
                     }
                     galfus_vm::VmEffect::ReceiveFilter {
                         sender_id: _,
