@@ -5,7 +5,7 @@ use crate::registry::ThreadId;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 pub struct RunnableQueue {
-    queue: VecDeque<ThreadId>,
+    queue: VecDeque<(ThreadId, bool)>,
 }
 
 impl RunnableQueue {
@@ -16,11 +16,19 @@ impl RunnableQueue {
     }
 
     pub fn enqueue(&mut self, id: ThreadId) {
-        self.queue.push_back(id);
+        self.queue.push_back((id, false));
+    }
+
+    pub fn enqueue_front(&mut self, id: ThreadId) {
+        self.queue.push_front((id, true));
+    }
+
+    pub fn dequeue_detailed(&mut self) -> Option<(ThreadId, bool)> {
+        self.queue.pop_front()
     }
 
     pub fn dequeue(&mut self) -> Option<ThreadId> {
-        self.queue.pop_front()
+        self.queue.pop_front().map(|(id, _)| id)
     }
 
     pub fn len(&self) -> usize {
@@ -28,7 +36,7 @@ impl RunnableQueue {
     }
 
     pub fn remove(&mut self, id: ThreadId) {
-        self.queue.retain(|queued| *queued != id);
+        self.queue.retain(|(queued, _)| *queued != id);
     }
 }
 

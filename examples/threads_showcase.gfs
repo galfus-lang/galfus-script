@@ -2,6 +2,8 @@ import { println } from "std/io"
 import { createThread, getMessage, getThread, hasMessages } from "std/thread"
 
 fn worker(args: [[u8]]): i32 {
+  println("Runing on thread")
+
   if hasMessages() {
     return 10
   }
@@ -28,9 +30,13 @@ export fn main(_args: [[u8]]): i32 {
     return 3
   }
 
+  println("starting thread")
   if !thread::spawn() {
     return 4
   }
+
+  // Wait for the worker to finish before inspecting its exit state.
+  const exitCode = thread::wait()
 
   if !thread::isExited() || thread::isRunning() || thread::exitReason() == null {
     return 5

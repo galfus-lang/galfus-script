@@ -359,6 +359,18 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                     });
                                     continue;
                                 }
+
+                                if native_name == "wait" {
+                                    let thread_id_reg = self.alloc_temp();
+                                    self.load_operand_to(&args[0], thread_id_reg);
+
+                                    self.instructions.push(Instruction::WaitThread {
+                                        dest: Reg(destination.raw() as u16),
+                                        thread_id: thread_id_reg,
+                                    });
+                                    self.free_temps(1);
+                                    continue;
+                                }
                             }
 
                             let native_provider_name = name

@@ -110,6 +110,9 @@ pub enum VmEffect {
     ThreadExitReason {
         thread_id: u64,
     },
+    WaitThread {
+        thread_id: u64,
+    },
     Blocked,
 }
 
@@ -574,6 +577,7 @@ impl VirtualMachine {
             | Instruction::ThreadIsRunning { .. }
             | Instruction::ThreadIsExited { .. }
             | Instruction::ThreadExitReason { .. }
+            | Instruction::WaitThread { .. }
             | Instruction::Panic { .. } => self.execute_control_instruction(thread, instr)?,
 
             Instruction::AllocLocal { .. }

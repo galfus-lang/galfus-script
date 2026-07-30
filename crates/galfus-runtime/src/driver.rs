@@ -29,6 +29,10 @@ impl KernelDriver for CooperativeDriver {
         self.queue.lock().unwrap().push_back(task);
     }
 
+    fn dispatch_front(&self, task: KernelTask) {
+        self.queue.lock().unwrap().push_front(task);
+    }
+
     fn on_exit(&self, callback: Box<dyn Fn(Result<i32, ExecutionFailure>) + Send + Sync>) {
         *self.exit_callback.lock().unwrap() = Some(callback);
     }

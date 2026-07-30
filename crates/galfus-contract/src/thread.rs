@@ -68,6 +68,11 @@ pub trait KernelDriver {
     /// The Kernel or Orchestrator calls this to submit work.
     fn dispatch(&self, task: KernelTask);
 
+    /// Dispatches work to the front of the scheduling queue for immediate slice continuation.
+    fn dispatch_front(&self, task: KernelTask) {
+        self.dispatch(task);
+    }
+
     /// Sets the callback to be invoked when the driver completes its execution.
     fn on_exit(&self, callback: Box<dyn Fn(Result<i32, crate::ExecutionFailure>) + Send + Sync>);
 

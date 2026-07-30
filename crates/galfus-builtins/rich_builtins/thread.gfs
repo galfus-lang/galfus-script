@@ -8,6 +8,7 @@ fn __internal_thread_send(id: i64, data: [u8]): bool { return false }
 fn __internal_thread_receive(id: i64, timeout: i32): [u8] | null { return null }
 fn __internal_thread_has_messages(): bool { return false }
 fn __internal_thread_get_message(): [u8] | null { return null }
+fn __internal_thread_wait(id: i64): i32 | null { return null }
 
 export struct Thread {
     id: i64,
@@ -59,4 +60,8 @@ fn Thread::send(self, data: [u8]): bool {
 
 fn Thread::tryReceiveMessage(self, timeout: i32): [u8] | null {
     return __internal_thread_receive(self.id, timeout)
+}
+
+fn Thread::wait(self): i32 | null {
+    return __internal_thread_wait(self.id)
 }

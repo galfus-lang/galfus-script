@@ -4,10 +4,16 @@ mod tests;
 use crate::queue::{BlockedQueue, RunnableQueue};
 use crate::registry::MailboxMessage;
 use crate::registry::{ThreadId, ThreadRegistry};
+use galfus_vm::Continuation;
 use galfus_vm::thread::VmThreadState;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+
+pub struct WaiterEntry {
+    pub waiter_id: ThreadId,
+    pub continuation: Continuation,
+}
 
 /// Manages thread lifecycle, scheduling queues, and timers.
 pub struct VirtualKernel {
@@ -15,6 +21,7 @@ pub struct VirtualKernel {
     registry: ThreadRegistry,
     pub(crate) runnable: RunnableQueue,
     blocked: BlockedQueue,
+    waiters: HashMap<ThreadId, Vec<WaiterEntry>>,
 }
 
 impl VirtualKernel {
@@ -24,6 +31,7 @@ impl VirtualKernel {
             registry: ThreadRegistry::new(),
             runnable: RunnableQueue::new(),
             blocked: BlockedQueue::new(),
+            waiters: HashMap::new(),
         }
     }
 
@@ -39,6 +47,11 @@ impl VirtualKernel {
     pub fn enqueue_runnable(&mut self, id: ThreadId, thread: VmThreadState) {
         self.registry.restore_vm_state(id, thread);
         self.runnable.enqueue(id);
+    }
+
+    pub fn enqueue_runnable_front(&mut self, id: ThreadId, thread: VmThreadState) {
+        self.registry.restore_vm_state(id, thread);
+        self.runnable.enqueue_front(id);
     }
 
     pub fn park_running(&mut self, id: ThreadId, thread: VmThreadState) {
@@ -86,8 +99,13 @@ impl VirtualKernel {
     }
 
     /// Returns the next runnable ThreadId.
+    #[allow(dead_code)]
     pub fn next_runnable(&mut self) -> Option<ThreadId> {
         self.runnable.dequeue()
+    }
+
+    pub fn next_runnable_detailed(&mut self) -> Option<(ThreadId, bool)> {
+        self.runnable.dequeue_detailed()
     }
 
     pub fn active_count(&self) -> usize {
@@ -139,6 +157,27 @@ impl VirtualKernel {
 
     pub fn get_mailbox(&self, id: ThreadId) -> Option<Arc<Mutex<VecDeque<MailboxMessage>>>> {
         self.registry.get_mailbox(id)
+    }
+
+    /// Registers `waiter_id` to be unblocked when `target_id` exits.
+    pub fn register_waiter(
+        &mut self,
+        target_id: ThreadId,
+        waiter_id: ThreadId,
+        continuation: Continuation,
+    ) {
+        self.waiters
+            .entry(target_id)
+            .or_default()
+            .push(WaiterEntry {
+                waiter_id,
+                continuation,
+            });
+    }
+
+    /// Drains all waiters registered for `target_id`, returning their entries.
+    pub fn drain_waiters(&mut self, target_id: ThreadId) -> Vec<WaiterEntry> {
+        self.waiters.remove(&target_id).unwrap_or_default()
     }
 }
 

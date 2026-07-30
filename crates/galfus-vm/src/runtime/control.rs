@@ -587,6 +587,14 @@ impl VirtualMachine {
                 });
             }
 
+            Instruction::WaitThread { dest, thread_id } => {
+                let thread_id = thread_id_value(thread, thread_id)?;
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::WaitThread { thread_id },
+                    continuation: Continuation::new(Some(dest)),
+                });
+            }
+
             Instruction::Ret { src } => {
                 let val = thread.read_reg(src)?;
                 let completed_frame = thread.call_stack.pop().ok_or(VmError::EmptyCallStack)?;

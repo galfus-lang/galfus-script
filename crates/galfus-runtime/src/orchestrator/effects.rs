@@ -361,7 +361,7 @@ impl Orchestrator {
                     .and_then(|k| self.kernel.lookup_key(k.as_str()))
                     .map(|id| galfus_vm::VmValue::Int64(id.raw() as i64))
                     .unwrap_or(galfus_vm::VmValue::Int64(-1));
-                self.resume_or_fail(thread_id, thread, continuation, val);
+                self.resume_or_fail_front(thread_id, thread, continuation, val);
             }
             galfus_vm::VmEffect::ThreadIsRunning {
                 thread_id: target_id,
@@ -378,7 +378,7 @@ impl Orchestrator {
                         })
                     })
                     .is_some_and(|state| state.is_running());
-                self.resume_or_fail(
+                self.resume_or_fail_front(
                     thread_id,
                     thread,
                     continuation,
@@ -400,7 +400,7 @@ impl Orchestrator {
                         })
                     })
                     .is_some_and(|state| state.is_exited());
-                self.resume_or_fail(
+                self.resume_or_fail_front(
                     thread_id,
                     thread,
                     continuation,
@@ -424,7 +424,7 @@ impl Orchestrator {
                     .and_then(|state| state.exit_reason())
                     .map(galfus_vm::VmValue::Int32)
                     .unwrap_or(galfus_vm::VmValue::Null);
-                self.resume_or_fail(thread_id, thread, continuation, reason);
+                self.resume_or_fail_front(thread_id, thread, continuation, reason);
             }
             galfus_vm::VmEffect::Blocked => {
                 self.kernel.enqueue_runnable(thread_id, thread);
@@ -434,7 +434,7 @@ impl Orchestrator {
                     .kernel
                     .get_mailbox(thread_id)
                     .is_some_and(|mailbox| !mailbox.lock().unwrap().is_empty());
-                self.resume_or_fail(
+                self.resume_or_fail_front(
                     thread_id,
                     thread,
                     continuation,
@@ -467,7 +467,42 @@ impl Orchestrator {
                     }
                     None => galfus_vm::VmValue::Null,
                 };
-                self.resume_or_fail(thread_id, thread, continuation, value);
+                self.resume_or_fail_front(thread_id, thread, continuation, value);
+            }
+            galfus_vm::VmEffect::WaitThread {
+                thread_id: target_raw,
+            } => {
+                let maybe_target = crate::registry::ThreadId::from_raw(target_raw);
+                let exit_code = maybe_target
+                    .and_then(|target| self.kernel.state(target))
+                    .and_then(|state| state.exit_reason());
+                if let Some(code) = exit_code {
+                    // Target already exited — resume immediately with the exit code.
+                    self.resume_or_fail_front(
+                        thread_id,
+                        thread,
+                        continuation,
+                        galfus_vm::VmValue::Int32(code),
+                    );
+                } else {
+                    // Target still running — block the caller and register it as a waiter.
+                    match maybe_target {
+                        Some(target_id) => {
+                            self.kernel.block(thread_id, thread, None);
+                            self.kernel
+                                .register_waiter(target_id, thread_id, continuation);
+                        }
+                        None => {
+                            // Invalid thread id — resume with null (no exit code).
+                            self.resume_or_fail_front(
+                                thread_id,
+                                thread,
+                                continuation,
+                                galfus_vm::VmValue::Null,
+                            );
+                        }
+                    }
+                }
             }
         }
     }

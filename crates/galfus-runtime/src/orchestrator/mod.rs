@@ -233,6 +233,30 @@ impl Orchestrator {
         }
     }
 
+    pub(super) fn resume_or_fail_front(
+        &mut self,
+        thread_id: crate::registry::ThreadId,
+        mut thread: galfus_vm::thread::VmThreadState,
+        continuation: galfus_vm::Continuation,
+        value: galfus_vm::VmValue,
+    ) {
+        let result = self
+            .vm
+            .as_ref()
+            .expect("VM is configured before execution")
+            .resume(thread_id.raw(), &mut thread, continuation, value);
+        match result {
+            Ok(()) => self.kernel.enqueue_runnable_front(thread_id, thread),
+            Err(error) => {
+                self.failure = Some(with_execution_stack(
+                    error.with_thread_id(thread_id.raw()),
+                    execution_stack(&thread),
+                ));
+                self.kernel.cancel(thread_id);
+            }
+        }
+    }
+
     fn record_late_completion(&mut self, thread_id: crate::registry::ThreadId, request_id: u64) {
         if self.late_completions.len() == MAX_LATE_COMPLETIONS {
             self.late_completions.pop_front();
@@ -310,7 +334,7 @@ impl Orchestrator {
                         return;
                     }
                 };
-                self.resume_or_fail(thread_id, thread, pending.continuation, value);
+                self.resume_or_fail_front(thread_id, thread, pending.continuation, value);
             }
             Err(error) => {
                 let error = with_execution_stack(
@@ -338,7 +362,7 @@ impl Orchestrator {
     pub(crate) fn dispatch_runnables(&mut self, token: MainThreadToken) {
         token.assert_current();
         self.assert_main_thread();
-        while let Some(thread_id) = self.kernel.next_runnable() {
+        while let Some((thread_id, is_front)) = self.kernel.next_runnable_detailed() {
             if let Some(thread) = self.kernel.take_thread(thread_id) {
                 self.kernel.mark_running(thread_id);
 
@@ -349,10 +373,12 @@ impl Orchestrator {
                     self.sink.clone(),
                 ));
 
-                self.driver
-                    .as_ref()
-                    .unwrap()
-                    .dispatch(KernelTask::Any(task));
+                let kernel_task = KernelTask::Any(task);
+                if is_front {
+                    self.driver.as_ref().unwrap().dispatch_front(kernel_task);
+                } else {
+                    self.driver.as_ref().unwrap().dispatch(kernel_task);
+                }
             }
         }
     }
@@ -378,6 +404,17 @@ impl Orchestrator {
                     code,
                 } => {
                     self.kernel.mark_exited(thread_id, thread, code);
+                    let waiters = self.kernel.drain_waiters(thread_id);
+                    for waiter in waiters {
+                        if let Some(waiter_thread) = self.kernel.take_thread(waiter.waiter_id) {
+                            self.resume_or_fail_front(
+                                waiter.waiter_id,
+                                waiter_thread,
+                                waiter.continuation,
+                                galfus_vm::VmValue::Int32(code),
+                            );
+                        }
+                    }
                 }
                 RuntimeEvent::Initialized {
                     thread_id,
