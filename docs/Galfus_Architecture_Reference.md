@@ -19,12 +19,14 @@ VM (Instruction Execution)
 ```
 
 **What is implemented:**
+
 - Full compiler pipeline (parsing to bytecode)
 - In-memory `BytecodeGraph` execution
 - Deterministic VM and memory graph
 - Optional Host Providers boundary
 
 **What is NOT part of the current architecture:**
+
 - **GFB (Galfus Bytecode File):** Removed. The graph exists only in memory.
 - **Bundler:** Not implemented.
 - **Optimizer:** Not implemented.
@@ -65,6 +67,7 @@ leave the prior snapshot unchanged.
 ## 5. The Workspace
 
 The `Workspace` owns the current architectural snapshots:
+
 - Source state
 - `SemanticGraph` snapshot
 - `BytecodeGraph` snapshot
@@ -97,12 +100,12 @@ transitions it to a suspended state.
 
 **Thread states:**
 
-| State     | Description                                                             |
-| :-------- | :---------------------------------------------------------------------- |
-| Runnable  | In the FIFO queue, will be picked up in the next scheduling cycle.      |
-| Running   | Currently executing its instruction budget on the driver.               |
-| Blocked   | Suspended in `BlockedQueue`, waiting for an external event or timeout.  |
-| Exited    | Function returned; exit code is stored in the registry.                 |
+| State    | Description                                                            |
+| :------- | :--------------------------------------------------------------------- |
+| Runnable | In the FIFO queue, will be picked up in the next scheduling cycle.     |
+| Running  | Currently executing its instruction budget on the driver.              |
+| Blocked  | Suspended in `BlockedQueue`, waiting for an external event or timeout. |
+| Exited   | Function returned; exit code is stored in the registry.                |
 
 **I/O suspension:** When a thread emits a `VmEffect` (e.g. `ProviderCall` for
 `println`), it is suspended and its continuation is stored. The I/O task is

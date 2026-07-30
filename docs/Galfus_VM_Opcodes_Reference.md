@@ -93,24 +93,24 @@ Control flow uses relative bytecode jumps. Jumps are offset by instructions/byte
 
 #### Messaging
 
-| Opcode                   | Arguments                                      | Behavior                                                                                         |
-| :----------------------- | :--------------------------------------------- | :----------------------------------------------------------------------------------------------- |
-| **`SEND`**               | `dest: Reg`, `target: Reg`, `msg: Reg`         | Send a `[u8]` message to thread `target`. Writes success bool to `dest`.                         |
-| **`RECEIVE_FILTER`**     | `dest: Reg`, `sender: Reg`, `timeout: Reg`     | Block until a message from `sender` arrives (or timeout expires). Writes the message to `dest`.  |
-| **`MAILBOX_HAS_MSGS`**   | `dest: Reg`                                    | Writes `true` to `dest` if the current thread's mailbox is non-empty.                            |
-| **`MAILBOX_GET_MSG`**    | `dest: Reg`                                    | Pops and writes the oldest mailbox message to `dest`, or `null` if empty.                        |
+| Opcode                 | Arguments                                  | Behavior                                                                                        |
+| :--------------------- | :----------------------------------------- | :---------------------------------------------------------------------------------------------- |
+| **`SEND`**             | `dest: Reg`, `target: Reg`, `msg: Reg`     | Send a `[u8]` message to thread `target`. Writes success bool to `dest`.                        |
+| **`RECEIVE_FILTER`**   | `dest: Reg`, `sender: Reg`, `timeout: Reg` | Block until a message from `sender` arrives (or timeout expires). Writes the message to `dest`. |
+| **`MAILBOX_HAS_MSGS`** | `dest: Reg`                                | Writes `true` to `dest` if the current thread's mailbox is non-empty.                           |
+| **`MAILBOX_GET_MSG`**  | `dest: Reg`                                | Pops and writes the oldest mailbox message to `dest`, or `null` if empty.                       |
 
 #### Thread Lifecycle
 
-| Opcode                   | Arguments                                      | Behavior                                                                                         |
-| :----------------------- | :--------------------------------------------- | :----------------------------------------------------------------------------------------------- |
-| **`CREATE_THREAD`**      | `dest: Reg`, `func: Reg`, `key: Reg`           | Creates a new thread entry from a function value and an optional key. Writes thread ID to `dest`.|
-| **`START_THREAD`**       | `dest: Reg`, `thread_id: Reg`, `arg: Reg`      | Spawns the thread. Writes `true` to `dest` if the transition succeeded (thread was not yet started). |
-| **`GET_THREAD`**         | `dest: Reg`, `key: Reg`                        | Looks up a thread by its key. Writes thread ID to `dest`, or `-1` if not found.                 |
-| **`THREAD_IS_RUNNING`**  | `dest: Reg`, `thread_id: Reg`                  | Writes `true` to `dest` if the thread is currently running.                                      |
-| **`THREAD_IS_EXITED`**   | `dest: Reg`, `thread_id: Reg`                  | Writes `true` to `dest` if the thread has exited.                                                |
-| **`THREAD_EXIT_REASON`** | `dest: Reg`, `thread_id: Reg`                  | Writes the exit code (`i32`) to `dest`, or `null` if the thread has not exited.                  |
-| **`WAIT_THREAD`**        | `dest: Reg`, `thread_id: Reg`                  | Suspends the calling thread until `thread_id` exits. Writes the exit code to `dest`, or `null` if the ID is invalid. Resumes immediately if the target has already exited. |
+| Opcode                   | Arguments                                 | Behavior                                                                                                                                                                   |
+| :----------------------- | :---------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`CREATE_THREAD`**      | `dest: Reg`, `func: Reg`, `key: Reg`      | Creates a new thread entry from a function value and an optional key. Writes thread ID to `dest`.                                                                          |
+| **`START_THREAD`**       | `dest: Reg`, `thread_id: Reg`, `arg: Reg` | Spawns the thread. Writes `true` to `dest` if the transition succeeded (thread was not yet started).                                                                       |
+| **`GET_THREAD`**         | `dest: Reg`, `key: Reg`                   | Looks up a thread by its key. Writes thread ID to `dest`, or `-1` if not found.                                                                                            |
+| **`THREAD_IS_RUNNING`**  | `dest: Reg`, `thread_id: Reg`             | Writes `true` to `dest` if the thread is currently running.                                                                                                                |
+| **`THREAD_IS_EXITED`**   | `dest: Reg`, `thread_id: Reg`             | Writes `true` to `dest` if the thread has exited.                                                                                                                          |
+| **`THREAD_EXIT_REASON`** | `dest: Reg`, `thread_id: Reg`             | Writes the exit code (`i32`) to `dest`, or `null` if the thread has not exited.                                                                                            |
+| **`WAIT_THREAD`**        | `dest: Reg`, `thread_id: Reg`             | Suspends the calling thread until `thread_id` exits. Writes the exit code to `dest`, or `null` if the ID is invalid. Resumes immediately if the target has already exited. |
 
 ---
 
@@ -118,18 +118,18 @@ Control flow uses relative bytecode jumps. Jumps are offset by instructions/byte
 
 Handles allocation in the current thread's private heap, object instantiations, and property/index reads/writes.
 
-| Opcode             | Hex    | Arguments                                                            | Behavior                                                       |
-| :----------------- | :----- | :------------------------------------------------------------------- | :------------------------------------------------------------- |
-| **`ALLOC_LOCAL`**  | `0x40` | `dest: Reg`, `type_idx: TypeIdx`                                     | Allocate a struct on the **Local Heap**.                       |
-| **`LOAD_FIELD`**   | `0x42` | `dest: Reg`, `obj: Reg`, `field: FieldIdx`                           | Read field from a local struct/object.                         |
-| **`STORE_FIELD`**  | `0x43` | `obj: Reg`, `field: FieldIdx`, `val: Reg`                            | Write value to local struct/object field.                      |
-| **`NEW_ARRAY`**    | `0x44` | `dest: Reg`, `type_idx: TypeIdx`, `len_reg: Reg`                     | Create array of length `len_reg`.                              |
-| **`LOAD_INDEX`**   | `0x45` | `dest: Reg`, `arr: Reg`, `idx: Reg`                                  | Read element `arr[idx]`. Returns `null` if out of bounds.      |
-| **`STORE_INDEX`**  | `0x46` | `arr: Reg`, `idx: Reg`, `val: Reg`                                   | Write `arr[idx] = val`. Panics/throws error if out of bounds.  |
-| **`NEW_TUPLE`**    | `0x47` | `dest: Reg`, `type_idx: TypeIdx`, `start: Reg`, `count: u8`          | Create tuple from contiguous registers.                        |
-| **`NEW_CHOICE`**   | `0x48` | `dest: Reg`, `type_idx: TypeIdx`, `variant_idx: u16`, `payload: Reg` | Create choice (tagged union) variant. payload can be `null`.   |
-| **`CAST`**         | `0x49` | `dest: Reg`, `src: Reg`, `type_idx: TypeIdx`                         | Safe type cast. Panics if types are incompatible.              |
-| **`INSTANCEOF`**   | `0x4A` | `dest: Reg`, `src: Reg`, `type_idx: TypeIdx`                         | Sets `dest` to `true` if `src` matches type, else `false`.     |
+| Opcode            | Hex    | Arguments                                                            | Behavior                                                      |
+| :---------------- | :----- | :------------------------------------------------------------------- | :------------------------------------------------------------ |
+| **`ALLOC_LOCAL`** | `0x40` | `dest: Reg`, `type_idx: TypeIdx`                                     | Allocate a struct on the **Local Heap**.                      |
+| **`LOAD_FIELD`**  | `0x42` | `dest: Reg`, `obj: Reg`, `field: FieldIdx`                           | Read field from a local struct/object.                        |
+| **`STORE_FIELD`** | `0x43` | `obj: Reg`, `field: FieldIdx`, `val: Reg`                            | Write value to local struct/object field.                     |
+| **`NEW_ARRAY`**   | `0x44` | `dest: Reg`, `type_idx: TypeIdx`, `len_reg: Reg`                     | Create array of length `len_reg`.                             |
+| **`LOAD_INDEX`**  | `0x45` | `dest: Reg`, `arr: Reg`, `idx: Reg`                                  | Read element `arr[idx]`. Returns `null` if out of bounds.     |
+| **`STORE_INDEX`** | `0x46` | `arr: Reg`, `idx: Reg`, `val: Reg`                                   | Write `arr[idx] = val`. Panics/throws error if out of bounds. |
+| **`NEW_TUPLE`**   | `0x47` | `dest: Reg`, `type_idx: TypeIdx`, `start: Reg`, `count: u8`          | Create tuple from contiguous registers.                       |
+| **`NEW_CHOICE`**  | `0x48` | `dest: Reg`, `type_idx: TypeIdx`, `variant_idx: u16`, `payload: Reg` | Create choice (tagged union) variant. payload can be `null`.  |
+| **`CAST`**        | `0x49` | `dest: Reg`, `src: Reg`, `type_idx: TypeIdx`                         | Safe type cast. Panics if types are incompatible.             |
+| **`INSTANCEOF`**  | `0x4A` | `dest: Reg`, `src: Reg`, `type_idx: TypeIdx`                         | Sets `dest` to `true` if `src` matches type, else `false`.    |
 
 ---
 
@@ -164,4 +164,4 @@ The interpreter's loop operates with exception/panic safety:
 3. Dispatch execution.
 4. If a panic or termination is triggered:
    - Walk up the call stack.
-      - Continue unwinding until caught or the VM aborts.
+     - Continue unwinding until caught or the VM aborts.
