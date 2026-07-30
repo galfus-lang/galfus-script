@@ -122,6 +122,7 @@ fn worker(args: [[u8]]): i32 {
 export fn main(args: [[u8]]): i32 {
   const thread = createThread(worker, "worker")
   thread::spawn()
+  thread::wait()   // blocks main until worker exits
   return 0
 }
 ```
@@ -144,12 +145,18 @@ fn Thread::isExited(self): bool
 fn Thread::exitReason(self): i32 | null
 fn Thread::send(self, data: [u8]): bool
 fn Thread::tryReceiveMessage(self, timeout: i32): [u8] | null
+fn Thread::wait(self): i32 | null
 ```
 
 `hasMessages` and `getMessage` inspect the mailbox of the current thread.
 `getMessage` is non-blocking: it removes and returns the oldest message, or
 returns `null` when the mailbox is empty. `tryReceiveMessage` is the
 timeout-aware receive operation associated with a `Thread` handle.
+
+`Thread::wait` suspends the calling thread until the target thread exits.
+It returns the exit code (`i32`) on success, or `null` if the thread ID is
+invalid. If the target has already exited when `wait` is called, the
+calling thread resumes immediately with the stored exit code.
 
 ### `std/fs`
 

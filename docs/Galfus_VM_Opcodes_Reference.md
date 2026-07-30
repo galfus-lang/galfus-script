@@ -1,8 +1,9 @@
 # Galfus VM Bytecode and Opcode Specification
 
 > **Status: Historical design.** The current VM executes the in-memory Rust
-> `Instruction` representation. It has no serialized bytecode format,
-> variable-length binary encoding, or multithreading.
+> `Instruction` representation. It has no serialized bytecode format or
+> variable-length binary encoding. Thread instructions are implemented and
+> cooperative multithreading is supported.
 
 This document preserves an earlier binary instruction-set proposal for the
 Galfus Virtual Machine.
@@ -89,6 +90,27 @@ Control flow uses relative bytecode jumps. Jumps are offset by instructions/byte
 | **`RET`**        | `0x35` | `src: Reg`                                                       | Return value from `src` to caller.                  |
 | **`RET_NULL`**   | `0x36` | None                                                             | Return `null` to caller (implicit void return).     |
 | **`PANIC`**      | `0x37` | `const_idx: ConstIdx`                                            | Terminate process with error constant message.      |
+
+#### Messaging
+
+| Opcode                   | Arguments                                      | Behavior                                                                                         |
+| :----------------------- | :--------------------------------------------- | :----------------------------------------------------------------------------------------------- |
+| **`SEND`**               | `dest: Reg`, `target: Reg`, `msg: Reg`         | Send a `[u8]` message to thread `target`. Writes success bool to `dest`.                         |
+| **`RECEIVE_FILTER`**     | `dest: Reg`, `sender: Reg`, `timeout: Reg`     | Block until a message from `sender` arrives (or timeout expires). Writes the message to `dest`.  |
+| **`MAILBOX_HAS_MSGS`**   | `dest: Reg`                                    | Writes `true` to `dest` if the current thread's mailbox is non-empty.                            |
+| **`MAILBOX_GET_MSG`**    | `dest: Reg`                                    | Pops and writes the oldest mailbox message to `dest`, or `null` if empty.                        |
+
+#### Thread Lifecycle
+
+| Opcode                   | Arguments                                      | Behavior                                                                                         |
+| :----------------------- | :--------------------------------------------- | :----------------------------------------------------------------------------------------------- |
+| **`CREATE_THREAD`**      | `dest: Reg`, `func: Reg`, `key: Reg`           | Creates a new thread entry from a function value and an optional key. Writes thread ID to `dest`.|
+| **`START_THREAD`**       | `dest: Reg`, `thread_id: Reg`, `arg: Reg`      | Spawns the thread. Writes `true` to `dest` if the transition succeeded (thread was not yet started). |
+| **`GET_THREAD`**         | `dest: Reg`, `key: Reg`                        | Looks up a thread by its key. Writes thread ID to `dest`, or `-1` if not found.                 |
+| **`THREAD_IS_RUNNING`**  | `dest: Reg`, `thread_id: Reg`                  | Writes `true` to `dest` if the thread is currently running.                                      |
+| **`THREAD_IS_EXITED`**   | `dest: Reg`, `thread_id: Reg`                  | Writes `true` to `dest` if the thread has exited.                                                |
+| **`THREAD_EXIT_REASON`** | `dest: Reg`, `thread_id: Reg`                  | Writes the exit code (`i32`) to `dest`, or `null` if the thread has not exited.                  |
+| **`WAIT_THREAD`**        | `dest: Reg`, `thread_id: Reg`                  | Suspends the calling thread until `thread_id` exits. Writes the exit code to `dest`, or `null` if the ID is invalid. Resumes immediately if the target has already exited. |
 
 ---
 

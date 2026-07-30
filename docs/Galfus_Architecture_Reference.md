@@ -87,6 +87,43 @@ Virtual threads provide cooperative concurrent execution. Each thread has an
 isolated heap and mailbox; the runtime registry retains its identity, lifecycle
 state, key, and mailbox while it is created, running, blocked, or exited.
 
+### Cooperative Scheduler
+
+The scheduler is implemented as a **FIFO queue** (`CooperativeDriver` backed by
+a `VecDeque`). Threads are dispatched in arrival order — no thread can skip
+ahead of another. Each scheduling cycle dequeues one thread, runs it for a
+fixed instruction budget, and either re-enqueues it (still runnable) or
+transitions it to a suspended state.
+
+**Thread states:**
+
+| State     | Description                                                             |
+| :-------- | :---------------------------------------------------------------------- |
+| Runnable  | In the FIFO queue, will be picked up in the next scheduling cycle.      |
+| Running   | Currently executing its instruction budget on the driver.               |
+| Blocked   | Suspended in `BlockedQueue`, waiting for an external event or timeout.  |
+| Exited    | Function returned; exit code is stored in the registry.                 |
+
+**I/O suspension:** When a thread emits a `VmEffect` (e.g. `ProviderCall` for
+`println`), it is suspended and its continuation is stored. The I/O task is
+dispatched to the **back** of the FIFO queue so the scheduler remains fair.
+When the effect completes, the thread is resumed at the front of the queue to
+continue promptly.
+
+### Waiter Mechanism (`WaitThread`)
+
+`WaitThread` implements join semantics without busy-waiting:
+
+1. The calling thread emits `VmEffect::WaitThread { thread_id }`.
+2. The orchestrator checks if the target is already `Exited`.
+   - **Yes**: Resumes the caller immediately with the stored exit code.
+   - **No**: Calls `kernel.block(caller)` and registers the caller in a
+     `waiters: HashMap<ThreadId, Vec<WaiterEntry>>` on the `VirtualKernel`.
+3. When the target thread exits (the `Exited` runtime event fires),
+   `kernel.drain_waiters(target_id)` is called. Each waiter's thread is taken
+   from the registry and resumed via `resume_or_fail_front`, putting it at the
+   front of the FIFO queue with the exit code as its result.
+
 ---
 
 ## 7. Providers
