@@ -382,12 +382,20 @@ impl Orchestrator {
                                 self.resume_or_fail(thread_id, thread, pending.continuation, value);
                             }
                             Err(error) => {
-                                self.failure = Some(
-                                    error
-                                        .with_thread_id(thread_id.raw())
-                                        .with_request_id(pending.request_id)
-                                        .with_module_id(pending.module_id.raw().into()),
-                                );
+                                let error = error
+                                    .with_thread_id(thread_id.raw())
+                                    .with_request_id(pending.request_id)
+                                    .with_module_id(pending.module_id.raw().into());
+                                self.failure = Some(match thread.initializing_module() {
+                                    Some(initializing_module_id) => ExecutionFailure::new(
+                                        ExecutionFailureKind::InitializationFailure,
+                                        "module initializer provider request failed",
+                                    )
+                                    .with_thread_id(thread_id.raw())
+                                    .with_module_id(initializing_module_id.raw().into())
+                                    .with_cause(error),
+                                    None => error,
+                                });
                                 self.kernel.cancel(thread_id);
                             }
                         }

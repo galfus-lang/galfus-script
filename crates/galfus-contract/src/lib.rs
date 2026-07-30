@@ -132,6 +132,11 @@ impl ExecutionFailure {
         self.request_id = Some(request_id);
         self
     }
+
+    pub fn with_cause(mut self, cause: ExecutionFailure) -> Self {
+        self.cause = Some(Box::new(cause));
+        self
+    }
 }
 
 impl std::fmt::Display for ExecutionFailure {

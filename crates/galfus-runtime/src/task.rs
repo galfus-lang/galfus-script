@@ -293,7 +293,17 @@ fn with_initialization_context(
     failure: ExecutionFailure,
 ) -> ExecutionFailure {
     match thread.initializing_module() {
-        Some(module_id) => failure.with_module_id(module_id.raw().into()),
+        Some(module_id) => {
+            let mut initialization_failure = ExecutionFailure::new(
+                ExecutionFailureKind::InitializationFailure,
+                "module initializer failed",
+            )
+            .with_module_id(module_id.raw().into());
+            if let Some(thread_id) = failure.thread_id {
+                initialization_failure = initialization_failure.with_thread_id(thread_id);
+            }
+            initialization_failure.with_cause(failure)
+        }
         None => failure,
     }
 }
