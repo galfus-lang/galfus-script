@@ -77,6 +77,9 @@ pub trait KernelDriver {
     /// Runs the driver loop. Behavior (blocking vs non-blocking) depends on the implementation.
     fn run(&self);
 
+    /// Receives the final result of a persistent execution.
+    fn complete(&self, _result: Result<i32, crate::ExecutionFailure>) {}
+
     /// Executes a single step, returning the current status.
     fn step(&self) -> Result<ExecutorStepResult, crate::ExecutionFailure> {
         unimplemented!("step is not implemented by default")

@@ -35,6 +35,12 @@ impl KernelDriver for PlaygroundExecutor {
         // NON-BLOCKING
     }
 
+    fn complete(&self, result: Result<i32, ExecutionFailure>) {
+        if let Some(callback) = self.exit_callback.lock().unwrap().take() {
+            callback(result);
+        }
+    }
+
     fn step(&self) -> Result<ExecutorStepResult, ExecutionFailure> {
         let task_entry = {
             let mut q = self.queue.lock().unwrap();

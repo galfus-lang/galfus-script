@@ -180,7 +180,16 @@ pub(crate) fn encode_into_thread_heap(
             });
             Ok(galfus_vm::VmValue::Object(reference))
         }
-        (BytecodeType::Array(element_type), BoundaryValue::Array { values, .. }) => {
+        (
+            BytecodeType::Array(element_type),
+            BoundaryValue::Array {
+                element_type: actual_element_type,
+                values,
+            },
+        ) => {
+            if actual_element_type != boundary_type(module, *element_type)? {
+                return Err(mismatch());
+            }
             let elements = values
                 .into_iter()
                 .map(|element| {

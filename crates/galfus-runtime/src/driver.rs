@@ -106,6 +106,12 @@ impl KernelDriver for CooperativeDriver {
         }
     }
 
+    fn complete(&self, result: Result<i32, ExecutionFailure>) {
+        if let Some(callback) = self.exit_callback.lock().unwrap().take() {
+            callback(result);
+        }
+    }
+
     fn step(&self) -> Result<ExecutorStepResult, ExecutionFailure> {
         let task_entry = self.queue.lock().unwrap().pop_front();
 

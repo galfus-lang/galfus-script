@@ -522,10 +522,8 @@ impl Workspace {
         providers: Option<Providers>,
         driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
     ) -> Result<(), RunBlocked> {
-        let execution = self.start_execution(args, providers, driver.clone())?;
-        let task = execution.into_task();
-        driver.dispatch(galfus_contract::KernelTask::Main(task));
-        driver.run();
+        let mut execution = self.start_execution(args, providers, driver)?;
+        let _ = execution.run_to_completion();
 
         Ok(())
     }

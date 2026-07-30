@@ -71,6 +71,26 @@ fn codec_encodes_an_array_with_its_expected_element_type() {
 }
 
 #[test]
+fn codec_rejects_an_array_with_a_different_declared_element_type() {
+    let module = module(vec![BytecodeType::Int32, BytecodeType::Array(TypeIdx(0))]);
+    let mut heap = galfus_vm::thread::PrivateHeap::new();
+
+    assert!(
+        encode_into_thread_heap(
+            &mut heap,
+            BoundaryValue::Array {
+                element_type: BoundaryType::U8,
+                values: vec![],
+            },
+            TypeIdx(1),
+            galfus_core::ModuleId::new(1),
+            &module,
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn codec_encodes_a_choice_with_its_declared_variant_payload() {
     let module = BytecodeModule {
         choice_layouts: vec![ChoiceLayout {

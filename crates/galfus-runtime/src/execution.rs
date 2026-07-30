@@ -20,6 +20,7 @@ pub struct Execution {
     result: Option<Result<BoundaryValue, ExecutionFailure>>,
     state: ExecutionState,
     initialization_complete: Arc<AtomicBool>,
+    exit_notified: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +56,7 @@ impl Execution {
                 ExecutionState::Created
             },
             initialization_complete,
+            exit_notified: false,
         }
     }
 
@@ -64,7 +66,8 @@ impl Execution {
         }
     }
 
-    pub fn into_task(mut self) -> Box<dyn RunnableTask> {
+    #[cfg(test)]
+    pub(crate) fn into_task(mut self) -> Box<dyn RunnableTask> {
         self.root
             .take()
             .expect("execution task is available before polling")
@@ -113,6 +116,14 @@ impl Execution {
             }
         }
         if let Some(result) = &self.result {
+            if !self.exit_notified {
+                self.exit_notified = true;
+                self.driver.complete(match result {
+                    Ok(BoundaryValue::I32(code)) => Ok(*code),
+                    Ok(_) => Ok(0),
+                    Err(error) => Err(error.clone()),
+                });
+            }
             return match result {
                 Ok(BoundaryValue::I32(code)) => Ok(ExecutorStepResult::Completed(*code)),
                 Ok(_) => Ok(ExecutorStepResult::Completed(0)),
@@ -184,10 +195,12 @@ impl ExecutionHandle {
             self.sink.send(RuntimeEvent::CancelThread { thread_id });
         }
     }
-}
 
-impl galfus_contract::MessageInjector for ExecutionHandle {
-    fn inject_system_response(
+    pub fn cancel(&self) {
+        self.sink.send(RuntimeEvent::CancelExecution);
+    }
+
+    pub fn resolve_request(
         &self,
         thread_id: usize,
         request_id: u64,
@@ -201,5 +214,16 @@ impl galfus_contract::MessageInjector for ExecutionHandle {
             request_id,
             result,
         });
+    }
+}
+
+impl galfus_contract::MessageInjector for ExecutionHandle {
+    fn inject_system_response(
+        &self,
+        thread_id: usize,
+        request_id: u64,
+        result: Result<BoundaryValue, ExecutionFailure>,
+    ) {
+        self.resolve_request(thread_id, request_id, result);
     }
 }
