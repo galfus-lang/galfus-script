@@ -27,9 +27,12 @@ pub(crate) struct StartupPlan {
     pub(crate) entry_args: galfus_vm::VmValue,
 }
 
-/// Proof that we are running on the main thread, since this cannot be sent across threads.
+/// Proof that orchestration runs on its bound host main thread.
+///
+/// On single-threaded WASM this is the creation event-loop context; native
+/// targets additionally validate the bound operating-system thread identity.
 #[derive(Clone, Copy)]
-pub struct MainThreadToken {
+pub(crate) struct MainThreadToken {
     thread_id: ThreadId,
     _marker: PhantomData<*mut ()>,
 }
@@ -51,9 +54,8 @@ impl MainThreadToken {
     }
 }
 
-/// The Orchestrator is the heart of the execution lifecycle.
-/// It owns the VirtualKernel and the Receiver for RuntimeEvents.
-pub struct Orchestrator {
+/// The runtime-internal owner of the VirtualKernel and runtime-event receiver.
+pub(crate) struct Orchestrator {
     kernel: VirtualKernel,
     receiver: mpsc::Receiver<(u64, RuntimeEvent)>,
     sink: EventSink,
@@ -68,7 +70,7 @@ pub struct Orchestrator {
 }
 
 impl Orchestrator {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let (sender, receiver) = mpsc::channel();
         Self {
             kernel: VirtualKernel::new(),
@@ -98,30 +100,30 @@ impl Orchestrator {
         );
     }
 
-    pub fn set_driver(&mut self, driver: Rc<dyn KernelDriver>) {
+    pub(crate) fn set_driver(&mut self, driver: Rc<dyn KernelDriver>) {
         self.assert_main_thread();
         self.driver = Some(driver);
     }
 
-    pub fn set_vm(&mut self, vm: Arc<VirtualMachine>) {
+    pub(crate) fn set_vm(&mut self, vm: Arc<VirtualMachine>) {
         self.assert_main_thread();
         self.vm = Some(vm);
     }
 
-    pub fn kernel_mut(&mut self, token: MainThreadToken) -> &mut VirtualKernel {
+    pub(crate) fn kernel_mut(&mut self, token: MainThreadToken) -> &mut VirtualKernel {
         token.assert_current();
         self.assert_main_thread();
         &mut self.kernel
     }
 
     #[cfg(test)]
-    pub fn kernel(&self, token: MainThreadToken) -> &VirtualKernel {
+    pub(crate) fn kernel(&self, token: MainThreadToken) -> &VirtualKernel {
         token.assert_current();
         self.assert_main_thread();
         &self.kernel
     }
 
-    pub fn sink(&self) -> EventSink {
+    pub(crate) fn sink(&self) -> EventSink {
         self.sink.clone()
     }
 
@@ -228,7 +230,7 @@ impl Orchestrator {
     }
 
     /// Dispatches all currently runnable threads from the VirtualKernel to the driver.
-    pub fn dispatch_runnables(&mut self, token: MainThreadToken) {
+    pub(crate) fn dispatch_runnables(&mut self, token: MainThreadToken) {
         token.assert_current();
         self.assert_main_thread();
         while let Some(thread_id) = self.kernel.next_runnable() {
@@ -252,7 +254,7 @@ impl Orchestrator {
     }
 
     /// Processes all pending events in the queue without blocking.
-    pub fn process_events(&mut self, token: MainThreadToken) {
+    pub(crate) fn process_events(&mut self, token: MainThreadToken) {
         token.assert_current();
         self.assert_main_thread();
         while let Ok((_event_id, event)) = self.receiver.try_recv() {

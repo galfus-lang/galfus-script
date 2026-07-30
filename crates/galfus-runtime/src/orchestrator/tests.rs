@@ -1,5 +1,32 @@
 use super::*;
 use galfus_contract::RunnableTask;
+use std::thread;
+
+#[test]
+#[should_panic(expected = "main-thread token used from another thread")]
+fn main_thread_tokens_reject_a_different_thread_binding() {
+    let other_thread_id = thread::spawn(|| thread::current().id())
+        .join()
+        .expect("thread identity is available");
+    let token = MainThreadToken {
+        thread_id: other_thread_id,
+        _marker: std::marker::PhantomData,
+    };
+
+    token.assert_current();
+}
+
+#[test]
+#[should_panic(expected = "orchestrator accessed from a non-main thread")]
+fn orchestrator_rejects_a_different_thread_binding() {
+    let other_thread_id = thread::spawn(|| thread::current().id())
+        .join()
+        .expect("thread identity is available");
+    let mut orchestrator = Orchestrator::new();
+    orchestrator.main_thread_id = other_thread_id;
+
+    let _ = orchestrator.main_thread_token();
+}
 
 #[test]
 fn spawned_event_is_registered_and_queued_on_the_main_thread() {
