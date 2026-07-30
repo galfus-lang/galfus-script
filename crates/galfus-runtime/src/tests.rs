@@ -150,6 +150,7 @@ fn pending_initializer_delays_entry_until_its_completion() {
         pending: pending.clone(),
         fail_initializer: false,
     });
+    assert_eq!(execution.status(), ExecutionState::Initializing);
 
     for _ in 0..4 {
         if !calls.lock().unwrap().is_empty() {
@@ -181,6 +182,11 @@ fn pending_initializer_delays_entry_until_its_completion() {
     assert_eq!(
         execution.run_to_completion(),
         Ok(galfus_contract::BoundaryValue::I32(42))
+    );
+    assert_eq!(execution.status(), ExecutionState::Completed);
+    assert_eq!(
+        execution.result(),
+        Some(&Ok(galfus_contract::BoundaryValue::I32(42)))
     );
     assert_eq!(*calls.lock().unwrap(), vec!["initialize", "entry"]);
 }

@@ -12,7 +12,11 @@ use galfus_vm::VirtualMachine;
 use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
 use std::rc::Rc;
-use std::sync::{Arc, mpsc};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
 use std::thread::{self, ThreadId};
 
 struct PendingContinuation {
@@ -119,6 +123,7 @@ pub(crate) struct Orchestrator {
     pending_continuations: HashMap<u64, PendingContinuation>,
     startup_plans: HashMap<crate::registry::ThreadId, StartupPlan>,
     next_request_id: u64,
+    initialization_complete: Arc<AtomicBool>,
 }
 
 impl Orchestrator {
@@ -136,6 +141,7 @@ impl Orchestrator {
             pending_continuations: HashMap::new(),
             startup_plans: HashMap::new(),
             next_request_id: 1,
+            initialization_complete: Arc::new(AtomicBool::new(true)),
         }
     }
 
@@ -179,12 +185,17 @@ impl Orchestrator {
         self.sink.clone()
     }
 
+    pub(crate) fn initialization_complete(&self) -> Arc<AtomicBool> {
+        self.initialization_complete.clone()
+    }
+
     pub(crate) fn set_startup_plan(
         &mut self,
         thread_id: crate::registry::ThreadId,
         plan: StartupPlan,
     ) {
         self.assert_main_thread();
+        self.initialization_complete.store(false, Ordering::Release);
         self.startup_plans.insert(thread_id, plan);
     }
 
@@ -214,7 +225,10 @@ impl Orchestrator {
                 self.startup_plans.insert(thread_id, plan);
                 (module_id, function, vec![])
             }
-            None => (plan.entry_module_id, plan.entry_func, vec![plan.entry_args]),
+            None => {
+                self.initialization_complete.store(true, Ordering::Release);
+                (plan.entry_module_id, plan.entry_func, vec![plan.entry_args])
+            }
         };
         let vm = self.vm.as_ref().expect("VM is configured before execution");
         if let Err(error) = vm.prepare_function(&mut thread, module_id, function, args) {

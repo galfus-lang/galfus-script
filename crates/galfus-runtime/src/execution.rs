@@ -7,6 +7,10 @@ use galfus_contract::{
     RunnableTask, ThreadResult,
 };
 use std::rc::Rc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 /// Owns one running program and drives its orchestrator cooperatively.
 pub struct Execution {
@@ -15,17 +19,21 @@ pub struct Execution {
     sink: EventSink,
     result: Option<Result<BoundaryValue, ExecutionFailure>>,
     state: ExecutionState,
+    initialization_complete: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExecutionState {
     Created,
+    Initializing,
     Running,
     Waiting,
     Cancelling,
     Completed,
     Failed,
     Cancelled,
+    ShuttingDown,
+    Stopped,
 }
 
 impl Execution {
@@ -33,13 +41,20 @@ impl Execution {
         root: Box<dyn RunnableTask>,
         driver: Rc<dyn KernelDriver>,
         sink: EventSink,
+        initialization_complete: Arc<AtomicBool>,
+        is_initializing: bool,
     ) -> Self {
         Self {
             root: Some(root),
             driver,
             sink,
             result: None,
-            state: ExecutionState::Created,
+            state: if is_initializing {
+                ExecutionState::Initializing
+            } else {
+                ExecutionState::Created
+            },
+            initialization_complete,
         }
     }
 
@@ -70,6 +85,11 @@ impl Execution {
 
     pub fn poll(&mut self, budget: usize) -> Result<ExecutorStepResult, ExecutionFailure> {
         if matches!(self.state, ExecutionState::Created) {
+            self.state = ExecutionState::Running;
+        }
+        if matches!(self.state, ExecutionState::Initializing)
+            && self.initialization_complete.load(Ordering::Acquire)
+        {
             self.state = ExecutionState::Running;
         }
         if let Some(root) = self.root.take() {
@@ -122,7 +142,7 @@ impl Execution {
         loop {
             match self.poll(100)? {
                 ExecutorStepResult::Completed(_) => {
-                    return self.result.take().unwrap_or(Ok(BoundaryValue::Null));
+                    return self.result.clone().unwrap_or(Ok(BoundaryValue::Null));
                 }
                 ExecutorStepResult::Blocked { .. } => {
                     if !self.sink.has_pending() {

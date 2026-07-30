@@ -16,7 +16,13 @@ impl KernelDriver for IdleDriver {
 fn cancellation_transitions_the_execution_to_cancelled() {
     let orchestrator = Orchestrator::new();
     let sink = orchestrator.sink();
-    let mut execution = Execution::new(Box::new(orchestrator), Rc::new(IdleDriver), sink);
+    let mut execution = Execution::new(
+        Box::new(orchestrator),
+        Rc::new(IdleDriver),
+        sink,
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        false,
+    );
 
     execution.cancel();
     assert_eq!(execution.status(), ExecutionState::Cancelling);

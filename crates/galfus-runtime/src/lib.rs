@@ -173,6 +173,7 @@ impl Runtime {
         let token = orchestrator.main_thread_token();
         let main_thread_id = orchestrator.kernel_mut(token).spawn(thread);
 
+        let is_initializing = startup_plan.is_some();
         if let Some(startup_plan) = startup_plan {
             orchestrator.set_startup_plan(main_thread_id, startup_plan);
         }
@@ -192,9 +193,16 @@ impl Runtime {
             .enqueue_runnable(main_thread_id, main_thread);
 
         let sink = orchestrator.sink();
+        let initialization_complete = orchestrator.initialization_complete();
         let task = Box::new(orchestrator);
 
-        Ok(Execution::new(task, driver, sink))
+        Ok(Execution::new(
+            task,
+            driver,
+            sink,
+            initialization_complete,
+            is_initializing,
+        ))
     }
 }
 
