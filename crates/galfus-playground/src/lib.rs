@@ -7,11 +7,9 @@ mod wasm;
 #[cfg(test)]
 mod tests;
 
-use std::sync;
-
 use anyhow::Result;
-use galfus_contract::{Providers, ThreadExecutor};
-use galfus_runtime::SingleThreadExecutor;
+use galfus_contract::Providers;
+use galfus_runtime::{CooperativeDriver, Execution};
 use galfus_workspace::{LoadResult, Workspace};
 
 pub use buffer_io::BufferIoProvider;
@@ -20,7 +18,7 @@ pub use buffer_io::BufferIoProvider;
 pub struct Playground {
     workspace: Workspace,
     io: BufferIoProvider,
-    executor: Option<sync::Arc<executor::PlaygroundExecutor>>,
+    execution: Option<Execution>,
 }
 
 pub struct PlaygroundCheckResult {
@@ -45,7 +43,7 @@ impl Playground {
         Self {
             workspace: Workspace::new(),
             io: BufferIoProvider::default(),
-            executor: None,
+            execution: None,
         }
     }
 
@@ -95,42 +93,40 @@ impl Playground {
     }
 
     pub fn run(&mut self, args: &[Vec<u8>]) -> Result<i32> {
-        use galfus_contract::ThreadExecutor;
-        let executor = sync::Arc::new(SingleThreadExecutor::new());
-        let exit_code = sync::Arc::new(sync::Mutex::new(0));
-        let ec = sync::Arc::clone(&exit_code);
-        executor.on_exit(Box::new(move |res: Result<i32, String>| {
-            *ec.lock().unwrap() = res.unwrap();
-        }));
-        self.workspace
-            .run(
+        let executor = std::rc::Rc::new(CooperativeDriver::new());
+        let mut execution = self
+            .workspace
+            .start_execution(
                 args,
                 Some(Providers::with_host(Box::new(self.io.clone()))),
                 executor.clone(),
             )
             .map_err(|error| anyhow::anyhow!("playground execution failed: {error:?}"))?;
-        let code = *exit_code.lock().unwrap();
-        Ok(code)
+        match execution.run_to_completion()? {
+            galfus_contract::BoundaryValue::I32(code) => Ok(code),
+            _ => Ok(0),
+        }
     }
 
     pub fn start(&mut self, args: &[Vec<u8>]) -> Result<()> {
-        let executor = sync::Arc::new(executor::PlaygroundExecutor::new());
-        self.workspace
-            .run(
+        let executor = std::rc::Rc::new(executor::PlaygroundExecutor::new());
+        let execution = self
+            .workspace
+            .start_execution(
                 args,
                 Some(Providers::with_host(Box::new(self.io.clone()))),
                 executor.clone(),
             )
             .map_err(|error| anyhow::anyhow!("playground execution failed: {error:?}"))?;
 
-        self.executor = Some(executor);
+        self.execution = Some(execution);
         Ok(())
     }
 
     pub fn step(&mut self) -> Result<galfus_contract::ExecutorStepResult> {
-        if let Some(executor) = &self.executor {
-            executor
-                .step()
+        if let Some(execution) = &mut self.execution {
+            execution
+                .poll(100)
                 .map_err(|error| anyhow::anyhow!("playground step failed: {error}"))
         } else {
             Err(anyhow::anyhow!("playground execution has not been started"))

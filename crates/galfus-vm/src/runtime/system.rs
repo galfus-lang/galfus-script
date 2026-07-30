@@ -7,7 +7,7 @@ impl VirtualMachine {
         &self,
         thread: &mut thread::VirtualThread,
         instr: Instruction,
-    ) -> Result<ExecutionStep, VmError> {
+    ) -> Result<VmStep, VmError> {
         match instr {
             // Category E: Memory Ownership
             Instruction::Drop { reg } => {
@@ -19,50 +19,70 @@ impl VirtualMachine {
                 name_const,
                 args_start,
                 arg_count,
+                arg_types,
+                return_type,
             } => {
-                if let Some(resp) = thread.system_response.take() {
-                    thread.write_reg(dest, resp)?;
-                    return Ok(ExecutionStep::Continue);
-                } else {
-                    let frame = thread.call_stack.last_mut().unwrap();
-                    frame.pc -= 1; // repeat this instruction upon resume
-
-                    let name = match self.current_image(thread)?.constants.constants
-                        [name_const.raw() as usize]
-                    {
-                        Constant::String(ref s) => s.clone(),
-                        _ => {
-                            return Err(VmError::TypeMismatch {
-                                expected: "String constant".to_string(),
-                                found: "other".to_string(),
-                            });
-                        }
-                    };
-
-                    let mut elements = Vec::new();
-                    // First element is the method name as a string (array of bytes)
-                    let name_chars = name.into_bytes().into_iter().map(Value::Uint8).collect();
-                    let name_val = Value::Object(thread.heap.alloc(HeapObject::Array {
-                        element_ty: TypeIdx(0),
-                        elements: name_chars,
-                    }));
-                    elements.push(name_val);
-
-                    for i in 0..arg_count {
-                        elements.push(thread.read_reg(Reg(args_start.raw() + i as u16))?);
+                let name = match self.current_image(thread)?.constants.constants
+                    [name_const.raw() as usize]
+                {
+                    Constant::String(ref s) => s.clone(),
+                    _ => {
+                        return Err(VmError::TypeMismatch {
+                            expected: "String constant".to_string(),
+                            found: "other".to_string(),
+                        });
                     }
+                };
+                let module_id = thread
+                    .call_stack
+                    .last()
+                    .ok_or(VmError::EmptyCallStack)?
+                    .module_id;
+                let args = (0..arg_count)
+                    .map(|index| thread.read_reg(Reg(args_start.raw() + index as u16)))
+                    .collect::<Result<Vec<_>, _>>()?;
 
-                    let msg = Value::Object(thread.heap.alloc(HeapObject::Array {
-                        element_ty: TypeIdx(0), // dummy for system messages
-                        elements,
-                    }));
-
-                    return Ok(ExecutionStep::SendMsg {
-                        dest,
-                        target: 0,
-                        msg,
-                    });
-                }
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::ProviderCall {
+                        module_id,
+                        name,
+                        args,
+                        arg_types,
+                        return_type,
+                    },
+                    continuation: Continuation::for_provider(dest, module_id, return_type),
+                });
+            }
+            Instruction::AwaitFuture {
+                dest,
+                future_id,
+                return_type,
+            } => {
+                let future_id = match thread.read_reg(future_id)? {
+                    Value::Uint64(id) => id,
+                    Value::Uint32(id) => id.into(),
+                    Value::Int64(id) if id >= 0 => id as u64,
+                    Value::Int32(id) if id >= 0 => id as u64,
+                    value => {
+                        return Err(VmError::TypeMismatch {
+                            expected: "non-negative future ID".to_string(),
+                            found: format!("{value:?}"),
+                        });
+                    }
+                };
+                let module_id = thread
+                    .call_stack
+                    .last()
+                    .ok_or(VmError::EmptyCallStack)?
+                    .module_id;
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::FutureWait {
+                        future_id,
+                        module_id,
+                        return_type,
+                    },
+                    continuation: Continuation::for_provider(dest, module_id, return_type),
+                });
             }
             Instruction::Len { dest, src } => {
                 let val = thread.read_reg(src)?;
@@ -156,6 +176,6 @@ impl VirtualMachine {
             _ => unreachable!("instruction routed to the wrong runtime handler"),
         }
 
-        Ok(ExecutionStep::Continue)
+        Ok(VmStep::Continue)
     }
 }

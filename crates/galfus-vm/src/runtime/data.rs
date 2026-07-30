@@ -7,7 +7,7 @@ impl VirtualMachine {
         &self,
         thread: &mut thread::VirtualThread,
         instr: Instruction,
-    ) -> Result<ExecutionStep, VmError> {
+    ) -> Result<VmStep, VmError> {
         match instr {
             // Category A: Data Movement & Constants
             Instruction::LoadConst { dest, const_idx } => {
@@ -97,7 +97,7 @@ impl VirtualMachine {
             _ => unreachable!("instruction routed to the wrong runtime handler"),
         }
 
-        Ok(ExecutionStep::Continue)
+        Ok(VmStep::Continue)
     }
 
     pub(super) fn uint8_type_idx(&self, thread: &thread::VirtualThread) -> TypeIdx {

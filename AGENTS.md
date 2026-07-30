@@ -1,8 +1,8 @@
+# Instructions for Agents
+
 ## Project Configuration
 
 - **Languages**: Rust (Core), TypeScript / Bun (CI/CD and Automation Scripts)
-
-# Instructions for Agents
 
 ## 1) Priority and Scope
 

@@ -1,8 +1,10 @@
 # Galfus Adapters Surface Reference
 
-> **Status: Planned design.** The implemented host boundary uses the optional
-> asynchronous `HostProvider` through the `Instruction::CallNative` mechanism. Proxy descriptors, native/WASM adapters, payloads,
-> and bundle reachability described below are not implemented yet.
+> **Status: mixed.** `galfus-contract` implements an in-memory `Adapters`
+> registry with nominal module/symbol lookup, affinity, cancellation, and
+> handle-release hooks. The compiler does not currently emit adapter calls.
+> Proxy descriptors, native/WASM payload loading, capability enforcement, and
+> bundle reachability described below are planned design, not runtime behavior.
 
 This document defines the Galfus adapter surface model.
 

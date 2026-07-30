@@ -5,14 +5,19 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
 
-> A small, efficient, highly modular interpreted scripting language built around typed source code, an in-memory executable graph, and a deterministic VM runtime.
+> A typed scripting language with an in-memory bytecode graph and a Rust-hosted VM runtime.
 
-Galfus Script is a programming language validating a compact, modular, VM-first scripting model. The compiler pipeline and VM interpreter are fully implemented and verified.
+Galfus Script is a VM-first language project. Its current implementation covers
+source checking, bytecode graph construction, and execution through the Rust
+runtime. Some documented interop, packaging, and async language features remain
+planned rather than source-level features.
 
 ---
 
 ## Table of Contents
 
+- [Embedding Galfus](docs/Embedding_Galfus_in_Rust.md)
+- [Why Galfus Is Embeddable](docs/Why_Galfus_Is_Embeddable.md)
 - [Status](#status)
 - [Core Features](#core-features)
 - [Memory Philosophy](#memory-philosophy)
@@ -27,7 +32,9 @@ Galfus Script is a programming language validating a compact, modular, VM-first 
 
 ## Status
 
-The entire core execution pipeline is complete. You can parse, typecheck, compile, and run Galfus Script projects using the local VM runner.
+You can parse, typecheck, compile, and run Galfus Script projects using the
+local VM runner. Embedding applications can use `galfus-workspace` for source
+management or `galfus-runtime` for an existing bytecode graph.
 
 ```txt
 .gfs Source Files (Workspace)
@@ -191,7 +198,9 @@ cargo fmt --check
 Galfus Script is designed from the ground up to be:
 
 - **VM-First**: Bytecode and interpreter structures dictate the design, making the VM highly portable.
-- **Host-Friendly**: Designed to easily embed in larger native applications (like game engines or databases).
+- **Host integration**: Rust hosts can supply providers, drivers, and lifecycle
+  control through explicit contracts; application scheduling and security policy
+  remain host responsibilities.
 - **Deterministic**: Standardized memory behavior, integer arithmetic, and strict execution paths.
 - **Explicit**: Avoids magic conventions; imports, exports, and structures must be declared explicitly.
 

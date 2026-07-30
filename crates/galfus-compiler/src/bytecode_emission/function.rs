@@ -382,12 +382,35 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                         self.ctx,
                                         &mir::Constant::String(native_name.to_string()),
                                     );
+                                let argument_types = args
+                                    .iter()
+                                    .map(|argument| self.get_operand_type(argument))
+                                    .collect::<Vec<_>>();
+                                let return_type = self
+                                    .func
+                                    .locals
+                                    .iter()
+                                    .find(|local| local.id == *destination)
+                                    .expect("native call destination must be a local")
+                                    .ty;
+                                let arg_types = argument_types
+                                    .into_iter()
+                                    .map(|ty| {
+                                        crate::bytecode_emission::types::lower_type(self.ctx, ty)
+                                    })
+                                    .collect();
+                                let return_type = crate::bytecode_emission::types::lower_type(
+                                    self.ctx,
+                                    return_type,
+                                );
 
                                 self.instructions.push(Instruction::CallNative {
                                     dest: Reg(destination.raw() as u16),
                                     name_const: name_idx,
                                     args_start: start_reg,
                                     arg_count: args.len() as u8,
+                                    arg_types,
+                                    return_type,
                                 });
 
                                 if !args.is_empty() {

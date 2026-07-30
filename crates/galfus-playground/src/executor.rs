@@ -1,63 +1,76 @@
 use std::sync;
 
-use galfus_contract::{ExecutorStepResult, RunnableTask, ThreadExecutor, ThreadResult};
-use std::collections::VecDeque;
-use std::sync::{
-    Mutex,
-    atomic::{AtomicU64, Ordering},
+use galfus_contract::{
+    ExecutionFailure, ExecutorStepResult, KernelDriver, KernelTask, ThreadResult,
 };
+use std::collections::VecDeque;
+use std::sync::Mutex;
 
 pub struct PlaygroundExecutor {
-    queue: Mutex<VecDeque<Box<dyn RunnableTask>>>,
-    next_thread_id: AtomicU64,
+    queue: Mutex<VecDeque<KernelTask>>,
     exit_code: sync::Mutex<i32>,
-    exit_callback: Mutex<Option<Box<dyn Fn(Result<i32, String>) + Send + Sync>>>,
+    exit_callback: Mutex<Option<Box<dyn Fn(Result<i32, ExecutionFailure>) + Send + Sync>>>,
 }
 
 impl PlaygroundExecutor {
     pub fn new() -> Self {
         Self {
             queue: Mutex::new(VecDeque::new()),
-            next_thread_id: AtomicU64::new(1),
             exit_code: sync::Mutex::new(0),
             exit_callback: Mutex::new(None),
         }
     }
 }
 
-impl ThreadExecutor for PlaygroundExecutor {
-    fn allocate_thread_id(&self) -> u64 {
-        self.next_thread_id.fetch_add(1, Ordering::Relaxed)
-    }
-
-    fn spawn(&self, task: Box<dyn RunnableTask>) {
+impl KernelDriver for PlaygroundExecutor {
+    fn dispatch(&self, task: KernelTask) {
         self.queue.lock().unwrap().push_back(task);
     }
 
-    fn on_exit(&self, callback: Box<dyn Fn(Result<i32, String>) + Send + Sync>) {
+    fn on_exit(&self, callback: Box<dyn Fn(Result<i32, ExecutionFailure>) + Send + Sync>) {
         *self.exit_callback.lock().unwrap() = Some(callback);
     }
 
     fn run(&self) {
-        // NON-BLOCKING:
-        // Do nothing!
-        // The tasks are already spawned in the queue.
-        // The environment (WASM) will drive the execution by calling `step()` periodically.
+        // NON-BLOCKING
     }
 
-    fn step(&self) -> Result<ExecutorStepResult, String> {
-        let task = {
+    fn complete(&self, result: Result<i32, ExecutionFailure>) {
+        if let Some(callback) = self.exit_callback.lock().unwrap().take() {
+            callback(result);
+        }
+    }
+
+    fn step(&self) -> Result<ExecutorStepResult, ExecutionFailure> {
+        let task_entry = {
             let mut q = self.queue.lock().unwrap();
             q.pop_front()
         };
 
-        let Some(task) = task else {
+        let Some(task_entry) = task_entry else {
             return Ok(ExecutorStepResult::Blocked { timeout: None });
         };
 
-        match task.run(100) {
+        let result = match task_entry {
+            KernelTask::Main(task) => task.run(100),
+            KernelTask::Any(task) => match task.run(100) {
+                ThreadResult::Yielded(task) => {
+                    let task = task.into_any_thread().ok_or_else(|| {
+                        ExecutionFailure::new(
+                            galfus_contract::ExecutionFailureKind::DriverFailure,
+                            "any-thread task yielded a non-transferable continuation",
+                        )
+                    })?;
+                    self.queue.lock().unwrap().push_back(KernelTask::Any(task));
+                    return Ok(ExecutorStepResult::Running);
+                }
+                result => result,
+            },
+        };
+
+        match result {
             ThreadResult::Yielded(t) => {
-                self.queue.lock().unwrap().push_back(t);
+                self.queue.lock().unwrap().push_back(KernelTask::Main(t));
                 Ok(ExecutorStepResult::Running)
             }
             ThreadResult::Blocked { timeout } => {

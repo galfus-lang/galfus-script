@@ -56,6 +56,7 @@ pub enum BytecodeType {
     Uint64,
     Float32,
     Float64,
+    ExternalHandle(String),
     Struct(StructLayoutIdx),
     Array(TypeIdx),
     Tuple(Vec<TypeIdx>),

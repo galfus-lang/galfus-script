@@ -2,10 +2,16 @@ use std::time;
 
 /// Represents an encapsulated virtual thread, ready to run.
 /// The host environment does not know its internals.
-pub trait RunnableTask: Send {
+pub trait RunnableTask {
     /// The host calls this method and provides a "budget" (e.g., number of instructions).
     /// The task runs until the budget is exhausted or it needs to pause.
     fn run(self: Box<Self>, budget: usize) -> ThreadResult;
+
+    /// Returns this task as transferable work when its continuation is `Send`.
+    /// Main-thread tasks keep the default `None` implementation.
+    fn into_any_thread(self: Box<Self>) -> Option<Box<dyn RunnableTask + Send>> {
+        None
+    }
 }
 
 /// The result returned after running a slice of a virtual thread.
@@ -18,7 +24,7 @@ pub enum ThreadResult {
     Completed(i32),
 
     /// The thread encountered a critical error (panic).
-    Failed(String),
+    Failed(crate::ExecutionFailure),
 
     /// The thread needs to call a Provider or is waiting for a message.
     /// The Host should discard the task. The Runtime Orchestrator will
@@ -36,24 +42,46 @@ pub enum ExecutorStepResult {
     Completed(i32),
 }
 
+/// A unit of work for the kernel driver to execute.
+pub enum KernelTask {
+    /// Work that must be pinned to the main thread (e.g. Orchestrator loop)
+    Main(Box<dyn RunnableTask>),
+    /// Work that can run on any available background thread
+    Any(Box<dyn RunnableTask + Send>),
+}
+
+/// The only scheduling information visible to a kernel driver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskAffinity {
+    Main,
+    Any,
+}
+
+impl KernelTask {
+    pub const fn affinity(&self) -> TaskAffinity {
+        match self {
+            Self::Main(_) => TaskAffinity::Main,
+            Self::Any(_) => TaskAffinity::Any,
+        }
+    }
+}
+
 /// The Host must implement this trait to dictate how tasks are scheduled.
-pub trait ThreadExecutor: Send + Sync {
-    /// Allocates a unique, non-zero identity for a virtual thread.
-    ///
-    /// Implementations must never reuse an allocated value during one execution.
-    fn allocate_thread_id(&self) -> u64;
+pub trait KernelDriver {
+    /// The Kernel or Orchestrator calls this to submit work.
+    fn dispatch(&self, task: KernelTask);
 
-    /// The Runtime calls this whenever a new thread is born or "woken up".
-    fn spawn(&self, task: Box<dyn RunnableTask>);
+    /// Sets the callback to be invoked when the driver completes its execution.
+    fn on_exit(&self, callback: Box<dyn Fn(Result<i32, crate::ExecutionFailure>) + Send + Sync>);
 
-    /// Sets the callback to be invoked when the executor completes its execution.
-    fn on_exit(&self, callback: Box<dyn Fn(Result<i32, String>) + Send + Sync>);
-
-    /// Runs the executor loop. Behavior (blocking vs non-blocking) depends on the implementation.
+    /// Runs the driver loop. Behavior (blocking vs non-blocking) depends on the implementation.
     fn run(&self);
 
-    /// Executes a single task step from the queue, returning the current status.
-    fn step(&self) -> Result<ExecutorStepResult, String> {
+    /// Receives the final result of a persistent execution.
+    fn complete(&self, _result: Result<i32, crate::ExecutionFailure>) {}
+
+    /// Executes a single step, returning the current status.
+    fn step(&self) -> Result<ExecutorStepResult, crate::ExecutionFailure> {
         unimplemented!("step is not implemented by default")
     }
 }

@@ -1,7 +1,9 @@
 /// Synchronous terminal I/O for native Galfus hosts.
 use std::io;
 
-use galfus_contract::{HostProvider, HostResponse, HostValue, MessageInjector};
+use galfus_contract::{
+    BoundaryValue, ExecutionFailure, ExecutionFailureKind, HostProvider, MessageInjector,
+};
 use std::io::{Read, Write};
 use std::sync::Arc;
 
@@ -11,36 +13,50 @@ impl HostProvider for NativeIoProvider {
     fn dispatch(
         &mut self,
         thread_id: usize,
+        request_id: u64,
         method: &str,
-        args: &[HostValue],
+        args: &[BoundaryValue],
         injector: Arc<dyn MessageInjector>,
     ) {
         match method {
             "write" => {
-                if let Some(HostValue::Bytes(bytes)) = args.first() {
+                if let Some(BoundaryValue::Bytes(bytes)) = args.first() {
                     let stdout = io::stdout();
                     let mut handle = stdout.lock();
                     if let Err(e) = handle.write_all(bytes).and_then(|()| handle.flush()) {
-                        injector
-                            .inject_system_response(thread_id, HostResponse::Error(e.to_string()));
+                        injector.inject_system_response(
+                            thread_id,
+                            request_id,
+                            Err(ExecutionFailure::new(
+                                ExecutionFailureKind::ProviderFailure,
+                                e.to_string(),
+                            )),
+                        );
                         return;
                     }
-                    injector
-                        .inject_system_response(thread_id, HostResponse::Success(HostValue::Null));
+                    injector.inject_system_response(thread_id, request_id, Ok(BoundaryValue::Null));
                 } else {
                     injector.inject_system_response(
                         thread_id,
-                        HostResponse::Error("Invalid arguments for write".to_string()),
+                        request_id,
+                        Err(ExecutionFailure::new(
+                            ExecutionFailureKind::ProviderFailure,
+                            "Invalid arguments for write".to_string(),
+                        )),
                     );
                 }
             }
             "read" => {
-                let terminator = if let Some(HostValue::Bytes(b)) = args.first() {
+                let terminator = if let Some(BoundaryValue::Bytes(b)) = args.first() {
                     b.clone()
                 } else {
                     injector.inject_system_response(
                         thread_id,
-                        HostResponse::Error("Invalid arguments for read".to_string()),
+                        request_id,
+                        Err(ExecutionFailure::new(
+                            ExecutionFailureKind::ProviderFailure,
+                            "Invalid arguments for read".to_string(),
+                        )),
                     );
                     return;
                 };
@@ -48,7 +64,11 @@ impl HostProvider for NativeIoProvider {
                 if terminator.is_empty() {
                     injector.inject_system_response(
                         thread_id,
-                        HostResponse::Error("input terminator must not be empty".to_string()),
+                        request_id,
+                        Err(ExecutionFailure::new(
+                            ExecutionFailureKind::ProviderFailure,
+                            "input terminator must not be empty".to_string(),
+                        )),
                     );
                     return;
                 }
@@ -63,14 +83,16 @@ impl HostProvider for NativeIoProvider {
                         Ok(0) if input.is_empty() => {
                             injector.inject_system_response(
                                 thread_id,
-                                HostResponse::Success(HostValue::Bytes(Vec::new())),
+                                request_id,
+                                Ok(BoundaryValue::Bytes(Vec::new())),
                             );
                             return;
                         }
                         Ok(0) => {
                             injector.inject_system_response(
                                 thread_id,
-                                HostResponse::Success(HostValue::Bytes(input)),
+                                request_id,
+                                Ok(BoundaryValue::Bytes(input)),
                             );
                             return;
                         }
@@ -80,7 +102,8 @@ impl HostProvider for NativeIoProvider {
                                 input.truncate(input.len() - terminator.len());
                                 injector.inject_system_response(
                                     thread_id,
-                                    HostResponse::Success(HostValue::Bytes(input)),
+                                    request_id,
+                                    Ok(BoundaryValue::Bytes(input)),
                                 );
                                 return;
                             }
@@ -88,7 +111,11 @@ impl HostProvider for NativeIoProvider {
                         Err(error) => {
                             injector.inject_system_response(
                                 thread_id,
-                                HostResponse::Error(error.to_string()),
+                                request_id,
+                                Err(ExecutionFailure::new(
+                                    ExecutionFailureKind::ProviderFailure,
+                                    error.to_string(),
+                                )),
                             );
                             return;
                         }
@@ -98,7 +125,11 @@ impl HostProvider for NativeIoProvider {
             _ => {
                 injector.inject_system_response(
                     thread_id,
-                    HostResponse::Error(format!("Method {} not found", method)),
+                    request_id,
+                    Err(ExecutionFailure::new(
+                        ExecutionFailureKind::ProviderFailure,
+                        format!("Method {} not found", method),
+                    )),
                 );
             }
         }

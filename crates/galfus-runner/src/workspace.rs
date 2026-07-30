@@ -7,7 +7,7 @@ use std::sync;
 use crate::NativeIoProvider;
 use anyhow::{Context, Result, bail};
 use galfus_contract::Providers;
-use galfus_runtime::SingleThreadExecutor;
+use galfus_runtime::CooperativeDriver;
 use galfus_workspace::{LoadResult, Workspace};
 use std::path::Path;
 
@@ -42,11 +42,11 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
         .iter()
         .map(|argument| argument.as_bytes().to_vec())
         .collect::<Vec<_>>();
-    use galfus_contract::ThreadExecutor;
-    let executor = sync::Arc::new(SingleThreadExecutor::new());
+    use galfus_contract::KernelDriver;
+    let executor = std::rc::Rc::new(CooperativeDriver::new());
     let exit_code = sync::Arc::new(sync::Mutex::new(0));
     let ec = sync::Arc::clone(&exit_code);
-    executor.on_exit(Box::new(move |res: Result<i32, String>| {
+    executor.on_exit(Box::new(move |res| {
         *ec.lock().unwrap() = res.unwrap();
     }));
     workspace

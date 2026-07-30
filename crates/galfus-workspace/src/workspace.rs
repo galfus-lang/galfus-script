@@ -16,7 +16,7 @@ use galfus_core::{DiagnosticBag, ModulePath, SourceFile};
 use galfus_frontend::modules::{
     FrontendRoots, FrontendSession, FrontendSource, FrontendUpdate, SemanticRoot, SemanticRootKind,
 };
-use galfus_runtime::{Runtime, RuntimeError, format_panic};
+use galfus_runtime::{Execution, Runtime, RuntimeError, format_panic};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -477,13 +477,13 @@ impl Workspace {
         Ok(CompileReport { graph })
     }
 
-    /// Load the current compiled graph into the runtime and execute its configured entry.
-    pub fn run(
+    /// Starts the configured entry as a persistent execution.
+    pub fn start_execution(
         &mut self,
         args: &[Vec<u8>],
         providers: Option<Providers>,
-        executor: Arc<dyn galfus_contract::ThreadExecutor>,
-    ) -> Result<(), RunBlocked> {
+        driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
+    ) -> Result<Execution, RunBlocked> {
         let graph = match &self.bytecode_state.compile_state {
             CompileState::Ready { graph, .. } => Arc::clone(graph),
             _ => return Err(RunBlocked::CompileRequired),
@@ -504,17 +504,26 @@ impl Workspace {
             .expect("a successful compile requires configuration")
             .run_entry
             .clone();
-        let task = Runtime::new(graph.clone(), providers)
-            .build_module_entry(entry_id, entry_name.as_str(), args, executor.clone())
+        Runtime::new(graph.clone(), providers)
+            .start(entry_id, entry_name.as_str(), args, driver.clone())
             .map_err(|error| {
                 if let RuntimeError::VmPanic(panic) = &error {
                     RunBlocked::RuntimeError(format_panic(&graph, panic))
                 } else {
                     RunBlocked::RuntimeError(error.to_string())
                 }
-            })?;
-        executor.spawn(task);
-        executor.run();
+            })
+    }
+
+    /// Compatibility helper that drives the returned execution through the supplied driver.
+    pub fn run(
+        &mut self,
+        args: &[Vec<u8>],
+        providers: Option<Providers>,
+        driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
+    ) -> Result<(), RunBlocked> {
+        let mut execution = self.start_execution(args, providers, driver)?;
+        let _ = execution.run_to_completion();
 
         Ok(())
     }

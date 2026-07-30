@@ -20,47 +20,101 @@ use galfus_contract::Providers;
 use galfus_core::ModuleId;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-pub enum ExecutionStep {
-    Continue,
-    Return(Value),
-    Blocked,
+#[derive(Debug, Clone)]
+pub struct Continuation {
+    dest: Option<Reg>,
+    expected_result: Option<(ModuleId, TypeIdx)>,
+    resumed: Arc<AtomicBool>,
+}
+
+impl Continuation {
+    pub(crate) fn new(dest: Option<Reg>) -> Self {
+        Self {
+            dest,
+            expected_result: None,
+            resumed: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub(crate) fn for_provider(dest: Reg, module_id: ModuleId, return_type: TypeIdx) -> Self {
+        Self {
+            dest: Some(dest),
+            expected_result: Some((module_id, return_type)),
+            resumed: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum VmEffect {
+    SendMsg {
+        target: u64,
+        bytes: Vec<u8>,
+    },
+    ProviderCall {
+        module_id: ModuleId,
+        name: String,
+        args: Vec<Value>,
+        arg_types: Vec<TypeIdx>,
+        return_type: TypeIdx,
+    },
+    AdapterCall {
+        module_id: ModuleId,
+        adapter: String,
+        symbol: String,
+        args: Vec<Value>,
+        arg_types: Vec<TypeIdx>,
+        return_type: TypeIdx,
+    },
+    TimerWait {
+        delay_ms: u64,
+    },
+    FutureWait {
+        future_id: u64,
+        module_id: ModuleId,
+        return_type: TypeIdx,
+    },
     ReceiveFilter {
-        dest: Reg,
         sender_id: u64,
         timeout: Option<u64>,
     },
-    SendMsg {
-        dest: Reg,
-        target: u64,
-        msg: Value,
-    },
     CreateThread {
-        dest: Reg,
         func: Value,
         key: Value,
     },
     StartThread {
-        dest: Reg,
         thread_id: u64,
         arg: Value,
     },
     GetThread {
-        dest: Reg,
         key: Value,
     },
     ThreadIsRunning {
-        dest: Reg,
         thread_id: u64,
     },
     ThreadIsExited {
-        dest: Reg,
         thread_id: u64,
     },
     ThreadExitReason {
-        dest: Reg,
         thread_id: u64,
     },
+    Blocked,
+}
+
+pub enum VmStep {
+    Continue,
+    Return {
+        value: Value,
+        module_id: ModuleId,
+        return_type: TypeIdx,
+    },
+    Suspend {
+        effect: VmEffect,
+        continuation: Continuation,
+    },
+    Failed(galfus_contract::ExecutionFailure),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -118,6 +172,10 @@ pub enum HeapObject {
         variant_idx: u16,
         payload: Value,
     },
+    ExternalHandle {
+        kind: String,
+        id: u64,
+    },
 }
 
 #[derive(Clone)]
@@ -154,6 +212,120 @@ pub struct VirtualMachine {
 }
 
 impl VirtualMachine {
+    /// Resumes a suspended VM operation exactly once without exposing register layout.
+    pub fn resume(
+        &self,
+        thread: &mut thread::VirtualThread,
+        continuation: Continuation,
+        value: Value,
+    ) -> Result<(), galfus_contract::ExecutionFailure> {
+        if continuation.resumed.swap(true, Ordering::AcqRel) {
+            return Err(galfus_contract::ExecutionFailure::new(
+                galfus_contract::ExecutionFailureKind::DuplicateCompletion,
+                "continuation was already resumed",
+            ));
+        }
+        if let Some((module_id, expected_type)) = continuation.expected_result
+            && !self.value_matches_type(thread, value.clone(), module_id, expected_type)
+        {
+            return Err(galfus_contract::ExecutionFailure::new(
+                galfus_contract::ExecutionFailureKind::InvalidContinuation,
+                "continuation result does not match its declared type",
+            ));
+        }
+        if let Some(dest) = continuation.dest {
+            thread.write_reg(dest, value).map_err(|error| {
+                galfus_contract::ExecutionFailure::new(
+                    galfus_contract::ExecutionFailureKind::InvalidContinuation,
+                    error.to_string(),
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    fn value_matches_type(
+        &self,
+        thread: &thread::VirtualThread,
+        value: Value,
+        module_id: ModuleId,
+        type_idx: TypeIdx,
+    ) -> bool {
+        let Some(module) = self.graph.get(module_id).map(|node| &node.module) else {
+            return false;
+        };
+        let Some(expected) = module.types.get(type_idx.raw() as usize) else {
+            return false;
+        };
+        match (expected, value) {
+            (BytecodeType::Null, Value::Null)
+            | (BytecodeType::Bool, Value::Bool(_))
+            | (BytecodeType::Int8, Value::Int8(_))
+            | (BytecodeType::Int16, Value::Int16(_))
+            | (BytecodeType::Int32, Value::Int32(_))
+            | (BytecodeType::Int64, Value::Int64(_))
+            | (BytecodeType::Uint8, Value::Uint8(_))
+            | (BytecodeType::Uint16, Value::Uint16(_))
+            | (BytecodeType::Uint32, Value::Uint32(_))
+            | (BytecodeType::Uint64, Value::Uint64(_))
+            | (BytecodeType::Float32, Value::Float32(_))
+            | (BytecodeType::Float64, Value::Float64(_)) => true,
+            (BytecodeType::Array(element_type), Value::Object(reference)) => {
+                let Ok(HeapObject::Array {
+                    element_ty,
+                    elements,
+                }) = thread.heap.get_object(reference)
+                else {
+                    return false;
+                };
+                element_ty == element_type
+                    && elements.iter().cloned().all(|value| {
+                        self.value_matches_type(thread, value, module_id, *element_type)
+                    })
+            }
+            (BytecodeType::Tuple(element_types), Value::Object(reference)) => {
+                let Ok(HeapObject::Tuple { elements }) = thread.heap.get_object(reference) else {
+                    return false;
+                };
+                elements.len() == element_types.len()
+                    && elements
+                        .iter()
+                        .cloned()
+                        .zip(element_types)
+                        .all(|(value, type_idx)| {
+                            self.value_matches_type(thread, value, module_id, *type_idx)
+                        })
+            }
+            (BytecodeType::Choice(layout_idx), Value::Object(reference)) => {
+                let Ok(HeapObject::Choice {
+                    module_id: value_module,
+                    layout_idx: actual_layout,
+                    variant_idx,
+                    payload,
+                }) = thread.heap.get_object(reference)
+                else {
+                    return false;
+                };
+                if *value_module != module_id || actual_layout != layout_idx {
+                    return false;
+                }
+                let Some(variant) = module
+                    .choice_layouts
+                    .get(layout_idx.raw() as usize)
+                    .and_then(|layout| layout.variants.get(*variant_idx as usize))
+                else {
+                    return false;
+                };
+                match variant.payload_ty {
+                    Some(type_idx) => {
+                        self.value_matches_type(thread, payload.clone(), module_id, type_idx)
+                    }
+                    None => matches!(payload, Value::Null),
+                }
+            }
+            _ => false,
+        }
+    }
     pub fn providers(&self) -> Option<Arc<Mutex<Providers>>> {
         self.context.providers.clone()
     }
@@ -296,52 +468,11 @@ impl VirtualMachine {
         &self,
         thread: &mut thread::VirtualThread,
         mut budget: usize,
-    ) -> Result<ExecutionStep, VmPanic> {
+    ) -> Result<VmStep, VmPanic> {
         while budget > 0 {
             match self.step(thread) {
-                Ok(ExecutionStep::Continue) => budget -= 1,
-                Ok(ExecutionStep::Return(val)) => return Ok(ExecutionStep::Return(val)),
-                Ok(ExecutionStep::Blocked) => return Ok(ExecutionStep::Blocked),
-                Ok(ExecutionStep::SendMsg { dest, target, msg }) => {
-                    return Ok(ExecutionStep::SendMsg { dest, target, msg });
-                }
-                Ok(ExecutionStep::ReceiveFilter {
-                    dest,
-                    sender_id,
-                    timeout,
-                }) => {
-                    return Ok(ExecutionStep::ReceiveFilter {
-                        dest,
-                        sender_id,
-                        timeout,
-                    });
-                }
-                Ok(ExecutionStep::CreateThread { dest, func, key }) => {
-                    return Ok(ExecutionStep::CreateThread { dest, func, key });
-                }
-                Ok(ExecutionStep::StartThread {
-                    dest,
-                    thread_id,
-                    arg,
-                }) => {
-                    return Ok(ExecutionStep::StartThread {
-                        dest,
-                        thread_id,
-                        arg,
-                    });
-                }
-                Ok(ExecutionStep::GetThread { dest, key }) => {
-                    return Ok(ExecutionStep::GetThread { dest, key });
-                }
-                Ok(ExecutionStep::ThreadIsRunning { dest, thread_id }) => {
-                    return Ok(ExecutionStep::ThreadIsRunning { dest, thread_id });
-                }
-                Ok(ExecutionStep::ThreadIsExited { dest, thread_id }) => {
-                    return Ok(ExecutionStep::ThreadIsExited { dest, thread_id });
-                }
-                Ok(ExecutionStep::ThreadExitReason { dest, thread_id }) => {
-                    return Ok(ExecutionStep::ThreadExitReason { dest, thread_id });
-                }
+                Ok(VmStep::Continue) => budget -= 1,
+                Ok(step) => return Ok(step),
                 Err(err) => {
                     let mut stack_trace = Vec::new();
                     for frame in thread.call_stack.iter().rev() {
@@ -358,10 +489,10 @@ impl VirtualMachine {
                 }
             }
         }
-        Ok(ExecutionStep::Continue)
+        Ok(VmStep::Continue)
     }
 
-    pub fn step(&self, thread: &mut thread::VirtualThread) -> Result<ExecutionStep, VmError> {
+    pub fn step(&self, thread: &mut thread::VirtualThread) -> Result<VmStep, VmError> {
         let instr = {
             let frame = thread
                 .call_stack
@@ -372,11 +503,12 @@ impl VirtualMachine {
             if frame.pc >= func.instructions.len() {
                 return Err(VmError::InstructionPointerOutOfBounds { pc: frame.pc });
             }
-            let instr = func.instructions[frame.pc];
+            let instr = func.instructions[frame.pc].clone();
             frame.pc += 1;
             instr
         };
 
+        let release_instruction = instr.clone();
         let step = match instr {
             Instruction::LoadConst { .. }
             | Instruction::Move { .. }
@@ -441,12 +573,13 @@ impl VirtualMachine {
 
             Instruction::Drop { .. }
             | Instruction::CallNative { .. }
+            | Instruction::AwaitFuture { .. }
             | Instruction::Len { .. }
             | Instruction::CopyArray { .. } => self.execute_system_instruction(thread, instr)?,
         };
 
-        if matches!(step, ExecutionStep::Continue) {
-            self.release_unreachable_if_needed(thread, instr);
+        if matches!(step, VmStep::Continue) {
+            self.release_unreachable_if_needed(thread, release_instruction);
         }
 
         Ok(step)
@@ -455,21 +588,10 @@ impl VirtualMachine {
     fn execute_loop(&self, thread: &mut thread::VirtualThread) -> Result<Value, VmError> {
         loop {
             match self.step(thread)? {
-                ExecutionStep::Continue => {}
-                ExecutionStep::Return(value) => return Ok(value),
-                ExecutionStep::Blocked => return Err(VmError::UnresolvedHostBlocked),
-                ExecutionStep::SendMsg { .. } => return Err(VmError::UnresolvedHostBlocked),
-                ExecutionStep::ReceiveFilter { .. } => return Err(VmError::UnresolvedHostBlocked),
-                ExecutionStep::CreateThread { .. } => return Err(VmError::UnresolvedHostBlocked),
-                ExecutionStep::StartThread { .. } => return Err(VmError::UnresolvedHostBlocked),
-                ExecutionStep::GetThread { .. } => return Err(VmError::UnresolvedHostBlocked),
-                ExecutionStep::ThreadIsRunning { .. } => {
-                    return Err(VmError::UnresolvedHostBlocked);
-                }
-                ExecutionStep::ThreadIsExited { .. } => return Err(VmError::UnresolvedHostBlocked),
-                ExecutionStep::ThreadExitReason { .. } => {
-                    return Err(VmError::UnresolvedHostBlocked);
-                }
+                VmStep::Continue => {}
+                VmStep::Return { value, .. } => return Ok(value),
+                VmStep::Suspend { .. } => return Err(VmError::UnresolvedHostBlocked),
+                VmStep::Failed(_) => return Err(VmError::UnresolvedHostBlocked),
             }
         }
     }

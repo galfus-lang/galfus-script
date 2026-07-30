@@ -1,171 +1,244 @@
-use std::thread;
-
-use super::{RuntimeTask, copy_thread_args};
-use crate::queue::BlockedQueue;
-use crate::registry::{ThreadId, ThreadRegistry};
-use galfus_bytecode::instruction::{FuncIdx, Reg, TypeIdx};
-use galfus_bytecode::{
-    BytecodeFunction, BytecodeGraph, BytecodeModule, BytecodeNode, BytecodeType, Instruction,
+use super::{
+    decode_from_thread_heap, encode_into_thread_heap, execution_stack, with_execution_stack,
 };
-use galfus_contract::{RunnableTask, ThreadExecutor, ThreadResult};
-use galfus_core::{ModuleId, ModulePath, SemanticRevision};
-use galfus_vm::thread::VirtualThread;
-use galfus_vm::{ExecutionStep, HeapObject, VirtualMachine, VmValue};
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use galfus_bytecode::instruction::{FuncIdx, TypeIdx};
+use galfus_bytecode::{
+    BytecodeModule, BytecodeType, ChoiceLayout, ChoiceVariantLayout, ConstantPool,
+};
+use galfus_contract::{BoundaryType, BoundaryValue};
+use galfus_vm::{HeapObject, VmValue};
 
-struct TestExecutor {
-    tasks: Mutex<VecDeque<Box<dyn RunnableTask>>>,
-}
+#[test]
+fn execution_stack_preserves_the_suspended_call_chain() {
+    let mut thread = galfus_vm::thread::VirtualThread::new();
+    thread.call_stack = vec![
+        galfus_vm::runtime::CallFrame {
+            module_id: galfus_core::ModuleId::new(1),
+            func_idx: FuncIdx(2),
+            pc: 4,
+            registers: vec![],
+            return_dest: None,
+        },
+        galfus_vm::runtime::CallFrame {
+            module_id: galfus_core::ModuleId::new(3),
+            func_idx: FuncIdx(5),
+            pc: 0,
+            registers: vec![],
+            return_dest: None,
+        },
+    ];
 
-impl TestExecutor {
-    fn take_task(&self) -> Option<Box<dyn RunnableTask>> {
-        self.tasks.lock().unwrap().pop_front()
-    }
-}
-
-impl ThreadExecutor for TestExecutor {
-    fn on_exit(&self, _cb: Box<dyn Fn(Result<i32, String>) + Send + Sync>) {}
-    fn run(&self) {}
-    fn allocate_thread_id(&self) -> u64 {
-        1
-    }
-
-    fn spawn(&self, task: Box<dyn RunnableTask>) {
-        self.tasks.lock().unwrap().push_back(task);
-    }
+    assert_eq!(
+        execution_stack(&thread),
+        vec![
+            galfus_contract::ExecutionFrame {
+                module_id: 3,
+                function_id: 5,
+                instruction_offset: 0,
+            },
+            galfus_contract::ExecutionFrame {
+                module_id: 1,
+                function_id: 2,
+                instruction_offset: 3,
+            },
+        ]
+    );
 }
 
 #[test]
-fn thread_arguments_copy_only_byte_sequences() {
-    let mut source_heap = galfus_vm::thread::PrivateHeap::new();
-    let bytes_ref = source_heap.alloc(HeapObject::Array {
-        element_ty: TypeIdx(0),
-        elements: vec![VmValue::Uint8(b'a'), VmValue::Uint8(b'b')],
-    });
-    let args = VmValue::Object(source_heap.alloc(HeapObject::Array {
-        element_ty: TypeIdx(1),
-        elements: vec![VmValue::Object(bytes_ref)],
-    }));
-    let mut target_heap = galfus_vm::thread::PrivateHeap::new();
+fn execution_stack_does_not_replace_a_failure_stack() {
+    let original = vec![galfus_contract::ExecutionFrame {
+        module_id: 7,
+        function_id: 8,
+        instruction_offset: 9,
+    }];
+    let failure = galfus_contract::ExecutionFailure::new(
+        galfus_contract::ExecutionFailureKind::ProviderFailure,
+        "provider failed",
+    )
+    .with_stack(original.clone());
 
-    let copied = copy_thread_args(&source_heap, &mut target_heap, &args)
-        .expect("byte-sequence arguments are copied into the target heap");
-
-    let VmValue::Object(copied_args_ref) = copied else {
-        panic!("expected an argument array");
-    };
-    let HeapObject::Array { elements, .. } = target_heap
-        .get_object(copied_args_ref)
-        .expect("copied argument array exists")
-    else {
-        panic!("expected an argument array");
-    };
-    let VmValue::Object(copied_bytes_ref) = elements[0] else {
-        panic!("expected a byte sequence");
-    };
-    assert!(matches!(
-        target_heap
-            .get_object(copied_bytes_ref)
-            .expect("copied bytes exist"),
-        HeapObject::Array { elements, .. }
-            if elements == &vec![VmValue::Uint8(b'a'), VmValue::Uint8(b'b')]
-    ));
+    assert_eq!(
+        with_execution_stack(
+            failure,
+            vec![galfus_contract::ExecutionFrame {
+                module_id: 1,
+                function_id: 2,
+                instruction_offset: 3,
+            }],
+        )
+        .stack,
+        original,
+    );
 }
 
-#[test]
-fn thread_arguments_reject_non_byte_values() {
-    let mut source_heap = galfus_vm::thread::PrivateHeap::new();
-    let args = VmValue::Object(source_heap.alloc(HeapObject::Array {
-        element_ty: TypeIdx(1),
-        elements: vec![VmValue::Int32(7)],
-    }));
-    let mut target_heap = galfus_vm::thread::PrivateHeap::new();
-
-    assert!(copy_thread_args(&source_heap, &mut target_heap, &args).is_none());
-    assert!(target_heap.objects.is_empty());
-}
-
-#[test]
-fn receive_timeout_resumes_with_null() {
-    let module_id = ModuleId::new(0);
-    let module = BytecodeModule {
-        name: "test.gfs".to_string(),
-        constants: Default::default(),
-        functions: vec![BytecodeFunction {
-            name: "wait".to_string(),
-            param_count: 0,
-            local_count: 3,
-            temp_count: 0,
-            return_ty: TypeIdx(1),
-            instructions: vec![
-                Instruction::ReceiveFilter {
-                    dest: Reg(0),
-                    sender: Reg(1),
-                    timeout: Reg(2),
-                },
-                Instruction::Ret { src: Reg(0) },
-            ],
-        }],
-        types: vec![
-            BytecodeType::Uint8,
-            BytecodeType::Array(TypeIdx(0)),
-            BytecodeType::Null,
-        ],
+fn module(types: Vec<BytecodeType>) -> BytecodeModule {
+    BytecodeModule {
+        name: "test".to_string(),
+        constants: ConstantPool::default(),
+        functions: vec![],
+        types,
         struct_layouts: vec![],
         choice_layouts: vec![],
         imports: vec![],
         exports: vec![],
         init_func_idx: None,
-    };
-    let graph = BytecodeGraph::from_modules(
-        SemanticRevision::new(0),
-        vec![BytecodeNode {
-            id: module_id,
-            path: ModulePath::new("test.gfs").expect("valid path"),
-            semantic_revision: SemanticRevision::new(0),
-            module,
-            metadata: None,
-        }],
-        vec![],
-    )
-    .expect("valid graph");
-    let vm = VirtualMachine::new(Arc::new(graph));
-    let thread_id = ThreadId::from_executor(1).expect("non-zero ID");
-    let mut waiting_thread = VirtualThread::new();
-    vm.prepare_function(&mut waiting_thread, module_id, FuncIdx(0), vec![])
-        .expect("function prepares");
-    waiting_thread
-        .write_reg(Reg(1), VmValue::Int64(7))
-        .expect("sender register exists");
-    waiting_thread
-        .write_reg(Reg(2), VmValue::Int32(1))
-        .expect("timeout register exists");
-    assert!(matches!(
-        vm.execute_with_budget(&mut waiting_thread, 10),
-        Ok(ExecutionStep::ReceiveFilter { .. })
-    ));
+    }
+}
 
-    let registry = Arc::new(Mutex::new(ThreadRegistry::new()));
-    registry.lock().unwrap().register(thread_id, waiting_thread);
-    let blocked = Arc::new(Mutex::new(BlockedQueue::new()));
-    blocked.lock().unwrap().block_with_timeout(thread_id, 1);
-    let executor = Arc::new(TestExecutor {
-        tasks: Mutex::new(VecDeque::new()),
+#[test]
+fn codec_preserves_the_declared_type_of_an_empty_array() {
+    let module = module(vec![BytecodeType::Int32, BytecodeType::Array(TypeIdx(0))]);
+    let mut heap = galfus_vm::thread::PrivateHeap::new();
+    let reference = heap.alloc(HeapObject::Array {
+        element_ty: TypeIdx(0),
+        elements: vec![],
     });
-    let task = RuntimeTask {
-        thread_id,
-        thread: VirtualThread::new(),
-        vm,
-        registry,
-        blocked,
-        executor: executor.clone(),
+
+    let value = decode_from_thread_heap(&heap, VmValue::Object(reference), TypeIdx(1), &module)
+        .expect("empty array decodes with its declared element type");
+
+    assert_eq!(
+        value,
+        BoundaryValue::Array {
+            element_type: BoundaryType::I32,
+            values: vec![],
+        }
+    );
+}
+
+#[test]
+fn codec_encodes_an_array_with_its_expected_element_type() {
+    let module = module(vec![BytecodeType::Int32, BytecodeType::Array(TypeIdx(0))]);
+    let mut heap = galfus_vm::thread::PrivateHeap::new();
+
+    let VmValue::Object(reference) = encode_into_thread_heap(
+        &mut heap,
+        BoundaryValue::Array {
+            element_type: BoundaryType::I32,
+            values: vec![BoundaryValue::I32(7)],
+        },
+        TypeIdx(1),
+        galfus_core::ModuleId::new(1),
+        &module,
+    )
+    .expect("array encodes with the expected element type") else {
+        panic!("array codec must allocate an object");
+    };
+    let HeapObject::Array {
+        element_ty,
+        elements,
+    } = heap.get_object(reference).expect("array exists")
+    else {
+        panic!("codec must allocate an array");
+    };
+    assert_eq!(*element_ty, TypeIdx(0));
+    assert_eq!(elements, &vec![VmValue::Int32(7)]);
+}
+
+#[test]
+fn codec_rejects_an_array_with_a_different_declared_element_type() {
+    let module = module(vec![BytecodeType::Int32, BytecodeType::Array(TypeIdx(0))]);
+    let mut heap = galfus_vm::thread::PrivateHeap::new();
+
+    assert!(
+        encode_into_thread_heap(
+            &mut heap,
+            BoundaryValue::Array {
+                element_type: BoundaryType::U8,
+                values: vec![],
+            },
+            TypeIdx(1),
+            galfus_core::ModuleId::new(1),
+            &module,
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn codec_encodes_a_choice_with_its_declared_variant_payload() {
+    let module = BytecodeModule {
+        choice_layouts: vec![ChoiceLayout {
+            name: "Result".to_string(),
+            variants: vec![ChoiceVariantLayout {
+                name: "Value".to_string(),
+                payload_ty: Some(TypeIdx(0)),
+            }],
+        }],
+        ..module(vec![
+            BytecodeType::Int32,
+            BytecodeType::Choice(galfus_bytecode::ChoiceLayoutIdx(0)),
+        ])
+    };
+    let mut heap = galfus_vm::thread::PrivateHeap::new();
+
+    let VmValue::Object(reference) = encode_into_thread_heap(
+        &mut heap,
+        BoundaryValue::Choice {
+            variant: 0,
+            payload: Some(Box::new(BoundaryValue::I32(7))),
+        },
+        TypeIdx(1),
+        galfus_core::ModuleId::new(1),
+        &module,
+    )
+    .expect("choice encodes with the expected layout") else {
+        panic!("choice codec must allocate an object");
+    };
+    let HeapObject::Choice {
+        module_id,
+        layout_idx,
+        variant_idx,
+        payload,
+    } = heap.get_object(reference).expect("choice exists")
+    else {
+        panic!("codec must allocate a choice");
+    };
+    assert_eq!(*module_id, galfus_core::ModuleId::new(1));
+    assert_eq!(*layout_idx, galfus_bytecode::ChoiceLayoutIdx(0));
+    assert_eq!(*variant_idx, 0);
+    assert_eq!(*payload, VmValue::Int32(7));
+}
+
+#[test]
+fn codec_round_trips_nominal_external_handles() {
+    let module = module(vec![BytecodeType::ExternalHandle("file".to_string())]);
+    let mut heap = galfus_vm::thread::PrivateHeap::new();
+    let value = BoundaryValue::Handle {
+        kind: "file".to_string(),
+        id: 9,
     };
 
-    task.schedule_receive_timeout(Reg(0), 1);
-    thread::sleep(Duration::from_millis(20));
+    let encoded = encode_into_thread_heap(
+        &mut heap,
+        value.clone(),
+        TypeIdx(0),
+        galfus_core::ModuleId::new(1),
+        &module,
+    )
+    .expect("handle encodes with its declared kind");
+    assert_eq!(
+        decode_from_thread_heap(&heap, encoded, TypeIdx(0), &module),
+        Ok(value)
+    );
+}
 
-    let timed_out_task = executor.take_task().expect("timeout wakes the task");
-    assert!(matches!(timed_out_task.run(10), ThreadResult::Completed(0)));
+#[test]
+fn codec_rejects_external_handles_with_the_wrong_kind() {
+    let module = module(vec![BytecodeType::ExternalHandle("file".to_string())]);
+    let mut heap = galfus_vm::thread::PrivateHeap::new();
+    assert!(
+        encode_into_thread_heap(
+            &mut heap,
+            BoundaryValue::Handle {
+                kind: "socket".to_string(),
+                id: 9
+            },
+            TypeIdx(0),
+            galfus_core::ModuleId::new(1),
+            &module,
+        )
+        .is_err()
+    );
 }

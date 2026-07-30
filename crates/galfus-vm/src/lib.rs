@@ -6,6 +6,6 @@ pub mod thread;
 
 pub use error::{StackFrameInfo, VmError, VmPanic};
 pub use runtime::{
-    CallFrame, ExecutionStep, HeapObject, RuntimeModuleState, VirtualMachine, VmContext,
-    VmObjectRef, VmValue,
+    CallFrame, Continuation, HeapObject, RuntimeModuleState, VirtualMachine, VmContext, VmEffect,
+    VmObjectRef, VmStep, VmValue,
 };

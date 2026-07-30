@@ -7,10 +7,12 @@ execution. It contains no target selection and no concrete platform adapter.
 
 - **Providers**: Owns the optional providers supplied for one execution.
 - **HostProvider**: Defines an asynchronous, message-based dispatch contract for executing native host capabilities.
-- **HostValue & HostResponse**: Agnostic data representation for payloads passing between the Galfus VM and the Host.
+- **BoundaryValue**: Typed values crossing the VM/host boundary.
 - **MessageInjector**: Trait for injecting responses back into a suspended virtual thread.
+- **Adapters**: Optional nominal adapter registry with affinity, cancellation,
+  and external-handle release hooks.
 
-Hosts construct `Providers` and pass them to `Workspace::run`. The CLI uses a
-native host provider, while the playground uses a buffered host provider. If no
-host provider is supplied, only executions that reach native calls (e.g. `std/io`) fail at runtime;
-compilation and executions without native calls remain valid.
+Hosts construct `Providers` and pass them to `Runtime::new` or
+`Workspace::start_execution`. If no host provider is supplied, only executions
+that reach native calls fail at runtime; compilation and executions without
+native calls remain valid.

@@ -75,7 +75,8 @@ It manages the orchestration of the frontend, compiler, and provides an API for 
 
 ## 6. Runtime and VM
 
-The runtime executes a borrowed `BytecodeGraph` with optional `Providers`.
+The runtime executes an `Arc<BytecodeGraph>` with optional `Providers` and
+optional `Adapters`.
 Execution state lives in the VM and is partitioned by `ModuleId`, including
 globals and initialization status. Dependencies initialize before the entry
 module, and the runtime does not duplicate bytecode.
@@ -91,8 +92,8 @@ state, key, and mailbox while it is created, running, blocked, or exited.
 ## 7. Providers
 
 Providers represent the boundary between Galfus and the host platform.
-The implemented provider surface is synchronous I/O. Additional capabilities
-such as file system and network access are planned.
+The provider surface is asynchronous and message-based. Concrete capabilities
+are supplied by the embedding host.
 If a provider is not supplied, related builtin calls will fail deterministically, allowing trivial sandboxing.
 
 ---
@@ -100,7 +101,7 @@ If a provider is not supplied, related builtin calls will fail deterministically
 ## 8. Execution Metadata
 
 Each `BytecodeNode` may contain optional `ExecutionMetadata` with instruction
-spans. Panic frames always contain module ID, function index, and the offset of
-the instruction that failed; the runtime formats them and uses spans when they
-are available.
+spans. Execution failures retain VM frames with module ID, function index, and
+instruction offset across asynchronous suspension. The current structured
+failure API does not expose resolved source spans directly.
 Function-symbol and source-path mappings are planned metadata extensions.

@@ -8,7 +8,7 @@ impl VirtualMachine {
         &self,
         thread: &mut thread::VirtualThread,
         instr: Instruction,
-    ) -> Result<ExecutionStep, VmError> {
+    ) -> Result<VmStep, VmError> {
         match instr {
             // Category D: Heaps, Structs & Collections
             Instruction::AllocLocal { dest, type_idx } => {
@@ -319,7 +319,7 @@ impl VirtualMachine {
             _ => unreachable!("instruction routed to the wrong runtime handler"),
         }
 
-        Ok(ExecutionStep::Continue)
+        Ok(VmStep::Continue)
     }
 
     fn deep_copy_value(
@@ -395,6 +395,7 @@ impl VirtualMachine {
                 HeapObject::Choice { payload, .. } => {
                     self.enqueue_copy_target(thread, payload, &mut closure, &mut pending)?;
                 }
+                HeapObject::ExternalHandle { .. } => {}
             }
         }
 
@@ -479,6 +480,7 @@ impl VirtualMachine {
                     variant_idx,
                     payload: Value::Null,
                 },
+                HeapObject::ExternalHandle { kind, id } => HeapObject::ExternalHandle { kind, id },
             };
 
             let copied_ref = thread.heap.alloc(placeholder);
@@ -601,6 +603,7 @@ impl VirtualMachine {
                         }
                     }
                 }
+                HeapObject::ExternalHandle { .. } => {}
             }
         }
 

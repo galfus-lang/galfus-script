@@ -1,18 +1,19 @@
 # galfus-runtime
 
-`galfus-runtime` defines entrypoint validation and execution orchestration over
-a borrowed `BytecodeGraph`.
+`galfus-runtime` validates entrypoints and orchestrates persistent executions
+over an `Arc<BytecodeGraph>`.
 
 ## Responsibilities
 
 - **Entrypoint Execution**: Validates and invokes exported module entries.
-- **Runtime Context**: Is created from a borrowed `BytecodeGraph` and optional host providers, then passes both to the VM for one execution.
+- **Persistent Execution**: `Runtime::start` returns an `Execution` that hosts
+  can poll, cancel, and inspect after completion.
 - **Host Integration**: Receives `Providers` from an embedding host or workspace and routes capability requests to the host platform.
 
-The runtime does not copy, rebuild, or deduplicate the `BytecodeGraph`.
-Current VM state includes a global-slot vector and initialization flag for each
-module, plus the heap and call frames.
+The runtime does not rebuild or duplicate the `BytecodeGraph`. VM state is
+per virtual thread and includes module initialization/global state, heap, and
+call frames. Providers and adapters are optional host-owned registries.
 
-When available, `ExecutionMetadata` maps a function instruction offset to its
-source span. Panics always retain the module ID, function index, and instruction
-offset; formatting enriches them with the optional source span.
+`ExecutionFailure` preserves machine-readable categories, IDs, causes, and VM
+frames. Optional `ExecutionMetadata` can map instruction offsets to source
+spans, but source locations are not yet exposed directly by the failure type.
