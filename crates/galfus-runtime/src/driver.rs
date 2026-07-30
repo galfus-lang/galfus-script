@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use std::collections::VecDeque;
 use std::sync;
 use std::sync::Mutex;
@@ -46,29 +49,55 @@ impl KernelDriver for CooperativeDriver {
                 continue;
             };
 
-            let runnable = match task_entry {
-                KernelTask::Main(task) => task,
-                KernelTask::Any(task) => task,
-            };
-
-            match runnable.run(100) {
-                ThreadResult::Yielded(task) => {
-                    self.queue.lock().unwrap().push_back(KernelTask::Main(task))
-                }
-                ThreadResult::Blocked { timeout } => {
-                    pending_timeout = match (pending_timeout, timeout) {
-                        (Some(current), Some(next)) => Some(current.min(next)),
-                        (Some(current), None) => Some(current),
-                        (None, next) => next,
-                    };
-                }
-                ThreadResult::Completed(code) => *self.exit_code.lock().unwrap() = code,
-                ThreadResult::Failed(error) => {
-                    if let Some(callback) = self.exit_callback.lock().unwrap().take() {
-                        callback(Err(error));
+            match task_entry {
+                KernelTask::Main(task) => match task.run(100) {
+                    ThreadResult::Yielded(task) => {
+                        self.queue.lock().unwrap().push_back(KernelTask::Main(task))
                     }
-                    return;
-                }
+                    ThreadResult::Blocked { timeout } => {
+                        pending_timeout = match (pending_timeout, timeout) {
+                            (Some(current), Some(next)) => Some(current.min(next)),
+                            (Some(current), None) => Some(current),
+                            (None, next) => next,
+                        };
+                    }
+                    ThreadResult::Completed(code) => *self.exit_code.lock().unwrap() = code,
+                    ThreadResult::Failed(error) => {
+                        if let Some(callback) = self.exit_callback.lock().unwrap().take() {
+                            callback(Err(error));
+                        }
+                        return;
+                    }
+                },
+                KernelTask::Any(task) => match task.run(100) {
+                    ThreadResult::Yielded(task) => {
+                        let Some(task) = task.into_any_thread() else {
+                            let error = ExecutionFailure::new(
+                                galfus_contract::ExecutionFailureKind::DriverFailure,
+                                "any-thread task yielded a non-transferable continuation",
+                            );
+                            if let Some(callback) = self.exit_callback.lock().unwrap().take() {
+                                callback(Err(error));
+                            }
+                            return;
+                        };
+                        self.queue.lock().unwrap().push_back(KernelTask::Any(task));
+                    }
+                    ThreadResult::Blocked { timeout } => {
+                        pending_timeout = match (pending_timeout, timeout) {
+                            (Some(current), Some(next)) => Some(current.min(next)),
+                            (Some(current), None) => Some(current),
+                            (None, next) => next,
+                        };
+                    }
+                    ThreadResult::Completed(code) => *self.exit_code.lock().unwrap() = code,
+                    ThreadResult::Failed(error) => {
+                        if let Some(callback) = self.exit_callback.lock().unwrap().take() {
+                            callback(Err(error));
+                        }
+                        return;
+                    }
+                },
             }
         }
         let code = *self.exit_code.lock().unwrap();
@@ -84,12 +113,24 @@ impl KernelDriver for CooperativeDriver {
             return Ok(ExecutorStepResult::Blocked { timeout: None });
         };
 
-        let runnable = match task_entry {
-            KernelTask::Main(task) => task,
-            KernelTask::Any(task) => task,
+        let result = match task_entry {
+            KernelTask::Main(task) => task.run(100),
+            KernelTask::Any(task) => match task.run(100) {
+                ThreadResult::Yielded(task) => {
+                    let task = task.into_any_thread().ok_or_else(|| {
+                        ExecutionFailure::new(
+                            galfus_contract::ExecutionFailureKind::DriverFailure,
+                            "any-thread task yielded a non-transferable continuation",
+                        )
+                    })?;
+                    self.queue.lock().unwrap().push_back(KernelTask::Any(task));
+                    return Ok(ExecutorStepResult::Running);
+                }
+                result => result,
+            },
         };
 
-        match runnable.run(100) {
+        match result {
             ThreadResult::Yielded(task) => {
                 self.queue.lock().unwrap().push_back(KernelTask::Main(task));
                 Ok(ExecutorStepResult::Running)

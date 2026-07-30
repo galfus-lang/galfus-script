@@ -402,6 +402,10 @@ impl RunnableTask for RuntimeTask {
             }
         }
     }
+
+    fn into_any_thread(self: Box<Self>) -> Option<Box<dyn RunnableTask + Send>> {
+        Some(self)
+    }
 }
 
 pub(crate) fn thread_key(thread: &VirtualThread, value: galfus_vm::VmValue) -> Option<String> {

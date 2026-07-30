@@ -6,6 +6,12 @@ pub trait RunnableTask {
     /// The host calls this method and provides a "budget" (e.g., number of instructions).
     /// The task runs until the budget is exhausted or it needs to pause.
     fn run(self: Box<Self>, budget: usize) -> ThreadResult;
+
+    /// Returns this task as transferable work when its continuation is `Send`.
+    /// Main-thread tasks keep the default `None` implementation.
+    fn into_any_thread(self: Box<Self>) -> Option<Box<dyn RunnableTask + Send>> {
+        None
+    }
 }
 
 /// The result returned after running a slice of a virtual thread.
@@ -42,6 +48,22 @@ pub enum KernelTask {
     Main(Box<dyn RunnableTask>),
     /// Work that can run on any available background thread
     Any(Box<dyn RunnableTask + Send>),
+}
+
+/// The only scheduling information visible to a kernel driver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskAffinity {
+    Main,
+    Any,
+}
+
+impl KernelTask {
+    pub const fn affinity(&self) -> TaskAffinity {
+        match self {
+            Self::Main(_) => TaskAffinity::Main,
+            Self::Any(_) => TaskAffinity::Any,
+        }
+    }
 }
 
 /// The Host must implement this trait to dictate how tasks are scheduled.

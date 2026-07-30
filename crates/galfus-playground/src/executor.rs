@@ -45,12 +45,24 @@ impl KernelDriver for PlaygroundExecutor {
             return Ok(ExecutorStepResult::Blocked { timeout: None });
         };
 
-        let runnable = match task_entry {
-            KernelTask::Main(t) => t,
-            KernelTask::Any(t) => t,
+        let result = match task_entry {
+            KernelTask::Main(task) => task.run(100),
+            KernelTask::Any(task) => match task.run(100) {
+                ThreadResult::Yielded(task) => {
+                    let task = task.into_any_thread().ok_or_else(|| {
+                        ExecutionFailure::new(
+                            galfus_contract::ExecutionFailureKind::DriverFailure,
+                            "any-thread task yielded a non-transferable continuation",
+                        )
+                    })?;
+                    self.queue.lock().unwrap().push_back(KernelTask::Any(task));
+                    return Ok(ExecutorStepResult::Running);
+                }
+                result => result,
+            },
         };
 
-        match runnable.run(100) {
+        match result {
             ThreadResult::Yielded(t) => {
                 self.queue.lock().unwrap().push_back(KernelTask::Main(t));
                 Ok(ExecutorStepResult::Running)
