@@ -29,6 +29,11 @@ fn providers_allow_host() {
 }
 
 #[test]
+fn providers_default_to_main_thread_affinity() {
+    assert_eq!(DummyHost.affinity("operation"), TaskAffinity::Main);
+}
+
+#[test]
 fn execution_failures_preserve_machine_readable_context() {
     let failure = ExecutionFailure::new(ExecutionFailureKind::ProviderFailure, "request failed")
         .with_thread_id(7)

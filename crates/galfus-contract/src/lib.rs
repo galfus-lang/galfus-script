@@ -152,6 +152,15 @@ pub trait MessageInjector: Send + Sync {
 }
 
 pub trait HostProvider: Send {
+    /// Declares the execution lane required to invoke this provider.
+    ///
+    /// Main-thread affinity is the safe default for host integrations that may
+    /// touch platform APIs. Providers that are safe to transfer may opt into
+    /// `TaskAffinity::Any`.
+    fn affinity(&self, _name: &str) -> TaskAffinity {
+        TaskAffinity::Main
+    }
+
     fn dispatch(
         &mut self,
         thread_id: usize,

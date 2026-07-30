@@ -4,7 +4,10 @@ mod tests;
 use crate::event::{EventSink, RuntimeEvent};
 use crate::kernel::VirtualKernel;
 use crate::task::RuntimeTask;
-use galfus_contract::{KernelDriver, KernelTask};
+use galfus_contract::{
+    BoundaryValue, ExecutionFailure, ExecutionFailureKind, KernelDriver, KernelTask,
+    MessageInjector, RunnableTask, TaskAffinity, ThreadResult,
+};
 use galfus_vm::VirtualMachine;
 use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
@@ -17,6 +20,54 @@ struct PendingContinuation {
     module_id: galfus_core::ModuleId,
     return_type: galfus_bytecode::instruction::TypeIdx,
     request_id: u64,
+}
+
+struct ProviderDispatchTask {
+    providers: Arc<std::sync::Mutex<galfus_contract::Providers>>,
+    thread_id: usize,
+    request_id: u64,
+    name: String,
+    args: Vec<BoundaryValue>,
+    injector: Arc<dyn MessageInjector>,
+}
+
+impl ProviderDispatchTask {
+    fn into_kernel_task(self, affinity: TaskAffinity) -> KernelTask {
+        match affinity {
+            TaskAffinity::Main => KernelTask::Main(Box::new(self)),
+            TaskAffinity::Any => KernelTask::Any(Box::new(self)),
+        }
+    }
+}
+
+impl RunnableTask for ProviderDispatchTask {
+    fn run(self: Box<Self>, _budget: usize) -> ThreadResult {
+        let mut providers = self.providers.lock().unwrap();
+        let Some(host) = providers.host_mut() else {
+            self.injector.inject_system_response(
+                self.thread_id,
+                self.request_id,
+                Err(ExecutionFailure::new(
+                    ExecutionFailureKind::MissingProvider,
+                    "HostProvider missing while dispatching request",
+                )
+                .with_request_id(self.request_id)),
+            );
+            return ThreadResult::Completed(0);
+        };
+        host.dispatch(
+            self.thread_id,
+            self.request_id,
+            self.name.as_str(),
+            self.args.as_slice(),
+            self.injector.clone(),
+        );
+        ThreadResult::Completed(0)
+    }
+
+    fn into_any_thread(self: Box<Self>) -> Option<Box<dyn RunnableTask + Send>> {
+        Some(self)
+    }
 }
 
 pub(crate) struct StartupPlan {
@@ -400,42 +451,60 @@ impl Orchestrator {
                                 continue;
                             }
                         };
-                        if let Some(providers) = vm.providers() {
+                        let Some(providers) = vm.providers() else {
+                            self.failure = Some(
+                                ExecutionFailure::new(
+                                    ExecutionFailureKind::MissingProvider,
+                                    "HostProvider missing",
+                                )
+                                .with_thread_id(thread_id.raw())
+                                .with_module_id(module_id.raw().into()),
+                            );
+                            self.kernel.cancel(thread_id);
+                            continue;
+                        };
+                        let affinity = {
                             let mut providers = providers.lock().unwrap();
-                            if let Some(host) = providers.host_mut() {
-                                let request_id = self.next_request_id;
-                                self.next_request_id += 1;
-                                self.pending_continuations.insert(
-                                    thread_id,
-                                    PendingContinuation {
-                                        continuation,
-                                        module_id,
-                                        return_type,
-                                        request_id,
-                                    },
+                            let Some(host) = providers.host_mut() else {
+                                self.failure = Some(
+                                    ExecutionFailure::new(
+                                        ExecutionFailureKind::MissingProvider,
+                                        "HostProvider missing",
+                                    )
+                                    .with_thread_id(thread_id.raw())
+                                    .with_module_id(module_id.raw().into()),
                                 );
-                                let injector =
-                                    Arc::new(crate::ExecutionHandle::new(self.sink.clone()));
-                                self.kernel.block(thread_id, thread, None);
-                                host.dispatch(
-                                    thread_id.raw() as usize,
-                                    request_id,
-                                    &name,
-                                    &args,
-                                    injector,
-                                );
+                                self.kernel.cancel(thread_id);
                                 continue;
-                            }
-                        }
-                        self.failure = Some(
-                            galfus_contract::ExecutionFailure::new(
-                                galfus_contract::ExecutionFailureKind::MissingProvider,
-                                "HostProvider missing",
-                            )
-                            .with_thread_id(thread_id.raw())
-                            .with_module_id(module_id.raw().into()),
+                            };
+                            host.affinity(name.as_str())
+                        };
+                        let request_id = self.next_request_id;
+                        self.next_request_id += 1;
+                        self.pending_continuations.insert(
+                            thread_id,
+                            PendingContinuation {
+                                continuation,
+                                module_id,
+                                return_type,
+                                request_id,
+                            },
                         );
-                        self.kernel.cancel(thread_id);
+                        let injector = Arc::new(crate::ExecutionHandle::new(self.sink.clone()));
+                        self.kernel.block(thread_id, thread, None);
+                        let task = ProviderDispatchTask {
+                            providers,
+                            thread_id: thread_id.raw() as usize,
+                            request_id,
+                            name,
+                            args,
+                            injector,
+                        };
+                        self.driver
+                            .as_ref()
+                            .expect("driver is configured before execution")
+                            .dispatch(task.into_kernel_task(affinity));
+                        continue;
                     }
                     galfus_vm::VmEffect::SendMsg { target, msg } => {
                         if target == 0 {

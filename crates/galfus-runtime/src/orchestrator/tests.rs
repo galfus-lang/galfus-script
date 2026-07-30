@@ -1,6 +1,67 @@
 use super::*;
-use galfus_contract::RunnableTask;
+use galfus_contract::{BoundaryValue, HostProvider, MessageInjector, Providers, RunnableTask};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use std::thread;
+
+struct RecordingProvider(Arc<AtomicBool>);
+
+impl HostProvider for RecordingProvider {
+    fn dispatch(
+        &mut self,
+        _thread_id: usize,
+        _request_id: u64,
+        _name: &str,
+        _args: &[BoundaryValue],
+        _injector: Arc<dyn MessageInjector>,
+    ) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+
+struct NoopInjector;
+
+impl MessageInjector for NoopInjector {
+    fn inject_system_response(
+        &self,
+        _thread_id: usize,
+        _request_id: u64,
+        _result: Result<BoundaryValue, galfus_contract::ExecutionFailure>,
+    ) {
+    }
+}
+
+fn provider_dispatch_task(called: Arc<AtomicBool>) -> ProviderDispatchTask {
+    ProviderDispatchTask {
+        providers: Arc::new(Mutex::new(Providers::with_host(Box::new(
+            RecordingProvider(called),
+        )))),
+        thread_id: 1,
+        request_id: 1,
+        name: "operation".to_string(),
+        args: vec![],
+        injector: Arc::new(NoopInjector),
+    }
+}
+
+#[test]
+fn provider_dispatch_tasks_use_the_declared_driver_lane() {
+    let called = Arc::new(AtomicBool::new(false));
+    let task = provider_dispatch_task(called.clone());
+    let KernelTask::Main(task) = task.into_kernel_task(TaskAffinity::Main) else {
+        panic!("main-affine provider must receive a main task");
+    };
+    assert!(matches!(task.run(1), ThreadResult::Completed(0)));
+    assert!(called.load(Ordering::Acquire));
+
+    let task = provider_dispatch_task(Arc::new(AtomicBool::new(false)));
+    assert!(matches!(
+        task.into_kernel_task(TaskAffinity::Any),
+        KernelTask::Any(_)
+    ));
+}
 
 #[test]
 #[should_panic(expected = "main-thread token used from another thread")]
