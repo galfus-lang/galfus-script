@@ -19,7 +19,7 @@ impl HostProvider for NativeIoProvider {
         injector: Arc<dyn MessageInjector>,
     ) {
         match method {
-            "write" => {
+            "io_write" => {
                 if let Some(BoundaryValue::Bytes(bytes)) = args.first() {
                     let stdout = io::stdout();
                     let mut handle = stdout.lock();
@@ -46,7 +46,7 @@ impl HostProvider for NativeIoProvider {
                     );
                 }
             }
-            "read" => {
+            "io_read" => {
                 let terminator = if let Some(BoundaryValue::Bytes(b)) = args.first() {
                     b.clone()
                 } else {

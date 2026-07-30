@@ -62,6 +62,19 @@ pub(crate) fn decode_from_thread_heap(
             else {
                 return Err(mismatch());
             };
+            if let Some(BytecodeType::Uint8) = module.types.get(element_type.raw() as usize) {
+                let bytes: Result<Vec<u8>, _> = elements
+                    .iter()
+                    .map(|element| {
+                        if let galfus_vm::VmValue::Uint8(b) = element {
+                            Ok(*b)
+                        } else {
+                            Err(mismatch())
+                        }
+                    })
+                    .collect();
+                return Ok(BoundaryValue::Bytes(bytes?));
+            }
             let values = elements
                 .iter()
                 .cloned()
