@@ -91,6 +91,18 @@ fn execution_failures_preserve_machine_readable_context() {
     assert_eq!(failure.module_id, Some(3));
 }
 
+#[test]
+fn execution_failures_preserve_asynchronous_frames() {
+    let stack = vec![ExecutionFrame {
+        module_id: 3,
+        function_id: 7,
+        instruction_offset: 11,
+    }];
+    let failure =
+        ExecutionFailure::new(ExecutionFailureKind::VmPanic, "failed").with_stack(stack.clone());
+    assert_eq!(failure.stack, stack);
+}
+
 struct MainThreadOnlyTask(Rc<()>);
 
 impl RunnableTask for MainThreadOnlyTask {

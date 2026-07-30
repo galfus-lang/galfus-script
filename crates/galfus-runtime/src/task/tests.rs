@@ -1,10 +1,76 @@
-use super::{decode_from_thread_heap, encode_into_thread_heap};
-use galfus_bytecode::instruction::TypeIdx;
+use super::{
+    decode_from_thread_heap, encode_into_thread_heap, execution_stack, with_execution_stack,
+};
+use galfus_bytecode::instruction::{FuncIdx, TypeIdx};
 use galfus_bytecode::{
     BytecodeModule, BytecodeType, ChoiceLayout, ChoiceVariantLayout, ConstantPool,
 };
 use galfus_contract::{BoundaryType, BoundaryValue};
 use galfus_vm::{HeapObject, VmValue};
+
+#[test]
+fn execution_stack_preserves_the_suspended_call_chain() {
+    let mut thread = galfus_vm::thread::VirtualThread::new();
+    thread.call_stack = vec![
+        galfus_vm::runtime::CallFrame {
+            module_id: galfus_core::ModuleId::new(1),
+            func_idx: FuncIdx(2),
+            pc: 4,
+            registers: vec![],
+            return_dest: None,
+        },
+        galfus_vm::runtime::CallFrame {
+            module_id: galfus_core::ModuleId::new(3),
+            func_idx: FuncIdx(5),
+            pc: 0,
+            registers: vec![],
+            return_dest: None,
+        },
+    ];
+
+    assert_eq!(
+        execution_stack(&thread),
+        vec![
+            galfus_contract::ExecutionFrame {
+                module_id: 3,
+                function_id: 5,
+                instruction_offset: 0,
+            },
+            galfus_contract::ExecutionFrame {
+                module_id: 1,
+                function_id: 2,
+                instruction_offset: 3,
+            },
+        ]
+    );
+}
+
+#[test]
+fn execution_stack_does_not_replace_a_failure_stack() {
+    let original = vec![galfus_contract::ExecutionFrame {
+        module_id: 7,
+        function_id: 8,
+        instruction_offset: 9,
+    }];
+    let failure = galfus_contract::ExecutionFailure::new(
+        galfus_contract::ExecutionFailureKind::ProviderFailure,
+        "provider failed",
+    )
+    .with_stack(original.clone());
+
+    assert_eq!(
+        with_execution_stack(
+            failure,
+            vec![galfus_contract::ExecutionFrame {
+                module_id: 1,
+                function_id: 2,
+                instruction_offset: 3,
+            }],
+        )
+        .stack,
+        original,
+    );
+}
 
 fn module(types: Vec<BytecodeType>) -> BytecodeModule {
     BytecodeModule {

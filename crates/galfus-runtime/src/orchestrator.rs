@@ -3,7 +3,7 @@ mod tests;
 
 use crate::event::{EventSink, RuntimeEvent};
 use crate::kernel::VirtualKernel;
-use crate::task::RuntimeTask;
+use crate::task::{RuntimeTask, execution_stack, with_execution_stack};
 use galfus_contract::{
     BoundaryValue, ExecutionFailure, ExecutionFailureKind, KernelDriver, KernelTask,
     MessageInjector, RunnableTask, TaskAffinity, ThreadResult,
@@ -25,6 +25,7 @@ struct PendingContinuation {
     module_id: galfus_core::ModuleId,
     return_type: galfus_bytecode::instruction::TypeIdx,
     request_id: u64,
+    stack: Vec<galfus_contract::ExecutionFrame>,
 }
 
 struct ProviderDispatchTask {
@@ -260,7 +261,8 @@ impl Orchestrator {
                     "module initializer completed without a startup plan",
                 )
                 .with_thread_id(thread_id.raw())
-                .with_module_id(initialized_module_id.raw().into()),
+                .with_module_id(initialized_module_id.raw().into())
+                .with_stack(execution_stack(&thread)),
             );
             self.kernel.cancel(thread_id);
             return;
@@ -309,7 +311,10 @@ impl Orchestrator {
         match result {
             Ok(()) => self.kernel.enqueue_runnable(thread_id, thread),
             Err(error) => {
-                self.failure = Some(error.with_thread_id(thread_id.raw()));
+                self.failure = Some(with_execution_stack(
+                    error.with_thread_id(thread_id.raw()),
+                    execution_stack(&thread),
+                ));
                 self.kernel.cancel(thread_id);
             }
         }
@@ -445,7 +450,7 @@ impl Orchestrator {
                                         self.failure = Some(galfus_contract::ExecutionFailure::new(
                                             galfus_contract::ExecutionFailureKind::BoundaryCodecFailure,
                                             format!("invalid provider result: {error:?}"),
-                                        ).with_thread_id(thread_id.raw()).with_request_id(pending.request_id).with_module_id(pending.module_id.raw().into()));
+                                        ).with_thread_id(thread_id.raw()).with_request_id(pending.request_id).with_module_id(pending.module_id.raw().into()).with_stack(pending.stack.clone()));
                                         self.kernel.cancel(thread_id);
                                         continue;
                                     }
@@ -453,10 +458,13 @@ impl Orchestrator {
                                 self.resume_or_fail(thread_id, thread, pending.continuation, value);
                             }
                             Err(error) => {
-                                let error = error
-                                    .with_thread_id(thread_id.raw())
-                                    .with_request_id(pending.request_id)
-                                    .with_module_id(pending.module_id.raw().into());
+                                let error = with_execution_stack(
+                                    error
+                                        .with_thread_id(thread_id.raw())
+                                        .with_request_id(pending.request_id)
+                                        .with_module_id(pending.module_id.raw().into()),
+                                    pending.stack,
+                                );
                                 self.failure = Some(match thread.initializing_module() {
                                     Some(initializing_module_id) => ExecutionFailure::new(
                                         ExecutionFailureKind::InitializationFailure,
@@ -497,6 +505,7 @@ impl Orchestrator {
                         arg_types,
                         return_type,
                     } => {
+                        let stack = execution_stack(&thread);
                         let vm = self.vm.as_ref().expect("VM is configured before execution");
                         let module = &vm
                             .graph
@@ -524,7 +533,8 @@ impl Orchestrator {
                                         format!("invalid provider argument: {error:?}"),
                                     )
                                     .with_thread_id(thread_id.raw())
-                                    .with_module_id(module_id.raw().into()),
+                                    .with_module_id(module_id.raw().into())
+                                    .with_stack(stack.clone()),
                                 );
                                 self.kernel.cancel(thread_id);
                                 continue;
@@ -537,7 +547,8 @@ impl Orchestrator {
                                     "HostProvider missing",
                                 )
                                 .with_thread_id(thread_id.raw())
-                                .with_module_id(module_id.raw().into()),
+                                .with_module_id(module_id.raw().into())
+                                .with_stack(stack.clone()),
                             );
                             self.kernel.cancel(thread_id);
                             continue;
@@ -551,7 +562,8 @@ impl Orchestrator {
                                         "HostProvider missing",
                                     )
                                     .with_thread_id(thread_id.raw())
-                                    .with_module_id(module_id.raw().into()),
+                                    .with_module_id(module_id.raw().into())
+                                    .with_stack(stack.clone()),
                                 );
                                 self.kernel.cancel(thread_id);
                                 continue;
@@ -568,6 +580,7 @@ impl Orchestrator {
                                 module_id,
                                 return_type,
                                 request_id,
+                                stack,
                             },
                         );
                         let injector = Arc::new(crate::ExecutionHandle::new(self.sink.clone()));
@@ -594,7 +607,8 @@ impl Orchestrator {
                                     galfus_contract::ExecutionFailureKind::InvalidBytecode,
                                     "host calls must use the ProviderCall VM effect",
                                 )
-                                .with_thread_id(thread_id.raw()),
+                                .with_thread_id(thread_id.raw())
+                                .with_stack(execution_stack(&thread)),
                             });
                             continue;
                         }
@@ -627,13 +641,15 @@ impl Orchestrator {
                         arg_types,
                         return_type,
                     } => {
+                        let stack = execution_stack(&thread);
                         let Some(adapters) = self.adapters.clone() else {
                             self.failure = Some(
                                 ExecutionFailure::new(
                                     ExecutionFailureKind::MissingAdapter,
                                     "adapter registry missing",
                                 )
-                                .with_thread_id(thread_id.raw()),
+                                .with_thread_id(thread_id.raw())
+                                .with_stack(stack.clone()),
                             );
                             self.kernel.cancel(thread_id);
                             continue;
@@ -664,7 +680,8 @@ impl Orchestrator {
                                     ExecutionFailureKind::BoundaryCodecFailure,
                                     "invalid adapter argument",
                                 )
-                                .with_thread_id(thread_id.raw()),
+                                .with_thread_id(thread_id.raw())
+                                .with_stack(stack.clone()),
                             );
                             self.kernel.cancel(thread_id);
                             continue;
@@ -680,7 +697,8 @@ impl Orchestrator {
                                     ExecutionFailureKind::MissingAdapter,
                                     "adapter symbol missing",
                                 )
-                                .with_thread_id(thread_id.raw()),
+                                .with_thread_id(thread_id.raw())
+                                .with_stack(stack.clone()),
                             );
                             self.kernel.cancel(thread_id);
                             continue;
@@ -695,6 +713,7 @@ impl Orchestrator {
                                 module_id,
                                 return_type,
                                 request_id,
+                                stack,
                             },
                         );
                         self.kernel.block(thread_id, thread, None);
@@ -722,7 +741,8 @@ impl Orchestrator {
                                 ExecutionFailureKind::InternalRuntimeFailure,
                                 "future waits require a future registry",
                             )
-                            .with_thread_id(thread_id.raw()),
+                            .with_thread_id(thread_id.raw())
+                            .with_stack(execution_stack(&thread)),
                         );
                         self.kernel.cancel(thread_id);
                     }

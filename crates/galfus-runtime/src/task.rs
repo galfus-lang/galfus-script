@@ -2,7 +2,9 @@
 mod tests;
 
 use crate::registry;
-use galfus_contract::{ExecutionFailure, ExecutionFailureKind, RunnableTask, ThreadResult};
+use galfus_contract::{
+    ExecutionFailure, ExecutionFailureKind, ExecutionFrame, RunnableTask, ThreadResult,
+};
 use galfus_vm::VirtualMachine;
 use galfus_vm::thread::VirtualThread;
 use std::sync::Arc;
@@ -317,6 +319,42 @@ fn with_initialization_context(
     }
 }
 
+pub(crate) fn execution_stack(thread: &VirtualThread) -> Vec<ExecutionFrame> {
+    thread
+        .call_stack
+        .iter()
+        .rev()
+        .map(|frame| ExecutionFrame {
+            module_id: frame.module_id.raw().into(),
+            function_id: frame.func_idx.raw().into(),
+            instruction_offset: frame.pc.saturating_sub(1),
+        })
+        .collect()
+}
+
+pub(crate) fn with_execution_stack(
+    failure: ExecutionFailure,
+    stack: Vec<ExecutionFrame>,
+) -> ExecutionFailure {
+    if failure.stack.is_empty() {
+        failure.with_stack(stack)
+    } else {
+        failure
+    }
+}
+
+fn panic_stack(panic: &galfus_vm::VmPanic) -> Vec<ExecutionFrame> {
+    panic
+        .stack_trace
+        .iter()
+        .map(|frame| ExecutionFrame {
+            module_id: frame.module_id.raw().into(),
+            function_id: frame.func_idx.raw().into(),
+            instruction_offset: frame.instruction_offset,
+        })
+        .collect()
+}
+
 impl RunnableTask for RuntimeTask {
     fn run(mut self: Box<Self>, budget: usize) -> ThreadResult {
         let mut thread = self.thread.take().unwrap();
@@ -327,7 +365,8 @@ impl RunnableTask for RuntimeTask {
                 let failure = with_initialization_context(
                     &thread,
                     ExecutionFailure::new(ExecutionFailureKind::VmPanic, e.to_string())
-                        .with_thread_id(self.thread_id.raw()),
+                        .with_thread_id(self.thread_id.raw())
+                        .with_stack(panic_stack(&e)),
                 );
                 self.events.send(crate::event::RuntimeEvent::Failed {
                     thread_id: self.thread_id,
@@ -370,7 +409,8 @@ impl RunnableTask for RuntimeTask {
                             format!("entry result must be i32, found {value:?}"),
                         )
                         .with_thread_id(self.thread_id.raw())
-                        .with_module_id(module_id.raw().into());
+                        .with_module_id(module_id.raw().into())
+                        .with_stack(execution_stack(&thread));
                         self.events.send(crate::event::RuntimeEvent::Failed {
                             thread_id: self.thread_id,
                             error: failure.clone(),
@@ -383,7 +423,8 @@ impl RunnableTask for RuntimeTask {
                             format!("invalid entry result: {error:?}"),
                         )
                         .with_thread_id(self.thread_id.raw())
-                        .with_module_id(module_id.raw().into());
+                        .with_module_id(module_id.raw().into())
+                        .with_stack(execution_stack(&thread));
                         self.events.send(crate::event::RuntimeEvent::Failed {
                             thread_id: self.thread_id,
                             error: failure.clone(),
@@ -411,8 +452,13 @@ impl RunnableTask for RuntimeTask {
                 ThreadResult::Blocked { timeout: None }
             }
             galfus_vm::VmStep::Failed(err) => {
-                let err =
-                    with_initialization_context(&thread, err.with_thread_id(self.thread_id.raw()));
+                let err = with_initialization_context(
+                    &thread,
+                    with_execution_stack(
+                        err.with_thread_id(self.thread_id.raw()),
+                        execution_stack(&thread),
+                    ),
+                );
                 self.events.send(crate::event::RuntimeEvent::Failed {
                     thread_id: self.thread_id,
                     error: err.clone(),

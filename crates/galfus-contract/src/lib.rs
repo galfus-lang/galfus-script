@@ -91,6 +91,14 @@ pub enum ExecutionFailureKind {
     InternalRuntimeFailure,
 }
 
+/// A VM frame preserved across an asynchronous suspension boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutionFrame {
+    pub module_id: u64,
+    pub function_id: u64,
+    pub instruction_offset: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionFailure {
     pub kind: ExecutionFailureKind,
@@ -100,8 +108,7 @@ pub struct ExecutionFailure {
     pub request_id: Option<u64>,
     pub module_id: Option<u64>,
     pub function_id: Option<u64>,
-    // Stack omitted for now to avoid coupling with VM internals in contract
-    // pub stack: Vec<ExecutionFrame>,
+    pub stack: Vec<ExecutionFrame>,
     pub cause: Option<Box<ExecutionFailure>>,
 }
 
@@ -115,6 +122,7 @@ impl ExecutionFailure {
             request_id: None,
             module_id: None,
             function_id: None,
+            stack: vec![],
             cause: None,
         }
     }
@@ -136,6 +144,11 @@ impl ExecutionFailure {
 
     pub fn with_cause(mut self, cause: ExecutionFailure) -> Self {
         self.cause = Some(Box::new(cause));
+        self
+    }
+
+    pub fn with_stack(mut self, stack: Vec<ExecutionFrame>) -> Self {
+        self.stack = stack;
         self
     }
 }
