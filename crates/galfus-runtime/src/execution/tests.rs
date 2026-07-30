@@ -1,10 +1,9 @@
 use super::*;
 use crate::orchestrator::Orchestrator;
-use galfus_contract::{ExecutorStepResult, KernelTask, RunnableTask, ThreadResult};
+use galfus_contract::{ExecutorStepResult, KernelTask};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
-    mpsc,
 };
 
 struct IdleDriver;
@@ -16,61 +15,54 @@ impl KernelDriver for IdleDriver {
 
     fn run(&self) {}
 
-    fn step(&self) -> Result<ExecutorStepResult, ExecutionFailure> {
-        Ok(ExecutorStepResult::Running)
+    fn step(&self) -> ExecutorStepResult {
+        ExecutorStepResult::Running
     }
-}
-
-struct YieldingTask;
-
-impl RunnableTask for YieldingTask {
-    fn run(self: Box<Self>, _budget: usize) -> ThreadResult {
-        ThreadResult::Yielded(self)
-    }
-}
-
-struct CompletedTask;
-
-impl RunnableTask for CompletedTask {
-    fn run(self: Box<Self>, _budget: usize) -> ThreadResult {
-        ThreadResult::Completed(7)
-    }
-}
-
-fn execution(root: Box<dyn RunnableTask>, initializing: bool, initialized: bool) -> Execution {
-    let (sender, _receiver) = mpsc::channel();
-    Execution::new(
-        root,
-        Rc::new(IdleDriver),
-        crate::event::EventSink::new(sender),
-        Arc::new(AtomicBool::new(initialized)),
-        initializing,
-    )
 }
 
 #[test]
 fn execution_transitions_from_created_to_running_and_preserves_completion() {
-    let mut execution = execution(Box::new(CompletedTask), false, true);
+    let orchestrator = Orchestrator::new();
+    let sink = orchestrator.sink();
+    let mut execution = Execution::new(
+        orchestrator,
+        Rc::new(IdleDriver),
+        sink,
+        Arc::new(AtomicBool::new(true)),
+        false,
+    );
     assert_eq!(execution.status(), ExecutionState::Created);
 
     assert!(matches!(
         execution.poll(1),
-        Ok(ExecutorStepResult::Completed(7))
+        Ok(ExecutorStepResult::Completed(0))
     ));
     assert_eq!(execution.status(), ExecutionState::Completed);
-    assert_eq!(execution.result(), Some(&Ok(BoundaryValue::I32(7))));
-    assert_eq!(execution.run_to_completion(), Ok(BoundaryValue::I32(7)));
-    assert_eq!(execution.result(), Some(&Ok(BoundaryValue::I32(7))));
+    assert_eq!(execution.result(), Some(&Ok(BoundaryValue::I32(0))));
+    assert_eq!(execution.run_to_completion(), Ok(BoundaryValue::I32(0)));
+    assert_eq!(execution.result(), Some(&Ok(BoundaryValue::I32(0))));
 }
 
 #[test]
 fn execution_remains_initializing_until_the_orchestrator_signal() {
     let initialization_complete = Arc::new(AtomicBool::new(false));
-    let (sender, _receiver) = mpsc::channel();
+    let mut orchestrator = Orchestrator::new();
+    let token = orchestrator.main_thread_token();
+    let thread_id = orchestrator.kernel_mut(token).spawn(galfus_vm::thread::VmThreadState::new(), None);
+    let thread = orchestrator.kernel_mut(token).take_thread(thread_id).unwrap();
+    orchestrator.kernel_mut(token).enqueue_runnable(thread_id, thread);
+
+    let driver = Rc::new(IdleDriver);
+    orchestrator.set_vm(Arc::new(galfus_vm::VirtualMachine::new(
+        Default::default(),
+    )));
+    orchestrator.set_driver(driver.clone());
+
+    let sink = orchestrator.sink();
     let mut execution = Execution::new(
-        Box::new(YieldingTask),
-        Rc::new(IdleDriver),
-        crate::event::EventSink::new(sender),
+        orchestrator,
+        driver,
+        sink,
         initialization_complete.clone(),
         true,
     );
@@ -87,10 +79,10 @@ fn cancellation_transitions_the_execution_to_cancelled() {
     let orchestrator = Orchestrator::new();
     let sink = orchestrator.sink();
     let mut execution = Execution::new(
-        Box::new(orchestrator),
+        orchestrator,
         Rc::new(IdleDriver),
         sink,
-        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        Arc::new(AtomicBool::new(true)),
         false,
     );
 

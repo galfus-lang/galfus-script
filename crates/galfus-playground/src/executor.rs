@@ -41,44 +41,29 @@ impl KernelDriver for PlaygroundExecutor {
         }
     }
 
-    fn step(&self) -> Result<ExecutorStepResult, ExecutionFailure> {
+    fn step(&self) -> ExecutorStepResult {
         let task_entry = {
             let mut q = self.queue.lock().unwrap();
             q.pop_front()
         };
 
         let Some(task_entry) = task_entry else {
-            return Ok(ExecutorStepResult::Blocked { timeout: None });
+            return ExecutorStepResult::Blocked { timeout: None };
         };
 
         let result = match task_entry {
             KernelTask::Main(task) => task.run(100),
-            KernelTask::Any(task) => match task.run(100) {
-                ThreadResult::Yielded(task) => {
-                    let task = task.into_any_thread().ok_or_else(|| {
-                        ExecutionFailure::new(
-                            galfus_contract::ExecutionFailureKind::DriverFailure,
-                            "any-thread task yielded a non-transferable continuation",
-                        )
-                    })?;
-                    self.queue.lock().unwrap().push_back(KernelTask::Any(task));
-                    return Ok(ExecutorStepResult::Running);
-                }
-                result => result,
-            },
+            KernelTask::Any(task) => task.run(100),
         };
 
         match result {
-            ThreadResult::Yielded(t) => {
-                self.queue.lock().unwrap().push_back(KernelTask::Main(t));
-                Ok(ExecutorStepResult::Running)
-            }
+            ThreadResult::Discarded => ExecutorStepResult::Running,
             ThreadResult::Blocked { timeout } => {
                 let is_empty = self.queue.lock().unwrap().is_empty();
                 if is_empty {
-                    Ok(ExecutorStepResult::Blocked { timeout })
+                    ExecutorStepResult::Blocked { timeout }
                 } else {
-                    Ok(ExecutorStepResult::Running)
+                    ExecutorStepResult::Running
                 }
             }
             ThreadResult::Completed(code) => {
@@ -88,16 +73,10 @@ impl KernelDriver for PlaygroundExecutor {
                 }
                 let is_empty = self.queue.lock().unwrap().is_empty();
                 if is_empty {
-                    Ok(ExecutorStepResult::Completed(code))
+                    ExecutorStepResult::Completed(code)
                 } else {
-                    Ok(ExecutorStepResult::Running)
+                    ExecutorStepResult::Running
                 }
-            }
-            ThreadResult::Failed(err) => {
-                if let Some(cb) = self.exit_callback.lock().unwrap().take() {
-                    cb(Err(err.clone()));
-                }
-                Err(err)
             }
         }
     }

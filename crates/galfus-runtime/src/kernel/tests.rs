@@ -1,12 +1,13 @@
 use super::VirtualKernel;
-use galfus_vm::thread::{MailboxMessage, VirtualThread};
+use galfus_vm::thread::VmThreadState;
+use crate::registry::MailboxMessage;
 
 #[test]
 fn expired_timers_are_enqueued_in_deterministic_order() {
     let mut kernel = VirtualKernel::new();
-    let first = kernel.spawn(VirtualThread::new());
-    let second = kernel.spawn(VirtualThread::new());
-    let earlier = kernel.spawn(VirtualThread::new());
+    let first = kernel.spawn(VmThreadState::new(), None);
+    let second = kernel.spawn(VmThreadState::new(), None);
+    let earlier = kernel.spawn(VmThreadState::new(), None);
 
     for (thread_id, timeout_ms) in [(first, 10), (second, 10), (earlier, 5)] {
         let thread = kernel
@@ -25,8 +26,8 @@ fn expired_timers_are_enqueued_in_deterministic_order() {
 #[test]
 fn mailbox_wakeups_keep_their_arrival_order() {
     let mut kernel = VirtualKernel::new();
-    let first = kernel.spawn(VirtualThread::new());
-    let second = kernel.spawn(VirtualThread::new());
+    let first = kernel.spawn(VmThreadState::new(), None);
+    let second = kernel.spawn(VmThreadState::new(), None);
 
     for thread_id in [first, second] {
         let thread = kernel

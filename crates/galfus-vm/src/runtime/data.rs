@@ -5,7 +5,7 @@ use super::*;
 impl VirtualMachine {
     pub(super) fn execute_data_instruction(
         &self,
-        thread: &mut thread::VirtualThread,
+        thread: &mut thread::VmThreadState,
         instr: Instruction,
     ) -> Result<VmStep, VmError> {
         match instr {
@@ -100,7 +100,7 @@ impl VirtualMachine {
         Ok(VmStep::Continue)
     }
 
-    pub(super) fn uint8_type_idx(&self, thread: &thread::VirtualThread) -> TypeIdx {
+    pub(super) fn uint8_type_idx(&self, thread: &thread::VmThreadState) -> TypeIdx {
         self.current_image(thread)
             .unwrap()
             .types

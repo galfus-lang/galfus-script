@@ -5,7 +5,7 @@ use super::*;
 impl VirtualMachine {
     pub(super) fn execute_cast(
         &self,
-        thread: &thread::VirtualThread,
+        thread: &thread::VmThreadState,
         val: &Value,
         target_ty: TypeIdx,
     ) -> Result<Value, VmError> {

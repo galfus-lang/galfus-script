@@ -60,7 +60,7 @@ fn test_copy_deep_copies_nested_structs() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let res = vm
         .run_function(
             &mut thread,
@@ -147,7 +147,7 @@ fn test_copy_preserves_internal_weak_observer_topology() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let res = vm
         .run_function(
             &mut thread,
@@ -238,7 +238,7 @@ fn test_copy_nulls_external_weak_observer_target() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let res = vm
         .run_function(
             &mut thread,
@@ -328,7 +328,7 @@ fn test_copy_preserves_strong_ownership_topology() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let res = vm
         .run_function(
             &mut thread,
@@ -381,7 +381,7 @@ fn test_copy_rejects_fieldless_structs_at_runtime() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let err = vm
         .run_function(
             &mut thread,

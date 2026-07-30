@@ -27,6 +27,7 @@ pub struct Continuation {
     dest: Option<Reg>,
     expected_result: Option<(ModuleId, TypeIdx)>,
     resumed: Arc<AtomicBool>,
+    pub origin_thread_id: Option<u64>,
 }
 
 impl Continuation {
@@ -35,7 +36,13 @@ impl Continuation {
             dest,
             expected_result: None,
             resumed: Arc::new(AtomicBool::new(false)),
+            origin_thread_id: None,
         }
+    }
+
+    pub fn with_origin(mut self, origin: u64) -> Self {
+        self.origin_thread_id = Some(origin);
+        self
     }
 
     pub(crate) fn for_provider(dest: Reg, module_id: ModuleId, return_type: TypeIdx) -> Self {
@@ -43,6 +50,7 @@ impl Continuation {
             dest: Some(dest),
             expected_result: Some((module_id, return_type)),
             resumed: Arc::new(AtomicBool::new(false)),
+            origin_thread_id: None,
         }
     }
 }
@@ -80,6 +88,8 @@ pub enum VmEffect {
         sender_id: u64,
         timeout: Option<u64>,
     },
+    MailboxHasMessages,
+    MailboxGetMessage,
     CreateThread {
         func: Value,
         key: Value,
@@ -215,10 +225,17 @@ impl VirtualMachine {
     /// Resumes a suspended VM operation exactly once without exposing register layout.
     pub fn resume(
         &self,
-        thread: &mut thread::VirtualThread,
+        thread_id: u64,
+        thread: &mut thread::VmThreadState,
         continuation: Continuation,
         value: Value,
     ) -> Result<(), galfus_contract::ExecutionFailure> {
+        if continuation.origin_thread_id != Some(thread_id) {
+            return Err(galfus_contract::ExecutionFailure::new(
+                galfus_contract::ExecutionFailureKind::InvalidContinuation,
+                "continuation resumed by wrong thread",
+            ));
+        }
         if continuation.resumed.swap(true, Ordering::AcqRel) {
             return Err(galfus_contract::ExecutionFailure::new(
                 galfus_contract::ExecutionFailureKind::DuplicateCompletion,
@@ -246,7 +263,7 @@ impl VirtualMachine {
 
     fn value_matches_type(
         &self,
-        thread: &thread::VirtualThread,
+        thread: &thread::VmThreadState,
         value: Value,
         module_id: ModuleId,
         type_idx: TypeIdx,
@@ -354,7 +371,7 @@ impl VirtualMachine {
 
     pub fn current_image(
         &self,
-        thread: &thread::VirtualThread,
+        thread: &thread::VmThreadState,
     ) -> Result<&galfus_bytecode::BytecodeModule, VmError> {
         let frame = thread.call_stack.last().ok_or(VmError::EmptyCallStack)?;
         Ok(&self.graph.get(frame.module_id).unwrap().module)
@@ -362,7 +379,7 @@ impl VirtualMachine {
 
     pub fn prepare_function(
         &self,
-        thread: &mut thread::VirtualThread,
+        thread: &mut thread::VmThreadState,
         module_id: galfus_core::ModuleId,
         func_idx: FuncIdx,
         args: Vec<Value>,
@@ -406,7 +423,7 @@ impl VirtualMachine {
 
     pub fn run_function(
         &self,
-        thread: &mut thread::VirtualThread,
+        thread: &mut thread::VmThreadState,
         module_id: galfus_core::ModuleId,
         func_idx: FuncIdx,
         args: Vec<Value>,
@@ -466,7 +483,7 @@ impl VirtualMachine {
 
     pub fn execute_with_budget(
         &self,
-        thread: &mut thread::VirtualThread,
+        thread: &mut thread::VmThreadState,
         mut budget: usize,
     ) -> Result<VmStep, VmPanic> {
         while budget > 0 {
@@ -492,7 +509,7 @@ impl VirtualMachine {
         Ok(VmStep::Continue)
     }
 
-    pub fn step(&self, thread: &mut thread::VirtualThread) -> Result<VmStep, VmError> {
+    pub fn step(&self, thread: &mut thread::VmThreadState) -> Result<VmStep, VmError> {
         let instr = {
             let frame = thread
                 .call_stack
@@ -585,7 +602,7 @@ impl VirtualMachine {
         Ok(step)
     }
 
-    fn execute_loop(&self, thread: &mut thread::VirtualThread) -> Result<Value, VmError> {
+    fn execute_loop(&self, thread: &mut thread::VmThreadState) -> Result<Value, VmError> {
         loop {
             match self.step(thread)? {
                 VmStep::Continue => {}
@@ -598,7 +615,7 @@ impl VirtualMachine {
 
     fn release_unreachable_if_needed(
         &self,
-        thread: &mut thread::VirtualThread,
+        thread: &mut thread::VmThreadState,
         instr: Instruction,
     ) {
         if matches!(instr, Instruction::Drop { .. })

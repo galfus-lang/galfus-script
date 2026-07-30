@@ -4,7 +4,7 @@ use super::*;
 
 impl VirtualMachine {
     #[allow(clippy::collapsible_if)]
-    pub fn release_unreachable(&self, thread: &mut thread::VirtualThread) {
+    pub fn release_unreachable(&self, thread: &mut thread::VmThreadState) {
         use std::collections::{HashSet, VecDeque};
 
         thread.heap.allocations_since_release = 0;

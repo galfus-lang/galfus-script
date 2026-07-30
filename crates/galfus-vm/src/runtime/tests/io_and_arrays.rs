@@ -3,7 +3,7 @@ use std::sync;
 use crate::thread;
 
 use super::*;
-use crate::thread::MailboxMessage;
+
 use galfus_bytecode::BytecodeModule;
 
 #[test]
@@ -125,7 +125,7 @@ fn test_len_and_copy_array() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let res = vm
         .run_function(
             &mut thread,
@@ -237,7 +237,7 @@ fn test_load_index_accepts_negative_index() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let res = vm
         .run_function(
             &mut thread,
@@ -284,7 +284,7 @@ fn test_load_index_out_of_bounds_returns_null() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let res = vm
         .run_function(
             &mut thread,
@@ -352,7 +352,7 @@ fn test_store_index_accepts_negative_index() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let res = vm
         .run_function(
             &mut thread,
@@ -406,7 +406,7 @@ fn test_store_index_out_of_bounds_returns_error() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let err = vm
         .run_function(
             &mut thread,
@@ -445,28 +445,21 @@ fn test_receive_returns_the_matching_mailbox_message() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph));
-    let mut thread = thread::VirtualThread::new();
-    thread.mailbox.lock().unwrap().push_back(MailboxMessage {
-        sender_id: 7,
-        data: vec![65, 66],
-    });
+    let mut thread = thread::VmThreadState::new();
+    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![VmValue::Int64(7), VmValue::Int32(10)]).unwrap();
+    let step = vm.execute_with_budget(&mut thread, 100).unwrap();
 
-    let value = vm
-        .run_function(
-            &mut thread,
-            module_id,
-            FuncIdx(0),
-            vec![VmValue::Int64(7), VmValue::Int32(10)],
-        )
-        .unwrap();
+    let crate::VmStep::Suspend { effect, .. } = step else {
+        panic!("should suspend");
+    };
 
-    let VmValue::Object(message_ref) = value else {
-        panic!("receive should return an array");
-    };
-    let HeapObject::Array { elements, .. } = thread.heap.get_object(message_ref).unwrap() else {
-        panic!("receive should return a byte array");
-    };
-    assert_eq!(elements, &[VmValue::Uint8(65), VmValue::Uint8(66)]);
+    assert_eq!(
+        effect,
+        crate::VmEffect::ReceiveFilter {
+            sender_id: 7,
+            timeout: Some(10),
+        }
+    );
 }
 
 #[test]
@@ -489,26 +482,11 @@ fn test_current_thread_mailbox_functions_read_and_consume_messages() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph));
-    let mut thread = thread::VirtualThread::new();
-    thread.mailbox.lock().unwrap().push_back(MailboxMessage {
-        sender_id: 7,
-        data: vec![65, 66],
-    });
-    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![])
-        .unwrap();
-
-    vm.step(&mut thread).unwrap();
-    assert_eq!(thread.read_reg(Reg(0)).unwrap(), VmValue::Bool(true));
-
-    vm.step(&mut thread).unwrap();
-    let VmValue::Object(message_ref) = thread.read_reg(Reg(1)).unwrap() else {
-        panic!("getMessage should return a byte array");
+    let mut thread = thread::VmThreadState::new();
+    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![]).unwrap();
+    let step = vm.execute_with_budget(&mut thread, 100).unwrap();
+    let crate::VmStep::Suspend { effect, .. } = step else {
+        panic!("should suspend");
     };
-    let HeapObject::Array { elements, .. } = thread.heap.get_object(message_ref).unwrap() else {
-        panic!("getMessage should return a byte array");
-    };
-    assert_eq!(elements, &[VmValue::Uint8(65), VmValue::Uint8(66)]);
-
-    vm.step(&mut thread).unwrap();
-    assert_eq!(thread.read_reg(Reg(2)).unwrap(), VmValue::Bool(false));
+    assert_eq!(effect, crate::VmEffect::MailboxHasMessages);
 }

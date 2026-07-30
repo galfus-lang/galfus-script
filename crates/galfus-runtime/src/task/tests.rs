@@ -10,7 +10,7 @@ use galfus_vm::{HeapObject, VmValue};
 
 #[test]
 fn execution_stack_preserves_the_suspended_call_chain() {
-    let mut thread = galfus_vm::thread::VirtualThread::new();
+    let mut thread = galfus_vm::thread::VmThreadState::new();
     thread.call_stack = vec![
         galfus_vm::runtime::CallFrame {
             module_id: galfus_core::ModuleId::new(1),

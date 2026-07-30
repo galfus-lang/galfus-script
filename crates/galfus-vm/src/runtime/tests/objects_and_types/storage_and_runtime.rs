@@ -34,7 +34,7 @@ fn test_structs_load_store() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let res = vm
         .run_function(
             &mut thread,
@@ -90,7 +90,7 @@ fn test_arrays_load_store() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let res = vm
         .run_function(
             &mut thread,
@@ -146,7 +146,7 @@ fn test_tuples() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let res = vm
         .run_function(
             &mut thread,
@@ -182,7 +182,7 @@ fn test_choices() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let res = vm
         .run_function(
             &mut thread,
@@ -232,7 +232,7 @@ fn test_cast() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let res = vm
         .run_function(
             &mut thread,
@@ -267,7 +267,7 @@ fn test_instanceof() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let res = vm
         .run_function(
             &mut thread,
@@ -309,7 +309,7 @@ fn test_instanceof_constraint_satisfied_by_struct_layout() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let res = vm
         .run_function(
             &mut thread,
@@ -348,7 +348,7 @@ fn test_division_by_zero_panic() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let res = vm.run_function(
         &mut thread,
         galfus_core::ModuleId::new(0),
@@ -427,7 +427,7 @@ fn test_unwinding_call_stack() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VirtualThread::new();
+    let mut thread = thread::VmThreadState::new();
     let res = vm.run_function(
         &mut thread,
         galfus_core::ModuleId::new(0),

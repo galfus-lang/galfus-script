@@ -2,9 +2,9 @@
 mod tests;
 
 use crate::queue::{BlockedQueue, RunnableQueue};
+use crate::registry::MailboxMessage;
 use crate::registry::{ThreadId, ThreadRegistry};
-use galfus_vm::thread::MailboxMessage;
-use galfus_vm::thread::VirtualThread;
+use galfus_vm::thread::VmThreadState;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -28,26 +28,26 @@ impl VirtualKernel {
     }
 
     /// Allocates a new ThreadId and registers the thread as runnable.
-    pub fn spawn(&mut self, thread: VirtualThread) -> ThreadId {
+    pub fn spawn(&mut self, thread: VmThreadState, key: Option<String>) -> ThreadId {
         let raw_id = self.next_thread_id.fetch_add(1, Ordering::Relaxed);
         let id = ThreadId::from_raw(raw_id).expect("thread id should be non-zero");
-        self.registry.register(id, thread);
+        self.registry.register(id, thread, key);
         id
     }
 
     /// Parks a currently running thread without blocking it.
-    pub fn enqueue_runnable(&mut self, id: ThreadId, thread: VirtualThread) {
-        self.registry.register_with_id(id, thread);
+    pub fn enqueue_runnable(&mut self, id: ThreadId, thread: VmThreadState) {
+        self.registry.restore_vm_state(id, thread);
         self.runnable.enqueue(id);
     }
 
-    pub fn park_running(&mut self, id: ThreadId, thread: VirtualThread) {
-        self.registry.park(id, thread);
+    pub fn park_running(&mut self, id: ThreadId, thread: VmThreadState) {
+        self.registry.restore_vm_state(id, thread);
     }
 
     /// Blocks a thread, optionally with a timeout.
-    pub fn block(&mut self, id: ThreadId, thread: VirtualThread, timeout: Option<u64>) {
-        self.registry.park(id, thread);
+    pub fn block(&mut self, id: ThreadId, thread: VmThreadState, timeout: Option<u64>) {
+        self.registry.restore_vm_state(id, thread);
         if let Some(ms) = timeout {
             self.blocked.block_with_timeout(id, ms);
         } else {
@@ -116,16 +116,20 @@ impl VirtualKernel {
 
     // Pass-through methods for tasks
 
-    pub fn take_thread(&mut self, id: ThreadId) -> Option<VirtualThread> {
+    pub fn take_thread(&mut self, id: ThreadId) -> Option<VmThreadState> {
         self.registry.take(id)
+    }
+
+    pub fn state(&self, id: ThreadId) -> Option<crate::registry::ThreadState> {
+        self.registry.state(id)
     }
 
     pub fn mark_running(&mut self, id: ThreadId) -> bool {
         self.registry.mark_running(id)
     }
 
-    pub fn mark_exited(&mut self, id: ThreadId, thread: VirtualThread, code: i32) -> bool {
-        self.registry.register_with_id(id, thread);
+    pub fn mark_exited(&mut self, id: ThreadId, thread: VmThreadState, code: i32) -> bool {
+        self.registry.restore_vm_state(id, thread);
         self.registry.mark_exited(id, code)
     }
 

@@ -1,0 +1,101 @@
+use galfus_contract::{
+    BoundaryValue, ExecutionFailure, ExecutionFailureKind, KernelTask, MessageInjector,
+    RunnableTask, TaskAffinity, ThreadResult,
+};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
+pub(crate) struct ProviderDispatchTask {
+    pub(crate) providers: Arc<std::sync::Mutex<galfus_contract::Providers>>,
+    pub(crate) thread_id: usize,
+    pub(crate) request_id: u64,
+    pub(crate) name: String,
+    pub(crate) args: Vec<BoundaryValue>,
+    pub(crate) injector: Arc<dyn MessageInjector>,
+    pub(crate) active: Arc<AtomicBool>,
+}
+
+pub(crate) struct AdapterDispatchTask {
+    pub(crate) adapters: Arc<std::sync::Mutex<galfus_contract::Adapters>>,
+    pub(crate) thread_id: usize,
+    pub(crate) request_id: u64,
+    pub(crate) module: String,
+    pub(crate) symbol: String,
+    pub(crate) args: Vec<BoundaryValue>,
+    pub(crate) injector: Arc<dyn MessageInjector>,
+    pub(crate) active: Arc<AtomicBool>,
+}
+
+impl RunnableTask for AdapterDispatchTask {
+    fn run(self: Box<Self>, _budget: usize) -> ThreadResult {
+        if !self.active.load(Ordering::Acquire) {
+            return ThreadResult::Discarded;
+        }
+        let mut adapters = self.adapters.lock().unwrap();
+        let Some(adapter) = adapters.get_mut(&self.module, &self.symbol) else {
+            self.injector.inject_system_response(
+                self.thread_id,
+                self.request_id,
+                Err(ExecutionFailure::new(
+                    ExecutionFailureKind::MissingAdapter,
+                    "adapter symbol missing",
+                )),
+            );
+            return ThreadResult::Discarded;
+        };
+        adapter.dispatch(
+            self.thread_id,
+            self.request_id,
+            &self.args,
+            self.injector.clone(),
+        );
+        ThreadResult::Discarded
+    }
+    fn into_any_thread(self: Box<Self>) -> Option<Box<dyn RunnableTask + Send>> {
+        Some(self)
+    }
+}
+
+impl ProviderDispatchTask {
+    pub(crate) fn into_kernel_task(self, affinity: TaskAffinity) -> KernelTask {
+        match affinity {
+            TaskAffinity::Main => KernelTask::Main(Box::new(self)),
+            TaskAffinity::Any => KernelTask::Any(Box::new(self)),
+        }
+    }
+}
+
+impl RunnableTask for ProviderDispatchTask {
+    fn run(self: Box<Self>, _budget: usize) -> ThreadResult {
+        if !self.active.load(Ordering::Acquire) {
+            return ThreadResult::Discarded;
+        }
+        let mut providers = self.providers.lock().unwrap();
+        let Some(host) = providers.host_mut() else {
+            self.injector.inject_system_response(
+                self.thread_id,
+                self.request_id,
+                Err(ExecutionFailure::new(
+                    ExecutionFailureKind::MissingProvider,
+                    "HostProvider missing while dispatching request",
+                )
+                .with_request_id(self.request_id)),
+            );
+            return ThreadResult::Discarded;
+        };
+        host.dispatch(
+            self.thread_id,
+            self.request_id,
+            self.name.as_str(),
+            self.args.as_slice(),
+            self.injector.clone(),
+        );
+        ThreadResult::Discarded
+    }
+
+    fn into_any_thread(self: Box<Self>) -> Option<Box<dyn RunnableTask + Send>> {
+        Some(self)
+    }
+}

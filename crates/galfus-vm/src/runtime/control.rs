@@ -5,7 +5,7 @@ use super::*;
 impl VirtualMachine {
     pub(super) fn execute_control_instruction(
         &self,
-        thread: &mut thread::VirtualThread,
+        thread: &mut thread::VmThreadState,
         instr: Instruction,
     ) -> Result<VmStep, VmError> {
         match instr {
@@ -448,51 +448,27 @@ impl VirtualMachine {
                     }
                 };
 
-                // Remove the first message matching sender_id.
-                let msg_opt = {
-                    let mut mailbox = thread.mailbox.lock().unwrap();
-                    let idx = mailbox
-                        .iter()
-                        .position(|message| message.sender_id == sender_id);
-                    if let Some(idx) = idx {
-                        Some(mailbox.remove(idx).unwrap().data)
-                    } else {
-                        None
-                    }
-                };
-
-                if let Some(data) = msg_opt {
-                    let message = Value::Object(thread.heap.alloc(HeapObject::Array {
-                        element_ty: self.uint8_type_idx(thread),
-                        elements: data.into_iter().map(Value::Uint8).collect(),
-                    }));
-                    let _ = thread.write_reg(dest, message);
-                    return Ok(VmStep::Continue);
-                } else {
-                    // Revert PC so we try again after waking up
-                    thread.call_stack.last_mut().unwrap().pc -= 1;
-                    return Ok(VmStep::Suspend {
-                        effect: VmEffect::ReceiveFilter {
-                            sender_id,
-                            timeout: timeout_val,
-                        },
-                        continuation: Continuation::new(Some(dest)),
-                    });
-                }
+                // The VM no longer has access to the mailbox, so we must suspend.
+                // The runtime will pop the message and resume.
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::ReceiveFilter {
+                        sender_id,
+                        timeout: timeout_val,
+                    },
+                    continuation: Continuation::new(Some(dest)),
+                });
             }
             Instruction::MailboxHasMessages { dest } => {
-                let has_messages = !thread.mailbox.lock().unwrap().is_empty();
-                thread.write_reg(dest, Value::Bool(has_messages))?;
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::MailboxHasMessages,
+                    continuation: Continuation::new(Some(dest)),
+                });
             }
             Instruction::MailboxGetMessage { dest } => {
-                let message = thread.mailbox.lock().unwrap().pop_front();
-                let value = message.map_or(Value::Null, |message| {
-                    Value::Object(thread.heap.alloc(HeapObject::Array {
-                        element_ty: self.uint8_type_idx(thread),
-                        elements: message.data.into_iter().map(Value::Uint8).collect(),
-                    }))
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::MailboxGetMessage,
+                    continuation: Continuation::new(Some(dest)),
                 });
-                thread.write_reg(dest, value)?;
             }
             Instruction::Send { dest, target, msg } => {
                 let target_val = thread.read_reg(target)?.clone();
@@ -682,7 +658,7 @@ impl VirtualMachine {
 
     fn execute_array_iterator_method(
         &self,
-        thread: &mut thread::VirtualThread,
+        thread: &mut thread::VmThreadState,
         obj: Reg,
         method_name: &str,
     ) -> Result<Option<Value>, VmError> {
@@ -766,7 +742,7 @@ impl VirtualMachine {
     }
 }
 
-fn thread_id_value(thread: &thread::VirtualThread, register: Reg) -> Result<u64, VmError> {
+fn thread_id_value(thread: &thread::VmThreadState, register: Reg) -> Result<u64, VmError> {
     match thread.read_reg(register)? {
         Value::Int64(id) => Ok(id as u64),
         value => Err(VmError::TypeMismatch {

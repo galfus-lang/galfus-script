@@ -364,42 +364,39 @@ fn run_initializes_dependencies_before_the_entry_module() {
         fn dispatch(&self, task: galfus_contract::KernelTask) {
             self.queue.lock().unwrap().push_back(task);
         }
+
+        fn step(&self) -> galfus_contract::ExecutorStepResult {
+            let t = self.queue.lock().unwrap().pop_front();
+            let Some(t) = t else {
+                return galfus_contract::ExecutorStepResult::Blocked { timeout: None };
+            };
+            let runnable = match t {
+                galfus_contract::KernelTask::Main(x) => x,
+                galfus_contract::KernelTask::Any(x) => x,
+            };
+            match runnable.run(100) {
+                galfus_contract::ThreadResult::Discarded => galfus_contract::ExecutorStepResult::Running,
+                galfus_contract::ThreadResult::Completed(code) => galfus_contract::ExecutorStepResult::Completed(code),
+                galfus_contract::ThreadResult::Blocked { timeout } => galfus_contract::ExecutorStepResult::Blocked { timeout },
+            }
+        }
     }
     let executor = std::rc::Rc::new(TestExecutor {
         queue: sync::Mutex::new(collections::VecDeque::new()),
     });
 
-    let task = Runtime::new(
+    let mut task = Runtime::new(
         sync::Arc::new(graph.clone()),
         Some(galfus_contract::Providers::with_host(Box::new(
             ImmediateProvider,
         ))),
     )
     .start(entry_id, "main", &[], executor.clone())
-    .expect("entry execution succeeds")
-    .into_task();
-    galfus_contract::KernelDriver::dispatch(
-        executor.as_ref(),
-        galfus_contract::KernelTask::Main(task),
-    ); //executor.as_ref(), task);
+    .expect("entry execution succeeds");
 
-    let mut exit_code = 0;
-    loop {
-        let t = executor.queue.lock().unwrap().pop_front();
-        let Some(t) = t else { break };
-        let runnable = match t {
-            galfus_contract::KernelTask::Main(x) => x,
-            galfus_contract::KernelTask::Any(x) => x,
-        };
-        match runnable.run(100) {
-            galfus_contract::ThreadResult::Yielded(t) => executor
-                .queue
-                .lock()
-                .unwrap()
-                .push_back(galfus_contract::KernelTask::Main(t)),
-            galfus_contract::ThreadResult::Completed(code) => exit_code = code,
-            _ => {}
-        }
-    }
+    let exit_code = match task.run_to_completion() {
+        Ok(galfus_contract::BoundaryValue::I32(code)) => code,
+        _ => panic!("Expected i32 exit code"),
+    };
     assert_eq!(exit_code, 42);
 }
