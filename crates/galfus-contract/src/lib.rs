@@ -4,6 +4,7 @@
 mod tests;
 pub mod thread;
 
+use std::collections::HashMap;
 use std::sync;
 
 pub use thread::*;
@@ -177,6 +178,79 @@ pub trait HostProvider: Send {
 
     /// Notifies the provider that a pending request no longer has an execution owner.
     fn cancel(&mut self, _thread_id: usize, _request_id: u64) {}
+}
+
+/// Typed foreign-function integration for one nominal adapter symbol.
+pub trait HostAdapter: Send {
+    fn affinity(&self) -> TaskAffinity {
+        TaskAffinity::Main
+    }
+
+    fn dispatch(
+        &mut self,
+        thread_id: usize,
+        request_id: u64,
+        args: &[BoundaryValue],
+        injector: sync::Arc<dyn MessageInjector>,
+    );
+
+    fn cancel(&mut self, _thread_id: usize, _request_id: u64) {}
+
+    /// Releases a foreign resource previously exposed through a nominal handle.
+    fn release_handle(&mut self, _kind: &str, _id: u64) {}
+}
+
+/// Adapter ownership is explicit and keyed by its nominal module and symbol.
+#[derive(Default)]
+pub struct Adapters {
+    entries: HashMap<(String, String), Box<dyn HostAdapter>>,
+    handles: HashMap<(String, u64), (String, String)>,
+}
+
+impl Adapters {
+    pub fn register(
+        &mut self,
+        module: impl Into<String>,
+        symbol: impl Into<String>,
+        adapter: Box<dyn HostAdapter>,
+    ) {
+        self.entries.insert((module.into(), symbol.into()), adapter);
+    }
+
+    pub fn get_mut(&mut self, module: &str, symbol: &str) -> Option<&mut (dyn HostAdapter + '_)> {
+        let adapter = self
+            .entries
+            .get_mut(&(module.to_string(), symbol.to_string()))?;
+        Some(&mut **adapter)
+    }
+
+    pub fn register_handle(
+        &mut self,
+        module: impl Into<String>,
+        symbol: impl Into<String>,
+        kind: impl Into<String>,
+        id: u64,
+    ) -> bool {
+        let owner = (module.into(), symbol.into());
+        if !self.entries.contains_key(&owner) {
+            return false;
+        }
+        self.handles.insert((kind.into(), id), owner).is_none()
+    }
+
+    pub fn contains_handle(&self, kind: &str, id: u64) -> bool {
+        self.handles.contains_key(&(kind.to_string(), id))
+    }
+
+    pub fn release_handle(&mut self, kind: &str, id: u64) -> bool {
+        let Some((module, symbol)) = self.handles.remove(&(kind.to_string(), id)) else {
+            return false;
+        };
+        if let Some(adapter) = self.get_mut(&module, &symbol) {
+            adapter.release_handle(kind, id);
+        }
+        true
+    }
 }
 
 /// Optional host capabilities supplied for one execution.

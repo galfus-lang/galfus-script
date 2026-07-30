@@ -4,6 +4,23 @@ use std::sync::Arc;
 
 struct DummyHost;
 
+struct DummyAdapter(Arc<std::sync::atomic::AtomicUsize>);
+
+impl HostAdapter for DummyAdapter {
+    fn dispatch(
+        &mut self,
+        _thread_id: usize,
+        _request_id: u64,
+        _args: &[BoundaryValue],
+        _injector: Arc<dyn MessageInjector>,
+    ) {
+    }
+
+    fn release_handle(&mut self, _kind: &str, _id: u64) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
+
 impl HostProvider for DummyHost {
     fn dispatch(
         &mut self,
@@ -31,6 +48,37 @@ fn providers_allow_host() {
 #[test]
 fn providers_default_to_main_thread_affinity() {
     assert_eq!(DummyHost.affinity("operation"), TaskAffinity::Main);
+}
+
+#[test]
+fn adapters_are_registered_by_nominal_module_and_symbol() {
+    let mut adapters = Adapters::default();
+    adapters.register(
+        "graphics",
+        "create",
+        Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
+            0,
+        )))),
+    );
+    assert!(adapters.get_mut("graphics", "create").is_some());
+    assert!(adapters.get_mut("graphics", "missing").is_none());
+}
+
+#[test]
+fn adapters_own_and_release_nominal_handles() {
+    let releases = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut adapters = Adapters::default();
+    adapters.register(
+        "graphics",
+        "create",
+        Box::new(DummyAdapter(releases.clone())),
+    );
+    assert!(adapters.register_handle("graphics", "create", "texture", 7));
+    assert!(adapters.contains_handle("texture", 7));
+    assert!(adapters.release_handle("texture", 7));
+    assert!(!adapters.contains_handle("texture", 7));
+    assert!(!adapters.release_handle("texture", 7));
+    assert_eq!(releases.load(std::sync::atomic::Ordering::Acquire), 1);
 }
 
 #[test]

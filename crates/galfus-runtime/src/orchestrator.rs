@@ -36,6 +36,43 @@ struct ProviderDispatchTask {
     injector: Arc<dyn MessageInjector>,
 }
 
+struct AdapterDispatchTask {
+    adapters: Arc<std::sync::Mutex<galfus_contract::Adapters>>,
+    thread_id: usize,
+    request_id: u64,
+    module: String,
+    symbol: String,
+    args: Vec<BoundaryValue>,
+    injector: Arc<dyn MessageInjector>,
+}
+
+impl RunnableTask for AdapterDispatchTask {
+    fn run(self: Box<Self>, _budget: usize) -> ThreadResult {
+        let mut adapters = self.adapters.lock().unwrap();
+        let Some(adapter) = adapters.get_mut(&self.module, &self.symbol) else {
+            self.injector.inject_system_response(
+                self.thread_id,
+                self.request_id,
+                Err(ExecutionFailure::new(
+                    ExecutionFailureKind::MissingAdapter,
+                    "adapter symbol missing",
+                )),
+            );
+            return ThreadResult::Completed(0);
+        };
+        adapter.dispatch(
+            self.thread_id,
+            self.request_id,
+            &self.args,
+            self.injector.clone(),
+        );
+        ThreadResult::Completed(0)
+    }
+    fn into_any_thread(self: Box<Self>) -> Option<Box<dyn RunnableTask + Send>> {
+        Some(self)
+    }
+}
+
 impl ProviderDispatchTask {
     fn into_kernel_task(self, affinity: TaskAffinity) -> KernelTask {
         match affinity {
@@ -123,6 +160,7 @@ pub(crate) struct Orchestrator {
     pending_continuations: HashMap<u64, PendingContinuation>,
     startup_plans: HashMap<crate::registry::ThreadId, StartupPlan>,
     next_request_id: u64,
+    adapters: Option<Arc<std::sync::Mutex<galfus_contract::Adapters>>>,
     initialization_complete: Arc<AtomicBool>,
 }
 
@@ -141,6 +179,7 @@ impl Orchestrator {
             pending_continuations: HashMap::new(),
             startup_plans: HashMap::new(),
             next_request_id: 1,
+            adapters: None,
             initialization_complete: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -166,6 +205,14 @@ impl Orchestrator {
     pub(crate) fn set_vm(&mut self, vm: Arc<VirtualMachine>) {
         self.assert_main_thread();
         self.vm = Some(vm);
+    }
+
+    pub(crate) fn set_adapters(
+        &mut self,
+        adapters: Option<Arc<std::sync::Mutex<galfus_contract::Adapters>>>,
+    ) {
+        self.assert_main_thread();
+        self.adapters = adapters;
     }
 
     pub(crate) fn kernel_mut(&mut self, token: MainThreadToken) -> &mut VirtualKernel {
@@ -572,15 +619,99 @@ impl Orchestrator {
                             galfus_vm::VmValue::Bool(success),
                         );
                     }
-                    galfus_vm::VmEffect::AdapterCall { .. } => {
-                        self.failure = Some(
-                            ExecutionFailure::new(
-                                ExecutionFailureKind::MissingAdapter,
-                                "adapter calls require an adapter registry",
-                            )
-                            .with_thread_id(thread_id.raw()),
+                    galfus_vm::VmEffect::AdapterCall {
+                        module_id,
+                        adapter,
+                        symbol,
+                        args,
+                        arg_types,
+                        return_type,
+                    } => {
+                        let Some(adapters) = self.adapters.clone() else {
+                            self.failure = Some(
+                                ExecutionFailure::new(
+                                    ExecutionFailureKind::MissingAdapter,
+                                    "adapter registry missing",
+                                )
+                                .with_thread_id(thread_id.raw()),
+                            );
+                            self.kernel.cancel(thread_id);
+                            continue;
+                        };
+                        let module = &self
+                            .vm
+                            .as_ref()
+                            .unwrap()
+                            .graph
+                            .get(module_id)
+                            .unwrap()
+                            .module;
+                        let args = args
+                            .into_iter()
+                            .zip(arg_types)
+                            .map(|(value, ty)| {
+                                crate::task::decode_from_thread_heap(
+                                    &thread.heap,
+                                    value,
+                                    ty,
+                                    module,
+                                )
+                            })
+                            .collect::<Result<Vec<_>, _>>();
+                        let Ok(args) = args else {
+                            self.failure = Some(
+                                ExecutionFailure::new(
+                                    ExecutionFailureKind::BoundaryCodecFailure,
+                                    "invalid adapter argument",
+                                )
+                                .with_thread_id(thread_id.raw()),
+                            );
+                            self.kernel.cancel(thread_id);
+                            continue;
+                        };
+                        let affinity = adapters
+                            .lock()
+                            .unwrap()
+                            .get_mut(&adapter, &symbol)
+                            .map(|adapter| adapter.affinity());
+                        let Some(affinity) = affinity else {
+                            self.failure = Some(
+                                ExecutionFailure::new(
+                                    ExecutionFailureKind::MissingAdapter,
+                                    "adapter symbol missing",
+                                )
+                                .with_thread_id(thread_id.raw()),
+                            );
+                            self.kernel.cancel(thread_id);
+                            continue;
+                        };
+                        let request_id = self.next_request_id;
+                        self.next_request_id += 1;
+                        self.pending_continuations.insert(
+                            request_id,
+                            PendingContinuation {
+                                thread_id,
+                                continuation,
+                                module_id,
+                                return_type,
+                                request_id,
+                            },
                         );
-                        self.kernel.cancel(thread_id);
+                        self.kernel.block(thread_id, thread, None);
+                        let task = AdapterDispatchTask {
+                            adapters,
+                            thread_id: thread_id.raw() as usize,
+                            request_id,
+                            module: adapter,
+                            symbol,
+                            args,
+                            injector: Arc::new(crate::ExecutionHandle::new(self.sink.clone())),
+                        };
+                        self.driver.as_ref().unwrap().dispatch(match affinity {
+                            TaskAffinity::Main => KernelTask::Main(Box::new(task)),
+                            TaskAffinity::Any => KernelTask::Any(Box::new(task)),
+                        });
+                        continue;
                     }
                     galfus_vm::VmEffect::TimerWait { delay_ms } => {
                         self.kernel.block(thread_id, thread, Some(delay_ms));

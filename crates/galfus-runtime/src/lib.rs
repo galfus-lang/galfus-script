@@ -82,6 +82,7 @@ impl EntryAbi {
 pub struct Runtime {
     graph: sync::Arc<galfus_bytecode::BytecodeGraph>,
     providers: Option<sync::Arc<sync::Mutex<Providers>>>,
+    adapters: Option<sync::Arc<sync::Mutex<galfus_contract::Adapters>>>,
 }
 
 impl Runtime {
@@ -92,7 +93,13 @@ impl Runtime {
         Self {
             graph,
             providers: providers.map(|p| sync::Arc::new(sync::Mutex::new(p))),
+            adapters: None,
         }
+    }
+
+    pub fn with_adapters(mut self, adapters: galfus_contract::Adapters) -> Self {
+        self.adapters = Some(sync::Arc::new(sync::Mutex::new(adapters)));
+        self
     }
 
     /// Starts a persistent execution from an exported entry point.
@@ -187,6 +194,7 @@ impl Runtime {
         let vm = sync::Arc::new(vm);
 
         orchestrator.set_vm(vm);
+        orchestrator.set_adapters(self.adapters.clone());
         orchestrator.set_driver(driver.clone());
         orchestrator
             .kernel_mut(token)
