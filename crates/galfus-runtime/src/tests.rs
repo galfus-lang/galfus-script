@@ -164,6 +164,15 @@ fn pending_initializer_delays_entry_until_its_completion() {
         .take()
         .expect("initializer is pending");
     injector.inject_system_response(
+        thread_id + 1,
+        request_id,
+        Ok(galfus_contract::BoundaryValue::Null),
+    );
+    execution
+        .poll(100)
+        .expect("cross-thread completion is ignored safely");
+    assert_eq!(*calls.lock().unwrap(), vec!["initialize"]);
+    injector.inject_system_response(
         thread_id,
         request_id,
         Ok(galfus_contract::BoundaryValue::Null),

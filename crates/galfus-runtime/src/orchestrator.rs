@@ -16,6 +16,7 @@ use std::sync::{Arc, mpsc};
 use std::thread::{self, ThreadId};
 
 struct PendingContinuation {
+    thread_id: crate::registry::ThreadId,
     continuation: galfus_vm::Continuation,
     module_id: galfus_core::ModuleId,
     return_type: galfus_bytecode::instruction::TypeIdx,
@@ -115,7 +116,7 @@ pub(crate) struct Orchestrator {
     main_thread_id: ThreadId,
     _not_send_sync: PhantomData<Rc<()>>,
     failure: Option<galfus_contract::ExecutionFailure>,
-    pending_continuations: HashMap<crate::registry::ThreadId, PendingContinuation>,
+    pending_continuations: HashMap<u64, PendingContinuation>,
     startup_plans: HashMap<crate::registry::ThreadId, StartupPlan>,
     next_request_id: u64,
 }
@@ -254,7 +255,16 @@ impl Orchestrator {
     }
 
     fn cancel_pending_continuation(&mut self, thread_id: crate::registry::ThreadId) {
-        let Some(pending) = self.pending_continuations.remove(&thread_id) else {
+        let request_id = self
+            .pending_continuations
+            .iter()
+            .find_map(|(&request_id, pending)| {
+                (pending.thread_id == thread_id).then_some(request_id)
+            });
+        let Some(request_id) = request_id else {
+            return;
+        };
+        let Some(pending) = self.pending_continuations.remove(&request_id) else {
             return;
         };
         let Some(vm) = self.vm.as_ref() else {
@@ -272,8 +282,8 @@ impl Orchestrator {
     fn cancel_all_pending_continuations(&mut self) {
         let thread_ids = self
             .pending_continuations
-            .keys()
-            .copied()
+            .values()
+            .map(|pending| pending.thread_id)
             .collect::<Vec<_>>();
         for thread_id in thread_ids {
             self.cancel_pending_continuation(thread_id);
@@ -342,11 +352,11 @@ impl Orchestrator {
                     request_id,
                     result,
                 } => {
-                    let Some(pending) = self.pending_continuations.remove(&thread_id) else {
+                    let Some(pending) = self.pending_continuations.remove(&request_id) else {
                         continue;
                     };
-                    if pending.request_id != request_id {
-                        self.pending_continuations.insert(thread_id, pending);
+                    if pending.thread_id != thread_id {
+                        self.pending_continuations.insert(request_id, pending);
                         continue;
                     }
                     if let Some(mut thread) = self.kernel.take_thread(thread_id) {
@@ -490,8 +500,9 @@ impl Orchestrator {
                         let request_id = self.next_request_id;
                         self.next_request_id += 1;
                         self.pending_continuations.insert(
-                            thread_id,
+                            request_id,
                             PendingContinuation {
+                                thread_id,
                                 continuation,
                                 module_id,
                                 return_type,
