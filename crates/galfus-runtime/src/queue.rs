@@ -1,5 +1,8 @@
+#[cfg(test)]
+mod tests;
+
 use crate::registry::ThreadId;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 pub struct RunnableQueue {
     queue: VecDeque<ThreadId>,
@@ -37,53 +40,85 @@ impl Default for RunnableQueue {
 
 pub struct BlockedQueue {
     blocked: HashSet<ThreadId>,
-    timeouts: HashMap<ThreadId, u64>,
+    clock_ms: u64,
+    next_timer_id: u64,
+    timers: BTreeSet<TimerEntry>,
+    active_timers: HashMap<ThreadId, TimerEntry>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct TimerEntry {
+    deadline_ms: u64,
+    timer_id: u64,
+    thread_id: u64,
 }
 
 impl BlockedQueue {
     pub fn new() -> Self {
         Self {
             blocked: HashSet::new(),
-            timeouts: HashMap::new(),
+            clock_ms: 0,
+            next_timer_id: 1,
+            timers: BTreeSet::new(),
+            active_timers: HashMap::new(),
         }
     }
 
     pub fn block(&mut self, id: ThreadId) {
+        self.remove_timer(id);
         self.blocked.insert(id);
     }
 
     pub fn block_with_timeout(&mut self, id: ThreadId, timeout_ms: u64) {
         self.blocked.insert(id);
-        self.timeouts.insert(id, timeout_ms);
+        self.remove_timer(id);
+        let timer = TimerEntry {
+            deadline_ms: self.clock_ms.saturating_add(timeout_ms),
+            timer_id: self.next_timer_id,
+            thread_id: id.raw(),
+        };
+        self.next_timer_id = self.next_timer_id.saturating_add(1);
+        self.timers.insert(timer);
+        self.active_timers.insert(id, timer);
     }
 
     pub fn unblock(&mut self, id: ThreadId) -> bool {
-        self.timeouts.remove(&id);
+        self.remove_timer(id);
         self.blocked.remove(&id)
     }
 
     pub fn remove(&mut self, id: ThreadId) {
-        self.timeouts.remove(&id);
+        self.remove_timer(id);
         self.blocked.remove(&id);
     }
 
-    /// Reduces the timeout of all blocked threads by delta_ms.
-    /// Returns a list of ThreadIds whose timeouts reached 0.
-    pub fn tick_timeouts(&mut self, delta_ms: u64) -> Vec<ThreadId> {
-        let mut woke_up = Vec::new();
-        self.timeouts.retain(|&id, remaining_ms| {
-            if *remaining_ms <= delta_ms {
-                woke_up.push(id);
-                false
-            } else {
-                *remaining_ms -= delta_ms;
-                true
-            }
-        });
+    fn remove_timer(&mut self, id: ThreadId) {
+        if let Some(timer) = self.active_timers.remove(&id) {
+            self.timers.remove(&timer);
+        }
+    }
 
-        // Unblock them
-        for id in &woke_up {
-            self.blocked.remove(id);
+    /// Advances virtual time and returns expired threads by deadline then timer ID.
+    pub fn tick_timeouts(&mut self, delta_ms: u64) -> Vec<ThreadId> {
+        self.clock_ms = self.clock_ms.saturating_add(delta_ms);
+        let mut woke_up = Vec::new();
+
+        while let Some(timer) = self.timers.iter().next().copied() {
+            if timer.deadline_ms > self.clock_ms {
+                break;
+            }
+            self.timers.remove(&timer);
+
+            let Some(thread_id) = ThreadId::from_raw(timer.thread_id) else {
+                continue;
+            };
+            if self.active_timers.get(&thread_id) != Some(&timer) {
+                continue;
+            }
+            self.active_timers.remove(&thread_id);
+            if self.blocked.remove(&thread_id) {
+                woke_up.push(thread_id);
+            }
         }
 
         woke_up

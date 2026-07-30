@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use crate::queue::{BlockedQueue, RunnableQueue};
 use crate::registry::{ThreadId, ThreadRegistry};
 use galfus_vm::thread::MailboxMessage;
