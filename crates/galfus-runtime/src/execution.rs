@@ -3,7 +3,8 @@ mod tests;
 
 use crate::event::{EventSink, RuntimeEvent};
 use galfus_contract::{
-    BoundaryValue, ExecutionFailure, ExecutionFailureKind, ExecutorStepResult, KernelDriver, ThreadResult
+    BoundaryValue, ExecutionFailure, ExecutionFailureKind, ExecutorStepResult, KernelDriver,
+    ThreadResult,
 };
 use std::rc::Rc;
 use std::sync::{
@@ -92,11 +93,12 @@ impl Execution {
             match orchestrator.step(budget) {
                 ThreadResult::Discarded => {
                     if let Some(failure) = orchestrator.failure.take() {
-                        self.state = if failure.kind == galfus_contract::ExecutionFailureKind::Cancelled {
-                            ExecutionState::Cancelled
-                        } else {
-                            ExecutionState::Failed
-                        };
+                        self.state =
+                            if failure.kind == galfus_contract::ExecutionFailureKind::Cancelled {
+                                ExecutionState::Cancelled
+                            } else {
+                                ExecutionState::Failed
+                            };
                         self.result = Some(Err(failure));
                         self.orchestrator = None;
                     }

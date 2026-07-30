@@ -446,7 +446,13 @@ fn test_receive_returns_the_matching_mailbox_message() {
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph));
     let mut thread = thread::VmThreadState::new();
-    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![VmValue::Int64(7), VmValue::Int32(10)]).unwrap();
+    vm.prepare_function(
+        &mut thread,
+        module_id,
+        FuncIdx(0),
+        vec![VmValue::Int64(7), VmValue::Int32(10)],
+    )
+    .unwrap();
     let step = vm.execute_with_budget(&mut thread, 100).unwrap();
 
     let crate::VmStep::Suspend { effect, .. } = step else {
@@ -483,7 +489,8 @@ fn test_current_thread_mailbox_functions_read_and_consume_messages() {
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph));
     let mut thread = thread::VmThreadState::new();
-    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![]).unwrap();
+    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![])
+        .unwrap();
     let step = vm.execute_with_budget(&mut thread, 100).unwrap();
     let crate::VmStep::Suspend { effect, .. } = step else {
         panic!("should suspend");

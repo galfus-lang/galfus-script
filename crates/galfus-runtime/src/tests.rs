@@ -375,9 +375,15 @@ fn run_initializes_dependencies_before_the_entry_module() {
                 galfus_contract::KernelTask::Any(x) => x,
             };
             match runnable.run(100) {
-                galfus_contract::ThreadResult::Discarded => galfus_contract::ExecutorStepResult::Running,
-                galfus_contract::ThreadResult::Completed(code) => galfus_contract::ExecutorStepResult::Completed(code),
-                galfus_contract::ThreadResult::Blocked { timeout } => galfus_contract::ExecutorStepResult::Blocked { timeout },
+                galfus_contract::ThreadResult::Discarded => {
+                    galfus_contract::ExecutorStepResult::Running
+                }
+                galfus_contract::ThreadResult::Completed(code) => {
+                    galfus_contract::ExecutorStepResult::Completed(code)
+                }
+                galfus_contract::ThreadResult::Blocked { timeout } => {
+                    galfus_contract::ExecutorStepResult::Blocked { timeout }
+                }
             }
         }
     }

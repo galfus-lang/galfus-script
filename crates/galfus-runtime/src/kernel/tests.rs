@@ -1,6 +1,6 @@
 use super::VirtualKernel;
-use galfus_vm::thread::VmThreadState;
 use crate::registry::MailboxMessage;
+use galfus_vm::thread::VmThreadState;
 
 #[test]
 fn expired_timers_are_enqueued_in_deterministic_order() {

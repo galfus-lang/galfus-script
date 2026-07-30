@@ -48,14 +48,19 @@ fn execution_remains_initializing_until_the_orchestrator_signal() {
     let initialization_complete = Arc::new(AtomicBool::new(false));
     let mut orchestrator = Orchestrator::new();
     let token = orchestrator.main_thread_token();
-    let thread_id = orchestrator.kernel_mut(token).spawn(galfus_vm::thread::VmThreadState::new(), None);
-    let thread = orchestrator.kernel_mut(token).take_thread(thread_id).unwrap();
-    orchestrator.kernel_mut(token).enqueue_runnable(thread_id, thread);
+    let thread_id = orchestrator
+        .kernel_mut(token)
+        .spawn(galfus_vm::thread::VmThreadState::new(), None);
+    let thread = orchestrator
+        .kernel_mut(token)
+        .take_thread(thread_id)
+        .unwrap();
+    orchestrator
+        .kernel_mut(token)
+        .enqueue_runnable(thread_id, thread);
 
     let driver = Rc::new(IdleDriver);
-    orchestrator.set_vm(Arc::new(galfus_vm::VirtualMachine::new(
-        Default::default(),
-    )));
+    orchestrator.set_vm(Arc::new(galfus_vm::VirtualMachine::new(Default::default())));
     orchestrator.set_driver(driver.clone());
 
     let sink = orchestrator.sink();
