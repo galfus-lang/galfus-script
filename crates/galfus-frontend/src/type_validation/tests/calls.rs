@@ -384,7 +384,33 @@ fn main(): null {
 fn check_reports_restricted_builtin_symbol_declaration() {
     let source = source(
         r#"
-fn __builtin_write(text: [u8]): null {
+fn __provider_write(text: [u8]): null {
+  return null
+}
+"#,
+    );
+
+    let parse_result = parse(&source);
+    assert!(!parse_result.has_errors());
+
+    let resolve_result = resolve(&source, parse_result.into_graph());
+    assert!(!resolve_result.has_errors());
+
+    let graph = resolve_result.into_graph();
+    let result = check_declaration_types(&source, &graph);
+    let result = check_definition_types(&source, &graph, result);
+
+    assert!(result.has_errors());
+    assert!(result.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code().as_str() == TypeDiagnosticCode::RestrictedBuiltinSymbol.as_code()
+    }));
+}
+
+#[test]
+fn check_reports_restricted_internal_symbol_declaration() {
+    let source = source(
+        r#"
+fn __internal_thread_create(text: [u8]): null {
   return null
 }
 "#,
@@ -410,12 +436,12 @@ fn __builtin_write(text: [u8]): null {
 fn check_reports_restricted_builtin_symbol_reference() {
     let source = source(
         r#"
-fn __builtin_write(text: [u8]): null {
+fn __provider_write(text: [u8]): null {
   return null
 }
 
 fn main(): null {
-  var x = __builtin_write
+  var x = __provider_write
 }
 "#,
     );

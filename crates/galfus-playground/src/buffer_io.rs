@@ -117,7 +117,7 @@ impl HostProvider for BufferIoProvider {
         injector: Arc<dyn MessageInjector>,
     ) {
         match method {
-            "io_write" => {
+            "io_write" | "write" => {
                 if let Some(bytes) = args.first().and_then(boundary_bytes) {
                     #[cfg(feature = "wasm")]
                     let callback = {
@@ -160,7 +160,7 @@ impl HostProvider for BufferIoProvider {
                     );
                 }
             }
-            "io_read" => {
+            "io_read" | "read" => {
                 let terminator = if let Some(bytes) = args.first().and_then(boundary_bytes) {
                     bytes
                 } else {

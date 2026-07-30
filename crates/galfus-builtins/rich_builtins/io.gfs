@@ -1,18 +1,18 @@
-fn __builtin_io_write(text: [u8]): null {}
-fn __builtin_io_read(terminator: [u8]): [u8] {
+fn __provider_io_write(text: [u8]): null {}
+fn __provider_io_read(terminator: [u8]): [u8] {
   return ""
 }
 
 export fn read(terminator: [u8] = "\n"): [u8] {
-  return __builtin_io_read(terminator)
+  return __provider_io_read(terminator)
 }
 
 export fn print(text: [u8]): null {
-  __builtin_io_write(text)
+  __provider_io_write(text)
 }
 
 export fn println(text: [u8]): null {
-  __builtin_io_write(text)
-  __builtin_io_write([<u8>10])
+  __provider_io_write(text)
+  __provider_io_write([<u8>10])
 }
 

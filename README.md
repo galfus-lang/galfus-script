@@ -55,7 +55,7 @@ management or `galfus-runtime` for an existing bytecode graph.
 Galfus Script implements a robust set of modern language features:
 
 - **Type Safety**: Fully typed syntax with static type inference, validation of assignments, function calls, member accesses, and expression statements.
-- **Encapsulated Builtins**: Strictly prevents user projects from referencing or declaring `__builtin_*` compiler intrinsics directly. These are visible only inside compiler-trusted builtin scopes.
+- **Encapsulated Builtins**: Strictly prevents user projects from referencing or declaring `__provider_*`, `__internal_*`, or `__builtin_*` intrinsics directly. These are visible only inside compiler-trusted builtin scopes.
 - **Structs**: Rich struct declarations supporting inline initialization, member field access, and typed layouts.
 - **Dynamic Array Spreads**: Array literal spread operators (`[...arr1, ...arr2]`) computed dynamically at runtime using custom `Len` and `CopyArray` VM instructions.
 - **Control Flow**: Conditionals (`if`/`else`), loop jumps, and comparison operators.

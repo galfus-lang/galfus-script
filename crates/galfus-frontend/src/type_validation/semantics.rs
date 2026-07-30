@@ -451,7 +451,10 @@ impl<'a> DeclarationTypeChecker<'a> {
 
         if !is_builtin_module && syntax_node.kind() == SyntaxNodeKind::Identifier {
             let name = self.node_text(node);
-            if name.starts_with("__builtin_") {
+            if name.starts_with("__builtin_")
+                || name.starts_with("__provider_")
+                || name.starts_with("__internal_")
+            {
                 self.report_restricted_builtin_symbol(node, &name);
             }
         }
