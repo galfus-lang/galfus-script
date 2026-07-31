@@ -602,6 +602,60 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
 
                 self.free_temp_if_operand(length);
             }
+            RValue::CreateFuture { func, args } => {
+                let func_idx = galfus_bytecode::instruction::FuncIdx(func.raw() as u16);
+                let start_reg = if args.is_empty() {
+                    Reg(0)
+                } else {
+                    let first = self.alloc_temp();
+                    let mut temp_regs = vec![first];
+                    for _ in 1..args.len() {
+                        temp_regs.push(self.alloc_temp());
+                    }
+                    for (i, arg_op) in args.iter().enumerate() {
+                        self.load_operand_to(arg_op, temp_regs[i]);
+                    }
+                    first
+                };
+                self.instructions.push(Instruction::CreateFuture {
+                    dest,
+                    func: func_idx,
+                    args_start: start_reg,
+                    arg_count: args.len() as u8,
+                });
+                if !args.is_empty() {
+                    self.free_temps(args.len() as u16);
+                }
+            }
+            RValue::CreateIndirectFuture {
+                func: func_op,
+                args,
+            } => {
+                let func_reg = self.operand_reg(func_op);
+                let start_reg = if args.is_empty() {
+                    Reg(0)
+                } else {
+                    let first = self.alloc_temp();
+                    let mut temp_regs = vec![first];
+                    for _ in 1..args.len() {
+                        temp_regs.push(self.alloc_temp());
+                    }
+                    for (i, arg_op) in args.iter().enumerate() {
+                        self.load_operand_to(arg_op, temp_regs[i]);
+                    }
+                    first
+                };
+                self.instructions.push(Instruction::CallDynamic {
+                    dest,
+                    func_reg,
+                    args_start: start_reg,
+                    arg_count: args.len() as u8,
+                });
+                self.free_temp_if_operand(func_op);
+                if !args.is_empty() {
+                    self.free_temps(args.len() as u16);
+                }
+            }
         }
     }
 

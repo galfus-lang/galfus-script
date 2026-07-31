@@ -1,4 +1,5 @@
 mod array_literals;
+mod async_await;
 mod binary;
 mod calls_and_members;
 mod cast;

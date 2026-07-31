@@ -72,6 +72,14 @@ pub enum BoundaryCodecError {
     UnsupportedType,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancellationOutcome {
+    Confirmed,
+    BestEffort,
+    Unsupported,
+    AlreadyCompleted,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExecutionFailureKind {
     VmPanic,
@@ -195,7 +203,9 @@ pub trait HostProvider: Send {
     );
 
     /// Notifies the provider that a pending request no longer has an execution owner.
-    fn cancel(&mut self, _thread_id: usize, _request_id: u64) {}
+    fn cancel(&mut self, _thread_id: usize, _request_id: u64) -> CancellationOutcome {
+        CancellationOutcome::Unsupported
+    }
 }
 
 /// Typed foreign-function integration for one nominal adapter symbol.
@@ -212,7 +222,9 @@ pub trait HostAdapter: Send {
         injector: sync::Arc<dyn MessageInjector>,
     );
 
-    fn cancel(&mut self, _thread_id: usize, _request_id: u64) {}
+    fn cancel(&mut self, _thread_id: usize, _request_id: u64) -> CancellationOutcome {
+        CancellationOutcome::Unsupported
+    }
 
     /// Releases a foreign resource previously exposed through a nominal handle.
     fn release_handle(&mut self, _kind: &str, _id: u64) {}
@@ -243,9 +255,17 @@ impl Adapters {
     }
 
     /// Notifies the owning adapter that a request no longer has an execution owner.
-    pub fn cancel(&mut self, module: &str, symbol: &str, thread_id: usize, request_id: u64) {
+    pub fn cancel(
+        &mut self,
+        module: &str,
+        symbol: &str,
+        thread_id: usize,
+        request_id: u64,
+    ) -> Option<CancellationOutcome> {
         if let Some(adapter) = self.get_mut(module, symbol) {
-            adapter.cancel(thread_id, request_id);
+            Some(adapter.cancel(thread_id, request_id))
+        } else {
+            None
         }
     }
 

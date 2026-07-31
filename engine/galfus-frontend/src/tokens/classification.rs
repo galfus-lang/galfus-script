@@ -61,6 +61,8 @@ impl TokenKind {
                 | Self::False
                 | Self::New
                 | Self::Copy
+                | Self::Async
+                | Self::Await
                 | Self::SelfKw
         )
     }

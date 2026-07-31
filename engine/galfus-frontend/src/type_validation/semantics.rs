@@ -587,7 +587,7 @@ impl<'a> DeclarationTypeChecker<'a> {
                     let flag_text = flag_ident.map(|id| self.node_text(id)).unwrap_or_default();
 
                     let is_valid = match owner {
-                        MetadataOwner::Function => flag_text == "stamp",
+                        MetadataOwner::Function => flag_text == "stamp" || flag_text == "async",
 
                         _ => false,
                     };

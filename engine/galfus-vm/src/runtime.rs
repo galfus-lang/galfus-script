@@ -113,6 +113,19 @@ pub enum VmEffect {
     WaitThread {
         thread_id: u64,
     },
+    CreateFuture {
+        module_id: ModuleId,
+        func_idx: FuncIdx,
+        args: Vec<Value>,
+    },
+    FutureWaitAll {
+        future_ids: Vec<u64>,
+        module_id: ModuleId,
+    },
+    FutureWaitRace {
+        future_ids: Vec<u64>,
+        module_id: ModuleId,
+    },
     Blocked,
 }
 
@@ -595,6 +608,9 @@ impl VirtualMachine {
             Instruction::Drop { .. }
             | Instruction::CallNative { .. }
             | Instruction::AwaitFuture { .. }
+            | Instruction::CreateFuture { .. }
+            | Instruction::AwaitAll { .. }
+            | Instruction::AwaitRace { .. }
             | Instruction::Len { .. }
             | Instruction::CopyArray { .. } => self.execute_system_instruction(thread, instr)?,
         };

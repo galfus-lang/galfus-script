@@ -86,6 +86,15 @@ fn validate_function(func: &MirFunction) -> Result<(), Vec<ValidationError>> {
                 }
                 | mir::Instruction::ConstraintCall {
                     destination: dest, ..
+                }
+                | mir::Instruction::Await {
+                    destination: dest, ..
+                }
+                | mir::Instruction::AwaitAll {
+                    destination: dest, ..
+                }
+                | mir::Instruction::AwaitRace {
+                    destination: dest, ..
                 } => {
                     if !assigned_locals.insert(*dest) {
                         errors.push(ValidationError {
@@ -399,6 +408,42 @@ fn validate_basic_block(
                 }
                 initialized.insert(*destination);
             }
+            mir::Instruction::Await {
+                future,
+                destination,
+            } => {
+                validate_operand(future, func, initialized, errors);
+                if !func.locals.iter().any(|decl| decl.id == *destination) {
+                    errors.push(ValidationError {
+                        message: format!(
+                            "Function '{}': Await assigned to undeclared local ID {:?}",
+                            func.name, destination
+                        ),
+                    });
+                }
+                initialized.insert(*destination);
+            }
+            mir::Instruction::AwaitAll {
+                futures,
+                destination,
+            }
+            | mir::Instruction::AwaitRace {
+                futures,
+                destination,
+            } => {
+                for fut in futures {
+                    validate_operand(fut, func, initialized, errors);
+                }
+                if !func.locals.iter().any(|decl| decl.id == *destination) {
+                    errors.push(ValidationError {
+                        message: format!(
+                            "Function '{}': Await tuple assigned to undeclared local ID {:?}",
+                            func.name, destination
+                        ),
+                    });
+                }
+                initialized.insert(*destination);
+            }
         }
     }
 
@@ -465,6 +510,20 @@ fn validate_rvalue_operands(
         RValue::NewArrayZeroed { .. } | RValue::LoadGlobal(_) => {}
         RValue::NewArrayZeroedDynamic { length, .. } => {
             validate_operand(length, func, initialized, errors);
+        }
+        RValue::CreateFuture { args, .. } => {
+            for arg in args {
+                validate_operand(arg, func, initialized, errors);
+            }
+        }
+        RValue::CreateIndirectFuture {
+            func: func_op,
+            args,
+        } => {
+            validate_operand(func_op, func, initialized, errors);
+            for arg in args {
+                validate_operand(arg, func, initialized, errors);
+            }
         }
     }
 }

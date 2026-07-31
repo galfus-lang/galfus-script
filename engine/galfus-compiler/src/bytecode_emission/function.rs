@@ -5,7 +5,7 @@ use galfus_ir::mir;
 
 use super::LowerCtx;
 use galfus_bytecode::Instruction;
-use galfus_bytecode::instruction::{GlobalIdx, Reg};
+use galfus_bytecode::instruction::{GlobalIdx, Reg, TypeIdx};
 use galfus_ir::mir::{
     Constant as MirConstant, Instruction as MirInstruction, MirFunction, Operand, Terminator,
 };
@@ -519,6 +519,71 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
 
                         self.free_temps(1 + args.len() as u16);
                         self.free_temp_if_operand(func);
+                    }
+                    MirInstruction::Await {
+                        future,
+                        destination,
+                    } => {
+                        let fut_reg = self.operand_reg(future);
+                        let return_type = TypeIdx(0);
+                        self.instructions.push(Instruction::AwaitFuture {
+                            dest: Reg(destination.raw() as u16),
+                            future_id: fut_reg,
+                            return_type,
+                        });
+                        self.free_temp_if_operand(future);
+                    }
+                    MirInstruction::AwaitAll {
+                        futures,
+                        destination,
+                    } => {
+                        let start_reg = if futures.is_empty() {
+                            Reg(0)
+                        } else {
+                            let first = self.alloc_temp();
+                            let mut temp_regs = vec![first];
+                            for _ in 1..futures.len() {
+                                temp_regs.push(self.alloc_temp());
+                            }
+                            for (i, fut_op) in futures.iter().enumerate() {
+                                self.load_operand_to(fut_op, temp_regs[i]);
+                            }
+                            first
+                        };
+                        self.instructions.push(Instruction::AwaitAll {
+                            dest: Reg(destination.raw() as u16),
+                            futures_start: start_reg,
+                            count: futures.len() as u8,
+                        });
+                        if !futures.is_empty() {
+                            self.free_temps(futures.len() as u16);
+                        }
+                    }
+                    MirInstruction::AwaitRace {
+                        futures,
+                        destination,
+                    } => {
+                        let start_reg = if futures.is_empty() {
+                            Reg(0)
+                        } else {
+                            let first = self.alloc_temp();
+                            let mut temp_regs = vec![first];
+                            for _ in 1..futures.len() {
+                                temp_regs.push(self.alloc_temp());
+                            }
+                            for (i, fut_op) in futures.iter().enumerate() {
+                                self.load_operand_to(fut_op, temp_regs[i]);
+                            }
+                            first
+                        };
+                        self.instructions.push(Instruction::AwaitRace {
+                            dest: Reg(destination.raw() as u16),
+                            futures_start: start_reg,
+                            count: futures.len() as u8,
+                        });
+                        if !futures.is_empty() {
+                            self.free_temps(futures.len() as u16);
+                        }
                     }
                 }
                 if let Some(span) = span_opt {

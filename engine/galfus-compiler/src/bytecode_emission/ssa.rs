@@ -246,6 +246,52 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
                     *destination = new_id;
                     self.write_variable(block, orig_target, new_id);
                 }
+                Instruction::Await {
+                    future,
+                    destination,
+                } => {
+                    self.replace_operand(block, future);
+                    let orig_target = *destination;
+                    let target_decl = self
+                        .new_locals
+                        .iter()
+                        .find(|d| d.id == orig_target)
+                        .unwrap()
+                        .clone();
+                    let new_id = LocalId::new(self.new_locals.len() as u32);
+                    self.new_locals.push(LocalDecl {
+                        id: new_id,
+                        ty: target_decl.ty,
+                    });
+                    *destination = new_id;
+                    self.write_variable(block, orig_target, new_id);
+                }
+                Instruction::AwaitAll {
+                    futures,
+                    destination,
+                }
+                | Instruction::AwaitRace {
+                    futures,
+                    destination,
+                } => {
+                    for fut in futures {
+                        self.replace_operand(block, fut);
+                    }
+                    let orig_target = *destination;
+                    let target_decl = self
+                        .new_locals
+                        .iter()
+                        .find(|d| d.id == orig_target)
+                        .unwrap()
+                        .clone();
+                    let new_id = LocalId::new(self.new_locals.len() as u32);
+                    self.new_locals.push(LocalDecl {
+                        id: new_id,
+                        ty: target_decl.ty,
+                    });
+                    *destination = new_id;
+                    self.write_variable(block, orig_target, new_id);
+                }
             }
         }
     }

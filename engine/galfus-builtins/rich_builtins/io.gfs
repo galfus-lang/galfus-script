@@ -1,18 +1,17 @@
-fn __provider_io_write(text: [u8]): null {}
-fn __provider_io_read(terminator: [u8]): [u8] {
+fn(async) __provider_io_write(text: [u8]): null {}
+fn(async) __provider_io_read(terminator: [u8]): [u8] {
   return ""
 }
 
 export fn read(terminator: [u8] = "\n"): [u8] {
-  return __provider_io_read(terminator)
+  return await __provider_io_read(terminator)
 }
 
 export fn print(text: [u8]): null {
-  __provider_io_write(text)
+  await __provider_io_write(text)
 }
 
 export fn println(text: [u8]): null {
-  __provider_io_write(text)
-  __provider_io_write([<u8>10])
+  await __provider_io_write(text)
+  await __provider_io_write([<u8>10])
 }
-

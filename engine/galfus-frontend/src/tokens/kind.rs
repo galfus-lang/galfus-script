@@ -42,6 +42,8 @@ pub enum TokenKind {
     False,
     New,
     Copy,
+    Async,
+    Await,
 
     SelfKw,
 

@@ -11,6 +11,7 @@ fn test_pure_mir_construction() {
         locals: vec![],
         blocks: vec![],
         type_substitutions: std::collections::HashMap::new(),
+        is_async: false,
     };
 
     let block = mir::BasicBlock {

@@ -355,4 +355,49 @@ impl Parser {
 
         Some(self.add_node(SyntaxNodeKind::TypeofExpression, span, vec![subject, arms]))
     }
+
+    pub(super) fn parse_await_expression(
+        &mut self,
+        boundary: ExpressionBoundary,
+    ) -> Option<NodeId> {
+        let await_token = self.expect(TokenKind::Await)?;
+
+        if self.at(&TokenKind::LeftParen) {
+            let offset = 1;
+            let kind = self.peek(offset).kind();
+            if kind == &TokenKind::Identifier {
+                let name = self.token_text(self.peek(offset));
+                if (name == "all" || name == "race")
+                    && self.peek(offset + 1).kind() == &TokenKind::RightParen
+                {
+                    let is_race = name == "race";
+                    self.bump();
+                    self.bump();
+                    self.bump();
+
+                    self.skip_newlines();
+
+                    let tuple_target = self.parse_grouped_expression()?;
+                    let span = Span::cover(await_token.span(), self.node_span(tuple_target))
+                        .unwrap_or(await_token.span());
+
+                    let node_kind = if is_race {
+                        SyntaxNodeKind::AwaitRaceExpression
+                    } else {
+                        SyntaxNodeKind::AwaitAllExpression
+                    };
+
+                    return Some(self.add_node(node_kind, span, vec![tuple_target]));
+                }
+            }
+        }
+
+        self.skip_newlines();
+
+        let operand = self.parse_unary_expression(boundary)?;
+        let span =
+            Span::cover(await_token.span(), self.node_span(operand)).unwrap_or(await_token.span());
+
+        Some(self.add_node(SyntaxNodeKind::AwaitExpression, span, vec![operand]))
+    }
 }

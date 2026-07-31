@@ -504,6 +504,42 @@ impl Orchestrator {
                     }
                 }
             }
+            galfus_vm::VmEffect::CreateFuture {
+                module_id: _,
+                func_idx: _,
+                args: _,
+            } => {
+                let future_id = self.next_request_id;
+                self.next_request_id += 1;
+                self.resume_or_fail_front(
+                    thread_id,
+                    thread,
+                    continuation,
+                    galfus_vm::VmValue::Uint64(future_id),
+                );
+            }
+            galfus_vm::VmEffect::FutureWaitAll {
+                future_ids: _,
+                module_id: _,
+            } => {
+                self.resume_or_fail_front(
+                    thread_id,
+                    thread,
+                    continuation,
+                    galfus_vm::VmValue::Null,
+                );
+            }
+            galfus_vm::VmEffect::FutureWaitRace {
+                future_ids: _,
+                module_id: _,
+            } => {
+                self.resume_or_fail_front(
+                    thread_id,
+                    thread,
+                    continuation,
+                    galfus_vm::VmValue::Null,
+                );
+            }
         }
     }
 }

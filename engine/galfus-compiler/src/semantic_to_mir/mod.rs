@@ -242,6 +242,7 @@ impl<'a> MirBuilder<'a> {
             locals: builder_ctx.locals,
             blocks: builder_ctx.blocks,
             type_substitutions: HashMap::new(),
+            is_async: false,
         };
         crate::bytecode_emission::ssa::convert_to_ssa(&mut func);
         Some(func)

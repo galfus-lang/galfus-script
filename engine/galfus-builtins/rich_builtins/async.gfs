@@ -1,0 +1,9 @@
+export struct Future<T> {
+  id: i64,
+}
+
+export fn futureFromId<T>(id: i64): Future<T> {
+  return new(Future<T>) {
+    id: id,
+  }
+}

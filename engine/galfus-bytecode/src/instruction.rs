@@ -376,6 +376,22 @@ pub enum Instruction {
         future_id: Reg,
         return_type: TypeIdx,
     },
+    CreateFuture {
+        dest: Reg,
+        func: FuncIdx,
+        args_start: Reg,
+        arg_count: u8,
+    },
+    AwaitAll {
+        dest: Reg,
+        futures_start: Reg,
+        count: u8,
+    },
+    AwaitRace {
+        dest: Reg,
+        futures_start: Reg,
+        count: u8,
+    },
     Len {
         dest: Reg,
         src: Reg,

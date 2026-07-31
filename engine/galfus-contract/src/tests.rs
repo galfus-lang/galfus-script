@@ -115,11 +115,12 @@ impl HostAdapter for CancellationRecordingAdapter {
     ) {
     }
 
-    fn cancel(&mut self, thread_id: usize, request_id: u64) {
+    fn cancel(&mut self, thread_id: usize, request_id: u64) -> CancellationOutcome {
         self.0.store(
             ((thread_id as u64) << 32) | request_id,
             std::sync::atomic::Ordering::Release,
         );
+        CancellationOutcome::Confirmed
     }
 }
 
