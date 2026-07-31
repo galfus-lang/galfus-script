@@ -256,6 +256,16 @@ Process termination and control. (Available only on desktop/server targets).
 fn exit(code: i32): null
 ```
 
+### `std/async`
+
+Asynchronous primitives and `Future<T>` definitions.
+
+```galfus
+struct Future<T> {
+  id: i64,
+}
+```
+
 ---
 
 ## 4. Tier 2: Rich Utility Modules

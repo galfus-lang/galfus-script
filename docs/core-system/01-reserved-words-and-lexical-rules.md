@@ -60,6 +60,7 @@ true
 false
 null
 weak
+await
 ```
 
 The following words are intentionally not part of the language:
@@ -129,6 +130,7 @@ The following names may be ordinary identifiers outside valid metadata positions
 stamp
 after
 name
+async
 ```
 
 Valid ordinary identifiers:
@@ -138,12 +140,16 @@ var stamp = 10
 var shared = true
 var after = "done"
 var name = "root"
+var async = true
 ```
 
 Valid keyword metadata:
 
 ```galfus
 fn(stamp) call(): null {
+}
+
+fn(async) fetchData(): [u8] {
 }
 
 loop(after) ready {
