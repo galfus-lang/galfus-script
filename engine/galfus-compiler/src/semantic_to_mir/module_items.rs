@@ -26,11 +26,12 @@ impl<'a> MirBuilder<'a> {
         let func_type = self.type_result.layer().symbol_type(symbol)?;
         let func_id = specialized_id.unwrap_or_else(|| FunctionId::new(symbol.raw()));
 
-        let is_async = name.starts_with("__internal_")
-            || name.starts_with("__provider_")
+        let is_async = name.starts_with("__provider_")
             || syntax
                 .first_child_of_kind(item, SyntaxNodeKind::KeywordMetadataList)
-                .and_then(|meta| syntax.first_child_of_kind(meta, SyntaxNodeKind::KeywordMetadataFlag))
+                .and_then(|meta| {
+                    syntax.first_child_of_kind(meta, SyntaxNodeKind::KeywordMetadataFlag)
+                })
                 .and_then(|flag| syntax.first_child_of_kind(flag, SyntaxNodeKind::Identifier))
                 .map(|ident| self.node_text(ident))
                 .map(|text| text == "async")

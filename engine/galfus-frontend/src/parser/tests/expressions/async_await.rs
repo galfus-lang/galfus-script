@@ -13,8 +13,7 @@ fn parse_async_function_declaration_and_await_expression() {
     let syntax = result.graph().syntax();
     let root = syntax.root().unwrap();
 
-    let await_expression =
-        find_first_of_kind(syntax, root, SyntaxNodeKind::AwaitExpression);
+    let await_expression = find_first_of_kind(syntax, root, SyntaxNodeKind::AwaitExpression);
 
     assert!(await_expression.is_some());
 }

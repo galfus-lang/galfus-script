@@ -58,16 +58,15 @@ impl VirtualMachine {
                 future_id,
                 return_type,
             } => {
-                let future_id = match thread.read_reg(future_id)? {
+                let val = thread.read_reg(future_id)?;
+                let future_id = match val {
                     Value::Uint64(id) => id,
                     Value::Uint32(id) => id.into(),
                     Value::Int64(id) if id >= 0 => id as u64,
                     Value::Int32(id) if id >= 0 => id as u64,
-                    value => {
-                        return Err(VmError::TypeMismatch {
-                            expected: "non-negative future ID".to_string(),
-                            found: format!("{value:?}"),
-                        });
+                    other => {
+                        thread.write_reg(dest, other)?;
+                        return Ok(VmStep::Continue);
                     }
                 };
                 let module_id = thread

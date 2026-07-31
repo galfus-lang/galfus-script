@@ -957,6 +957,57 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 }
             }
 
+            SyntaxNodeKind::AwaitExpression => {
+                let target_node = node.child(0).unwrap();
+                let future_op = self.lower_expression(target_node);
+                let ty = self.node_type(expr_id).unwrap_or_else(|| TypeId::new(0));
+                let temp_id = self.declare_local(None, ty);
+
+                self.current_instructions.push((
+                    Instruction::Await {
+                        future: future_op,
+                        destination: temp_id,
+                    },
+                    None,
+                ));
+
+                Operand::Local(temp_id)
+            }
+
+            SyntaxNodeKind::AwaitAllExpression => {
+                let target_id = node.child(0).unwrap();
+                let futures = self.lower_await_futures_list(target_id);
+                let ty = self.node_type(expr_id).unwrap_or_else(|| TypeId::new(0));
+                let temp_id = self.declare_local(None, ty);
+
+                self.current_instructions.push((
+                    Instruction::AwaitAll {
+                        futures,
+                        destination: temp_id,
+                    },
+                    None,
+                ));
+
+                Operand::Local(temp_id)
+            }
+
+            SyntaxNodeKind::AwaitRaceExpression => {
+                let target_id = node.child(0).unwrap();
+                let futures = self.lower_await_futures_list(target_id);
+                let ty = self.node_type(expr_id).unwrap_or_else(|| TypeId::new(0));
+                let temp_id = self.declare_local(None, ty);
+
+                self.current_instructions.push((
+                    Instruction::AwaitRace {
+                        futures,
+                        destination: temp_id,
+                    },
+                    None,
+                ));
+
+                Operand::Local(temp_id)
+            }
+
             _ => Operand::Constant(Constant::Null),
         }
     }
@@ -1289,6 +1340,35 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
             }
             _ => {}
         }
+    }
+
+    fn lower_await_futures_list(&mut self, target_id: NodeId) -> Vec<Operand> {
+        let syntax = self.builder.graph.syntax();
+        let mut futures = Vec::new();
+
+        let inner_id = if let Some(target_node) = syntax.node(target_id) {
+            if target_node.kind() == SyntaxNodeKind::GroupedExpression {
+                target_node.first_child().unwrap_or(target_id)
+            } else {
+                target_id
+            }
+        } else {
+            target_id
+        };
+
+        if let Some(inner_node) = syntax.node(inner_id) {
+            if inner_node.kind() == SyntaxNodeKind::TupleExpression {
+                for &child_id in inner_node.children() {
+                    futures.push(self.lower_expression(child_id));
+                }
+            } else {
+                futures.push(self.lower_expression(inner_id));
+            }
+        } else {
+            futures.push(self.lower_expression(target_id));
+        }
+
+        futures
     }
 }
 

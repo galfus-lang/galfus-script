@@ -356,7 +356,10 @@ impl Parser {
         Some(self.add_node(SyntaxNodeKind::TypeofExpression, span, vec![subject, arms]))
     }
 
-    pub(super) fn parse_await_expression(&mut self, boundary: ExpressionBoundary) -> Option<NodeId> {
+    pub(super) fn parse_await_expression(
+        &mut self,
+        boundary: ExpressionBoundary,
+    ) -> Option<NodeId> {
         let await_token = self.expect(TokenKind::Await)?;
 
         if self.at(&TokenKind::LeftParen) {
@@ -392,8 +395,8 @@ impl Parser {
         self.skip_newlines();
 
         let operand = self.parse_unary_expression(boundary)?;
-        let span = Span::cover(await_token.span(), self.node_span(operand))
-            .unwrap_or(await_token.span());
+        let span =
+            Span::cover(await_token.span(), self.node_span(operand)).unwrap_or(await_token.span());
 
         Some(self.add_node(SyntaxNodeKind::AwaitExpression, span, vec![operand]))
     }

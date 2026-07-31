@@ -516,7 +516,10 @@ fn validate_rvalue_operands(
                 validate_operand(arg, func, initialized, errors);
             }
         }
-        RValue::CreateIndirectFuture { func: func_op, args } => {
+        RValue::CreateIndirectFuture {
+            func: func_op,
+            args,
+        } => {
             validate_operand(func_op, func, initialized, errors);
             for arg in args {
                 validate_operand(arg, func, initialized, errors);

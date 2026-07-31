@@ -91,7 +91,10 @@ impl Parser {
         match node.kind() {
             SyntaxNodeKind::CallExpression
             | SyntaxNodeKind::MatchExpression
-            | SyntaxNodeKind::InstanceofExpression => true,
+            | SyntaxNodeKind::InstanceofExpression
+            | SyntaxNodeKind::AwaitExpression
+            | SyntaxNodeKind::AwaitAllExpression
+            | SyntaxNodeKind::AwaitRaceExpression => true,
 
             SyntaxNodeKind::GroupedExpression => node
                 .children()
@@ -145,7 +148,10 @@ impl Parser {
         }
 
         peek_kind == &TokenKind::Identifier
-            && matches!(self.token_text(self.peek(offset)), "stamp" | "after" | "async")
+            && matches!(
+                self.token_text(self.peek(offset)),
+                "stamp" | "after" | "async"
+            )
     }
 
     pub(super) fn at_type_argument_close(&self) -> bool {

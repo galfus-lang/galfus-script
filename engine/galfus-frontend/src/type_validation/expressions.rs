@@ -132,9 +132,13 @@ impl<'a> DeclarationTypeChecker<'a> {
 
             SyntaxNodeKind::AwaitExpression => self.infer_await_expression_type(node, expected),
 
-            SyntaxNodeKind::AwaitAllExpression => self.infer_await_all_expression_type(node, expected),
+            SyntaxNodeKind::AwaitAllExpression => {
+                self.infer_await_all_expression_type(node, expected)
+            }
 
-            SyntaxNodeKind::AwaitRaceExpression => self.infer_await_race_expression_type(node, expected),
+            SyntaxNodeKind::AwaitRaceExpression => {
+                self.infer_await_race_expression_type(node, expected)
+            }
 
             _ => None,
         }?;
@@ -495,7 +499,9 @@ impl<'a> DeclarationTypeChecker<'a> {
         match self.layer.table().kind(resolved).cloned() {
             Some(TypeKind::GenericInstance { base, arguments }) => {
                 if let Some(TypeKind::Named { symbol }) = self.layer.table().kind(base) {
-                    if self.symbol_name(*symbol).as_deref() == Some("Future") && !arguments.is_empty() {
+                    if self.symbol_name(*symbol).as_deref() == Some("Future")
+                        && !arguments.is_empty()
+                    {
                         return arguments[0];
                     }
                 }

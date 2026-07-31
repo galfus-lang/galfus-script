@@ -627,7 +627,10 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     self.free_temps(args.len() as u16);
                 }
             }
-            RValue::CreateIndirectFuture { func: func_op, args } => {
+            RValue::CreateIndirectFuture {
+                func: func_op,
+                args,
+            } => {
                 let func_reg = self.operand_reg(func_op);
                 let start_reg = if args.is_empty() {
                     Reg(0)

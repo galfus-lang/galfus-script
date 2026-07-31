@@ -520,7 +520,10 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                         self.free_temps(1 + args.len() as u16);
                         self.free_temp_if_operand(func);
                     }
-                    MirInstruction::Await { future, destination } => {
+                    MirInstruction::Await {
+                        future,
+                        destination,
+                    } => {
                         let fut_reg = self.operand_reg(future);
                         let return_type = TypeIdx(0);
                         self.instructions.push(Instruction::AwaitFuture {
@@ -530,7 +533,10 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                         });
                         self.free_temp_if_operand(future);
                     }
-                    MirInstruction::AwaitAll { futures, destination } => {
+                    MirInstruction::AwaitAll {
+                        futures,
+                        destination,
+                    } => {
                         let start_reg = if futures.is_empty() {
                             Reg(0)
                         } else {
@@ -553,7 +559,10 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                             self.free_temps(futures.len() as u16);
                         }
                     }
-                    MirInstruction::AwaitRace { futures, destination } => {
+                    MirInstruction::AwaitRace {
+                        futures,
+                        destination,
+                    } => {
                         let start_reg = if futures.is_empty() {
                             Reg(0)
                         } else {
