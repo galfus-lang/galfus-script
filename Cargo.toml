@@ -1,6 +1,9 @@
 [workspace]
-members = ["crates/*"]
-default-members = ["crates/galfus-cli"]
+members = [
+    "engine/*",
+    "hosts/*",
+]
+default-members = ["hosts/galfus-cli"]
 resolver = "3"
 
 [workspace.package]
