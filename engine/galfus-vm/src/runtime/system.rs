@@ -64,6 +64,25 @@ impl VirtualMachine {
                     Value::Uint32(id) => id.into(),
                     Value::Int64(id) if id >= 0 => id as u64,
                     Value::Int32(id) if id >= 0 => id as u64,
+                    Value::Object(obj_ref) => {
+                        if let Ok(HeapObject::Struct { fields, .. }) =
+                            thread.heap.get_object(obj_ref)
+                        {
+                            match fields.first() {
+                                Some(Value::Uint64(id)) => *id,
+                                Some(Value::Uint32(id)) => (*id).into(),
+                                Some(Value::Int64(id)) if *id >= 0 => *id as u64,
+                                Some(Value::Int32(id)) if *id >= 0 => *id as u64,
+                                _ => {
+                                    thread.write_reg(dest, Value::Object(obj_ref))?;
+                                    return Ok(VmStep::Continue);
+                                }
+                            }
+                        } else {
+                            thread.write_reg(dest, Value::Object(obj_ref))?;
+                            return Ok(VmStep::Continue);
+                        }
+                    }
                     other => {
                         thread.write_reg(dest, other)?;
                         return Ok(VmStep::Continue);

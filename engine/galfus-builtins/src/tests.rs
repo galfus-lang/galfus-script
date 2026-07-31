@@ -60,6 +60,12 @@ fn test_format_ansi_source_checks() {
 }
 
 #[test]
+fn test_std_async_source_checks() {
+    assert_builtin_checks("std/async", ASYNC_SOURCE);
+    assert!(ASYNC_SOURCE.contains("Future"));
+}
+
+#[test]
 fn test_thread_source_checks() {
     assert_builtin_checks("std/thread", THREAD_SOURCE);
     assert!(THREAD_SOURCE.contains("isRunning"));
