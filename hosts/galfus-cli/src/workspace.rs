@@ -4,7 +4,7 @@ mod tests;
 use std::fs;
 use std::sync;
 
-use crate::NativeIoProvider;
+use crate::native_io::NativeIoProvider;
 use anyhow::{Context, Result, bail};
 use galfus_contract::Providers;
 use galfus_runtime::CooperativeDriver;

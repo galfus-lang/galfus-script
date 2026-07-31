@@ -9,9 +9,9 @@ description = "Galfus playground API — run Galfus source in-process and captur
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-galfus-contract = { path = "../galfus-contract" }
-galfus-runtime = { path = "../galfus-runtime" }
-galfus-workspace = { path = "../galfus-workspace" }
+galfus-contract = { path = "../../engine/galfus-contract" }
+galfus-runtime = { path = "../../engine/galfus-runtime" }
+galfus-workspace = { path = "../../engine/galfus-workspace" }
 anyhow = { workspace = true }
 
 # Optional wasm feature

@@ -1,3 +1,6 @@
+mod native_io;
+mod workspace;
+
 use std::process;
 
 use anyhow::Result;
@@ -27,9 +30,9 @@ fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     match Cli::parse().command {
         Command::Run { workspace, args } => {
-            let exit_code = galfus_runner::run_project(&workspace, &args)?;
+            let exit_code = workspace::run_project(&workspace, &args)?;
             process::exit(exit_code);
         }
-        Command::Check { workspace } => galfus_runner::check_workspace_root(&workspace),
+        Command::Check { workspace } => workspace::check_workspace_root(&workspace),
     }
 }
