@@ -26,6 +26,16 @@ impl<'a> MirBuilder<'a> {
         let func_type = self.type_result.layer().symbol_type(symbol)?;
         let func_id = specialized_id.unwrap_or_else(|| FunctionId::new(symbol.raw()));
 
+        let is_async = name.starts_with("__internal_")
+            || name.starts_with("__provider_")
+            || syntax
+                .first_child_of_kind(item, SyntaxNodeKind::KeywordMetadataList)
+                .and_then(|meta| syntax.first_child_of_kind(meta, SyntaxNodeKind::KeywordMetadataFlag))
+                .and_then(|flag| syntax.first_child_of_kind(flag, SyntaxNodeKind::Identifier))
+                .map(|ident| self.node_text(ident))
+                .map(|text| text == "async")
+                .unwrap_or(false);
+
         // Parameters
         let mut parameter_types = Vec::new();
         let mut param_symbols = Vec::new();
@@ -163,6 +173,7 @@ impl<'a> MirBuilder<'a> {
             locals: builder_ctx.locals,
             blocks: builder_ctx.blocks,
             type_substitutions,
+            is_async,
         };
         crate::bytecode_emission::ssa::convert_to_ssa(&mut func);
         Some(func)
@@ -213,6 +224,14 @@ impl<'a> MirBuilder<'a> {
             _ => galfus_core::TypeId::new(0),
         };
 
+        let is_async = syntax
+            .first_child_of_kind(item, SyntaxNodeKind::KeywordMetadataList)
+            .and_then(|meta| syntax.first_child_of_kind(meta, SyntaxNodeKind::KeywordMetadataFlag))
+            .and_then(|flag| syntax.first_child_of_kind(flag, SyntaxNodeKind::Identifier))
+            .map(|ident| self.node_text(ident))
+            .map(|text| text == "async")
+            .unwrap_or(false);
+
         self.next_local_id = 0;
         self.next_block_id = 1;
 
@@ -261,6 +280,7 @@ impl<'a> MirBuilder<'a> {
             locals: builder_ctx.locals,
             blocks: builder_ctx.blocks,
             type_substitutions: collections::HashMap::new(),
+            is_async,
         };
         crate::bytecode_emission::ssa::convert_to_ssa(&mut func);
         Some(func)

@@ -152,6 +152,9 @@ pub enum SyntaxNodeKind {
     TypeofArmList,
     TypeofArm,
     NewArrayExpression,
+    AwaitExpression,
+    AwaitAllExpression,
+    AwaitRaceExpression,
 
     // Operators
     UnaryOperator,
@@ -247,6 +250,9 @@ impl SyntaxNodeKind {
                 | SyntaxNodeKind::InstanceofExpression
                 | SyntaxNodeKind::NewArrayExpression
                 | SyntaxNodeKind::WildcardExpression
+                | SyntaxNodeKind::AwaitExpression
+                | SyntaxNodeKind::AwaitAllExpression
+                | SyntaxNodeKind::AwaitRaceExpression
         )
     }
 

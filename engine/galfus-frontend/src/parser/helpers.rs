@@ -28,6 +28,7 @@ impl Parser {
                 | TokenKind::Instanceof
                 | TokenKind::Typeof
                 | TokenKind::Fn
+                | TokenKind::Await
         )
     }
 
@@ -138,8 +139,13 @@ impl Parser {
             offset += 1;
         }
 
-        self.peek(offset).kind() == &TokenKind::Identifier
-            && matches!(self.token_text(self.peek(offset)), "stamp" | "after")
+        let peek_kind = self.peek(offset).kind();
+        if peek_kind == &TokenKind::Async {
+            return true;
+        }
+
+        peek_kind == &TokenKind::Identifier
+            && matches!(self.token_text(self.peek(offset)), "stamp" | "after" | "async")
     }
 
     pub(super) fn at_type_argument_close(&self) -> bool {

@@ -35,6 +35,8 @@ impl Lexer<'_> {
             "false" => TokenKind::False,
             "new" => TokenKind::New,
             "copy" => TokenKind::Copy,
+            "async" => TokenKind::Async,
+            "await" => TokenKind::Await,
 
             "self" => TokenKind::SelfKw,
             _ => return None,

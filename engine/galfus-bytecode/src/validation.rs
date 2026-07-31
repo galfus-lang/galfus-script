@@ -594,6 +594,33 @@ pub fn validate_bytecode_module(
                     check_reg(future_id, &mut errors);
                     check_type(return_type, &mut errors);
                 }
+                Instruction::CreateFuture {
+                    dest,
+                    func: func_idx,
+                    args_start,
+                    arg_count,
+                } => {
+                    check_reg(dest, &mut errors);
+                    check_func(func_idx, &mut errors);
+                    if arg_count > 0 {
+                        check_reg(Reg(args_start.raw() + arg_count as u16 - 1), &mut errors);
+                    }
+                }
+                Instruction::AwaitAll {
+                    dest,
+                    futures_start,
+                    count,
+                }
+                | Instruction::AwaitRace {
+                    dest,
+                    futures_start,
+                    count,
+                } => {
+                    check_reg(dest, &mut errors);
+                    if count > 0 {
+                        check_reg(Reg(futures_start.raw() + count as u16 - 1), &mut errors);
+                    }
+                }
                 Instruction::Len { dest, src } => {
                     check_reg(dest, &mut errors);
                     check_reg(src, &mut errors);

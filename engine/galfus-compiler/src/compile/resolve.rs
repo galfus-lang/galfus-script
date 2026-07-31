@@ -36,6 +36,13 @@ pub(super) fn collect_call_targets(
                     collect_operand_function_target(obj, targets);
                     collect_operand_function_targets(args, targets);
                 }
+                galfus_ir::mir::Instruction::Await { future, .. } => {
+                    collect_operand_function_target(future, targets);
+                }
+                galfus_ir::mir::Instruction::AwaitAll { futures, .. }
+                | galfus_ir::mir::Instruction::AwaitRace { futures, .. } => {
+                    collect_operand_function_targets(futures, targets);
+                }
                 galfus_ir::mir::Instruction::Drop(_) => {}
             }
         }
@@ -96,6 +103,14 @@ fn collect_rvalue_function_targets(value: &galfus_ir::mir::RValue, targets: &mut
             if let Some(operand) = payload {
                 collect_operand_function_target(operand, targets);
             }
+        }
+        RValue::CreateFuture { func, args } => {
+            targets.push(*func);
+            collect_operand_function_targets(args, targets);
+        }
+        RValue::CreateIndirectFuture { func, args } => {
+            collect_operand_function_target(func, targets);
+            collect_operand_function_targets(args, targets);
         }
         RValue::NewArrayZeroed { .. } | RValue::LoadGlobal(_) => {}
     }

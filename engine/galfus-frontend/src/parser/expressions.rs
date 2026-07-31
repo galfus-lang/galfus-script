@@ -319,6 +319,10 @@ impl Parser {
             return self.parse_copy_expression(boundary);
         }
 
+        if self.at(&TokenKind::Await) {
+            return self.parse_await_expression(boundary);
+        }
+
         if Self::is_unary_operator(self.current().kind()) {
             let operator_token = self.bump();
 

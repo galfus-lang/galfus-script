@@ -130,6 +130,12 @@ impl<'a> DeclarationTypeChecker<'a> {
 
             SyntaxNodeKind::NewArrayExpression => self.infer_new_array_expression_type(node),
 
+            SyntaxNodeKind::AwaitExpression => self.infer_await_expression_type(node, expected),
+
+            SyntaxNodeKind::AwaitAllExpression => self.infer_await_all_expression_type(node, expected),
+
+            SyntaxNodeKind::AwaitRaceExpression => self.infer_await_race_expression_type(node, expected),
+
             _ => None,
         }?;
 
@@ -428,5 +434,74 @@ impl<'a> DeclarationTypeChecker<'a> {
         }
 
         Some(ty)
+    }
+
+    fn infer_await_expression_type(
+        &mut self,
+        node: NodeId,
+        expected: Option<TypeId>,
+    ) -> Option<TypeId> {
+        let operand = self.graph.syntax().child(node, 0)?;
+        let operand_type = self.infer_expression_type_with_expected(operand, expected)?;
+
+        let unwrapped = self.unwrap_future_type(operand_type);
+        Some(unwrapped)
+    }
+
+    fn infer_await_all_expression_type(
+        &mut self,
+        node: NodeId,
+        _expected: Option<TypeId>,
+    ) -> Option<TypeId> {
+        let tuple_node = self.graph.syntax().child(node, 0)?;
+        let tuple_type = self.infer_expression_type(tuple_node)?;
+        let resolved = self.resolve_alias_type(tuple_type);
+
+        if let Some(TypeKind::Tuple { elements }) = self.layer.table().kind(resolved).cloned() {
+            let unwrapped: Vec<TypeId> = elements
+                .into_iter()
+                .map(|elem| self.unwrap_future_type(elem))
+                .collect();
+            let tuple_ty = self.layer.table_mut().intern_tuple(unwrapped);
+            return Some(tuple_ty);
+        }
+
+        Some(self.unwrap_future_type(tuple_type))
+    }
+
+    fn infer_await_race_expression_type(
+        &mut self,
+        node: NodeId,
+        _expected: Option<TypeId>,
+    ) -> Option<TypeId> {
+        let tuple_node = self.graph.syntax().child(node, 0)?;
+        let tuple_type = self.infer_expression_type(tuple_node)?;
+        let resolved = self.resolve_alias_type(tuple_type);
+
+        if let Some(TypeKind::Tuple { elements }) = self.layer.table().kind(resolved).cloned() {
+            let unwrapped: Vec<TypeId> = elements
+                .into_iter()
+                .map(|elem| self.unwrap_future_type(elem))
+                .collect();
+            let union_ty = self.layer.table_mut().intern_union(unwrapped);
+            return Some(union_ty);
+        }
+
+        Some(self.unwrap_future_type(tuple_type))
+    }
+
+    fn unwrap_future_type(&mut self, ty: TypeId) -> TypeId {
+        let resolved = self.resolve_alias_type(ty);
+        match self.layer.table().kind(resolved).cloned() {
+            Some(TypeKind::GenericInstance { base, arguments }) => {
+                if let Some(TypeKind::Named { symbol }) = self.layer.table().kind(base) {
+                    if self.symbol_name(*symbol).as_deref() == Some("Future") && !arguments.is_empty() {
+                        return arguments[0];
+                    }
+                }
+                ty
+            }
+            _ => ty,
+        }
     }
 }

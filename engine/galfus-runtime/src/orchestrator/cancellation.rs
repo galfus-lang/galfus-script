@@ -25,12 +25,12 @@ impl Orchestrator {
                     };
                     let mut providers = providers.lock().unwrap();
                     if let Some(host) = providers.host_mut() {
-                        host.cancel(thread_id.raw() as usize, pending.request_id);
+                        let _outcome = host.cancel(thread_id.raw() as usize, pending.request_id);
                     }
                 }
                 PendingOperation::Adapter { module, symbol } => {
                     if let Some(adapters) = &self.adapters {
-                        adapters.lock().unwrap().cancel(
+                        let _outcome = adapters.lock().unwrap().cancel(
                             &module,
                             &symbol,
                             thread_id.raw() as usize,

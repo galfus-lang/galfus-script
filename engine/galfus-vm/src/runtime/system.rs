@@ -173,6 +173,95 @@ impl VirtualMachine {
                     });
                 }
             }
+            Instruction::CreateFuture {
+                dest,
+                func: func_idx,
+                args_start,
+                arg_count,
+            } => {
+                let args = (0..arg_count)
+                    .map(|index| thread.read_reg(Reg(args_start.raw() + index as u16)))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let module_id = thread
+                    .call_stack
+                    .last()
+                    .ok_or(VmError::EmptyCallStack)?
+                    .module_id;
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::CreateFuture {
+                        module_id,
+                        func_idx,
+                        args,
+                    },
+                    continuation: Continuation::for_provider(dest, module_id, TypeIdx(0)),
+                });
+            }
+            Instruction::AwaitAll {
+                dest,
+                futures_start,
+                count,
+            } => {
+                let future_ids = (0..count)
+                    .map(|index| {
+                        let val = thread.read_reg(Reg(futures_start.raw() + index as u16))?;
+                        match val {
+                            Value::Uint64(id) => Ok(id),
+                            Value::Uint32(id) => Ok(id.into()),
+                            Value::Int64(id) if id >= 0 => Ok(id as u64),
+                            Value::Int32(id) if id >= 0 => Ok(id as u64),
+                            value => Err(VmError::TypeMismatch {
+                                expected: "non-negative future ID".to_string(),
+                                found: format!("{value:?}"),
+                            }),
+                        }
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let module_id = thread
+                    .call_stack
+                    .last()
+                    .ok_or(VmError::EmptyCallStack)?
+                    .module_id;
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::FutureWaitAll {
+                        future_ids,
+                        module_id,
+                    },
+                    continuation: Continuation::for_provider(dest, module_id, TypeIdx(0)),
+                });
+            }
+            Instruction::AwaitRace {
+                dest,
+                futures_start,
+                count,
+            } => {
+                let future_ids = (0..count)
+                    .map(|index| {
+                        let val = thread.read_reg(Reg(futures_start.raw() + index as u16))?;
+                        match val {
+                            Value::Uint64(id) => Ok(id),
+                            Value::Uint32(id) => Ok(id.into()),
+                            Value::Int64(id) if id >= 0 => Ok(id as u64),
+                            Value::Int32(id) if id >= 0 => Ok(id as u64),
+                            value => Err(VmError::TypeMismatch {
+                                expected: "non-negative future ID".to_string(),
+                                found: format!("{value:?}"),
+                            }),
+                        }
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let module_id = thread
+                    .call_stack
+                    .last()
+                    .ok_or(VmError::EmptyCallStack)?
+                    .module_id;
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::FutureWaitRace {
+                        future_ids,
+                        module_id,
+                    },
+                    continuation: Continuation::for_provider(dest, module_id, TypeIdx(0)),
+                });
+            }
             _ => unreachable!("instruction routed to the wrong runtime handler"),
         }
 

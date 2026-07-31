@@ -55,6 +55,7 @@ pub struct MirFunction {
     pub locals: Vec<LocalDecl>,
     pub blocks: Vec<BasicBlock>,
     pub type_substitutions: HashMap<SymbolId, TypeId>,
+    pub is_async: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -101,6 +102,18 @@ pub enum Instruction {
         method_name: String,
         obj: Operand,
         args: Vec<Operand>,
+        destination: LocalId,
+    },
+    Await {
+        future: Operand,
+        destination: LocalId,
+    },
+    AwaitAll {
+        futures: Vec<Operand>,
+        destination: LocalId,
+    },
+    AwaitRace {
+        futures: Vec<Operand>,
         destination: LocalId,
     },
 }
@@ -172,6 +185,14 @@ pub enum RValue {
     Instanceof(Operand, TypeId),
     LoadGlobal(String),
     Len(Operand),
+    CreateFuture {
+        func: FunctionId,
+        args: Vec<Operand>,
+    },
+    CreateIndirectFuture {
+        func: Operand,
+        args: Vec<Operand>,
+    },
 }
 
 #[derive(Debug, Clone)]
