@@ -617,11 +617,20 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     }
                     first
                 };
+                let param_types = self.ctx.function_param_types.get(&func).cloned().unwrap_or_default();
+                let arg_types = param_types
+                    .into_iter()
+                    .map(|ty| crate::bytecode_emission::types::lower_type(self.ctx, ty))
+                    .collect();
+                let return_ty = self.ctx.function_return_types.get(&func).copied().unwrap();
+                let return_type = crate::bytecode_emission::types::lower_type(self.ctx, return_ty);
                 self.instructions.push(Instruction::CreateFuture {
                     dest,
                     func: func_idx,
                     args_start: start_reg,
                     arg_count: args.len() as u8,
+                    arg_types,
+                    return_type,
                 });
                 if !args.is_empty() {
                     self.free_temps(args.len() as u16);
@@ -645,11 +654,18 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     }
                     first
                 };
-                self.instructions.push(Instruction::CallDynamic {
+
+                // TODO: Determine arg_types and return_type for dynamic futures
+                let arg_types = vec![];
+                let return_type = galfus_bytecode::instruction::TypeIdx(0);
+
+                self.instructions.push(Instruction::CreateIndirectFuture {
                     dest,
                     func_reg,
                     args_start: start_reg,
                     arg_count: args.len() as u8,
+                    arg_types,
+                    return_type,
                 });
                 self.free_temp_if_operand(func_op);
                 if !args.is_empty() {

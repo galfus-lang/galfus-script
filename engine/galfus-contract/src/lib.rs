@@ -210,21 +210,26 @@ pub trait HostProvider: Send {
     }
 }
 
-/// Typed foreign-function integration for one nominal adapter symbol.
-pub trait HostAdapter: Send {
-    fn affinity(&self) -> TaskAffinity {
-        TaskAffinity::Main
-    }
-
+/// A bound external module invoked by Runtime on the main thread.
+///
+/// Implementations may create and coordinate arbitrary internal workers. Those workers must
+/// report completion exclusively through the supplied `MessageInjector`.
+pub trait BoundExternalModule: Send {
     fn dispatch(
         &mut self,
+        symbol: &str,
         thread_id: usize,
         request_id: u64,
         args: &[BoundaryValue],
         injector: sync::Arc<dyn MessageInjector>,
     );
 
-    fn cancel(&mut self, _thread_id: usize, _request_id: u64) -> CancellationOutcome {
+    fn cancel(
+        &mut self,
+        _symbol: &str,
+        _thread_id: usize,
+        _request_id: u64,
+    ) -> CancellationOutcome {
         CancellationOutcome::Unsupported
     }
 
@@ -232,40 +237,37 @@ pub trait HostAdapter: Send {
     fn release_handle(&mut self, _kind: &str, _id: u64) {}
 }
 
-/// Adapter ownership is explicit and keyed by its nominal module and symbol.
+/// External bindings are explicit and keyed by nominal proxy module.
 #[derive(Default)]
-pub struct Adapters {
-    entries: HashMap<(String, String), Box<dyn HostAdapter>>,
-    handles: HashMap<(String, u64), (String, String)>,
+pub struct ExternalBindings {
+    modules: HashMap<String, Box<dyn BoundExternalModule>>,
+    handles: HashMap<(String, u64), String>,
 }
 
-impl Adapters {
-    pub fn register(
+impl ExternalBindings {
+    pub fn register_module(
         &mut self,
-        module: impl Into<String>,
-        symbol: impl Into<String>,
-        adapter: Box<dyn HostAdapter>,
+        proxy_module: impl Into<String>,
+        module: Box<dyn BoundExternalModule>,
     ) {
-        self.entries.insert((module.into(), symbol.into()), adapter);
+        self.modules.insert(proxy_module.into(), module);
     }
 
-    pub fn get_mut(&mut self, module: &str, symbol: &str) -> Option<&mut (dyn HostAdapter + '_)> {
-        let adapter = self
-            .entries
-            .get_mut(&(module.to_string(), symbol.to_string()))?;
-        Some(&mut **adapter)
+    pub fn get_mut(&mut self, proxy_module: &str) -> Option<&mut (dyn BoundExternalModule + '_)> {
+        let module = self.modules.get_mut(proxy_module)?;
+        Some(&mut **module)
     }
 
     /// Notifies the owning adapter that a request no longer has an execution owner.
     pub fn cancel(
         &mut self,
-        module: &str,
+        proxy_module: &str,
         symbol: &str,
         thread_id: usize,
         request_id: u64,
     ) -> Option<CancellationOutcome> {
-        if let Some(adapter) = self.get_mut(module, symbol) {
-            Some(adapter.cancel(thread_id, request_id))
+        if let Some(module) = self.get_mut(proxy_module) {
+            Some(module.cancel(symbol, thread_id, request_id))
         } else {
             None
         }
@@ -273,13 +275,12 @@ impl Adapters {
 
     pub fn register_handle(
         &mut self,
-        module: impl Into<String>,
-        symbol: impl Into<String>,
+        proxy_module: impl Into<String>,
         kind: impl Into<String>,
         id: u64,
     ) -> bool {
-        let owner = (module.into(), symbol.into());
-        if !self.entries.contains_key(&owner) {
+        let owner = proxy_module.into();
+        if !self.modules.contains_key(&owner) {
             return false;
         }
         self.handles.insert((kind.into(), id), owner).is_none()
@@ -290,11 +291,11 @@ impl Adapters {
     }
 
     pub fn release_handle(&mut self, kind: &str, id: u64) -> bool {
-        let Some((module, symbol)) = self.handles.remove(&(kind.to_string(), id)) else {
+        let Some(proxy_module) = self.handles.remove(&(kind.to_string(), id)) else {
             return false;
         };
-        if let Some(adapter) = self.get_mut(&module, &symbol) {
-            adapter.release_handle(kind, id);
+        if let Some(module) = self.get_mut(&proxy_module) {
+            module.release_handle(kind, id);
         }
         true
     }
@@ -329,6 +330,20 @@ pub struct ExternalModuleDescriptor {
     pub exports: Vec<ExternalFunctionSignature>,
 }
 
+/// A declarative external-module dependency produced during compilation.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ExternalModuleRequirement {
+    pub proxy_module: String,
+    pub descriptor: ExternalModuleDescriptor,
+}
+
+/// Package-ready external-module metadata. `artifact` is an opaque loader-defined reference.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ExternalModuleImage {
+    pub requirement: ExternalModuleRequirement,
+    pub artifact: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ExternalFunctionSignature {
     pub name: String,
@@ -361,23 +376,14 @@ pub enum AdapterLoadError {
     Other(String),
 }
 
-pub struct LoadedExternalModule {
-    pub name: String,
-    pub functions: HashMap<
-        String,
-        sync::Arc<dyn Fn(&[BoundaryValue]) -> Result<BoundaryValue, String> + Send + Sync>,
-    >,
-}
-
 pub trait ModuleAdapter: Send + Sync {
     fn name(&self) -> &str;
     fn validate_schema(
         &self,
         descriptor: &ExternalModuleDescriptor,
     ) -> Result<(), AdapterValidationError>;
-    fn load_module(
+    fn bind_module(
         &self,
-        target_path: &str,
-        descriptor: &ExternalModuleDescriptor,
-    ) -> Result<LoadedExternalModule, AdapterLoadError>;
+        image: &ExternalModuleImage,
+    ) -> Result<Box<dyn BoundExternalModule>, AdapterLoadError>;
 }

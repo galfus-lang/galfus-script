@@ -378,7 +378,8 @@ fn run_initializes_dependencies_before_the_entry_module() {
                 galfus_contract::ThreadResult::Discarded => {
                     galfus_contract::ExecutorStepResult::Running
                 }
-                galfus_contract::ThreadResult::Completed(code) => {
+                galfus_contract::ThreadResult::Completed(res) => {
+                    let code = if let Ok(galfus_contract::BoundaryValue::I32(c)) = res { c } else { 0 };
                     galfus_contract::ExecutorStepResult::Completed(code)
                 }
                 galfus_contract::ThreadResult::Blocked { timeout } => {

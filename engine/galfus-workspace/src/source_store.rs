@@ -9,6 +9,7 @@ use std::sync::Arc;
 pub enum ModuleOrigin {
     User,
     Builtin,
+    ExternalProxy,
 }
 
 pub struct SourceEntry {

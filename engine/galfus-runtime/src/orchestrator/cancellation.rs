@@ -29,8 +29,8 @@ impl Orchestrator {
                     }
                 }
                 PendingOperation::Adapter { module, symbol } => {
-                    if let Some(adapters) = &self.adapters {
-                        let _outcome = adapters.lock().unwrap().cancel(
+                    if let Some(bindings) = &self.external_bindings {
+                        let _outcome = bindings.lock().unwrap().cancel(
                             &module,
                             &symbol,
                             thread_id.raw() as usize,

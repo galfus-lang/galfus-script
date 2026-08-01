@@ -7,13 +7,14 @@ use crate::ImportKind;
 use crate::diagnostics::CheckDiagnosticCode;
 use crate::modules::collect_implicit_dependencies;
 use crate::modules::graph::SemanticModuleGraph;
-use crate::modules::module::SemanticModule;
+use crate::modules::module::{FrontendModuleKind, SemanticModule};
 use crate::modules::resolution::{
     is_builtin_module, is_resolvable_import, resolve_relative_import,
 };
 use crate::{
-    ImportedSurfaceTypes, ModuleSurface, build_module_surface, check_declaration_types,
-    check_definition_types_with_surfaces, imported_surface_types_for_named_export, parse, resolve,
+    ImportedSurfaceTypes, ModuleSurface, SyntaxNodeKind, build_module_surface,
+    check_declaration_types, check_definition_types_with_surfaces,
+    imported_surface_types_for_named_export, parse, resolve,
 };
 use galfus_core::{
     Diagnostic, DiagnosticBag, ModuleId, ModulePath, NodeId, Revision, SourceFile, SymbolId,
@@ -60,6 +61,7 @@ pub struct FrontendSource<'a> {
     pub module_id: ModuleId,
     pub path: ModulePath,
     pub source: &'a SourceFile,
+    pub kind: FrontendModuleKind,
 }
 
 pub struct FrontendUpdate<'a> {
@@ -114,7 +116,9 @@ impl FrontendSession {
                 .or_else(|| self.module_by_path.get(&input.path).copied());
             let source_changed = existing_index.is_none_or(|index| {
                 let module = &self.modules[index];
-                module.path() != &input.path || module.source() != input.source
+                module.path() != &input.path
+                    || module.source() != input.source
+                    || module.kind() != input.kind
             });
             if !source_changed {
                 continue;
@@ -207,6 +211,7 @@ impl FrontendSession {
             source_id: input.source.id(),
             path: input.path.clone(),
             source_revision,
+            kind: input.kind,
             semantic_revision: galfus_core::SemanticRevision::new(self.next_semantic_revision),
             source: input.source.clone(),
             graph,
@@ -253,6 +258,7 @@ impl FrontendSession {
                 .extend(module.graph().diagnostics().iter().cloned());
         }
         self.validate_imports();
+        self.validate_external_proxy_declarations();
         for module in &self.modules {
             if let Some(result) = module.type_result() {
                 self.diagnostics
@@ -340,6 +346,95 @@ impl FrontendSession {
                     ),
                     span,
                 ));
+            }
+        }
+    }
+
+    fn validate_external_proxy_declarations(&mut self) {
+        for module in &self.modules {
+            let Some(root) = module.graph().syntax().root() else {
+                continue;
+            };
+            let syntax = module.graph().syntax();
+            for item in syntax
+                .node(root)
+                .into_iter()
+                .flat_map(|node| node.children())
+            {
+                let (function, exported) = match syntax.node(*item).map(|node| node.kind()) {
+                    Some(SyntaxNodeKind::FunctionItem) => (Some(*item), false),
+                    Some(SyntaxNodeKind::ExportItem) => (syntax.first_child(*item), true),
+                    _ => (None, false),
+                };
+                let Some(function) = function else {
+                    continue;
+                };
+                if !syntax
+                    .node(function)
+                    .is_some_and(|node| node.kind() == SyntaxNodeKind::FunctionItem)
+                {
+                    continue;
+                }
+
+                let has_body = syntax
+                    .node(function)
+                    .and_then(|node| node.last_child())
+                    .is_some_and(|last| {
+                        syntax.node(last).is_some_and(|node| {
+                            node.kind() == SyntaxNodeKind::Block || node.kind().is_expression()
+                        })
+                    });
+                if has_body {
+                    if module.kind() == FrontendModuleKind::ExternalProxy {
+                        self.diagnostics.push(Diagnostic::error_with_message(
+                            CheckDiagnosticCode::InvalidExternalProxyDeclaration,
+                            "external proxy functions must not have a body",
+                            syntax
+                                .node(function)
+                                .map(|node| node.span())
+                                .unwrap_or_else(|| module.source().span()),
+                        ));
+                    }
+                    continue;
+                }
+
+                match module.kind() {
+                    FrontendModuleKind::Standard => self.diagnostics.push(Diagnostic::error(
+                        CheckDiagnosticCode::BodylessFunction,
+                        syntax
+                            .node(function)
+                            .map(|node| node.span())
+                            .unwrap_or_else(|| module.source().span()),
+                    )),
+                    FrontendModuleKind::Builtin => {}
+                    FrontendModuleKind::ExternalProxy => {
+                        let is_async = syntax
+                            .first_child_of_kind(function, SyntaxNodeKind::KeywordMetadataList)
+                            .and_then(|metadata| {
+                                syntax.first_child_of_kind(
+                                    metadata,
+                                    SyntaxNodeKind::KeywordMetadataFlag,
+                                )
+                            })
+                            .and_then(|flag| {
+                                syntax.first_child_of_kind(flag, SyntaxNodeKind::Identifier)
+                            })
+                            .is_some_and(|flag| {
+                                module.source().slice(syntax.node(flag).unwrap().span())
+                                    == Some("async")
+                            });
+                        if !exported || !is_async {
+                            self.diagnostics.push(Diagnostic::error_with_message(
+                                CheckDiagnosticCode::InvalidExternalProxyDeclaration,
+                                "external proxy functions must be declared as `export fn(async)`",
+                                syntax
+                                    .node(function)
+                                    .map(|node| node.span())
+                                    .unwrap_or_else(|| module.source().span()),
+                            ));
+                        }
+                    }
+                }
             }
         }
     }

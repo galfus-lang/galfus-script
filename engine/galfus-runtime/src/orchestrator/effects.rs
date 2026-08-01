@@ -3,7 +3,7 @@ use crate::event::RuntimeEvent;
 use crate::orchestrator::external::{AdapterDispatchTask, ProviderDispatchTask};
 use crate::orchestrator::pending::{PendingContinuation, PendingKey, PendingOperation};
 use crate::task::execution_stack;
-use galfus_contract::{ExecutionFailure, ExecutionFailureKind, KernelTask, TaskAffinity};
+use galfus_contract::{ExecutionFailure, ExecutionFailureKind, KernelTask};
 use std::sync::{Arc, atomic::AtomicBool};
 
 impl Orchestrator {
@@ -159,7 +159,7 @@ impl Orchestrator {
                 return_type,
             } => {
                 let stack = execution_stack(&thread);
-                let Some(adapters) = self.adapters.clone() else {
+                let Some(bindings) = self.external_bindings.clone() else {
                     self.failure = Some(
                         ExecutionFailure::new(
                             ExecutionFailureKind::MissingAdapter,
@@ -198,12 +198,7 @@ impl Orchestrator {
                     self.kernel.cancel(thread_id);
                     return;
                 };
-                let affinity = adapters
-                    .lock()
-                    .unwrap()
-                    .get_mut(&adapter, &symbol)
-                    .map(|adapter| adapter.affinity());
-                let Some(affinity) = affinity else {
+                if bindings.lock().unwrap().get_mut(&adapter).is_none() {
                     self.failure = Some(
                         ExecutionFailure::new(
                             ExecutionFailureKind::MissingAdapter,
@@ -214,7 +209,7 @@ impl Orchestrator {
                     );
                     self.kernel.cancel(thread_id);
                     return;
-                };
+                }
                 let request_id = self.next_request_id;
                 self.next_request_id += 1;
                 let active = Arc::new(AtomicBool::new(true));
@@ -236,7 +231,7 @@ impl Orchestrator {
                 );
                 self.kernel.block(thread_id, thread, None);
                 let task = AdapterDispatchTask {
-                    adapters,
+                    bindings,
                     thread_id: thread_id.raw() as usize,
                     request_id,
                     module: adapter,
@@ -245,10 +240,10 @@ impl Orchestrator {
                     injector: Arc::new(crate::ExecutionHandle::new(self.sink.clone())),
                     active,
                 };
-                self.driver.as_ref().unwrap().dispatch(match affinity {
-                    TaskAffinity::Main => KernelTask::Main(Box::new(task)),
-                    TaskAffinity::Any => KernelTask::Any(Box::new(task)),
-                });
+                self.driver
+                    .as_ref()
+                    .unwrap()
+                    .dispatch(KernelTask::Main(Box::new(task)));
                 return;
             }
             galfus_vm::VmEffect::TimerWait { delay_ms } => {
@@ -273,9 +268,19 @@ impl Orchestrator {
                     self.kernel.cancel(thread_id);
                     return;
                 }
-                // Check if this future was already resolved by an intrinsic effect.
-                if let Some(ready_result) = self.ready_futures.remove(&future_id) {
-                    // Result is already available — complete immediately without blocking.
+                
+                let is_resolved = if let Some(record) = self.future_registry.get(thread_id, future_id) {
+                    matches!(record.state, crate::orchestrator::future_registry::FutureState::Resolved(_))
+                } else {
+                    false
+                };
+
+                if is_resolved {
+                    let record = self.future_registry.remove(thread_id, future_id).unwrap();
+                    let crate::orchestrator::future_registry::FutureState::Resolved(ready_result) = record.state else {
+                        unreachable!()
+                    };
+                    
                     self.pending_continuations.insert(
                         key,
                         PendingContinuation {
@@ -297,6 +302,66 @@ impl Orchestrator {
                     });
                     return;
                 }
+                
+                let is_created = if let Some(record) = self.future_registry.get_mut(thread_id, future_id) {
+                    if matches!(record.state, crate::orchestrator::future_registry::FutureState::Created) {
+                        record.state = crate::orchestrator::future_registry::FutureState::Running;
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+                if is_created {
+                    let activation = self.future_registry.get_mut(thread_id, future_id).unwrap().activation.take().unwrap();
+                    
+                    match activation {
+                        crate::orchestrator::future_registry::Activation::GalfusFunction {
+                            module_id: act_module_id,
+                            func_idx,
+                            args,
+                            arg_types,
+                        } => {
+                            let mut worker_thread = galfus_vm::thread::VmThreadState::new();
+                            let module = &self.vm.as_ref().unwrap().graph.get(act_module_id).unwrap().module;
+                            
+                            let mut vm_args = Vec::with_capacity(args.len());
+                            for (boundary, expected_ty) in args.into_iter().zip(arg_types.into_iter()) {
+                                let vm_val = crate::task::encode_into_thread_heap(
+                                    &mut worker_thread.heap,
+                                    boundary,
+                                    expected_ty,
+                                    act_module_id,
+                                    module
+                                ).unwrap();
+                                vm_args.push(vm_val);
+                            }
+                            worker_thread.call_stack.push(galfus_vm::runtime::CallFrame {
+                                module_id: act_module_id,
+                                func_idx,
+                                pc: 0,
+                                registers: vec![galfus_vm::VmValue::Null; 256],
+                                return_dest: None,
+                            });
+                            for (i, val) in vm_args.into_iter().enumerate() {
+                                worker_thread.write_reg(galfus_bytecode::instruction::Reg(i as u16), val).unwrap();
+                            }
+                            
+                            let worker_id = self.kernel.spawn(worker_thread, None);
+                            let spawned_thread = self.kernel.take_thread(worker_id).unwrap();
+                            self.kernel.enqueue_runnable(worker_id, spawned_thread);
+                            
+                            self.kernel.register_waiter(worker_id, thread_id, future_id);
+                        }
+                        _ => {
+                            // Phase E: Internal, Provider, Adapter
+                            unimplemented!("Activation for non-Galfus functions not yet implemented in Phase D")
+                        }
+                    }
+                }
+                
                 self.pending_continuations.insert(
                     key,
                     PendingContinuation {
@@ -417,7 +482,10 @@ impl Orchestrator {
                 let reason = crate::registry::ThreadId::from_raw(target_id)
                     .and_then(|id| self.kernel.state(id))
                     .and_then(|state| state.exit_reason())
-                    .map(galfus_vm::VmValue::Int32)
+                    .and_then(|result| match result {
+                        Ok(galfus_contract::BoundaryValue::I32(code)) => Some(galfus_vm::VmValue::Int32(code)),
+                        _ => None,
+                    })
                     .unwrap_or(galfus_vm::VmValue::Null);
                 self.resolve_intrinsic_future(thread_id, thread, continuation, reason);
             }
@@ -473,17 +541,17 @@ impl Orchestrator {
                 let exit_code = maybe_target
                     .and_then(|target| self.kernel.state(target))
                     .and_then(|state| state.exit_reason());
-                if let Some(code) = exit_code {
-                    self.ready_futures
-                        .insert(future_id, Ok(galfus_contract::BoundaryValue::I32(code)));
+                if let Some(result) = exit_code {
+                    self.future_registry
+                        .insert_resolved(thread_id, future_id, result);
                 } else {
                     match maybe_target {
                         Some(target_id) => {
                             self.kernel.register_waiter(target_id, thread_id, future_id);
                         }
                         None => {
-                            self.ready_futures
-                                .insert(future_id, Ok(galfus_contract::BoundaryValue::Null));
+                            self.future_registry
+                                .insert_resolved(thread_id, future_id, Ok(galfus_contract::BoundaryValue::Null));
                         }
                     }
                 }
@@ -495,9 +563,47 @@ impl Orchestrator {
                 );
             }
             galfus_vm::VmEffect::CreateFuture {
-                module_id: _,
-                func_idx: _,
-                args: _,
+                module_id,
+                func_idx,
+                args,
+                arg_types,
+                return_type: _,
+            } => {
+                let future_id = self.next_request_id;
+                self.next_request_id += 1;
+                
+                let module = &self.vm.as_ref().unwrap().graph.get(module_id).unwrap().module;
+                let mut encoded_args = Vec::with_capacity(args.len());
+                for (arg, ty) in args.into_iter().zip(arg_types.iter()) {
+                    let boundary = crate::task::decode_from_thread_heap(&thread.heap, arg, *ty, module).unwrap();
+                    encoded_args.push(boundary);
+                }
+
+                self.future_registry.insert_created(
+                    thread_id,
+                    future_id,
+                    None,
+                    crate::orchestrator::future_registry::Activation::GalfusFunction {
+                        module_id,
+                        func_idx,
+                        args: encoded_args,
+                        arg_types,
+                    }
+                );
+                
+                self.resume_or_fail_front(
+                    thread_id,
+                    thread,
+                    continuation,
+                    galfus_vm::VmValue::Uint64(future_id),
+                );
+            }
+            galfus_vm::VmEffect::CreateIndirectFuture { 
+                module_id: _, 
+                func: _, 
+                args: _, 
+                arg_types: _,
+                return_type: _,
             } => {
                 let future_id = self.next_request_id;
                 self.next_request_id += 1;
@@ -544,7 +650,7 @@ impl Orchestrator {
         let future_id = self.next_request_id;
         self.next_request_id += 1;
         let boundary = crate::task::vm_value_to_boundary(value);
-        self.ready_futures.insert(future_id, Ok(boundary));
+        self.future_registry.insert_resolved(thread_id, future_id, Ok(boundary));
         self.resume_or_fail_front(
             thread_id,
             thread,

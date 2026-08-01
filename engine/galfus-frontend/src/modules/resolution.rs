@@ -52,7 +52,7 @@ pub fn resolve_relative_import(base_module: &ModulePath, source: &str) -> Option
     }
 
     let mut path = segments.join("/");
-    if !path.ends_with(".gfs") {
+    if !path.ends_with(".gfs") && !path.ends_with(".gfp") {
         path.push_str(".gfs");
     }
 

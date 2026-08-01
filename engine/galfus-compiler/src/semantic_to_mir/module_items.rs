@@ -4,6 +4,21 @@ use super::*;
 use std::collections::HashMap;
 
 impl<'a> MirBuilder<'a> {
+    fn is_async_function_item(&self, item: NodeId) -> bool {
+        let syntax = self.graph.syntax();
+        let Some(metadata) = syntax.first_child_of_kind(item, SyntaxNodeKind::KeywordMetadataList)
+        else {
+            return false;
+        };
+
+        syntax
+            .node(metadata)
+            .into_iter()
+            .flat_map(|metadata| metadata.children())
+            .filter_map(|flag| syntax.first_child_of_kind(*flag, SyntaxNodeKind::Identifier))
+            .any(|identifier| self.node_text(identifier) == "async")
+    }
+
     pub(super) fn build_function(&mut self, item: NodeId) -> Option<MirFunction> {
         self.build_function_with_substitutions(item, None, HashMap::new())
     }
@@ -26,13 +41,7 @@ impl<'a> MirBuilder<'a> {
         let func_type = self.type_result.layer().symbol_type(symbol)?;
         let func_id = specialized_id.unwrap_or_else(|| FunctionId::new(symbol.raw()));
 
-        let is_async = syntax
-            .first_child_of_kind(item, SyntaxNodeKind::KeywordMetadataList)
-            .and_then(|meta| syntax.first_child_of_kind(meta, SyntaxNodeKind::KeywordMetadataFlag))
-            .and_then(|flag| syntax.first_child_of_kind(flag, SyntaxNodeKind::Identifier))
-            .map(|ident| self.node_text(ident))
-            .map(|text| text == "async")
-            .unwrap_or(false);
+        let is_async = self.is_async_function_item(item);
 
         // Parameters
         let mut parameter_types = Vec::new();
@@ -67,12 +76,23 @@ impl<'a> MirBuilder<'a> {
             }
         }
 
-        // Return Type derived from function signature in the TypeTable
-        let return_type = match self.type_result.layer().table().kind(func_type) {
+        // The callable type of an async function returns Future<T>, while its body and MIR
+        // function return T. Keep the payload type here so return validation and bytecode agree.
+        let callable_return_type = match self.type_result.layer().table().kind(func_type) {
             Some(TypeKind::Function(f)) => {
                 self.substitute_type(f.return_type(), &type_substitutions)
             }
             _ => func_type,
+        };
+        let return_type = if is_async {
+            match self.type_result.layer().table().kind(callable_return_type) {
+                Some(TypeKind::GenericInstance { arguments, .. }) => {
+                    arguments.first().copied().unwrap_or(callable_return_type)
+                }
+                _ => callable_return_type,
+            }
+        } else {
+            callable_return_type
         };
 
         // Reset the local ID counter for this function
@@ -222,18 +242,23 @@ impl<'a> MirBuilder<'a> {
             }
         }
 
-        let return_type = match self.type_result.layer().table().kind(expr_ty) {
+        let callable_return_type = match self.type_result.layer().table().kind(expr_ty) {
             Some(TypeKind::Function(f)) => f.return_type(),
             _ => galfus_core::TypeId::new(0),
         };
 
-        let is_async = syntax
-            .first_child_of_kind(item, SyntaxNodeKind::KeywordMetadataList)
-            .and_then(|meta| syntax.first_child_of_kind(meta, SyntaxNodeKind::KeywordMetadataFlag))
-            .and_then(|flag| syntax.first_child_of_kind(flag, SyntaxNodeKind::Identifier))
-            .map(|ident| self.node_text(ident))
-            .map(|text| text == "async")
-            .unwrap_or(false);
+        let is_async = self.is_async_function_item(item);
+
+        let return_type = if is_async {
+            match self.type_result.layer().table().kind(callable_return_type) {
+                Some(TypeKind::GenericInstance { arguments, .. }) => {
+                    arguments.first().copied().unwrap_or(callable_return_type)
+                }
+                _ => callable_return_type,
+            }
+        } else {
+            callable_return_type
+        };
 
         self.next_local_id = 0;
         self.next_block_id = 1;

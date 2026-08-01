@@ -225,7 +225,12 @@ impl<'a> DeclarationTypeChecker<'a> {
             .filter_map(|parameter| self.lower_function_parameter_type(*parameter, node))
             .collect::<Vec<_>>();
 
-        let return_type = self.layer.node_type(return_type_node)?;
+        let payload_type = self.layer.node_type(return_type_node)?;
+        let return_type = if self.is_async_function(node) {
+            self.async_future_type(node, payload_type)
+        } else {
+            payload_type
+        };
 
         Some(
             self.layer

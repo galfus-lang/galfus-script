@@ -13,7 +13,7 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync;
 
-use galfus_contract::{BoundaryType, BoundaryValue, Providers};
+use galfus_contract::{BoundaryType, BoundaryValue, ExternalBindings, Providers};
 use galfus_vm::{VirtualMachine, VmPanic, VmValue};
 
 pub use driver::CooperativeDriver;
@@ -82,7 +82,7 @@ impl EntryAbi {
 pub struct Runtime {
     graph: sync::Arc<galfus_bytecode::BytecodeGraph>,
     providers: Option<sync::Arc<sync::Mutex<Providers>>>,
-    adapters: Option<sync::Arc<sync::Mutex<galfus_contract::Adapters>>>,
+    external_bindings: Option<sync::Arc<sync::Mutex<ExternalBindings>>>,
 }
 
 impl Runtime {
@@ -93,12 +93,12 @@ impl Runtime {
         Self {
             graph,
             providers: providers.map(|p| sync::Arc::new(sync::Mutex::new(p))),
-            adapters: None,
+            external_bindings: None,
         }
     }
 
-    pub fn with_adapters(mut self, adapters: galfus_contract::Adapters) -> Self {
-        self.adapters = Some(sync::Arc::new(sync::Mutex::new(adapters)));
+    pub fn with_external_bindings(mut self, bindings: ExternalBindings) -> Self {
+        self.external_bindings = Some(sync::Arc::new(sync::Mutex::new(bindings)));
         self
     }
 
@@ -195,7 +195,7 @@ impl Runtime {
         let vm = sync::Arc::new(vm);
 
         orchestrator.set_vm(vm);
-        orchestrator.set_adapters(self.adapters.clone());
+        orchestrator.set_external_bindings(self.external_bindings.clone());
         orchestrator.set_driver(driver.clone());
         orchestrator
             .kernel_mut(token)

@@ -381,6 +381,16 @@ pub enum Instruction {
         func: FuncIdx,
         args_start: Reg,
         arg_count: u8,
+        arg_types: Vec<TypeIdx>,
+        return_type: TypeIdx,
+    },
+    CreateIndirectFuture {
+        dest: Reg,
+        func_reg: Reg,
+        args_start: Reg,
+        arg_count: u8,
+        arg_types: Vec<TypeIdx>,
+        return_type: TypeIdx,
     },
     AwaitAll {
         dest: Reg,

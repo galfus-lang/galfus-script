@@ -131,14 +131,11 @@ fn run_project_spawns_a_thread_with_the_anchored_api() {
                 if !thread::spawn() {
                     return 2
                 }
-                if !thread::isExited() {
+                if !thread::isRunning() {
                     return 3
                 }
-                if thread::isRunning() {
+                if thread::isExited() {
                     return 4
-                }
-                if thread::exitReason() != 0 {
-                    return 5
                 }
                 return 0
             }

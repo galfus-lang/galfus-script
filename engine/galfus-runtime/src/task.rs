@@ -440,7 +440,7 @@ impl RunnableTask for RuntimeTask {
                         thread,
                         module_id,
                     });
-                    return ThreadResult::Completed(0);
+                    return ThreadResult::Completed(Ok(galfus_contract::BoundaryValue::I32(0)));
                 }
                 let module = &self
                     .vm
@@ -450,42 +450,22 @@ impl RunnableTask for RuntimeTask {
                     .module;
                 let result = match decode_from_thread_heap(&thread.heap, value, return_type, module)
                 {
-                    Ok(galfus_contract::BoundaryValue::I32(code)) => code,
-                    Ok(value) => {
-                        let failure = ExecutionFailure::new(
-                            ExecutionFailureKind::BoundaryCodecFailure,
-                            format!("entry result must be i32, found {value:?}"),
-                        )
-                        .with_thread_id(self.thread_id.raw())
-                        .with_module_id(module_id.raw().into())
-                        .with_stack(execution_stack(&thread));
-                        self.events.send(crate::event::RuntimeEvent::Failed {
-                            thread_id: self.thread_id,
-                            error: failure.clone(),
-                        });
-                        return ThreadResult::Discarded;
-                    }
-                    Err(error) => {
-                        let failure = ExecutionFailure::new(
-                            ExecutionFailureKind::BoundaryCodecFailure,
-                            format!("invalid entry result: {error:?}"),
-                        )
-                        .with_thread_id(self.thread_id.raw())
-                        .with_module_id(module_id.raw().into())
-                        .with_stack(execution_stack(&thread));
-                        self.events.send(crate::event::RuntimeEvent::Failed {
-                            thread_id: self.thread_id,
-                            error: failure.clone(),
-                        });
-                        return ThreadResult::Discarded;
-                    }
+                    Ok(value) => Ok(value),
+                    Err(e) => Err(ExecutionFailure::new(
+                        ExecutionFailureKind::BoundaryCodecFailure,
+                        format!("failed to decode thread return value: {e:?}"),
+                    )
+                    .with_thread_id(self.thread_id.raw())
+                    .with_module_id(module_id.raw().into())
+                    .with_stack(execution_stack(&thread))),
                 };
+
                 self.events.send(crate::event::RuntimeEvent::Exited {
                     thread_id: self.thread_id,
                     thread,
-                    code: result,
+                    result: result.clone(),
                 });
-                ThreadResult::Completed(result)
+                return ThreadResult::Completed(result);
             }
             galfus_vm::VmStep::Suspend {
                 effect,

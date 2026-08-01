@@ -61,6 +61,29 @@ fn check_infers_expression_function_return_type_without_annotation() {
 }
 
 #[test]
+fn check_binds_async_function_expression_as_a_future() {
+    let (_source, graph, result) = check_source(
+        r#"
+struct Future<T> {
+  id: i64,
+}
+
+var load = fn(async) (): i32 => 1
+"#,
+    );
+
+    let function = find_node_by_kind(&graph, SyntaxNodeKind::ExpressionFunction).unwrap();
+    let ty = result.layer().node_type(function).unwrap();
+    let TypeKind::Function(function) = result.layer().table().kind(ty).unwrap() else {
+        panic!("expected function type");
+    };
+    assert!(matches!(
+        result.layer().table().kind(function.return_type()),
+        Some(TypeKind::GenericInstance { .. })
+    ));
+}
+
+#[test]
 fn check_accepts_block_function_body() {
     let (_source, _graph, result) = check_source(
         r#"

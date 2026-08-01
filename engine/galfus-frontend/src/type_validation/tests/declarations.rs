@@ -7,6 +7,7 @@ fn check_binds_function_symbol_type() {
 fn main(value: i32): null {
   return
 }
+
 "#,
     );
 
@@ -30,6 +31,28 @@ fn main(value: i32): null {
         }
         other => panic!("expected function type, got {other:?}"),
     }
+}
+
+#[test]
+fn check_binds_async_function_as_a_future_of_its_payload() {
+    let (_source, graph, result) =
+        check_source("struct Future<T> { id: i64 }\nfn(async) load(): i32 { return 1 }\n");
+
+    let load = symbol_by_name_and_kind(&graph, "load", SymbolKind::Function);
+    let ty = result.layer().symbol_type(load).unwrap();
+    let TypeKind::Function(function) = result.layer().table().kind(ty).unwrap() else {
+        panic!("expected function type");
+    };
+    let TypeKind::GenericInstance { arguments, .. } =
+        result.layer().table().kind(function.return_type()).unwrap()
+    else {
+        panic!("expected Future payload type");
+    };
+    assert_eq!(arguments.len(), 1);
+    assert_eq!(
+        result.layer().table().kind(arguments[0]),
+        Some(&TypeKind::Primitive(PrimitiveType::Int32))
+    );
 }
 
 #[test]

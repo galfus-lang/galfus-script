@@ -56,6 +56,7 @@ pub enum TypeDiagnosticCode {
     UnreachablePattern,
     UnreachableCode,
     InvalidBufferElement,
+    AwaitRequiresFuture,
 }
 
 impl DiagnosticCodeKind for TypeDiagnosticCode {
@@ -112,6 +113,7 @@ impl DiagnosticCodeKind for TypeDiagnosticCode {
             Self::UnresolvedControlTarget => "T0049",
 
             Self::InvalidBufferElement => "T0052",
+            Self::AwaitRequiresFuture => "T0056",
             Self::InvalidPatternOrder => "T0053",
             Self::UnreachablePattern => "T0054",
             Self::UnreachableCode => "T0055",
@@ -176,6 +178,7 @@ impl DiagnosticCodeKind for TypeDiagnosticCode {
             Self::UnreachablePattern => "unreachable pattern",
             Self::UnreachableCode => "unreachable code",
             Self::InvalidBufferElement => "invalid buffer element type",
+            Self::AwaitRequiresFuture => "await requires a Future value",
         }
     }
 }

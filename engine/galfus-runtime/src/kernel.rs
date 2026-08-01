@@ -148,9 +148,9 @@ impl VirtualKernel {
         self.registry.mark_running(id)
     }
 
-    pub fn mark_exited(&mut self, id: ThreadId, thread: VmThreadState, code: i32) -> bool {
+    pub fn mark_exited(&mut self, id: ThreadId, thread: VmThreadState, result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>) -> bool {
         self.registry.restore_vm_state(id, thread);
-        self.registry.mark_exited(id, code)
+        self.registry.mark_exited(id, result)
     }
 
     pub fn lookup_key(&self, key: &str) -> Option<ThreadId> {

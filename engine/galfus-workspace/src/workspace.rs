@@ -3,18 +3,20 @@ mod tests;
 
 use std::str;
 
-use crate::config::{WorkspaceConfig, parse_workspace_config};
+use crate::config::{WORKSPACE_SOURCE_ID, WorkspaceConfig, parse_workspace_config};
+use crate::diagnostic::WorkspaceDiagnosticCode;
 use crate::source_store::ModuleOrigin;
 use crate::state::{
     BytecodeState, CheckState, CompileBlocked, CompileState, RunBlocked, SemanticState,
     SourceState, WorkspaceError,
 };
 use galfus_bytecode::{BytecodeGraph, ImportEdge};
-use galfus_compiler::CompiledModule;
-use galfus_contract::Providers;
-use galfus_core::{DiagnosticBag, ModulePath, SourceFile};
+use galfus_compiler::{CompiledModule, gfp::parse_gfp_frontmatter};
+use galfus_contract::{ExternalModuleDescriptor, Providers};
+use galfus_core::{Diagnostic, DiagnosticBag, ModulePath, SourceFile, Span};
 use galfus_frontend::modules::{
-    FrontendRoots, FrontendSession, FrontendSource, FrontendUpdate, SemanticRoot, SemanticRootKind,
+    FrontendModuleKind, FrontendRoots, FrontendSession, FrontendSource, FrontendUpdate,
+    SemanticRoot, SemanticRootKind,
 };
 use galfus_runtime::{Execution, Runtime, RuntimeError, format_panic};
 use std::collections::{HashMap, HashSet};
@@ -27,6 +29,7 @@ pub struct Workspace {
     pub bytecode_state: BytecodeState,
     pub frontend: FrontendSession,
     pub adapters: HashMap<String, Arc<dyn galfus_contract::ModuleAdapter>>,
+    pub external_descriptors: HashMap<ModulePath, ExternalModuleDescriptor>,
 }
 
 pub enum LoadResult {
@@ -65,6 +68,7 @@ impl Workspace {
             bytecode_state: BytecodeState::new(),
             frontend: FrontendSession::new(),
             adapters: HashMap::new(),
+            external_descriptors: HashMap::new(),
         }
     }
 
@@ -94,22 +98,52 @@ impl Workspace {
         module_bytes: &[u8],
     ) -> Result<LoadResult, WorkspaceError> {
         let module_path = ModulePath::new(path).ok_or(WorkspaceError::InvalidPath)?;
-        if self
-            .source_state
-            .store
-            .get(&module_path)
-            .is_some_and(|entry| entry.bytes.as_ref() == module_bytes)
+        if !path.ends_with(".gfp")
+            && self
+                .source_state
+                .store
+                .get(&module_path)
+                .is_some_and(|entry| entry.bytes.as_ref() == module_bytes)
         {
             return Ok(LoadResult::Success);
         }
 
+        let (source_bytes, origin, descriptor) = if path.ends_with(".gfp") {
+            let source = match str::from_utf8(module_bytes) {
+                Ok(source) => source,
+                Err(_) => return Ok(Self::invalid_external_proxy(".gfp source must be UTF-8")),
+            };
+            let (frontmatter, body) = match parse_gfp_frontmatter(source) {
+                Ok(parsed) => parsed,
+                Err(error) => return Ok(Self::invalid_external_proxy(error)),
+            };
+            (
+                Arc::from(body.as_bytes()),
+                ModuleOrigin::ExternalProxy,
+                Some(ExternalModuleDescriptor {
+                    adapter: frontmatter.adapter,
+                    targets: frontmatter.targets,
+                    metadata: frontmatter.metadata,
+                    exports: Vec::new(),
+                }),
+            )
+        } else {
+            (Arc::from(module_bytes), ModuleOrigin::User, None)
+        };
+
         self.source_state.revision.next();
         self.source_state.store.load_module(
             module_path.clone(),
-            Arc::from(module_bytes),
-            ModuleOrigin::User,
+            source_bytes,
+            origin,
             self.source_state.revision,
         );
+        if let Some(descriptor) = descriptor {
+            self.external_descriptors
+                .insert(module_path.clone(), descriptor);
+        } else {
+            self.external_descriptors.remove(&module_path);
+        }
         self.source_state.dirty_sources.insert(module_path);
         self.mark_dirty();
         Ok(LoadResult::Success)
@@ -136,6 +170,7 @@ impl Workspace {
         let module_path = ModulePath::new(path).ok_or(WorkspaceError::InvalidPath)?;
 
         if let Some(entry) = self.source_state.store.remove_module(&module_path) {
+            self.external_descriptors.remove(&module_path);
             self.source_state.revision.next();
             self.source_state.dirty_sources.remove(&module_path);
             self.source_state.removed_modules.push(entry.module_id);
@@ -144,6 +179,16 @@ impl Workspace {
         } else {
             Ok(RemoveResult::NotFound)
         }
+    }
+
+    fn invalid_external_proxy(message: impl Into<String>) -> LoadResult {
+        let mut diagnostics = DiagnosticBag::new();
+        diagnostics.push(Diagnostic::error_with_message(
+            WorkspaceDiagnosticCode::InvalidExternalProxy,
+            message,
+            Span::empty(WORKSPACE_SOURCE_ID, 0),
+        ));
+        LoadResult::Diagnostics(diagnostics)
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -190,7 +235,7 @@ impl Workspace {
                 };
             } else {
                 let roots = self.frontend_roots();
-                let report = loop {
+                let mut report = loop {
                     let source_files = self
                         .source_state
                         .dirty_sources
@@ -200,6 +245,13 @@ impl Workspace {
                             (
                                 entry.module_id,
                                 entry.path.clone(),
+                                match entry.origin {
+                                    ModuleOrigin::User => FrontendModuleKind::Standard,
+                                    ModuleOrigin::Builtin => FrontendModuleKind::Builtin,
+                                    ModuleOrigin::ExternalProxy => {
+                                        FrontendModuleKind::ExternalProxy
+                                    }
+                                },
                                 SourceFile::new(
                                     entry.source_id,
                                     entry.path.to_string(),
@@ -210,10 +262,11 @@ impl Workspace {
                         .collect::<Vec<_>>();
                     let sources = source_files
                         .iter()
-                        .map(|(module_id, path, source)| FrontendSource {
+                        .map(|(module_id, path, kind, source)| FrontendSource {
                             module_id: *module_id,
                             path: path.clone(),
                             source,
+                            kind: *kind,
                         })
                         .collect::<Vec<_>>();
                     let update = FrontendUpdate {
@@ -230,6 +283,8 @@ impl Workspace {
                         break report;
                     }
                 };
+
+                self.validate_registered_adapter_schemas(&mut report.diagnostics);
 
                 if report.diagnostics.has_errors() {
                     self.semantic_state.check_state = CheckState::Failed {
@@ -284,6 +339,21 @@ impl Workspace {
             loaded = true;
         }
         loaded
+    }
+
+    fn validate_registered_adapter_schemas(&self, diagnostics: &mut DiagnosticBag) {
+        for descriptor in self.external_descriptors.values() {
+            let Some(adapter) = self.adapters.get(&descriptor.adapter) else {
+                continue;
+            };
+            if let Err(error) = adapter.validate_schema(descriptor) {
+                diagnostics.push(Diagnostic::error_with_message(
+                    WorkspaceDiagnosticCode::InvalidExternalProxy,
+                    error.to_string(),
+                    Span::empty(WORKSPACE_SOURCE_ID, 0),
+                ));
+            }
+        }
     }
 
     fn frontend_roots(&self) -> FrontendRoots {

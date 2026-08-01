@@ -65,6 +65,21 @@ impl<'a> DeclarationTypeChecker<'a> {
         ));
     }
 
+    pub(super) fn report_await_requires_future(&mut self, expression: NodeId, actual: TypeId) {
+        let span = self
+            .graph
+            .syntax()
+            .node(expression)
+            .map(|node| node.span())
+            .unwrap_or_else(|| self.source.span());
+        let actual = self.describe_type_for_diagnostic(actual);
+        self.diagnostics.push(Diagnostic::error_with_message(
+            TypeDiagnosticCode::AwaitRequiresFuture,
+            format!("await requires `Future<T>`, got `{actual}`"),
+            span,
+        ));
+    }
+
     pub(super) fn report_unsupported_operator(&mut self, operator: NodeId, operator_text: &str) {
         let span = self
             .graph

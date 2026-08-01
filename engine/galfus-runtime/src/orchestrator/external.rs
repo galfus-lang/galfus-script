@@ -18,7 +18,7 @@ pub(crate) struct ProviderDispatchTask {
 }
 
 pub(crate) struct AdapterDispatchTask {
-    pub(crate) adapters: Arc<std::sync::Mutex<galfus_contract::Adapters>>,
+    pub(crate) bindings: Arc<std::sync::Mutex<galfus_contract::ExternalBindings>>,
     pub(crate) thread_id: usize,
     pub(crate) request_id: u64,
     pub(crate) module: String,
@@ -33,8 +33,8 @@ impl RunnableTask for AdapterDispatchTask {
         if !self.active.load(Ordering::Acquire) {
             return ThreadResult::Discarded;
         }
-        let mut adapters = self.adapters.lock().unwrap();
-        let Some(adapter) = adapters.get_mut(&self.module, &self.symbol) else {
+        let mut bindings = self.bindings.lock().unwrap();
+        let Some(module) = bindings.get_mut(&self.module) else {
             self.injector.inject_system_response(
                 self.thread_id,
                 self.request_id,
@@ -45,7 +45,8 @@ impl RunnableTask for AdapterDispatchTask {
             );
             return ThreadResult::Discarded;
         };
-        adapter.dispatch(
+        module.dispatch(
+            self.symbol.as_str(),
             self.thread_id,
             self.request_id,
             &self.args,

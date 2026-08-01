@@ -649,14 +649,22 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
 
                 if is_indirect {
                     let func_op = self.lower_expression(target_node);
-                    self.current_instructions.push((
+                    let instruction = if self.is_future_type(ty) {
+                        Instruction::Assign(
+                            temp_id,
+                            RValue::CreateIndirectFuture {
+                                func: func_op,
+                                args,
+                            },
+                        )
+                    } else {
                         Instruction::IndirectCall {
                             func: func_op,
                             args,
                             destination: temp_id,
-                        },
-                        None,
-                    ));
+                        }
+                    };
+                    self.current_instructions.push((instruction, None));
                 } else {
                     let mut func_id = if is_namespace_call {
                         path_call_function_id(real_target)
@@ -692,14 +700,22 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                         func_id = specialized;
                     }
 
-                    self.current_instructions.push((
+                    let instruction = if self.is_future_type(ty) {
+                        Instruction::Assign(
+                            temp_id,
+                            RValue::CreateFuture {
+                                func: func_id,
+                                args,
+                            },
+                        )
+                    } else {
                         Instruction::Call {
                             func: func_id,
                             args,
                             destination: temp_id,
-                        },
-                        None,
-                    ));
+                        }
+                    };
+                    self.current_instructions.push((instruction, None));
                 }
 
                 Operand::Local(temp_id)

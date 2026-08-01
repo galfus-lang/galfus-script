@@ -117,6 +117,15 @@ pub enum VmEffect {
         module_id: ModuleId,
         func_idx: FuncIdx,
         args: Vec<Value>,
+        arg_types: Vec<TypeIdx>,
+        return_type: TypeIdx,
+    },
+    CreateIndirectFuture {
+        module_id: ModuleId,
+        func: Value,
+        args: Vec<Value>,
+        arg_types: Vec<TypeIdx>,
+        return_type: TypeIdx,
     },
     FutureWaitAll {
         future_ids: Vec<u64>,
@@ -613,6 +622,7 @@ impl VirtualMachine {
             | Instruction::CallNative { .. }
             | Instruction::AwaitFuture { .. }
             | Instruction::CreateFuture { .. }
+            | Instruction::CreateIndirectFuture { .. }
             | Instruction::AwaitAll { .. }
             | Instruction::AwaitRace { .. }
             | Instruction::Len { .. }

@@ -4,6 +4,7 @@ mod tests;
 pub(crate) mod cancellation;
 pub(crate) mod effects;
 pub(crate) mod external;
+pub(crate) mod future_registry;
 pub(crate) mod pending;
 pub(crate) mod startup;
 
@@ -24,6 +25,7 @@ use std::sync::{
 };
 use std::thread::{self, ThreadId};
 
+use future_registry::FutureRegistry;
 use pending::{LateCompletion, MAX_LATE_COMPLETIONS, PendingContinuation, PendingKey};
 pub(crate) use startup::StartupPlan;
 
@@ -63,12 +65,12 @@ pub(crate) struct Orchestrator {
     pending_continuations: HashMap<PendingKey, PendingContinuation>,
     startup_plans: HashMap<crate::registry::ThreadId, StartupPlan>,
     next_request_id: u64,
-    adapters: Option<Arc<std::sync::Mutex<galfus_contract::Adapters>>>,
+    external_bindings: Option<Arc<std::sync::Mutex<galfus_contract::ExternalBindings>>>,
     initialization_complete: Arc<AtomicBool>,
     shutting_down: bool,
     late_completions: VecDeque<LateCompletion>,
     root_thread_id: Option<crate::registry::ThreadId>,
-    ready_futures: HashMap<u64, Result<galfus_contract::BoundaryValue, ExecutionFailure>>,
+    pub(crate) future_registry: FutureRegistry,
 }
 
 impl Orchestrator {
@@ -86,12 +88,12 @@ impl Orchestrator {
             pending_continuations: HashMap::new(),
             startup_plans: HashMap::new(),
             next_request_id: 1,
-            adapters: None,
+            external_bindings: None,
             initialization_complete: Arc::new(AtomicBool::new(true)),
             shutting_down: false,
             late_completions: VecDeque::new(),
             root_thread_id: None,
-            ready_futures: HashMap::new(),
+            future_registry: FutureRegistry::new(),
         }
     }
 
@@ -123,12 +125,12 @@ impl Orchestrator {
         self.vm = Some(vm);
     }
 
-    pub(crate) fn set_adapters(
+    pub(crate) fn set_external_bindings(
         &mut self,
-        adapters: Option<Arc<std::sync::Mutex<galfus_contract::Adapters>>>,
+        bindings: Option<Arc<std::sync::Mutex<galfus_contract::ExternalBindings>>>,
     ) {
         self.assert_main_thread();
-        self.adapters = adapters;
+        self.external_bindings = bindings;
     }
 
     pub(crate) fn kernel_mut(&mut self, token: MainThreadToken) -> &mut VirtualKernel {
@@ -371,7 +373,7 @@ impl Orchestrator {
         if self.pending_continuations.contains_key(&key) {
             self.complete_pending(thread_id, key, result);
         } else {
-            self.ready_futures.insert(future_id, result);
+            self.future_registry.insert_resolved(thread_id, future_id, result);
         }
     }
 
@@ -418,15 +420,15 @@ impl Orchestrator {
                 RuntimeEvent::Exited {
                     thread_id,
                     thread,
-                    code,
+                    result,
                 } => {
-                    self.kernel.mark_exited(thread_id, thread, code);
+                    self.kernel.mark_exited(thread_id, thread, result.clone());
                     let waiters = self.kernel.drain_waiters(thread_id);
                     for waiter in waiters {
                         self.complete_future(
                             waiter.waiter_id,
                             waiter.future_id,
-                            Ok(BoundaryValue::I32(code)),
+                            result.clone(),
                         );
                     }
                 }
@@ -503,7 +505,7 @@ impl Orchestrator {
                 .root_thread_id
                 .and_then(|id| self.kernel.get_exit_code(id))
                 .unwrap_or(0);
-            return galfus_contract::ThreadResult::Completed(code);
+            return galfus_contract::ThreadResult::Completed(Ok(galfus_contract::BoundaryValue::I32(code)));
         }
 
         galfus_contract::ThreadResult::Discarded

@@ -196,10 +196,13 @@ impl VirtualMachine {
                 func: func_idx,
                 args_start,
                 arg_count,
+                ref arg_types,
+                return_type,
             } => {
-                let args = (0..arg_count)
-                    .map(|index| thread.read_reg(Reg(args_start.raw() + index as u16)))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let mut args = Vec::with_capacity(arg_count as usize);
+                for i in 0..arg_count {
+                    args.push(thread.read_reg(Reg(args_start.raw() + i as u16))?);
+                }
                 let module_id = thread
                     .call_stack
                     .last()
@@ -210,6 +213,37 @@ impl VirtualMachine {
                         module_id,
                         func_idx,
                         args,
+                        arg_types: arg_types.clone(),
+                        return_type,
+                    },
+                    continuation: Continuation::for_provider(dest, module_id, TypeIdx(0)),
+                });
+            }
+            Instruction::CreateIndirectFuture {
+                dest,
+                func_reg,
+                args_start,
+                arg_count,
+                ref arg_types,
+                return_type,
+            } => {
+                let func_val = thread.read_reg(func_reg)?;
+                let mut args = Vec::with_capacity(arg_count as usize);
+                for i in 0..arg_count {
+                    args.push(thread.read_reg(Reg(args_start.raw() + i as u16))?);
+                }
+                let module_id = thread
+                    .call_stack
+                    .last()
+                    .ok_or(VmError::EmptyCallStack)?
+                    .module_id;
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::CreateIndirectFuture {
+                        module_id,
+                        func: func_val,
+                        args,
+                        arg_types: arg_types.clone(),
+                        return_type,
                     },
                     continuation: Continuation::for_provider(dest, module_id, TypeIdx(0)),
                 });

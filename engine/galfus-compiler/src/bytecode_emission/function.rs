@@ -409,6 +409,14 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                     .find(|local| local.id == *destination)
                                     .expect("native call destination must be a local")
                                     .ty;
+                                let return_type =
+                                    match self.ctx.type_result.layer().table().kind(return_type) {
+                                        Some(galfus_frontend::TypeKind::GenericInstance {
+                                            arguments,
+                                            ..
+                                        }) => arguments.first().copied().unwrap_or(return_type),
+                                        _ => return_type,
+                                    };
                                 let arg_types = args
                                     .iter()
                                     .map(|argument| {

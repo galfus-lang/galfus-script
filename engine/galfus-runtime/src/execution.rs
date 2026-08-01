@@ -103,8 +103,8 @@ impl Execution {
                         self.orchestrator = None;
                     }
                 }
-                ThreadResult::Completed(code) => {
-                    self.result = Some(Ok(BoundaryValue::I32(code)));
+                ThreadResult::Completed(res) => {
+                    self.result = Some(res);
                     self.state = ExecutionState::Completed;
                 }
                 ThreadResult::Blocked { .. } => {

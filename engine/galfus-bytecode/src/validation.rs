@@ -599,9 +599,33 @@ pub fn validate_bytecode_module(
                     func: func_idx,
                     args_start,
                     arg_count,
+                    ref arg_types,
+                    return_type,
                 } => {
                     check_reg(dest, &mut errors);
                     check_func(func_idx, &mut errors);
+                    for &ty in arg_types {
+                        check_type(ty, &mut errors);
+                    }
+                    check_type(return_type, &mut errors);
+                    if arg_count > 0 {
+                        check_reg(Reg(args_start.raw() + arg_count as u16 - 1), &mut errors);
+                    }
+                }
+                Instruction::CreateIndirectFuture {
+                    dest,
+                    func_reg,
+                    args_start,
+                    arg_count,
+                    ref arg_types,
+                    return_type,
+                } => {
+                    check_reg(dest, &mut errors);
+                    check_reg(func_reg, &mut errors);
+                    for &ty in arg_types {
+                        check_type(ty, &mut errors);
+                    }
+                    check_type(return_type, &mut errors);
                     if arg_count > 0 {
                         check_reg(Reg(args_start.raw() + arg_count as u16 - 1), &mut errors);
                     }

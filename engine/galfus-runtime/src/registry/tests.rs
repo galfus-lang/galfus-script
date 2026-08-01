@@ -56,9 +56,12 @@ fn registry_tracks_state_after_the_thread_body_is_taken() {
     registry.register(id, VmThreadState::new(), None);
     assert!(registry.mark_running(id));
     let _running_thread = registry.take(id).expect("thread is available to run");
-    assert!(registry.mark_exited(id, 7));
 
-    assert_eq!(registry.state(id), Some(ThreadState::Exited(7)));
+    assert!(registry.mark_exited(id, Ok(galfus_contract::BoundaryValue::I32(7))));
+    assert_eq!(
+        registry.state(id),
+        Some(ThreadState::Exited(Ok(galfus_contract::BoundaryValue::I32(7))))
+    );
 }
 
 #[test]

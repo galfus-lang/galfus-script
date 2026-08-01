@@ -23,11 +23,13 @@ fn check_uses_the_module_ids_provided_by_the_host() {
             module_id: ModuleId::new(41),
             path: path("src/main.gfs"),
             source: &main,
+            kind: FrontendModuleKind::Standard,
         },
         FrontendSource {
             module_id: ModuleId::new(7),
             path: path("src/utilities.gfs"),
             source: &utilities,
+            kind: FrontendModuleKind::Standard,
         },
     ];
     let roots = FrontendRoots::default();
@@ -63,6 +65,85 @@ fn check_uses_the_module_ids_provided_by_the_host() {
 }
 
 #[test]
+fn check_preserves_async_future_payloads_across_imported_generic_calls() {
+    let utilities = SourceFile::new(
+        SourceId::new(3),
+        "src/utilities.gfs".to_string(),
+        "export struct Future<T> { id: i64 }\nexport fn(async) load<T>(value: T): T { return value }"
+            .to_string(),
+    );
+    let main = SourceFile::new(
+        SourceId::new(9),
+        "src/main.gfs".to_string(),
+        "import { Future, load } from './utilities'\nfn(async) main(): i32 { const future = load(1); return await future }".to_string(),
+    );
+    let sources = [
+        FrontendSource {
+            module_id: ModuleId::new(41),
+            path: path("src/main.gfs"),
+            source: &main,
+            kind: FrontendModuleKind::Standard,
+        },
+        FrontendSource {
+            module_id: ModuleId::new(7),
+            path: path("src/utilities.gfs"),
+            source: &utilities,
+            kind: FrontendModuleKind::Standard,
+        },
+    ];
+    let mut session = FrontendSession::new();
+
+    let report = session.check(FrontendUpdate {
+        source_revision: Revision::new(1),
+        sources: &sources,
+        removed_modules: &[],
+        roots: &FrontendRoots::default(),
+    });
+
+    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+}
+
+#[test]
+fn check_preserves_async_future_payloads_across_namespace_calls() {
+    let utilities = SourceFile::new(
+        SourceId::new(3),
+        "src/utilities.gfs".to_string(),
+        "export struct Future<T> { id: i64 }\nexport fn(async) load(): i32 { return 1 }"
+            .to_string(),
+    );
+    let main = SourceFile::new(
+        SourceId::new(9),
+        "src/main.gfs".to_string(),
+        "import utilities from './utilities'\nfn main(): i32 { return await utilities::load() }"
+            .to_string(),
+    );
+    let sources = [
+        FrontendSource {
+            module_id: ModuleId::new(41),
+            path: path("src/main.gfs"),
+            source: &main,
+            kind: FrontendModuleKind::Standard,
+        },
+        FrontendSource {
+            module_id: ModuleId::new(7),
+            path: path("src/utilities.gfs"),
+            source: &utilities,
+            kind: FrontendModuleKind::Standard,
+        },
+    ];
+    let mut session = FrontendSession::new();
+
+    let report = session.check(FrontendUpdate {
+        source_revision: Revision::new(1),
+        sources: &sources,
+        removed_modules: &[],
+        roots: &FrontendRoots::default(),
+    });
+
+    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+}
+
+#[test]
 fn check_reprocesses_changed_modules_and_transitive_dependents_only() {
     let utilities_v1 = SourceFile::new(
         SourceId::new(3),
@@ -84,16 +165,19 @@ fn check_reprocesses_changed_modules_and_transitive_dependents_only() {
             module_id: ModuleId::new(41),
             path: path("src/main.gfs"),
             source: &main,
+            kind: FrontendModuleKind::Standard,
         },
         FrontendSource {
             module_id: ModuleId::new(7),
             path: path("src/utilities.gfs"),
             source: &utilities_v1,
+            kind: FrontendModuleKind::Standard,
         },
         FrontendSource {
             module_id: ModuleId::new(13),
             path: path("src/isolated.gfs"),
             source: &isolated,
+            kind: FrontendModuleKind::Standard,
         },
     ];
     let roots = FrontendRoots::default();
@@ -122,6 +206,7 @@ fn check_reprocesses_changed_modules_and_transitive_dependents_only() {
         module_id: ModuleId::new(7),
         path: path("src/utilities.gfs"),
         source: &utilities_v2,
+        kind: FrontendModuleKind::Standard,
     }];
     let report = session.check(FrontendUpdate {
         source_revision: Revision::new(2),
@@ -166,11 +251,13 @@ fn check_records_resolved_implicit_range_dependency() {
             module_id: ModuleId::new(1),
             path: path("src/main.gfs"),
             source: &main,
+            kind: FrontendModuleKind::Standard,
         },
         FrontendSource {
             module_id: ModuleId::new(2),
             path: path("std/iterable.gfs"),
             source: &iterable,
+            kind: FrontendModuleKind::Standard,
         },
     ];
     let roots = FrontendRoots::new(vec![SemanticRoot::new(
@@ -212,11 +299,13 @@ fn check_records_iterable_dependency_for_array_iteration() {
             module_id: ModuleId::new(1),
             path: path("src/main.gfs"),
             source: &main,
+            kind: FrontendModuleKind::Standard,
         },
         FrontendSource {
             module_id: ModuleId::new(2),
             path: path("std/iterable.gfs"),
             source: &iterable,
+            kind: FrontendModuleKind::Standard,
         },
     ];
     let roots = FrontendRoots::new(vec![SemanticRoot::new(
@@ -258,11 +347,13 @@ fn check_removes_modules_and_refreshes_dependent_edges() {
             module_id: ModuleId::new(1),
             path: path("src/main.gfs"),
             source: &main,
+            kind: FrontendModuleKind::Standard,
         },
         FrontendSource {
             module_id: ModuleId::new(2),
             path: path("src/utility.gfs"),
             source: &utility,
+            kind: FrontendModuleKind::Standard,
         },
     ];
     let roots = FrontendRoots::new(vec![SemanticRoot::new(

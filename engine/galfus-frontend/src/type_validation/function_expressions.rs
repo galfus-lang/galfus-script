@@ -24,6 +24,12 @@ impl<'a> DeclarationTypeChecker<'a> {
             None => self.infer_function_body_type(body)?,
         };
 
+        let return_type = if self.is_async_function(node) {
+            self.async_future_type(node, return_type)
+        } else {
+            return_type
+        };
+
         Some(
             self.layer
                 .table_mut()

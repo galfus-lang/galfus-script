@@ -26,7 +26,7 @@ pub enum RuntimeEvent {
     Exited {
         thread_id: ThreadId,
         thread: VmThreadState,
-        code: i32,
+        result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
     },
     /// A module initializer completed and the startup sequence can advance.
     Initialized {
