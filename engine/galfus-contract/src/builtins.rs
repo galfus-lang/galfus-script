@@ -1,20 +1,22 @@
-pub const ASYNC_SOURCE: &str = include_str!("../builtins/async.gfs");
-pub const THREAD_SOURCE: &str = include_str!("../builtins/thread.gfs");
-pub const CONSTRAINTS_SOURCE: &str = include_str!("../builtins/constraints.gfs");
-pub const ITERABLE_SOURCE: &str = include_str!("../builtins/iterable.gfs");
-pub const TEXT_SOURCE: &str = include_str!("../builtins/text.gfs");
-pub const FORMAT_SOURCE: &str = include_str!("../builtins/format.gfs");
-pub const FORMAT_ANSI_SOURCE: &str = include_str!("../builtins/format/ansi.gfs");
-pub const STD_IO_SOURCE: &str = include_str!("../builtins/io.gfs");
+pub const ASYNC_SOURCE: &str = include_str!("../builtins/internals/async.gfs");
+pub const THREAD_SOURCE: &str = include_str!("../builtins/internals/thread.gfs");
+pub const CONSTRAINTS_SOURCE: &str = include_str!("../builtins/internals/constraints.gfs");
+pub const ITERABLE_SOURCE: &str = include_str!("../builtins/internals/iterable.gfs");
+pub const TEXT_SOURCE: &str = include_str!("../builtins/utilities/text.gfs");
+pub const FORMAT_SOURCE: &str = include_str!("../builtins/utilities/format.gfs");
+pub const FORMAT_ANSI_SOURCE: &str = include_str!("../builtins/utilities/format/ansi.gfs");
+pub const STD_IO_SOURCE: &str = include_str!("../builtins/bridges/io.gfs");
 
-/// Internal core modules that are built-in to the VM and use `__internal_*` primitives.
-pub static INTERNAL_CORE_MODULES: &[(&str, &str)] =
-    &[("std/async", ASYNC_SOURCE), ("std/thread", THREAD_SOURCE)];
+/// Internal core modules that are built-in to the VM and auto-inferred by the language engine.
+pub static INTERNAL_CORE_MODULES: &[(&str, &str)] = &[
+    ("std/async", ASYNC_SOURCE),
+    ("std/thread", THREAD_SOURCE),
+    ("std/constraints", CONSTRAINTS_SOURCE),
+    ("std/iterable", ITERABLE_SOURCE),
+];
 
 /// Utility modules that are pure Galfus Script algorithmic libraries without native bridge functions.
 pub static UTILITY_MODULES: &[(&str, &str)] = &[
-    ("std/constraints", CONSTRAINTS_SOURCE),
-    ("std/iterable", ITERABLE_SOURCE),
     ("text", TEXT_SOURCE),
     ("format", FORMAT_SOURCE),
     ("format/ansi", FORMAT_ANSI_SOURCE),
