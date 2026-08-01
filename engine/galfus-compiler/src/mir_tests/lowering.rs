@@ -340,3 +340,118 @@ fn test_mir_builder_for_loop() {
         "Expected for loop to lower to multiple blocks"
     );
 }
+
+#[test]
+fn test_async_call_emits_typed_future_instruction() {
+    let source_id = SourceId::new(0);
+    let code = r#"
+        struct Future<T> { id: i64 }
+
+        fn(async) load(value: i32): i32 {
+            return value
+        }
+
+        fn(async) main(): i32 {
+            const future = load(7)
+            return await future
+        }
+    "#;
+    let source = SourceFile::new(source_id, "typed_future.gfs".to_string(), code.to_string());
+    let parse_result = parse(&source);
+    let graph = resolve(&source, parse_result.into_graph()).into_graph();
+    let type_result =
+        check_definition_types(&source, &graph, check_declaration_types(&source, &graph));
+    assert!(
+        !type_result.has_errors(),
+        "Typecheck error: {:?}",
+        type_result.diagnostics()
+    );
+
+    let mir_module = MirBuilder::new(&graph, &type_result, code).build();
+    let (module, _) = lower_module(&mir_module, &type_result, &graph, code);
+    let main = module
+        .functions
+        .iter()
+        .find(|function| function.name == "main")
+        .expect("main function should be emitted");
+    let instruction = main
+        .instructions
+        .iter()
+        .find_map(|instruction| match instruction {
+            galfus_bytecode::Instruction::CreateFuture {
+                arg_count,
+                arg_types,
+                return_type,
+                ..
+            } => Some((*arg_count, arg_types, *return_type)),
+            _ => None,
+        })
+        .expect("async call should emit CreateFuture");
+
+    assert_eq!(instruction.0, 1);
+    assert_eq!(instruction.1.len(), 1);
+    assert!(matches!(
+        module.types[instruction.2.raw() as usize],
+        galfus_bytecode::BytecodeType::Int32
+    ));
+}
+
+#[test]
+fn test_indirect_async_call_emits_typed_future_instruction() {
+    let source_id = SourceId::new(0);
+    let code = r#"
+        struct Future<T> { id: i64 }
+
+        fn(async) load(value: i32): i32 {
+            return value
+        }
+
+        fn(async) main(): i32 {
+            const callback = load
+            const future = callback(7)
+            return await future
+        }
+    "#;
+    let source = SourceFile::new(
+        source_id,
+        "indirect_future.gfs".to_string(),
+        code.to_string(),
+    );
+    let parse_result = parse(&source);
+    let graph = resolve(&source, parse_result.into_graph()).into_graph();
+    let type_result =
+        check_definition_types(&source, &graph, check_declaration_types(&source, &graph));
+    assert!(
+        !type_result.has_errors(),
+        "Typecheck error: {:?}",
+        type_result.diagnostics()
+    );
+
+    let mir_module = MirBuilder::new(&graph, &type_result, code).build();
+    let (module, _) = lower_module(&mir_module, &type_result, &graph, code);
+    let main = module
+        .functions
+        .iter()
+        .find(|function| function.name == "main")
+        .expect("main function should be emitted");
+    let instruction = main
+        .instructions
+        .iter()
+        .find_map(|instruction| match instruction {
+            galfus_bytecode::Instruction::CreateIndirectFuture {
+                arg_count,
+                arg_types,
+                return_type,
+                ..
+            } => Some((*arg_count, arg_types, *return_type)),
+            _ => None,
+        })
+        .expect("indirect async call should emit CreateIndirectFuture");
+
+    assert_eq!(instruction.0, 1);
+    assert_eq!(instruction.1.len(), 1);
+    assert!(matches!(
+        module.types[instruction.2.raw() as usize],
+        galfus_bytecode::BytecodeType::Int32
+    ));
+}

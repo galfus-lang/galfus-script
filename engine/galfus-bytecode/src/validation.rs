@@ -8,6 +8,12 @@ use crate::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BytecodeValidationError {
+    FutureArgumentTypeCountMismatch {
+        func_name: String,
+        instr_idx: usize,
+        expected_count: usize,
+        found_count: usize,
+    },
     InvalidConstantIndex {
         func_name: String,
         instr_idx: usize,
@@ -604,6 +610,14 @@ pub fn validate_bytecode_module(
                 } => {
                     check_reg(dest, &mut errors);
                     check_func(func_idx, &mut errors);
+                    if arg_types.len() != arg_count as usize {
+                        errors.push(BytecodeValidationError::FutureArgumentTypeCountMismatch {
+                            func_name: func_name.clone(),
+                            instr_idx,
+                            expected_count: arg_count as usize,
+                            found_count: arg_types.len(),
+                        });
+                    }
                     for &ty in arg_types {
                         check_type(ty, &mut errors);
                     }
@@ -622,6 +636,14 @@ pub fn validate_bytecode_module(
                 } => {
                     check_reg(dest, &mut errors);
                     check_reg(func_reg, &mut errors);
+                    if arg_types.len() != arg_count as usize {
+                        errors.push(BytecodeValidationError::FutureArgumentTypeCountMismatch {
+                            func_name: func_name.clone(),
+                            instr_idx,
+                            expected_count: arg_count as usize,
+                            found_count: arg_types.len(),
+                        });
+                    }
                     for &ty in arg_types {
                         check_type(ty, &mut errors);
                     }

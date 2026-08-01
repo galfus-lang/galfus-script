@@ -208,9 +208,32 @@ impl VirtualMachine {
                     .last()
                     .ok_or(VmError::EmptyCallStack)?
                     .module_id;
+                let current_image = &self.graph.get(module_id).unwrap().module;
+                let (target_module_id, func_idx) =
+                    if (func_idx.raw() as usize) < current_image.functions.len() {
+                        (module_id, func_idx)
+                    } else {
+                        let import_idx = (func_idx.raw() as usize) - current_image.functions.len();
+                        let link = self
+                            .graph
+                            .resolve_imports(module_id)
+                            .map_err(|_| VmError::FunctionOutOfBounds { index: func_idx })?;
+                        let import = link
+                            .imports
+                            .get(import_idx)
+                            .ok_or(VmError::FunctionOutOfBounds { index: func_idx })?;
+                        let target_func_idx = match &import.kind {
+                            galfus_bytecode::graph_resolver::ResolvedImportKind::Function(
+                                index,
+                            ) => *index,
+                            _ => return Err(VmError::FunctionOutOfBounds { index: func_idx }),
+                        };
+                        (import.module_id, target_func_idx)
+                    };
                 return Ok(VmStep::Suspend {
                     effect: VmEffect::CreateFuture {
                         module_id,
+                        target_module_id,
                         func_idx,
                         args,
                         arg_types: arg_types.clone(),

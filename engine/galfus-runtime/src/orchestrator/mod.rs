@@ -297,6 +297,16 @@ impl Orchestrator {
             self.record_late_completion(thread_id, id);
             return;
         }
+        self.resume_pending(thread_id, pending, result, key);
+    }
+
+    fn resume_pending(
+        &mut self,
+        thread_id: crate::registry::ThreadId,
+        pending: PendingContinuation,
+        result: Result<BoundaryValue, ExecutionFailure>,
+        key: PendingKey,
+    ) {
         self.kernel.unblock(thread_id);
         let Some(mut thread) = self.kernel.take_thread(thread_id) else {
             return;
@@ -369,11 +379,25 @@ impl Orchestrator {
         future_id: u64,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
-        let key = PendingKey::Future(future_id);
-        if self.pending_continuations.contains_key(&key) {
-            self.complete_pending(thread_id, key, result);
-        } else {
-            self.future_registry.insert_resolved(thread_id, future_id, result);
+        let waiters = match self
+            .future_registry
+            .complete(thread_id, future_id, result.clone())
+        {
+            Ok(waiters) => waiters,
+            Err(error) => {
+                self.failure = Some(error);
+                self.kernel.cancel(thread_id);
+                return;
+            }
+        };
+        for waiter in waiters {
+            let waiter_thread_id = waiter.continuation.thread_id;
+            self.resume_pending(
+                waiter_thread_id,
+                waiter.continuation,
+                result.clone(),
+                PendingKey::Future(future_id),
+            );
         }
     }
 
@@ -425,11 +449,7 @@ impl Orchestrator {
                     self.kernel.mark_exited(thread_id, thread, result.clone());
                     let waiters = self.kernel.drain_waiters(thread_id);
                     for waiter in waiters {
-                        self.complete_future(
-                            waiter.waiter_id,
-                            waiter.future_id,
-                            result.clone(),
-                        );
+                        self.complete_future(waiter.waiter_id, waiter.future_id, result.clone());
                     }
                 }
                 RuntimeEvent::Initialized {
@@ -452,7 +472,7 @@ impl Orchestrator {
                     thread_id,
                     future_id,
                     result,
-                } => self.complete_pending(thread_id, PendingKey::Future(future_id), result),
+                } => self.complete_future(thread_id, future_id, result),
                 RuntimeEvent::Tick { delta_ms } => {
                     self.kernel.tick(delta_ms);
                 }
@@ -505,7 +525,9 @@ impl Orchestrator {
                 .root_thread_id
                 .and_then(|id| self.kernel.get_exit_code(id))
                 .unwrap_or(0);
-            return galfus_contract::ThreadResult::Completed(Ok(galfus_contract::BoundaryValue::I32(code)));
+            return galfus_contract::ThreadResult::Completed(Ok(
+                galfus_contract::BoundaryValue::I32(code),
+            ));
         }
 
         galfus_contract::ThreadResult::Discarded

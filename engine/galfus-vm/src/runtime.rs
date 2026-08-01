@@ -45,7 +45,7 @@ impl Continuation {
         self
     }
 
-    pub(crate) fn for_provider(dest: Reg, module_id: ModuleId, return_type: TypeIdx) -> Self {
+    pub fn for_provider(dest: Reg, module_id: ModuleId, return_type: TypeIdx) -> Self {
         Self {
             dest: Some(dest),
             expected_result: Some((module_id, return_type)),
@@ -114,7 +114,10 @@ pub enum VmEffect {
         thread_id: u64,
     },
     CreateFuture {
+        /// Module whose type table encodes the call arguments and Future payload.
         module_id: ModuleId,
+        /// Resolved module that owns `func_idx`.
+        target_module_id: ModuleId,
         func_idx: FuncIdx,
         args: Vec<Value>,
         arg_types: Vec<TypeIdx>,

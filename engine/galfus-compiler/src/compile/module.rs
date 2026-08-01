@@ -317,6 +317,8 @@ fn compile_single_module(
         ctx.function_map.insert(func.id, local_idx);
         ctx.function_names.insert(func.id, func.name.clone());
         ctx.function_return_types.insert(func.id, func.return_type);
+        ctx.function_param_types
+            .insert(func.id, func.parameter_types.clone());
     }
 
     let mut execution_metadata = galfus_bytecode::graph::ExecutionMetadata {

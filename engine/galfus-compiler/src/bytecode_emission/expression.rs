@@ -603,7 +603,12 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                 self.free_temp_if_operand(length);
             }
             RValue::CreateFuture { func, args } => {
-                let func_idx = galfus_bytecode::instruction::FuncIdx(func.raw() as u16);
+                let func_idx = *self.ctx.function_map.get(func).unwrap_or_else(|| {
+                    panic!(
+                        "missing lowered function mapping for {:?} while emitting {} ({:?})",
+                        func, self.func.name, self.func.id
+                    )
+                });
                 let start_reg = if args.is_empty() {
                     Reg(0)
                 } else {
@@ -617,13 +622,23 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     }
                     first
                 };
-                let param_types = self.ctx.function_param_types.get(&func).cloned().unwrap_or_default();
-                let arg_types = param_types
-                    .into_iter()
-                    .map(|ty| crate::bytecode_emission::types::lower_type(self.ctx, ty))
+                let arg_types = args
+                    .iter()
+                    .map(|argument| {
+                        crate::bytecode_emission::types::lower_type(
+                            self.ctx,
+                            self.get_operand_type(argument),
+                        )
+                    })
                     .collect();
-                let return_ty = self.ctx.function_return_types.get(&func).copied().unwrap();
-                let return_type = crate::bytecode_emission::types::lower_type(self.ctx, return_ty);
+                let future_ty = self
+                    .func
+                    .locals
+                    .iter()
+                    .find(|local| local.id.raw() as u16 == dest.raw())
+                    .map(|local| local.ty)
+                    .expect("CreateFuture destination must be a MIR local");
+                let return_type = self.future_payload_type_index(future_ty);
                 self.instructions.push(Instruction::CreateFuture {
                     dest,
                     func: func_idx,
@@ -655,9 +670,27 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     first
                 };
 
-                // TODO: Determine arg_types and return_type for dynamic futures
-                let arg_types = vec![];
-                let return_type = galfus_bytecode::instruction::TypeIdx(0);
+                let function_ty = crate::bytecode_emission::types::resolve_type_with_substitutions(
+                    self.ctx,
+                    self.get_operand_type(func_op),
+                );
+                let table = self.ctx.type_result.layer().table();
+                let TypeKind::Function(function) = table
+                    .kind(function_ty)
+                    .unwrap_or_else(|| panic!("indirect future target must have a function type"))
+                else {
+                    panic!("indirect future target must have a function type");
+                };
+                let arg_types = args
+                    .iter()
+                    .map(|argument| {
+                        crate::bytecode_emission::types::lower_type(
+                            self.ctx,
+                            self.get_operand_type(argument),
+                        )
+                    })
+                    .collect();
+                let return_type = self.future_payload_type_index(function.return_type());
 
                 self.instructions.push(Instruction::CreateIndirectFuture {
                     dest,
@@ -777,6 +810,25 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
         if matches!(operand, Operand::Constant(_)) {
             self.free_temps(1);
         }
+    }
+
+    fn future_payload_type_index(
+        &mut self,
+        future_ty: TypeId,
+    ) -> galfus_bytecode::instruction::TypeIdx {
+        let future_ty =
+            crate::bytecode_emission::types::resolve_type_with_substitutions(self.ctx, future_ty);
+        let table = self.ctx.type_result.layer().table();
+        let TypeKind::GenericInstance { arguments, .. } = table
+            .kind(future_ty)
+            .unwrap_or_else(|| panic!("async function must return Future<T>"))
+        else {
+            panic!("async function must return Future<T>");
+        };
+        let payload_ty = *arguments
+            .first()
+            .expect("Future<T> must carry a payload type");
+        crate::bytecode_emission::types::lower_type(self.ctx, payload_ty)
     }
 
     pub(crate) fn get_operand_type(&self, operand: &Operand) -> TypeId {

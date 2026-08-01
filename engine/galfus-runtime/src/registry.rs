@@ -21,7 +21,9 @@ impl ThreadState {
         matches!(self, Self::Exited(_))
     }
 
-    pub fn exit_reason(&self) -> Option<Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>> {
+    pub fn exit_reason(
+        &self,
+    ) -> Option<Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>> {
         match self {
             Self::Exited(result) => Some(result.clone()),
             Self::Created | Self::Running => None,
@@ -104,17 +106,23 @@ impl ThreadRegistry {
     }
 
     pub fn get_exit_code(&self, id: ThreadId) -> Option<i32> {
-        self.tcbs.get(&id).and_then(|tcb| tcb.state.exit_reason()).and_then(|result| {
-            if let Ok(galfus_contract::BoundaryValue::I32(code)) = result {
-                Some(code)
-            } else {
-                None
-            }
-        })
+        self.tcbs
+            .get(&id)
+            .and_then(|tcb| tcb.state.exit_reason())
+            .and_then(|result| {
+                if let Ok(galfus_contract::BoundaryValue::I32(code)) = result {
+                    Some(code)
+                } else {
+                    None
+                }
+            })
     }
 
     pub fn debug_states(&self) -> Vec<(ThreadId, ThreadState)> {
-        self.tcbs.iter().map(|(&k, v)| (k, v.state.clone())).collect()
+        self.tcbs
+            .iter()
+            .map(|(&k, v)| (k, v.state.clone()))
+            .collect()
     }
 
     pub fn lookup_key(&self, key: &str) -> Option<ThreadId> {
@@ -151,7 +159,11 @@ impl ThreadRegistry {
         false
     }
 
-    pub fn mark_exited(&mut self, id: ThreadId, result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>) -> bool {
+    pub fn mark_exited(
+        &mut self,
+        id: ThreadId,
+        result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
+    ) -> bool {
         if let Some(tcb) = self.tcbs.get_mut(&id) {
             tcb.state = ThreadState::Exited(result);
             return true;

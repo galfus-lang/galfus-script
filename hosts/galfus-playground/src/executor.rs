@@ -67,7 +67,11 @@ impl KernelDriver for PlaygroundExecutor {
                 }
             }
             ThreadResult::Completed(res) => {
-                let code = if let Ok(galfus_contract::BoundaryValue::I32(c)) = res { c } else { 0 };
+                let code = if let Ok(galfus_contract::BoundaryValue::I32(c)) = res {
+                    c
+                } else {
+                    0
+                };
                 *self.exit_code.lock().unwrap() = code;
                 if let Some(cb) = &*self.exit_callback.lock().unwrap() {
                     cb(Ok(code));

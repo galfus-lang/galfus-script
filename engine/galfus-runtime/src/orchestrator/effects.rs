@@ -254,117 +254,8 @@ impl Orchestrator {
                 module_id,
                 return_type,
             } => {
-                let key = PendingKey::Future(future_id);
-                if self.pending_continuations.contains_key(&key) {
-                    self.failure = Some(
-                        ExecutionFailure::new(
-                            ExecutionFailureKind::InvalidContinuation,
-                            "future is already awaited",
-                        )
-                        .with_thread_id(thread_id.raw())
-                        .with_future_id(future_id)
-                        .with_stack(execution_stack(&thread)),
-                    );
-                    self.kernel.cancel(thread_id);
-                    return;
-                }
-                
-                let is_resolved = if let Some(record) = self.future_registry.get(thread_id, future_id) {
-                    matches!(record.state, crate::orchestrator::future_registry::FutureState::Resolved(_))
-                } else {
-                    false
-                };
-
-                if is_resolved {
-                    let record = self.future_registry.remove(thread_id, future_id).unwrap();
-                    let crate::orchestrator::future_registry::FutureState::Resolved(ready_result) = record.state else {
-                        unreachable!()
-                    };
-                    
-                    self.pending_continuations.insert(
-                        key,
-                        PendingContinuation {
-                            thread_id,
-                            continuation,
-                            module_id,
-                            return_type,
-                            request_id: future_id,
-                            stack: execution_stack(&thread),
-                            operation: PendingOperation::Future,
-                            active: Arc::new(AtomicBool::new(true)),
-                        },
-                    );
-                    self.kernel.block(thread_id, thread, None);
-                    self.sink.send(crate::event::RuntimeEvent::FutureCompleted {
-                        thread_id,
-                        future_id,
-                        result: ready_result,
-                    });
-                    return;
-                }
-                
-                let is_created = if let Some(record) = self.future_registry.get_mut(thread_id, future_id) {
-                    if matches!(record.state, crate::orchestrator::future_registry::FutureState::Created) {
-                        record.state = crate::orchestrator::future_registry::FutureState::Running;
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-
-                if is_created {
-                    let activation = self.future_registry.get_mut(thread_id, future_id).unwrap().activation.take().unwrap();
-                    
-                    match activation {
-                        crate::orchestrator::future_registry::Activation::GalfusFunction {
-                            module_id: act_module_id,
-                            func_idx,
-                            args,
-                            arg_types,
-                        } => {
-                            let mut worker_thread = galfus_vm::thread::VmThreadState::new();
-                            let module = &self.vm.as_ref().unwrap().graph.get(act_module_id).unwrap().module;
-                            
-                            let mut vm_args = Vec::with_capacity(args.len());
-                            for (boundary, expected_ty) in args.into_iter().zip(arg_types.into_iter()) {
-                                let vm_val = crate::task::encode_into_thread_heap(
-                                    &mut worker_thread.heap,
-                                    boundary,
-                                    expected_ty,
-                                    act_module_id,
-                                    module
-                                ).unwrap();
-                                vm_args.push(vm_val);
-                            }
-                            worker_thread.call_stack.push(galfus_vm::runtime::CallFrame {
-                                module_id: act_module_id,
-                                func_idx,
-                                pc: 0,
-                                registers: vec![galfus_vm::VmValue::Null; 256],
-                                return_dest: None,
-                            });
-                            for (i, val) in vm_args.into_iter().enumerate() {
-                                worker_thread.write_reg(galfus_bytecode::instruction::Reg(i as u16), val).unwrap();
-                            }
-                            
-                            let worker_id = self.kernel.spawn(worker_thread, None);
-                            let spawned_thread = self.kernel.take_thread(worker_id).unwrap();
-                            self.kernel.enqueue_runnable(worker_id, spawned_thread);
-                            
-                            self.kernel.register_waiter(worker_id, thread_id, future_id);
-                        }
-                        _ => {
-                            // Phase E: Internal, Provider, Adapter
-                            unimplemented!("Activation for non-Galfus functions not yet implemented in Phase D")
-                        }
-                    }
-                }
-                
-                self.pending_continuations.insert(
-                    key,
-                    PendingContinuation {
+                let waiter = crate::orchestrator::future_registry::Waiter {
+                    continuation: PendingContinuation {
                         thread_id,
                         continuation,
                         module_id,
@@ -374,7 +265,140 @@ impl Orchestrator {
                         operation: PendingOperation::Future,
                         active: Arc::new(AtomicBool::new(true)),
                     },
-                );
+                };
+                let disposition = match self
+                    .future_registry
+                    .add_waiter(thread_id, future_id, waiter)
+                {
+                    Ok(disposition) => disposition,
+                    Err(error) => {
+                        self.failure = Some(error.with_stack(execution_stack(&thread)));
+                        self.kernel.cancel(thread_id);
+                        return;
+                    }
+                };
+
+                if let crate::orchestrator::future_registry::WaitDisposition::Resolved {
+                    waiter,
+                    result,
+                } = disposition
+                {
+                    self.kernel.block(thread_id, thread, None);
+                    self.resume_pending(
+                        thread_id,
+                        waiter.continuation,
+                        result,
+                        PendingKey::Future(future_id),
+                    );
+                    return;
+                }
+                if matches!(
+                    disposition,
+                    crate::orchestrator::future_registry::WaitDisposition::Discarded
+                ) {
+                    self.failure = Some(
+                        ExecutionFailure::new(
+                            ExecutionFailureKind::InvalidContinuation,
+                            "discarded future cannot be awaited",
+                        )
+                        .with_thread_id(thread_id.raw())
+                        .with_future_id(future_id)
+                        .with_stack(execution_stack(&thread)),
+                    );
+                    self.kernel.cancel(thread_id);
+                    return;
+                }
+
+                let activation = match self
+                    .future_registry
+                    .take_activation_for_start(thread_id, future_id)
+                {
+                    Ok(activation) => activation,
+                    Err(error) => {
+                        self.failure = Some(error.with_stack(execution_stack(&thread)));
+                        self.kernel.cancel(thread_id);
+                        return;
+                    }
+                };
+
+                if let Some(activation) = activation {
+                    match activation {
+                        crate::orchestrator::future_registry::Activation::GalfusFunction {
+                            module_id: act_module_id,
+                            func_idx,
+                            args,
+                            arg_types,
+                        } => {
+                            let mut worker_thread = galfus_vm::thread::VmThreadState::new();
+                            let module = &self
+                                .vm
+                                .as_ref()
+                                .unwrap()
+                                .graph
+                                .get(act_module_id)
+                                .unwrap()
+                                .module;
+
+                            let mut vm_args = Vec::with_capacity(args.len());
+                            for (boundary, expected_ty) in
+                                args.into_iter().zip(arg_types.into_iter())
+                            {
+                                let vm_val = match crate::task::encode_into_thread_heap(
+                                    &mut worker_thread.heap,
+                                    boundary,
+                                    expected_ty,
+                                    act_module_id,
+                                    module,
+                                ) {
+                                    Ok(value) => value,
+                                    Err(error) => {
+                                        self.failure = Some(
+                                            ExecutionFailure::new(
+                                                ExecutionFailureKind::BoundaryCodecFailure,
+                                                format!(
+                                                    "invalid future worker argument: {error:?}"
+                                                ),
+                                            )
+                                            .with_thread_id(thread_id.raw())
+                                            .with_module_id(act_module_id.raw().into())
+                                            .with_stack(execution_stack(&thread)),
+                                        );
+                                        self.kernel.cancel(thread_id);
+                                        return;
+                                    }
+                                };
+                                vm_args.push(vm_val);
+                            }
+                            worker_thread
+                                .call_stack
+                                .push(galfus_vm::runtime::CallFrame {
+                                    module_id: act_module_id,
+                                    func_idx,
+                                    pc: 0,
+                                    registers: vec![galfus_vm::VmValue::Null; 256],
+                                    return_dest: None,
+                                });
+                            for (i, val) in vm_args.into_iter().enumerate() {
+                                worker_thread
+                                    .write_reg(galfus_bytecode::instruction::Reg(i as u16), val)
+                                    .unwrap();
+                            }
+
+                            let worker_id = self.kernel.spawn(worker_thread, None);
+                            let spawned_thread = self.kernel.take_thread(worker_id).unwrap();
+                            self.kernel.enqueue_runnable(worker_id, spawned_thread);
+
+                            self.kernel.register_waiter(worker_id, thread_id, future_id);
+                        }
+                        _ => {
+                            // Phase E: Internal, Provider, Adapter
+                            unimplemented!(
+                                "Activation for non-Galfus functions not yet implemented in Phase D"
+                            )
+                        }
+                    }
+                }
+
                 self.kernel.block(thread_id, thread, None);
             }
             galfus_vm::VmEffect::ReceiveFilter {
@@ -483,7 +507,9 @@ impl Orchestrator {
                     .and_then(|id| self.kernel.state(id))
                     .and_then(|state| state.exit_reason())
                     .and_then(|result| match result {
-                        Ok(galfus_contract::BoundaryValue::I32(code)) => Some(galfus_vm::VmValue::Int32(code)),
+                        Ok(galfus_contract::BoundaryValue::I32(code)) => {
+                            Some(galfus_vm::VmValue::Int32(code))
+                        }
                         _ => None,
                     })
                     .unwrap_or(galfus_vm::VmValue::Null);
@@ -542,16 +568,29 @@ impl Orchestrator {
                     .and_then(|target| self.kernel.state(target))
                     .and_then(|state| state.exit_reason());
                 if let Some(result) = exit_code {
-                    self.future_registry
-                        .insert_resolved(thread_id, future_id, result);
+                    if let Err(error) = self
+                        .future_registry
+                        .insert_resolved(thread_id, future_id, result)
+                    {
+                        self.failure = Some(error.with_stack(execution_stack(&thread)));
+                        self.kernel.cancel(thread_id);
+                        return;
+                    }
                 } else {
                     match maybe_target {
                         Some(target_id) => {
                             self.kernel.register_waiter(target_id, thread_id, future_id);
                         }
                         None => {
-                            self.future_registry
-                                .insert_resolved(thread_id, future_id, Ok(galfus_contract::BoundaryValue::Null));
+                            if let Err(error) = self.future_registry.insert_resolved(
+                                thread_id,
+                                future_id,
+                                Ok(galfus_contract::BoundaryValue::Null),
+                            ) {
+                                self.failure = Some(error.with_stack(execution_stack(&thread)));
+                                self.kernel.cancel(thread_id);
+                                return;
+                            }
                         }
                     }
                 }
@@ -564,33 +603,59 @@ impl Orchestrator {
             }
             galfus_vm::VmEffect::CreateFuture {
                 module_id,
+                target_module_id,
                 func_idx,
                 args,
                 arg_types,
-                return_type: _,
+                return_type,
             } => {
                 let future_id = self.next_request_id;
                 self.next_request_id += 1;
-                
-                let module = &self.vm.as_ref().unwrap().graph.get(module_id).unwrap().module;
+
+                let module = &self
+                    .vm
+                    .as_ref()
+                    .unwrap()
+                    .graph
+                    .get(module_id)
+                    .unwrap()
+                    .module;
                 let mut encoded_args = Vec::with_capacity(args.len());
                 for (arg, ty) in args.into_iter().zip(arg_types.iter()) {
-                    let boundary = crate::task::decode_from_thread_heap(&thread.heap, arg, *ty, module).unwrap();
-                    encoded_args.push(boundary);
+                    match crate::task::decode_from_thread_heap(&thread.heap, arg, *ty, module) {
+                        Ok(value) => encoded_args.push(value),
+                        Err(error) => {
+                            self.failure = Some(
+                                ExecutionFailure::new(
+                                    ExecutionFailureKind::BoundaryCodecFailure,
+                                    format!("invalid future argument: {error:?}"),
+                                )
+                                .with_thread_id(thread_id.raw())
+                                .with_module_id(module_id.raw().into())
+                                .with_stack(execution_stack(&thread)),
+                            );
+                            self.kernel.cancel(thread_id);
+                            return;
+                        }
+                    }
                 }
 
-                self.future_registry.insert_created(
+                if let Err(error) = self.future_registry.insert_created(
                     thread_id,
                     future_id,
-                    None,
+                    Some(return_type),
                     crate::orchestrator::future_registry::Activation::GalfusFunction {
-                        module_id,
+                        module_id: target_module_id,
                         func_idx,
                         args: encoded_args,
                         arg_types,
-                    }
-                );
-                
+                    },
+                ) {
+                    self.failure = Some(error.with_stack(execution_stack(&thread)));
+                    self.kernel.cancel(thread_id);
+                    return;
+                }
+
                 self.resume_or_fail_front(
                     thread_id,
                     thread,
@@ -598,15 +663,79 @@ impl Orchestrator {
                     galfus_vm::VmValue::Uint64(future_id),
                 );
             }
-            galfus_vm::VmEffect::CreateIndirectFuture { 
-                module_id: _, 
-                func: _, 
-                args: _, 
-                arg_types: _,
-                return_type: _,
+            galfus_vm::VmEffect::CreateIndirectFuture {
+                module_id,
+                func,
+                args,
+                arg_types,
+                return_type,
             } => {
                 let future_id = self.next_request_id;
                 self.next_request_id += 1;
+                let galfus_vm::VmValue::Function {
+                    module_id: target_module_id,
+                    func_idx,
+                } = func
+                else {
+                    self.failure = Some(
+                        ExecutionFailure::new(
+                            ExecutionFailureKind::InvalidContinuation,
+                            "indirect async call requires a function value",
+                        )
+                        .with_thread_id(thread_id.raw())
+                        .with_module_id(module_id.raw().into())
+                        .with_stack(execution_stack(&thread)),
+                    );
+                    self.kernel.cancel(thread_id);
+                    return;
+                };
+                let target_module = &self
+                    .vm
+                    .as_ref()
+                    .unwrap()
+                    .graph
+                    .get(target_module_id)
+                    .unwrap()
+                    .module;
+                let mut encoded_args = Vec::with_capacity(args.len());
+                for (arg, ty) in args.into_iter().zip(arg_types.iter()) {
+                    match crate::task::decode_from_thread_heap(
+                        &thread.heap,
+                        arg,
+                        *ty,
+                        target_module,
+                    ) {
+                        Ok(value) => encoded_args.push(value),
+                        Err(error) => {
+                            self.failure = Some(
+                                ExecutionFailure::new(
+                                    ExecutionFailureKind::BoundaryCodecFailure,
+                                    format!("invalid indirect future argument: {error:?}"),
+                                )
+                                .with_thread_id(thread_id.raw())
+                                .with_module_id(module_id.raw().into())
+                                .with_stack(execution_stack(&thread)),
+                            );
+                            self.kernel.cancel(thread_id);
+                            return;
+                        }
+                    }
+                }
+                if let Err(error) = self.future_registry.insert_created(
+                    thread_id,
+                    future_id,
+                    Some(return_type),
+                    crate::orchestrator::future_registry::Activation::GalfusFunction {
+                        module_id: target_module_id,
+                        func_idx,
+                        args: encoded_args,
+                        arg_types,
+                    },
+                ) {
+                    self.failure = Some(error.with_stack(execution_stack(&thread)));
+                    self.kernel.cancel(thread_id);
+                    return;
+                }
                 self.resume_or_fail_front(
                     thread_id,
                     thread,
@@ -650,7 +779,14 @@ impl Orchestrator {
         let future_id = self.next_request_id;
         self.next_request_id += 1;
         let boundary = crate::task::vm_value_to_boundary(value);
-        self.future_registry.insert_resolved(thread_id, future_id, Ok(boundary));
+        if let Err(error) = self
+            .future_registry
+            .insert_resolved(thread_id, future_id, Ok(boundary))
+        {
+            self.failure = Some(error);
+            self.kernel.cancel(thread_id);
+            return;
+        }
         self.resume_or_fail_front(
             thread_id,
             thread,

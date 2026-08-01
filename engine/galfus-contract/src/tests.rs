@@ -154,7 +154,10 @@ fn main_kernel_tasks_accept_non_send_state() {
     let KernelTask::Main(task) = task else {
         panic!("main task must preserve its affinity");
     };
-    assert!(matches!(task.run(1), ThreadResult::Completed(Ok(BoundaryValue::I32(0)))));
+    assert!(matches!(
+        task.run(1),
+        ThreadResult::Completed(Ok(BoundaryValue::I32(0)))
+    ));
 }
 
 fn assert_builtin_checks(name: &str, source: &str) {

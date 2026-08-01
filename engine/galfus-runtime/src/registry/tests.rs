@@ -60,7 +60,9 @@ fn registry_tracks_state_after_the_thread_body_is_taken() {
     assert!(registry.mark_exited(id, Ok(galfus_contract::BoundaryValue::I32(7))));
     assert_eq!(
         registry.state(id),
-        Some(ThreadState::Exited(Ok(galfus_contract::BoundaryValue::I32(7))))
+        Some(ThreadState::Exited(Ok(
+            galfus_contract::BoundaryValue::I32(7)
+        )))
     );
 }
 
