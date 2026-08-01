@@ -250,6 +250,32 @@ fn codec_round_trips_nominal_external_handles() {
 }
 
 #[test]
+fn codec_round_trips_function_references() {
+    let module = module(vec![BytecodeType::Function {
+        params: vec![],
+        ret: TypeIdx(0),
+    }]);
+    let mut heap = galfus_vm::thread::PrivateHeap::new();
+    let value = BoundaryValue::Function {
+        module_id: 3,
+        func_idx: 7,
+    };
+
+    let encoded = encode_into_thread_heap(
+        &mut heap,
+        value.clone(),
+        TypeIdx(0),
+        galfus_core::ModuleId::new(1),
+        &module,
+    )
+    .expect("function reference encodes");
+    assert_eq!(
+        decode_from_thread_heap(&heap, encoded, TypeIdx(0), &module),
+        Ok(value)
+    );
+}
+
+#[test]
 fn codec_rejects_external_handles_with_the_wrong_kind() {
     let module = module(vec![BytecodeType::ExternalHandle("file".to_string())]);
     let mut heap = galfus_vm::thread::PrivateHeap::new();

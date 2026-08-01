@@ -59,6 +59,7 @@ pub struct FutureRecord {
     pub owner_thread_id: ThreadId,
     pub future_id: u64,
     pub payload_type: Option<TypeIdx>,
+    pub payload_module_id: Option<ModuleId>,
     pub activation: Option<Activation>,
     pub state: FutureState,
     pub waiters: Vec<Waiter>,
@@ -81,6 +82,7 @@ impl FutureRegistry {
         owner_thread_id: ThreadId,
         future_id: u64,
         payload_type: Option<TypeIdx>,
+        payload_module_id: Option<ModuleId>,
         activation: Activation,
     ) -> Result<(), ExecutionFailure> {
         if self.records.contains_key(&(owner_thread_id, future_id)) {
@@ -95,6 +97,7 @@ impl FutureRegistry {
             owner_thread_id,
             future_id,
             payload_type,
+            payload_module_id,
             activation: Some(activation),
             state: FutureState::Created,
             waiters: Vec::new(),
@@ -108,9 +111,16 @@ impl FutureRegistry {
         owner_thread_id: ThreadId,
         future_id: u64,
         payload_type: Option<TypeIdx>,
+        payload_module_id: Option<ModuleId>,
         activation: Activation,
     ) -> Result<(), ExecutionFailure> {
-        self.create(owner_thread_id, future_id, payload_type, activation)
+        self.create(
+            owner_thread_id,
+            future_id,
+            payload_type,
+            payload_module_id,
+            activation,
+        )
     }
 
     pub fn take_activation_for_start(
@@ -234,6 +244,7 @@ impl FutureRegistry {
             owner_thread_id,
             future_id,
             None,
+            None,
             Activation::Internal {
                 operation: "intrinsic".to_string(),
                 args: vec![],
@@ -242,6 +253,15 @@ impl FutureRegistry {
         )?;
         let _waiters = self.complete(owner_thread_id, future_id, result)?;
         Ok(())
+    }
+
+    pub fn payload_schema(
+        &self,
+        owner_thread_id: ThreadId,
+        future_id: u64,
+    ) -> Option<(ModuleId, TypeIdx)> {
+        let record = self.records.get(&(owner_thread_id, future_id))?;
+        Some((record.payload_module_id?, record.payload_type?))
     }
 
     pub fn get(&self, thread_id: ThreadId, future_id: u64) -> Option<&FutureRecord> {

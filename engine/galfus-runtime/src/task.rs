@@ -44,6 +44,16 @@ pub(crate) fn decode_from_thread_heap(
         (BytecodeType::Float64, galfus_vm::VmValue::Float64(value)) => {
             Ok(BoundaryValue::F64(value))
         }
+        (
+            BytecodeType::Function { .. },
+            galfus_vm::VmValue::Function {
+                module_id,
+                func_idx,
+            },
+        ) => Ok(BoundaryValue::Function {
+            module_id: module_id.raw(),
+            func_idx: func_idx.raw(),
+        }),
         (BytecodeType::ExternalHandle(kind), galfus_vm::VmValue::Object(reference)) => match heap
             .get_object(reference)
         {
@@ -203,6 +213,16 @@ pub(crate) fn encode_into_thread_heap(
         (BytecodeType::Float64, BoundaryValue::F64(value)) => {
             Ok(galfus_vm::VmValue::Float64(value))
         }
+        (
+            BytecodeType::Function { .. },
+            BoundaryValue::Function {
+                module_id,
+                func_idx,
+            },
+        ) => Ok(galfus_vm::VmValue::Function {
+            module_id: galfus_core::ModuleId::new(module_id),
+            func_idx: galfus_bytecode::instruction::FuncIdx(func_idx),
+        }),
         (BytecodeType::ExternalHandle(kind), BoundaryValue::Handle { kind: actual, id })
             if kind == &actual =>
         {
@@ -306,6 +326,7 @@ pub(crate) fn boundary_type(
         Some(BytecodeType::Uint64) => Ok(BoundaryType::U64),
         Some(BytecodeType::Float32) => Ok(BoundaryType::F32),
         Some(BytecodeType::Float64) => Ok(BoundaryType::F64),
+        Some(BytecodeType::Function { .. }) => Ok(BoundaryType::Function),
         Some(BytecodeType::ExternalHandle(kind)) => Ok(BoundaryType::Handle { kind: kind.clone() }),
         Some(BytecodeType::Array(element)) => Ok(BoundaryType::Array(Box::new(boundary_type(
             module, *element,
@@ -327,6 +348,7 @@ pub struct RuntimeTask {
     pub thread: Option<galfus_vm::thread::VmThreadState>,
     pub vm: Arc<VirtualMachine>,
     pub events: crate::event::EventSink,
+    pub future_completion: Option<(registry::ThreadId, u64)>,
 }
 
 impl RuntimeTask {
@@ -335,12 +357,14 @@ impl RuntimeTask {
         thread: galfus_vm::thread::VmThreadState,
         vm: Arc<VirtualMachine>,
         events: crate::event::EventSink,
+        future_completion: Option<(registry::ThreadId, u64)>,
     ) -> Self {
         Self {
             thread_id,
             thread: Some(thread),
             vm,
             events,
+            future_completion,
         }
     }
 }
@@ -461,11 +485,22 @@ impl RunnableTask for RuntimeTask {
                     .with_stack(execution_stack(&thread))),
                 };
 
-                self.events.send(crate::event::RuntimeEvent::Exited {
-                    thread_id: self.thread_id,
-                    thread,
-                    result: result.clone(),
-                });
+                if let Some((owner_thread_id, future_id)) = self.future_completion {
+                    self.events
+                        .send(crate::event::RuntimeEvent::FutureWorkerCompleted {
+                            worker_thread_id: self.thread_id,
+                            owner_thread_id,
+                            future_id,
+                            thread,
+                            result: result.clone(),
+                        });
+                } else {
+                    self.events.send(crate::event::RuntimeEvent::Exited {
+                        thread_id: self.thread_id,
+                        thread,
+                        result: result.clone(),
+                    });
+                }
                 return ThreadResult::Completed(result);
             }
             galfus_vm::VmStep::Suspend {

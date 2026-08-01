@@ -56,6 +56,14 @@ pub enum RuntimeEvent {
         future_id: u64,
         result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
     },
+    /// A dedicated worker completed a Galfus future activation.
+    FutureWorkerCompleted {
+        worker_thread_id: ThreadId,
+        owner_thread_id: ThreadId,
+        future_id: u64,
+        thread: VmThreadState,
+        result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
+    },
     /// Advances the virtual clock for blocked threads.
     Tick {
         delta_ms: u64,

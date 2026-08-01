@@ -254,3 +254,38 @@ impl galfus_contract::MessageInjector for ExecutionHandle {
         self.resolve_request(thread_id, request_id, result);
     }
 }
+
+pub(crate) struct FutureCompletionInjector {
+    sink: EventSink,
+    owner_thread_id: crate::registry::ThreadId,
+    future_id: u64,
+}
+
+impl FutureCompletionInjector {
+    pub(crate) fn new(
+        sink: EventSink,
+        owner_thread_id: crate::registry::ThreadId,
+        future_id: u64,
+    ) -> Self {
+        Self {
+            sink,
+            owner_thread_id,
+            future_id,
+        }
+    }
+}
+
+impl galfus_contract::MessageInjector for FutureCompletionInjector {
+    fn inject_system_response(
+        &self,
+        _thread_id: usize,
+        _request_id: u64,
+        result: Result<BoundaryValue, ExecutionFailure>,
+    ) {
+        self.sink.send(RuntimeEvent::FutureCompleted {
+            thread_id: self.owner_thread_id,
+            future_id: self.future_id,
+            result,
+        });
+    }
+}

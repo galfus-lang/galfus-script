@@ -27,6 +27,7 @@ pub enum BoundaryType {
     F32,
     F64,
     Bytes,
+    Function,
     Array(Box<BoundaryType>),
     Tuple(Vec<BoundaryType>),
     Choice {
@@ -53,6 +54,10 @@ pub enum BoundaryValue {
     F32(f32),
     F64(f64),
     Bytes(Vec<u8>),
+    Function {
+        module_id: u32,
+        func_idx: u16,
+    },
     Array {
         element_type: BoundaryType,
         values: Vec<BoundaryValue>,

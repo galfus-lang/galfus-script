@@ -70,6 +70,7 @@ pub(crate) struct Orchestrator {
     shutting_down: bool,
     late_completions: VecDeque<LateCompletion>,
     root_thread_id: Option<crate::registry::ThreadId>,
+    future_workers: HashMap<crate::registry::ThreadId, (crate::registry::ThreadId, u64)>,
     pub(crate) future_registry: FutureRegistry,
 }
 
@@ -93,6 +94,7 @@ impl Orchestrator {
             shutting_down: false,
             late_completions: VecDeque::new(),
             root_thread_id: None,
+            future_workers: HashMap::new(),
             future_registry: FutureRegistry::new(),
         }
     }
@@ -379,6 +381,39 @@ impl Orchestrator {
         future_id: u64,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
+        if let (Some((payload_module_id, payload_type)), Ok(value)) = (
+            self.future_registry.payload_schema(thread_id, future_id),
+            &result,
+        ) {
+            let module = &self
+                .vm
+                .as_ref()
+                .expect("VM is configured before execution")
+                .graph
+                .get(payload_module_id)
+                .expect("future payload module is loaded")
+                .module;
+            let mut payload_heap = galfus_vm::thread::PrivateHeap::new();
+            if let Err(error) = crate::task::encode_into_thread_heap(
+                &mut payload_heap,
+                value.clone(),
+                payload_type,
+                payload_module_id,
+                module,
+            ) {
+                self.failure = Some(
+                    ExecutionFailure::new(
+                        ExecutionFailureKind::BoundaryCodecFailure,
+                        format!("invalid future worker result: {error:?}"),
+                    )
+                    .with_thread_id(thread_id.raw())
+                    .with_future_id(future_id)
+                    .with_module_id(payload_module_id.raw().into()),
+                );
+                self.kernel.cancel(thread_id);
+                return;
+            }
+        }
         let waiters = match self
             .future_registry
             .complete(thread_id, future_id, result.clone())
@@ -414,6 +449,7 @@ impl Orchestrator {
                     thread,
                     self.vm.as_ref().unwrap().clone(),
                     self.sink.clone(),
+                    self.future_workers.get(&thread_id).copied(),
                 ));
 
                 let kernel_task = KernelTask::Any(task);
@@ -473,6 +509,18 @@ impl Orchestrator {
                     future_id,
                     result,
                 } => self.complete_future(thread_id, future_id, result),
+                RuntimeEvent::FutureWorkerCompleted {
+                    worker_thread_id,
+                    owner_thread_id,
+                    future_id,
+                    thread,
+                    result,
+                } => {
+                    self.future_workers.remove(&worker_thread_id);
+                    self.kernel
+                        .mark_exited(worker_thread_id, thread, result.clone());
+                    self.complete_future(owner_thread_id, future_id, result);
+                }
                 RuntimeEvent::Tick { delta_ms } => {
                     self.kernel.tick(delta_ms);
                 }

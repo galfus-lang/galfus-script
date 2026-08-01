@@ -41,7 +41,13 @@ fn waiter() -> Waiter {
 fn resolved_future_keeps_its_cached_result_for_later_awaits() {
     let mut registry = FutureRegistry::new();
     registry
-        .create(owner(), 7, Some(TypeIdx(3)), activation())
+        .create(
+            owner(),
+            7,
+            Some(TypeIdx(3)),
+            Some(ModuleId::new(1)),
+            activation(),
+        )
         .unwrap();
     registry
         .complete(owner(), 7, Ok(BoundaryValue::I32(42)))
@@ -63,7 +69,9 @@ fn resolved_future_keeps_its_cached_result_for_later_awaits() {
 #[test]
 fn created_future_is_discarded_without_starting_its_activation() {
     let mut registry = FutureRegistry::new();
-    registry.create(owner(), 7, None, activation()).unwrap();
+    registry
+        .create(owner(), 7, None, None, activation())
+        .unwrap();
     registry.discard(owner(), 7).unwrap();
 
     assert!(matches!(
@@ -79,7 +87,9 @@ fn created_future_is_discarded_without_starting_its_activation() {
 #[test]
 fn duplicate_completion_is_rejected_without_replacing_the_cache() {
     let mut registry = FutureRegistry::new();
-    registry.create(owner(), 7, None, activation()).unwrap();
+    registry
+        .create(owner(), 7, None, None, activation())
+        .unwrap();
     registry
         .complete(owner(), 7, Ok(BoundaryValue::I32(1)))
         .unwrap();
@@ -98,7 +108,9 @@ fn duplicate_completion_is_rejected_without_replacing_the_cache() {
 #[test]
 fn discarded_future_cannot_be_completed_later() {
     let mut registry = FutureRegistry::new();
-    registry.create(owner(), 7, None, activation()).unwrap();
+    registry
+        .create(owner(), 7, None, None, activation())
+        .unwrap();
     registry.discard(owner(), 7).unwrap();
 
     assert!(
@@ -115,7 +127,9 @@ fn discarded_future_cannot_be_completed_later() {
 #[test]
 fn completion_drains_all_registered_waiters_once() {
     let mut registry = FutureRegistry::new();
-    registry.create(owner(), 7, None, activation()).unwrap();
+    registry
+        .create(owner(), 7, None, None, activation())
+        .unwrap();
     assert!(matches!(
         registry.add_waiter(owner(), 7, waiter()),
         Ok(WaitDisposition::Registered)
@@ -141,9 +155,15 @@ fn completion_drains_all_registered_waiters_once() {
 #[test]
 fn duplicate_ids_and_foreign_owners_are_rejected() {
     let mut registry = FutureRegistry::new();
-    registry.create(owner(), 7, None, activation()).unwrap();
+    registry
+        .create(owner(), 7, None, None, activation())
+        .unwrap();
 
-    assert!(registry.create(owner(), 7, None, activation()).is_err());
+    assert!(
+        registry
+            .create(owner(), 7, None, None, activation())
+            .is_err()
+    );
     assert!(registry.add_waiter(foreign_owner(), 7, waiter()).is_err());
     assert!(
         registry
