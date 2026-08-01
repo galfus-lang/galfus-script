@@ -26,6 +26,7 @@ pub struct Workspace {
     pub semantic_state: SemanticState,
     pub bytecode_state: BytecodeState,
     pub frontend: FrontendSession,
+    pub adapters: HashMap<String, Arc<dyn galfus_contract::ModuleAdapter>>,
 }
 
 pub enum LoadResult {
@@ -63,7 +64,12 @@ impl Workspace {
             semantic_state: SemanticState::new(),
             bytecode_state: BytecodeState::new(),
             frontend: FrontendSession::new(),
+            adapters: HashMap::new(),
         }
+    }
+
+    pub fn register_adapter(&mut self, adapter: Arc<dyn galfus_contract::ModuleAdapter>) {
+        self.adapters.insert(adapter.name().to_string(), adapter);
     }
 
     pub fn load_config(&mut self, config_toml: &[u8]) -> Result<LoadResult, WorkspaceError> {

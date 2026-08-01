@@ -153,5 +153,34 @@
     "prefix": "gtransaction",
     "description": "Create a transaction block",
     "body": ["transaction {", "  ${1}", "}"]
+  },
+  "Async Function": {
+    "prefix": "gasyncfn",
+    "description": "Create an async Galfus function",
+    "body": ["fn(async) ${1:name}(${2}): ${3:null} {", "  ${4}", "}"]
+  },
+  "Async Provider Function": {
+    "prefix": "gproviderfn",
+    "description": "Declare an async provider function boundary",
+    "body": ["fn(async) __provider_${1:module}_${2:name}(${3}): ${4:null}"]
+  },
+  "Proxy File Template": {
+    "prefix": "gfp",
+    "description": "Create a Galfus proxy definition file (.gfp)",
+    "body": [
+      "---",
+      "adapter = \"${1:c_abi}\"",
+      "",
+      "[targets]",
+      "windows = \"./bin/${2:lib}.dll\"",
+      "linux = \"./bin/lib${2:lib}.so\"",
+      "macos = \"./bin/lib${2:lib}.dylib\"",
+      "",
+      "[metadata]",
+      "thread_affinity = \"${3:main}\"",
+      "---",
+      "",
+      "export fn(async) ${4:Function}(${5}): ${6:i32}"
+    ]
   }
 }

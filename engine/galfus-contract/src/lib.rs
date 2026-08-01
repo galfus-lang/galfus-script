@@ -12,7 +12,7 @@ pub use builtins::*;
 pub use thread::*;
 
 /// A typed value that crosses the execution boundary safely.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum BoundaryType {
     Null,
     Bool,
@@ -318,4 +318,66 @@ impl Providers {
     pub fn host_mut(&mut self) -> Option<&mut (dyn HostProvider + 'static)> {
         self.host.as_deref_mut()
     }
+}
+
+/// Description of an external proxy module compiled from a .gfp file.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ExternalModuleDescriptor {
+    pub adapter: String,
+    pub targets: HashMap<String, String>,
+    pub metadata: HashMap<String, String>,
+    pub exports: Vec<ExternalFunctionSignature>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ExternalFunctionSignature {
+    pub name: String,
+    pub is_async: bool,
+    pub parameter_types: Vec<BoundaryType>,
+    pub return_type: BoundaryType,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum AdapterValidationError {
+    #[error("unsupported adapter: {0}")]
+    UnsupportedAdapter(String),
+
+    #[error("missing target for platform '{platform}': {reason}")]
+    MissingPlatformTarget { platform: String, reason: String },
+
+    #[error("invalid schema: {0}")]
+    InvalidSchema(String),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum AdapterLoadError {
+    #[error("failed to load dynamic library at '{path}': {message}")]
+    LibraryLoadFailed { path: String, message: String },
+
+    #[error("missing symbol '{symbol}' in library '{path}'")]
+    SymbolNotFound { symbol: String, path: String },
+
+    #[error("adapter load error: {0}")]
+    Other(String),
+}
+
+pub struct LoadedExternalModule {
+    pub name: String,
+    pub functions: HashMap<
+        String,
+        sync::Arc<dyn Fn(&[BoundaryValue]) -> Result<BoundaryValue, String> + Send + Sync>,
+    >,
+}
+
+pub trait ModuleAdapter: Send + Sync {
+    fn name(&self) -> &str;
+    fn validate_schema(
+        &self,
+        descriptor: &ExternalModuleDescriptor,
+    ) -> Result<(), AdapterValidationError>;
+    fn load_module(
+        &self,
+        target_path: &str,
+        descriptor: &ExternalModuleDescriptor,
+    ) -> Result<LoadedExternalModule, AdapterLoadError>;
 }

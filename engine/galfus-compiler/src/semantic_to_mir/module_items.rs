@@ -150,16 +150,21 @@ impl<'a> MirBuilder<'a> {
             }
         }
 
-        let body = syntax.node(item)?.last_child()?;
+        let last_node = syntax.node(item)?.last_child()?;
 
         if syntax
-            .node(body)
-            .is_some_and(|body| body.kind() == SyntaxNodeKind::Block)
+            .node(last_node)
+            .is_some_and(|node| node.kind() == SyntaxNodeKind::Block)
         {
-            builder_ctx.lower_block(body);
-        } else {
-            let operand = builder_ctx.lower_expression(body);
+            builder_ctx.lower_block(last_node);
+        } else if syntax
+            .node(last_node)
+            .is_some_and(|node| node.kind().is_expression())
+        {
+            let operand = builder_ctx.lower_expression(last_node);
             builder_ctx.terminate_block(Terminator::Return(Some(operand)));
+        } else {
+            builder_ctx.terminate_block(Terminator::Return(None));
         }
         builder_ctx.flush_current_instructions();
 
