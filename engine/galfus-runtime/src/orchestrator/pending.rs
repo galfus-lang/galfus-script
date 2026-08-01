@@ -21,6 +21,7 @@ pub(crate) enum PendingOperation {
     Provider,
     Adapter { module: String, symbol: String },
     Future,
+    AggregateMember { coordinator_id: u64, index: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

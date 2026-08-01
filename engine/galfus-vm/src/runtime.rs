@@ -136,10 +136,12 @@ pub enum VmEffect {
     FutureWaitAll {
         future_ids: Vec<u64>,
         module_id: ModuleId,
+        return_type: TypeIdx,
     },
     FutureWaitRace {
         future_ids: Vec<u64>,
         module_id: ModuleId,
+        return_type: TypeIdx,
     },
     Blocked,
 }

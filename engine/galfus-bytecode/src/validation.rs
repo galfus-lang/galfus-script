@@ -656,13 +656,16 @@ pub fn validate_bytecode_module(
                     dest,
                     futures_start,
                     count,
+                    return_type,
                 }
                 | Instruction::AwaitRace {
                     dest,
                     futures_start,
                     count,
+                    return_type,
                 } => {
                     check_reg(dest, &mut errors);
+                    check_type(return_type, &mut errors);
                     if count > 0 {
                         check_reg(Reg(futures_start.raw() + count as u16 - 1), &mut errors);
                     }

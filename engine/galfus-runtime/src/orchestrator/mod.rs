@@ -26,7 +26,9 @@ use std::sync::{
 use std::thread::{self, ThreadId};
 
 use future_registry::FutureRegistry;
-use pending::{LateCompletion, MAX_LATE_COMPLETIONS, PendingContinuation, PendingKey};
+use pending::{
+    LateCompletion, MAX_LATE_COMPLETIONS, PendingContinuation, PendingKey, PendingOperation,
+};
 pub(crate) use startup::StartupPlan;
 
 /// Proof that orchestration runs on its bound host main thread.
@@ -71,7 +73,25 @@ pub(crate) struct Orchestrator {
     late_completions: VecDeque<LateCompletion>,
     root_thread_id: Option<crate::registry::ThreadId>,
     future_workers: HashMap<crate::registry::ThreadId, (crate::registry::ThreadId, u64)>,
+    thread_exit_waits: HashMap<crate::registry::ThreadId, Vec<(crate::registry::ThreadId, u64)>>,
     pub(crate) future_registry: FutureRegistry,
+    aggregate_coordinators: HashMap<u64, AggregateCoordinator>,
+    aggregate_registration: Option<(u64, usize)>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum AggregateMode {
+    All,
+    Race,
+}
+
+pub(crate) struct AggregateCoordinator {
+    pub(crate) mode: AggregateMode,
+    pub(crate) future_ids: Vec<u64>,
+    pub(crate) pending: PendingContinuation,
+    pub(crate) results: Vec<Option<Result<BoundaryValue, ExecutionFailure>>>,
+    pub(crate) winner: Option<Result<BoundaryValue, ExecutionFailure>>,
+    pub(crate) armed: bool,
 }
 
 impl Orchestrator {
@@ -95,7 +115,10 @@ impl Orchestrator {
             late_completions: VecDeque::new(),
             root_thread_id: None,
             future_workers: HashMap::new(),
+            thread_exit_waits: HashMap::new(),
             future_registry: FutureRegistry::new(),
+            aggregate_coordinators: HashMap::new(),
+            aggregate_registration: None,
         }
     }
 
@@ -309,6 +332,14 @@ impl Orchestrator {
         result: Result<BoundaryValue, ExecutionFailure>,
         key: PendingKey,
     ) {
+        if let PendingOperation::AggregateMember {
+            coordinator_id,
+            index,
+        } = pending.operation
+        {
+            self.complete_aggregate_member(coordinator_id, index, result);
+            return;
+        }
         self.kernel.unblock(thread_id);
         let Some(mut thread) = self.kernel.take_thread(thread_id) else {
             return;
@@ -420,6 +451,10 @@ impl Orchestrator {
         {
             Ok(waiters) => waiters,
             Err(error) => {
+                if error.kind == ExecutionFailureKind::DuplicateCompletion {
+                    self.record_late_completion(thread_id, future_id);
+                    return;
+                }
                 self.failure = Some(error);
                 self.kernel.cancel(thread_id);
                 return;
@@ -434,6 +469,84 @@ impl Orchestrator {
                 PendingKey::Future(future_id),
             );
         }
+    }
+
+    pub(super) fn register_thread_exit_future(
+        &mut self,
+        target_thread_id: crate::registry::ThreadId,
+        owner_thread_id: crate::registry::ThreadId,
+        future_id: u64,
+    ) {
+        self.thread_exit_waits
+            .entry(target_thread_id)
+            .or_default()
+            .push((owner_thread_id, future_id));
+    }
+
+    fn complete_aggregate_member(
+        &mut self,
+        coordinator_id: u64,
+        index: usize,
+        result: Result<BoundaryValue, ExecutionFailure>,
+    ) {
+        let Some(coordinator) = self.aggregate_coordinators.get_mut(&coordinator_id) else {
+            return;
+        };
+        if index >= coordinator.results.len() || coordinator.results[index].is_some() {
+            return;
+        }
+        coordinator.results[index] = Some(result.clone());
+        if matches!(coordinator.mode, AggregateMode::Race) && coordinator.winner.is_none() {
+            coordinator.winner = Some(result);
+        }
+        if !coordinator.armed {
+            return;
+        }
+        self.finish_aggregate_if_ready(coordinator_id);
+    }
+
+    pub(super) fn finish_aggregate_if_ready(&mut self, coordinator_id: u64) {
+        let Some(coordinator) = self.aggregate_coordinators.get(&coordinator_id) else {
+            return;
+        };
+        let result = match coordinator.mode {
+            AggregateMode::All if coordinator.results.iter().all(Option::is_some) => {
+                let values = coordinator
+                    .results
+                    .iter()
+                    .map(|result| result.as_ref().expect("all results are present").clone())
+                    .collect::<Result<Vec<_>, _>>();
+                values.map(BoundaryValue::Tuple)
+            }
+            AggregateMode::Race => match coordinator.winner.clone() {
+                Some(result) => result,
+                None => return,
+            },
+            AggregateMode::All => return,
+        };
+        let Some(coordinator) = self.aggregate_coordinators.remove(&coordinator_id) else {
+            return;
+        };
+        if matches!(coordinator.mode, AggregateMode::Race) {
+            for future_id in coordinator.future_ids {
+                let disposition = self
+                    .future_registry
+                    .discard_for_race(coordinator.pending.thread_id, future_id);
+                if let Ok(future_registry::DiscardDisposition::Running(activation)) = disposition {
+                    self.cancel_future_activation(
+                        coordinator.pending.thread_id,
+                        future_id,
+                        activation,
+                    );
+                }
+            }
+        }
+        self.resume_pending(
+            coordinator.pending.thread_id,
+            coordinator.pending,
+            result,
+            PendingKey::Future(coordinator_id),
+        );
     }
 
     /// Dispatches all currently runnable threads from the VirtualKernel to the driver.
@@ -483,9 +596,12 @@ impl Orchestrator {
                     result,
                 } => {
                     self.kernel.mark_exited(thread_id, thread, result.clone());
-                    let waiters = self.kernel.drain_waiters(thread_id);
-                    for waiter in waiters {
-                        self.complete_future(waiter.waiter_id, waiter.future_id, result.clone());
+                    let waiters = self
+                        .thread_exit_waits
+                        .remove(&thread_id)
+                        .unwrap_or_default();
+                    for (owner_thread_id, future_id) in waiters {
+                        self.complete_future(owner_thread_id, future_id, result.clone());
                     }
                 }
                 RuntimeEvent::Initialized {

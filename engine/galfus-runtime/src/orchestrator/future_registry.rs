@@ -7,6 +7,10 @@ use galfus_bytecode::instruction::{FuncIdx, TypeIdx};
 use galfus_contract::{BoundaryValue, ExecutionFailure};
 use galfus_core::ModuleId;
 use std::collections::HashMap;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 #[derive(Debug, Clone)]
 pub enum Activation {
@@ -55,14 +59,23 @@ pub enum WaitDisposition {
     Discarded,
 }
 
+pub enum DiscardDisposition {
+    Created,
+    Running(Activation),
+    Retained,
+    Terminal,
+}
+
 pub struct FutureRecord {
     pub owner_thread_id: ThreadId,
     pub future_id: u64,
     pub payload_type: Option<TypeIdx>,
     pub payload_module_id: Option<ModuleId>,
     pub activation: Option<Activation>,
+    pub running_activation: Option<Activation>,
     pub state: FutureState,
     pub waiters: Vec<Waiter>,
+    pub active: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -99,8 +112,10 @@ impl FutureRegistry {
             payload_type,
             payload_module_id,
             activation: Some(activation),
+            running_activation: None,
             state: FutureState::Created,
             waiters: Vec::new(),
+            active: Arc::new(AtomicBool::new(true)),
         };
         self.records.insert((owner_thread_id, future_id), record);
         Ok(())
@@ -142,7 +157,9 @@ impl FutureRegistry {
         match record.state {
             FutureState::Created => {
                 record.state = FutureState::Running;
-                Ok(record.activation.take())
+                let activation = record.activation.take();
+                record.running_activation = activation.clone();
+                Ok(activation)
             }
             FutureState::Running | FutureState::Resolved(_) | FutureState::Discarded => Ok(None),
         }
@@ -182,7 +199,24 @@ impl FutureRegistry {
         &mut self,
         owner_thread_id: ThreadId,
         future_id: u64,
-    ) -> Result<(), ExecutionFailure> {
+    ) -> Result<DiscardDisposition, ExecutionFailure> {
+        self.discard_inner(owner_thread_id, future_id, false)
+    }
+
+    pub fn discard_for_race(
+        &mut self,
+        owner_thread_id: ThreadId,
+        future_id: u64,
+    ) -> Result<DiscardDisposition, ExecutionFailure> {
+        self.discard_inner(owner_thread_id, future_id, true)
+    }
+
+    fn discard_inner(
+        &mut self,
+        owner_thread_id: ThreadId,
+        future_id: u64,
+        force: bool,
+    ) -> Result<DiscardDisposition, ExecutionFailure> {
         let record = self
             .records
             .get_mut(&(owner_thread_id, future_id))
@@ -194,11 +228,31 @@ impl FutureRegistry {
                 .with_thread_id(owner_thread_id.raw())
                 .with_future_id(future_id)
             })?;
-        if matches!(record.state, FutureState::Created) {
-            record.activation = None;
-            record.state = FutureState::Discarded;
+        if !force && !record.waiters.is_empty() {
+            return Ok(DiscardDisposition::Retained);
         }
-        Ok(())
+        match record.state {
+            FutureState::Created => {
+                record.activation = None;
+                record.active.store(false, Ordering::Release);
+                record.state = FutureState::Discarded;
+                Ok(DiscardDisposition::Created)
+            }
+            FutureState::Running => {
+                let activation = record.running_activation.take().ok_or_else(|| {
+                    ExecutionFailure::new(
+                        galfus_contract::ExecutionFailureKind::InvalidContinuation,
+                        "running future has no activation descriptor",
+                    )
+                    .with_thread_id(owner_thread_id.raw())
+                    .with_future_id(future_id)
+                })?;
+                record.state = FutureState::Discarded;
+                record.active.store(false, Ordering::Release);
+                Ok(DiscardDisposition::Running(activation))
+            }
+            FutureState::Resolved(_) | FutureState::Discarded => Ok(DiscardDisposition::Terminal),
+        }
     }
 
     pub fn complete(
@@ -230,6 +284,7 @@ impl FutureRegistry {
             .with_future_id(future_id));
         }
         record.activation = None;
+        record.running_activation = None;
         record.state = FutureState::Resolved(result);
         Ok(std::mem::take(&mut record.waiters))
     }
@@ -262,6 +317,16 @@ impl FutureRegistry {
     ) -> Option<(ModuleId, TypeIdx)> {
         let record = self.records.get(&(owner_thread_id, future_id))?;
         Some((record.payload_module_id?, record.payload_type?))
+    }
+
+    pub fn active_flag(
+        &self,
+        owner_thread_id: ThreadId,
+        future_id: u64,
+    ) -> Option<Arc<AtomicBool>> {
+        self.records
+            .get(&(owner_thread_id, future_id))
+            .map(|record| record.active.clone())
     }
 
     pub fn get(&self, thread_id: ThreadId, future_id: u64) -> Option<&FutureRecord> {

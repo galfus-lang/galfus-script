@@ -286,11 +286,13 @@ impl VirtualMachine {
                 dest,
                 futures_start,
                 count,
+                return_type,
             } => {
                 let future_ids = (0..count)
                     .map(|index| {
                         let val = thread.read_reg(Reg(futures_start.raw() + index as u16))?;
                         match val {
+                            Value::Future(id) => Ok(id),
                             Value::Uint64(id) => Ok(id),
                             Value::Uint32(id) => Ok(id.into()),
                             Value::Int64(id) if id >= 0 => Ok(id as u64),
@@ -311,19 +313,22 @@ impl VirtualMachine {
                     effect: VmEffect::FutureWaitAll {
                         future_ids,
                         module_id,
+                        return_type,
                     },
-                    continuation: Continuation::for_provider(dest, module_id, TypeIdx(0)),
+                    continuation: Continuation::for_provider(dest, module_id, return_type),
                 });
             }
             Instruction::AwaitRace {
                 dest,
                 futures_start,
                 count,
+                return_type,
             } => {
                 let future_ids = (0..count)
                     .map(|index| {
                         let val = thread.read_reg(Reg(futures_start.raw() + index as u16))?;
                         match val {
+                            Value::Future(id) => Ok(id),
                             Value::Uint64(id) => Ok(id),
                             Value::Uint32(id) => Ok(id.into()),
                             Value::Int64(id) if id >= 0 => Ok(id as u64),
@@ -344,8 +349,9 @@ impl VirtualMachine {
                     effect: VmEffect::FutureWaitRace {
                         future_ids,
                         module_id,
+                        return_type,
                     },
-                    continuation: Continuation::for_provider(dest, module_id, TypeIdx(0)),
+                    continuation: Continuation::for_provider(dest, module_id, return_type),
                 });
             }
             _ => unreachable!("instruction routed to the wrong runtime handler"),

@@ -396,11 +396,13 @@ pub enum Instruction {
         dest: Reg,
         futures_start: Reg,
         count: u8,
+        return_type: TypeIdx,
     },
     AwaitRace {
         dest: Reg,
         futures_start: Reg,
         count: u8,
+        return_type: TypeIdx,
     },
     Len {
         dest: Reg,

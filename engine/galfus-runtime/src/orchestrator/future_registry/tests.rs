@@ -85,6 +85,28 @@ fn created_future_is_discarded_without_starting_its_activation() {
 }
 
 #[test]
+fn running_future_is_discarded_and_exposes_its_activation_for_cancellation() {
+    let mut registry = FutureRegistry::new();
+    registry
+        .create(owner(), 7, None, None, activation())
+        .unwrap();
+    registry.take_activation_for_start(owner(), 7).unwrap();
+
+    assert!(matches!(
+        registry.discard(owner(), 7),
+        Ok(DiscardDisposition::Running(
+            Activation::GalfusFunction { .. }
+        ))
+    ));
+    assert!(
+        !registry
+            .active_flag(owner(), 7)
+            .expect("record remains retained")
+            .load(std::sync::atomic::Ordering::Acquire)
+    );
+}
+
+#[test]
 fn duplicate_completion_is_rejected_without_replacing_the_cache() {
     let mut registry = FutureRegistry::new();
     registry

@@ -253,10 +253,19 @@ impl Orchestrator {
                 self.kernel.block(thread_id, thread, Some(delay_ms));
             }
             galfus_vm::VmEffect::FutureDropped { future_id } => {
-                if let Err(error) = self.future_registry.discard(thread_id, future_id) {
-                    self.failure = Some(error.with_stack(execution_stack(&thread)));
-                    self.kernel.cancel(thread_id);
-                    return;
+                let disposition = match self.future_registry.discard(thread_id, future_id) {
+                    Ok(disposition) => disposition,
+                    Err(error) => {
+                        self.failure = Some(error.with_stack(execution_stack(&thread)));
+                        self.kernel.cancel(thread_id);
+                        return;
+                    }
+                };
+                if let crate::orchestrator::future_registry::DiscardDisposition::Running(
+                    activation,
+                ) = disposition
+                {
+                    self.cancel_future_activation(thread_id, future_id, activation);
                 }
                 self.resume_or_fail_front(
                     thread_id,
@@ -270,6 +279,7 @@ impl Orchestrator {
                 module_id,
                 return_type,
             } => {
+                let aggregate_registration = self.aggregate_registration.take();
                 let waiter = crate::orchestrator::future_registry::Waiter {
                     continuation: PendingContinuation {
                         thread_id,
@@ -278,7 +288,13 @@ impl Orchestrator {
                         return_type,
                         request_id: future_id,
                         stack: execution_stack(&thread),
-                        operation: PendingOperation::Future,
+                        operation: aggregate_registration.map_or(
+                            PendingOperation::Future,
+                            |(coordinator_id, index)| PendingOperation::AggregateMember {
+                                coordinator_id,
+                                index,
+                            },
+                        ),
                         active: Arc::new(AtomicBool::new(true)),
                     },
                 };
@@ -299,7 +315,9 @@ impl Orchestrator {
                     result,
                 } = disposition
                 {
-                    self.kernel.block(thread_id, thread, None);
+                    if aggregate_registration.is_none() {
+                        self.kernel.block(thread_id, thread, None);
+                    }
                     self.resume_pending(
                         thread_id,
                         waiter.continuation,
@@ -462,7 +480,10 @@ impl Orchestrator {
                                     thread_id,
                                     future_id,
                                 )),
-                                active: Arc::new(AtomicBool::new(true)),
+                                active: self
+                                    .future_registry
+                                    .active_flag(thread_id, future_id)
+                                    .expect("active future has a registry record"),
                             };
                             self.driver
                                 .as_ref()
@@ -513,7 +534,10 @@ impl Orchestrator {
                                     thread_id,
                                     future_id,
                                 )),
-                                active: Arc::new(AtomicBool::new(true)),
+                                active: self
+                                    .future_registry
+                                    .active_flag(thread_id, future_id)
+                                    .expect("active future has a registry record"),
                             };
                             self.driver
                                 .as_ref()
@@ -605,7 +629,7 @@ impl Orchestrator {
                                     match thread_arg(0).and_then(|id| self.kernel.state(id)) {
                                         Some(state) if !state.is_exited() => {
                                             if let Some(target_id) = thread_arg(0) {
-                                                self.kernel.register_waiter(
+                                                self.register_thread_exit_future(
                                                     target_id, thread_id, future_id,
                                                 );
                                             }
@@ -789,7 +813,9 @@ impl Orchestrator {
                                 }
                             };
                             if let Some(result) = immediate {
-                                self.kernel.block(thread_id, thread, None);
+                                if aggregate_registration.is_none() {
+                                    self.kernel.block(thread_id, thread, None);
+                                }
                                 self.complete_future(thread_id, future_id, result);
                                 return;
                             }
@@ -797,7 +823,9 @@ impl Orchestrator {
                     }
                 }
 
-                self.kernel.block(thread_id, thread, None);
+                if aggregate_registration.is_none() {
+                    self.kernel.block(thread_id, thread, None);
+                }
             }
             galfus_vm::VmEffect::ReceiveFilter {
                 sender_id: _,
@@ -977,7 +1005,30 @@ impl Orchestrator {
                 } else {
                     match maybe_target {
                         Some(target_id) => {
-                            self.kernel.register_waiter(target_id, thread_id, future_id);
+                            if let Err(error) = self.future_registry.insert_created(
+                                thread_id,
+                                future_id,
+                                None,
+                                None,
+                                crate::orchestrator::future_registry::Activation::Internal {
+                                    operation: "thread-exit".to_string(),
+                                    args: vec![],
+                                    arg_types: vec![],
+                                },
+                            ) {
+                                self.failure = Some(error.with_stack(execution_stack(&thread)));
+                                self.kernel.cancel(thread_id);
+                                return;
+                            }
+                            if let Err(error) = self
+                                .future_registry
+                                .take_activation_for_start(thread_id, future_id)
+                            {
+                                self.failure = Some(error.with_stack(execution_stack(&thread)));
+                                self.kernel.cancel(thread_id);
+                                return;
+                            }
+                            self.register_thread_exit_future(target_id, thread_id, future_id);
                         }
                         None => {
                             if let Err(error) = self.future_registry.insert_resolved(
@@ -1138,28 +1189,116 @@ impl Orchestrator {
                 );
             }
             galfus_vm::VmEffect::FutureWaitAll {
-                future_ids: _,
-                module_id: _,
+                future_ids,
+                module_id,
+                return_type,
             } => {
-                self.resume_or_fail_front(
+                self.begin_aggregate_wait(
                     thread_id,
                     thread,
                     continuation,
-                    galfus_vm::VmValue::Null,
+                    module_id,
+                    return_type,
+                    future_ids,
+                    crate::orchestrator::AggregateMode::All,
                 );
             }
             galfus_vm::VmEffect::FutureWaitRace {
-                future_ids: _,
-                module_id: _,
+                future_ids,
+                module_id,
+                return_type,
             } => {
-                self.resume_or_fail_front(
+                self.begin_aggregate_wait(
                     thread_id,
                     thread,
                     continuation,
-                    galfus_vm::VmValue::Null,
+                    module_id,
+                    return_type,
+                    future_ids,
+                    crate::orchestrator::AggregateMode::Race,
                 );
             }
         }
+    }
+
+    fn begin_aggregate_wait(
+        &mut self,
+        thread_id: crate::registry::ThreadId,
+        thread: galfus_vm::thread::VmThreadState,
+        continuation: galfus_vm::Continuation,
+        module_id: ModuleId,
+        return_type: TypeIdx,
+        future_ids: Vec<u64>,
+        mode: crate::orchestrator::AggregateMode,
+    ) {
+        let coordinator_id = self.next_request_id;
+        self.next_request_id += 1;
+        self.aggregate_coordinators.insert(
+            coordinator_id,
+            crate::orchestrator::AggregateCoordinator {
+                mode,
+                future_ids: future_ids.clone(),
+                pending: PendingContinuation {
+                    thread_id,
+                    continuation,
+                    module_id,
+                    return_type,
+                    request_id: coordinator_id,
+                    stack: execution_stack(&thread),
+                    operation: PendingOperation::Future,
+                    active: Arc::new(AtomicBool::new(true)),
+                },
+                results: vec![None; future_ids.len()],
+                winner: None,
+                armed: false,
+            },
+        );
+
+        for (index, future_id) in future_ids.into_iter().enumerate() {
+            let Some((_, member_return_type)) =
+                self.future_registry.payload_schema(thread_id, future_id)
+            else {
+                self.failure = Some(
+                    ExecutionFailure::new(
+                        ExecutionFailureKind::InvalidContinuation,
+                        "aggregate member has no payload schema",
+                    )
+                    .with_thread_id(thread_id.raw())
+                    .with_future_id(future_id)
+                    .with_stack(execution_stack(&thread)),
+                );
+                self.aggregate_coordinators.remove(&coordinator_id);
+                self.kernel.cancel(thread_id);
+                return;
+            };
+            self.aggregate_registration = Some((coordinator_id, index));
+            self.handle_effect(
+                thread_id,
+                galfus_vm::thread::VmThreadState::new(),
+                galfus_vm::VmEffect::FutureWait {
+                    future_id,
+                    module_id,
+                    return_type: member_return_type,
+                },
+                galfus_vm::Continuation::for_provider(
+                    galfus_bytecode::instruction::Reg(0),
+                    module_id,
+                    member_return_type,
+                ),
+            );
+            self.aggregate_registration = None;
+            if self.failure.is_some() {
+                self.aggregate_coordinators.remove(&coordinator_id);
+                self.kernel.cancel(thread_id);
+                return;
+            }
+        }
+
+        if let Some(coordinator) = self.aggregate_coordinators.get_mut(&coordinator_id) {
+            coordinator.armed = true;
+        }
+        self.kernel.block(thread_id, thread, None);
+        self.finish_aggregate_if_ready(coordinator_id);
     }
 
     fn future_activation(
@@ -1234,7 +1373,7 @@ impl Orchestrator {
             thread_id,
             thread,
             continuation,
-            galfus_vm::VmValue::Uint64(future_id),
+            galfus_vm::VmValue::Future(future_id),
         );
     }
 }

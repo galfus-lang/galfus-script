@@ -4,14 +4,9 @@ mod tests;
 use crate::queue::{BlockedQueue, RunnableQueue};
 use crate::registry::{MailboxMessage, ThreadId, ThreadRegistry, ThreadState};
 use galfus_vm::thread::VmThreadState;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-
-pub struct WaiterEntry {
-    pub waiter_id: ThreadId,
-    pub future_id: u64,
-}
 
 /// Manages thread lifecycle, scheduling queues, and timers.
 pub struct VirtualKernel {
@@ -19,7 +14,6 @@ pub struct VirtualKernel {
     registry: ThreadRegistry,
     pub(crate) runnable: RunnableQueue,
     blocked: BlockedQueue,
-    waiters: HashMap<ThreadId, Vec<WaiterEntry>>,
 }
 
 impl VirtualKernel {
@@ -29,7 +23,6 @@ impl VirtualKernel {
             registry: ThreadRegistry::new(),
             runnable: RunnableQueue::new(),
             blocked: BlockedQueue::new(),
-            waiters: HashMap::new(),
         }
     }
 
@@ -168,22 +161,6 @@ impl VirtualKernel {
 
     pub fn debug_states(&self) -> Vec<(ThreadId, ThreadState)> {
         self.registry.debug_states()
-    }
-
-    /// Registers a future owned by `waiter_id` to complete when `target_id` exits.
-    pub fn register_waiter(&mut self, target_id: ThreadId, waiter_id: ThreadId, future_id: u64) {
-        self.waiters
-            .entry(target_id)
-            .or_default()
-            .push(WaiterEntry {
-                waiter_id,
-                future_id,
-            });
-    }
-
-    /// Drains all waiters registered for `target_id`, returning their entries.
-    pub fn drain_waiters(&mut self, target_id: ThreadId) -> Vec<WaiterEntry> {
-        self.waiters.remove(&target_id).unwrap_or_default()
     }
 }
 

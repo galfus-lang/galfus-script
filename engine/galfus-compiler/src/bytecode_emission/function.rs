@@ -584,6 +584,15 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                         futures,
                         destination,
                     } => {
+                        let payload_type = self
+                            .func
+                            .locals
+                            .iter()
+                            .find(|local| local.id == *destination)
+                            .expect("await(all) destination must be a local")
+                            .ty;
+                        let return_type =
+                            crate::bytecode_emission::types::lower_type(self.ctx, payload_type);
                         let start_reg = if futures.is_empty() {
                             Reg(0)
                         } else {
@@ -601,6 +610,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                             dest: Reg(destination.raw() as u16),
                             futures_start: start_reg,
                             count: futures.len() as u8,
+                            return_type,
                         });
                         if !futures.is_empty() {
                             self.free_temps(futures.len() as u16);
@@ -610,6 +620,15 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                         futures,
                         destination,
                     } => {
+                        let payload_type = self
+                            .func
+                            .locals
+                            .iter()
+                            .find(|local| local.id == *destination)
+                            .expect("await(race) destination must be a local")
+                            .ty;
+                        let return_type =
+                            crate::bytecode_emission::types::lower_type(self.ctx, payload_type);
                         let start_reg = if futures.is_empty() {
                             Reg(0)
                         } else {
@@ -627,6 +646,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                             dest: Reg(destination.raw() as u16),
                             futures_start: start_reg,
                             count: futures.len() as u8,
+                            return_type,
                         });
                         if !futures.is_empty() {
                             self.free_temps(futures.len() as u16);
