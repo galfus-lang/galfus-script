@@ -273,6 +273,30 @@ impl Orchestrator {
                     self.kernel.cancel(thread_id);
                     return;
                 }
+                // Check if this future was already resolved by an intrinsic effect.
+                if let Some(ready_result) = self.ready_futures.remove(&future_id) {
+                    // Result is already available — complete immediately without blocking.
+                    self.pending_continuations.insert(
+                        key,
+                        PendingContinuation {
+                            thread_id,
+                            continuation,
+                            module_id,
+                            return_type,
+                            request_id: future_id,
+                            stack: execution_stack(&thread),
+                            operation: PendingOperation::Future,
+                            active: Arc::new(AtomicBool::new(true)),
+                        },
+                    );
+                    self.kernel.block(thread_id, thread, None);
+                    self.sink.send(crate::event::RuntimeEvent::FutureCompleted {
+                        thread_id,
+                        future_id,
+                        result: ready_result,
+                    });
+                    return;
+                }
                 self.pending_continuations.insert(
                     key,
                     PendingContinuation {
@@ -304,7 +328,7 @@ impl Orchestrator {
                 let new_id = self
                     .kernel
                     .spawn(new_thread, crate::task::thread_key(&thread, key));
-                self.resume_or_fail(
+                self.resolve_intrinsic_future(
                     thread_id,
                     thread,
                     continuation,
@@ -319,9 +343,7 @@ impl Orchestrator {
                 let mut success = false;
 
                 if let Some(target_id) = target_id {
-                    let target_thread = self.kernel.take_thread(target_id).filter(|_| {
-                        self.kernel.state(target_id) == Some(crate::registry::ThreadState::Created)
-                    });
+                    let target_thread = self.kernel.take_created_thread(target_id);
                     if let Some(mut target_thread) = target_thread {
                         let prepared = match target_thread.entry_func.clone() {
                             Some(galfus_vm::VmValue::Function {
@@ -349,7 +371,7 @@ impl Orchestrator {
                     }
                 }
 
-                self.resume_or_fail(
+                self.resolve_intrinsic_future(
                     thread_id,
                     thread,
                     continuation,
@@ -361,24 +383,15 @@ impl Orchestrator {
                     .and_then(|k| self.kernel.lookup_key(k.as_str()))
                     .map(|id| galfus_vm::VmValue::Int64(id.raw() as i64))
                     .unwrap_or(galfus_vm::VmValue::Int64(-1));
-                self.resume_or_fail_front(thread_id, thread, continuation, val);
+                self.resolve_intrinsic_future(thread_id, thread, continuation, val);
             }
             galfus_vm::VmEffect::ThreadIsRunning {
                 thread_id: target_id,
             } => {
                 let running = crate::registry::ThreadId::from_raw(target_id)
-                    .and_then(|target_id| {
-                        self.kernel.take_thread(target_id).map(|t| {
-                            let state = self
-                                .kernel
-                                .state(target_id)
-                                .unwrap_or(crate::registry::ThreadState::Exited(0));
-                            self.kernel.park_running(target_id, t);
-                            state
-                        })
-                    })
+                    .and_then(|id| self.kernel.state(id))
                     .is_some_and(|state| state.is_running());
-                self.resume_or_fail_front(
+                self.resolve_intrinsic_future(
                     thread_id,
                     thread,
                     continuation,
@@ -389,18 +402,9 @@ impl Orchestrator {
                 thread_id: target_id,
             } => {
                 let exited = crate::registry::ThreadId::from_raw(target_id)
-                    .and_then(|target_id| {
-                        self.kernel.take_thread(target_id).map(|t| {
-                            let state = self
-                                .kernel
-                                .state(target_id)
-                                .unwrap_or(crate::registry::ThreadState::Exited(0));
-                            self.kernel.park_running(target_id, t);
-                            state
-                        })
-                    })
+                    .and_then(|id| self.kernel.state(id))
                     .is_some_and(|state| state.is_exited());
-                self.resume_or_fail_front(
+                self.resolve_intrinsic_future(
                     thread_id,
                     thread,
                     continuation,
@@ -411,20 +415,11 @@ impl Orchestrator {
                 thread_id: target_id,
             } => {
                 let reason = crate::registry::ThreadId::from_raw(target_id)
-                    .and_then(|target_id| {
-                        self.kernel.take_thread(target_id).map(|t| {
-                            let state = self
-                                .kernel
-                                .state(target_id)
-                                .unwrap_or(crate::registry::ThreadState::Exited(0));
-                            self.kernel.park_running(target_id, t);
-                            state
-                        })
-                    })
+                    .and_then(|id| self.kernel.state(id))
                     .and_then(|state| state.exit_reason())
                     .map(galfus_vm::VmValue::Int32)
                     .unwrap_or(galfus_vm::VmValue::Null);
-                self.resume_or_fail_front(thread_id, thread, continuation, reason);
+                self.resolve_intrinsic_future(thread_id, thread, continuation, reason);
             }
             galfus_vm::VmEffect::Blocked => {
                 self.kernel.enqueue_runnable(thread_id, thread);
@@ -472,37 +467,32 @@ impl Orchestrator {
             galfus_vm::VmEffect::WaitThread {
                 thread_id: target_raw,
             } => {
+                let future_id = self.next_request_id;
+                self.next_request_id += 1;
                 let maybe_target = crate::registry::ThreadId::from_raw(target_raw);
                 let exit_code = maybe_target
                     .and_then(|target| self.kernel.state(target))
                     .and_then(|state| state.exit_reason());
                 if let Some(code) = exit_code {
-                    // Target already exited — resume immediately with the exit code.
-                    self.resume_or_fail_front(
-                        thread_id,
-                        thread,
-                        continuation,
-                        galfus_vm::VmValue::Int32(code),
-                    );
+                    self.ready_futures
+                        .insert(future_id, Ok(galfus_contract::BoundaryValue::I32(code)));
                 } else {
-                    // Target still running — block the caller and register it as a waiter.
                     match maybe_target {
                         Some(target_id) => {
-                            self.kernel.block(thread_id, thread, None);
-                            self.kernel
-                                .register_waiter(target_id, thread_id, continuation);
+                            self.kernel.register_waiter(target_id, thread_id, future_id);
                         }
                         None => {
-                            // Invalid thread id — resume with null (no exit code).
-                            self.resume_or_fail_front(
-                                thread_id,
-                                thread,
-                                continuation,
-                                galfus_vm::VmValue::Null,
-                            );
+                            self.ready_futures
+                                .insert(future_id, Ok(galfus_contract::BoundaryValue::Null));
                         }
                     }
                 }
+                self.resume_or_fail_front(
+                    thread_id,
+                    thread,
+                    continuation,
+                    galfus_vm::VmValue::Uint64(future_id),
+                );
             }
             galfus_vm::VmEffect::CreateFuture {
                 module_id: _,
@@ -541,5 +531,25 @@ impl Orchestrator {
                 );
             }
         }
+    }
+
+    /// Resolves an intrinsic VM effect (e.g. CreateThread, StartThread) through a ready future.
+    fn resolve_intrinsic_future(
+        &mut self,
+        thread_id: crate::registry::ThreadId,
+        thread: galfus_vm::thread::VmThreadState,
+        continuation: galfus_vm::Continuation,
+        value: galfus_vm::VmValue,
+    ) {
+        let future_id = self.next_request_id;
+        self.next_request_id += 1;
+        let boundary = crate::task::vm_value_to_boundary(value);
+        self.ready_futures.insert(future_id, Ok(boundary));
+        self.resume_or_fail_front(
+            thread_id,
+            thread,
+            continuation,
+            galfus_vm::VmValue::Uint64(future_id),
+        );
     }
 }

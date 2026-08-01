@@ -5,7 +5,7 @@ use galfus_ir::mir;
 
 use super::LowerCtx;
 use galfus_bytecode::Instruction;
-use galfus_bytecode::instruction::{GlobalIdx, Reg, TypeIdx};
+use galfus_bytecode::instruction::{GlobalIdx, Reg};
 use galfus_ir::mir::{
     Constant as MirConstant, Instruction as MirInstruction, MirFunction, Operand, Terminator,
 };
@@ -246,7 +246,10 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     } => {
                         let builtin_name = self.ctx.function_names.get(func).map(|s| s.to_string());
                         if let Some(name) = builtin_name {
-                            if let Some(native_name) = name.strip_prefix("__internal_thread_") {
+                            let simple_name = name.rsplit("::").next().unwrap_or(name.as_str());
+                            if let Some(native_name) =
+                                simple_name.strip_prefix("__internal_thread_")
+                            {
                                 if native_name == "create" {
                                     let func_reg = self.alloc_temp();
                                     self.load_operand_to(&args[0], func_reg);
@@ -373,9 +376,10 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                 }
                             }
 
-                            let native_provider_name = name
+                            let simple_name = name.rsplit("::").next().unwrap_or(name.as_str());
+                            let native_provider_name = simple_name
                                 .strip_prefix("__provider_")
-                                .or_else(|| name.strip_prefix("__builtin_"));
+                                .or_else(|| simple_name.strip_prefix("__builtin_"));
 
                             if let Some(native_name) = native_provider_name {
                                 let start_reg = if args.is_empty() {
@@ -398,10 +402,6 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                         self.ctx,
                                         &mir::Constant::String(native_name.to_string()),
                                     );
-                                let argument_types = args
-                                    .iter()
-                                    .map(|argument| self.get_operand_type(argument))
-                                    .collect::<Vec<_>>();
                                 let return_type = self
                                     .func
                                     .locals
@@ -409,10 +409,41 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                     .find(|local| local.id == *destination)
                                     .expect("native call destination must be a local")
                                     .ty;
-                                let arg_types = argument_types
-                                    .into_iter()
-                                    .map(|ty| {
-                                        crate::bytecode_emission::types::lower_type(self.ctx, ty)
+                                let arg_types = args
+                                    .iter()
+                                    .map(|argument| {
+                                        let is_string_const = match argument {
+                                            mir::Operand::ConstRef(idx) => matches!(
+                                                self.ctx.mir_constants.get(*idx),
+                                                Some(mir::Constant::String(_))
+                                            ),
+                                            mir::Operand::Constant(mir::Constant::String(_)) => {
+                                                true
+                                            }
+                                            _ => false,
+                                        };
+                                        if is_string_const {
+                                            let u8_ty =
+                                                self.ctx.type_result.layer().table().primitive(
+                                                    galfus_frontend::PrimitiveType::Uint8,
+                                                );
+                                            let u8_idx =
+                                                crate::bytecode_emission::types::lower_type(
+                                                    self.ctx, u8_ty,
+                                                );
+                                            let type_idx = galfus_bytecode::instruction::TypeIdx(
+                                                self.ctx.types.len() as u16,
+                                            );
+                                            self.ctx
+                                                .types
+                                                .push(galfus_bytecode::BytecodeType::Array(u8_idx));
+                                            type_idx
+                                        } else {
+                                            let ty = self.get_operand_type(argument);
+                                            crate::bytecode_emission::types::lower_type(
+                                                self.ctx, ty,
+                                            )
+                                        }
                                     })
                                     .collect();
                                 let return_type = crate::bytecode_emission::types::lower_type(
@@ -525,7 +556,15 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                         destination,
                     } => {
                         let fut_reg = self.operand_reg(future);
-                        let return_type = TypeIdx(0);
+                        let payload_type = self
+                            .func
+                            .locals
+                            .iter()
+                            .find(|local| local.id == *destination)
+                            .expect("await destination must be a local")
+                            .ty;
+                        let return_type =
+                            crate::bytecode_emission::types::lower_type(self.ctx, payload_type);
                         self.instructions.push(Instruction::AwaitFuture {
                             dest: Reg(destination.raw() as u16),
                             future_id: fut_reg,

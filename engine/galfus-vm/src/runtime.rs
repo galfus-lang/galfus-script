@@ -303,6 +303,10 @@ impl VirtualMachine {
             | (BytecodeType::Uint64, Value::Uint64(_))
             | (BytecodeType::Float32, Value::Float32(_))
             | (BytecodeType::Float64, Value::Float64(_)) => true,
+            (BytecodeType::Nullable(_), Value::Null) => true,
+            (BytecodeType::Nullable(inner), value) => {
+                self.value_matches_type(thread, value, module_id, *inner)
+            }
             (BytecodeType::Array(element_type), Value::Object(reference)) => {
                 let Ok(HeapObject::Array {
                     element_ty,

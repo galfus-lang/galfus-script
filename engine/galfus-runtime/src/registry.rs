@@ -137,7 +137,7 @@ impl ThreadRegistry {
 
     pub fn mark_running(&mut self, id: ThreadId) -> bool {
         if let Some(tcb) = self.tcbs.get_mut(&id) {
-            if tcb.state == ThreadState::Created {
+            if !tcb.state.is_exited() {
                 tcb.state = ThreadState::Running;
                 return true;
             }
@@ -147,10 +147,8 @@ impl ThreadRegistry {
 
     pub fn mark_exited(&mut self, id: ThreadId, code: i32) -> bool {
         if let Some(tcb) = self.tcbs.get_mut(&id) {
-            if tcb.state.is_running() {
-                tcb.state = ThreadState::Exited(code);
-                return true;
-            }
+            tcb.state = ThreadState::Exited(code);
+            return true;
         }
         false
     }

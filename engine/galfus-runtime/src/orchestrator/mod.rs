@@ -68,6 +68,7 @@ pub(crate) struct Orchestrator {
     shutting_down: bool,
     late_completions: VecDeque<LateCompletion>,
     root_thread_id: Option<crate::registry::ThreadId>,
+    ready_futures: HashMap<u64, Result<galfus_contract::BoundaryValue, ExecutionFailure>>,
 }
 
 impl Orchestrator {
@@ -90,6 +91,7 @@ impl Orchestrator {
             shutting_down: false,
             late_completions: VecDeque::new(),
             root_thread_id: None,
+            ready_futures: HashMap::new(),
         }
     }
 
@@ -293,6 +295,7 @@ impl Orchestrator {
             self.record_late_completion(thread_id, id);
             return;
         }
+        self.kernel.unblock(thread_id);
         let Some(mut thread) = self.kernel.take_thread(thread_id) else {
             return;
         };
@@ -358,6 +361,20 @@ impl Orchestrator {
         }
     }
 
+    pub(super) fn complete_future(
+        &mut self,
+        thread_id: crate::registry::ThreadId,
+        future_id: u64,
+        result: Result<BoundaryValue, ExecutionFailure>,
+    ) {
+        let key = PendingKey::Future(future_id);
+        if self.pending_continuations.contains_key(&key) {
+            self.complete_pending(thread_id, key, result);
+        } else {
+            self.ready_futures.insert(future_id, result);
+        }
+    }
+
     /// Dispatches all currently runnable threads from the VirtualKernel to the driver.
     pub(crate) fn dispatch_runnables(&mut self, token: MainThreadToken) {
         token.assert_current();
@@ -406,14 +423,11 @@ impl Orchestrator {
                     self.kernel.mark_exited(thread_id, thread, code);
                     let waiters = self.kernel.drain_waiters(thread_id);
                     for waiter in waiters {
-                        if let Some(waiter_thread) = self.kernel.take_thread(waiter.waiter_id) {
-                            self.resume_or_fail_front(
-                                waiter.waiter_id,
-                                waiter_thread,
-                                waiter.continuation,
-                                galfus_vm::VmValue::Int32(code),
-                            );
-                        }
+                        self.complete_future(
+                            waiter.waiter_id,
+                            waiter.future_id,
+                            Ok(BoundaryValue::I32(code)),
+                        );
                     }
                 }
                 RuntimeEvent::Initialized {
@@ -493,5 +507,11 @@ impl Orchestrator {
         }
 
         galfus_contract::ThreadResult::Discarded
+    }
+
+    pub(crate) fn debug_states(
+        &self,
+    ) -> Vec<(crate::registry::ThreadId, crate::registry::ThreadState)> {
+        self.kernel.debug_states()
     }
 }

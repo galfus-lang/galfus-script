@@ -668,6 +668,7 @@ impl VirtualMachine {
             BytecodeType::Float32 => Value::Float32(0.0),
             BytecodeType::Float64 => Value::Float64(0.0),
             BytecodeType::Null => Value::Null,
+            BytecodeType::Nullable(_) => Value::Null,
             BytecodeType::Struct(_)
             | BytecodeType::Choice(_)
             | BytecodeType::Array(_)

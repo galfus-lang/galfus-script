@@ -773,6 +773,17 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                 let constant = &self.ctx.mir_constants[*idx];
                 let layer = self.ctx.type_result.layer();
                 let table = layer.table();
+                if matches!(constant, MirConstant::String(_)) {
+                    let u8_ty = table.primitive(PrimitiveType::Uint8);
+                    for i in 0..table.len() {
+                        let ty_id = TypeId::new(i as u32);
+                        if let Some(TypeKind::Array { element }) = table.kind(ty_id) {
+                            if *element == u8_ty {
+                                return ty_id;
+                            }
+                        }
+                    }
+                }
                 let prim = match constant {
                     MirConstant::Null => PrimitiveType::Null,
                     MirConstant::Bool(_) => PrimitiveType::Bool,
@@ -786,26 +797,24 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     | MirConstant::Uint64(_) => PrimitiveType::Int32,
                     MirConstant::Float32(_) | MirConstant::Float64(_) => PrimitiveType::Float32,
                     MirConstant::Function(_) => PrimitiveType::Null,
-                    MirConstant::String(_) => {
-                        // Find String type in type table
-                        for i in 0..table.len() {
-                            let ty_id = TypeId::new(i as u32);
-                            if matches!(
-                                table.kind(ty_id),
-                                Some(TypeKind::Primitive(PrimitiveType::Uint8))
-                            ) {
-                                // Fallback to Int32 if not found
-                            }
-                        }
-                        PrimitiveType::Int32
-                    }
+                    MirConstant::String(_) => unreachable!(),
                 };
                 table.primitive(prim)
             }
             Operand::Constant(constant) => {
                 let layer = self.ctx.type_result.layer();
                 let table = layer.table();
-                // Simple mapping for constants
+                if matches!(constant, MirConstant::String(_)) {
+                    let u8_ty = table.primitive(PrimitiveType::Uint8);
+                    for i in 0..table.len() {
+                        let ty_id = TypeId::new(i as u32);
+                        if let Some(TypeKind::Array { element }) = table.kind(ty_id) {
+                            if *element == u8_ty {
+                                return ty_id;
+                            }
+                        }
+                    }
+                }
                 let prim = match constant {
                     MirConstant::Null => PrimitiveType::Null,
                     MirConstant::Bool(_) => PrimitiveType::Bool,
@@ -819,19 +828,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     | MirConstant::Uint64(_) => PrimitiveType::Int32,
                     MirConstant::Float32(_) | MirConstant::Float64(_) => PrimitiveType::Float64,
                     MirConstant::Function(_) => PrimitiveType::Null,
-                    MirConstant::String(_) => {
-                        // Find String type in type table
-                        for i in 0..table.len() {
-                            let ty_id = TypeId::new(i as u32);
-                            if matches!(
-                                table.kind(ty_id),
-                                Some(TypeKind::Primitive(PrimitiveType::Uint8))
-                            ) {
-                                // Fallback to Int32 if not found
-                            }
-                        }
-                        PrimitiveType::Int32
-                    }
+                    MirConstant::String(_) => unreachable!(),
                 };
                 for i in 0..table.len() {
                     let ty_id = TypeId::new(i as u32);

@@ -59,6 +59,7 @@ pub enum BytecodeType {
     ExternalHandle(String),
     Struct(StructLayoutIdx),
     Array(TypeIdx),
+    Nullable(TypeIdx),
     Tuple(Vec<TypeIdx>),
     Choice(ChoiceLayoutIdx),
     Constraint(String),

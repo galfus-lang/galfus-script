@@ -154,9 +154,20 @@ impl Execution {
                 }
                 ExecutorStepResult::Blocked { .. } => {
                     if !self.sink.has_pending() {
+                        let failure_info = self
+                            .orchestrator
+                            .as_ref()
+                            .and_then(|o| o.failure.as_ref())
+                            .map(|f| f.message.as_str())
+                            .unwrap_or("no failure recorded");
+                        let states_info = self
+                            .orchestrator
+                            .as_ref()
+                            .map(|o| format!("states={:?}", o.debug_states()))
+                            .unwrap_or_default();
                         return Err(ExecutionFailure::new(
                             ExecutionFailureKind::InternalRuntimeFailure,
-                            "execution is blocked",
+                            format!("execution is blocked ({failure_info}, {states_info})"),
                         ));
                     }
                 }

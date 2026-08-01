@@ -2,9 +2,7 @@
 mod tests;
 
 use crate::queue::{BlockedQueue, RunnableQueue};
-use crate::registry::MailboxMessage;
-use crate::registry::{ThreadId, ThreadRegistry};
-use galfus_vm::Continuation;
+use crate::registry::{MailboxMessage, ThreadId, ThreadRegistry, ThreadState};
 use galfus_vm::thread::VmThreadState;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -12,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 pub struct WaiterEntry {
     pub waiter_id: ThreadId,
-    pub continuation: Continuation,
+    pub future_id: u64,
 }
 
 /// Manages thread lifecycle, scheduling queues, and timers.
@@ -138,6 +136,10 @@ impl VirtualKernel {
         self.registry.take(id)
     }
 
+    pub fn take_created_thread(&mut self, id: ThreadId) -> Option<VmThreadState> {
+        self.registry.take_created(id)
+    }
+
     pub fn state(&self, id: ThreadId) -> Option<crate::registry::ThreadState> {
         self.registry.state(id)
     }
@@ -159,19 +161,18 @@ impl VirtualKernel {
         self.registry.get_mailbox(id)
     }
 
-    /// Registers `waiter_id` to be unblocked when `target_id` exits.
-    pub fn register_waiter(
-        &mut self,
-        target_id: ThreadId,
-        waiter_id: ThreadId,
-        continuation: Continuation,
-    ) {
+    pub fn debug_states(&self) -> Vec<(ThreadId, ThreadState)> {
+        self.registry.debug_states()
+    }
+
+    /// Registers a future owned by `waiter_id` to complete when `target_id` exits.
+    pub fn register_waiter(&mut self, target_id: ThreadId, waiter_id: ThreadId, future_id: u64) {
         self.waiters
             .entry(target_id)
             .or_default()
             .push(WaiterEntry {
                 waiter_id,
-                continuation,
+                future_id,
             });
     }
 

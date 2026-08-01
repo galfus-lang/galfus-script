@@ -157,6 +157,31 @@ fn codec_rejects_an_array_with_a_different_declared_element_type() {
 }
 
 #[test]
+fn codec_round_trips_nullable_values() {
+    let module = module(vec![
+        BytecodeType::Int32,
+        BytecodeType::Nullable(TypeIdx(0)),
+    ]);
+    let mut heap = galfus_vm::thread::PrivateHeap::new();
+
+    for value in [BoundaryValue::I32(7), BoundaryValue::Null] {
+        let encoded = encode_into_thread_heap(
+            &mut heap,
+            value.clone(),
+            TypeIdx(1),
+            galfus_core::ModuleId::new(1),
+            &module,
+        )
+        .expect("nullable value encodes");
+
+        assert_eq!(
+            decode_from_thread_heap(&heap, encoded, TypeIdx(1), &module),
+            Ok(value)
+        );
+    }
+}
+
+#[test]
 fn codec_encodes_a_choice_with_its_declared_variant_payload() {
     let module = BytecodeModule {
         choice_layouts: vec![ChoiceLayout {

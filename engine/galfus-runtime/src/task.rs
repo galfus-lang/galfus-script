@@ -85,6 +85,10 @@ pub(crate) fn decode_from_thread_heap(
                 values,
             })
         }
+        (BytecodeType::Nullable(_), galfus_vm::VmValue::Null) => Ok(BoundaryValue::Null),
+        (BytecodeType::Nullable(inner), value) => {
+            decode_from_thread_heap(heap, value, *inner, module)
+        }
         (BytecodeType::Tuple(element_types), galfus_vm::VmValue::Object(reference)) => {
             let galfus_vm::HeapObject::Tuple { elements } = heap
                 .get_object(reference)
@@ -136,6 +140,29 @@ pub(crate) fn decode_from_thread_heap(
             })
         }
         _ => Err(mismatch()),
+    }
+}
+
+/// Converts a scalar `VmValue` produced by a VM intrinsic effect into a `BoundaryValue`
+/// without requiring heap or type-table context. Only covers the primitive types returned
+/// by thread intrinsics (i64, bool, i32, null).
+pub(crate) fn vm_value_to_boundary(value: galfus_vm::VmValue) -> galfus_contract::BoundaryValue {
+    use galfus_contract::BoundaryValue;
+    match value {
+        galfus_vm::VmValue::Null => BoundaryValue::Null,
+        galfus_vm::VmValue::Bool(v) => BoundaryValue::Bool(v),
+        galfus_vm::VmValue::Int8(v) => BoundaryValue::I8(v),
+        galfus_vm::VmValue::Int16(v) => BoundaryValue::I16(v),
+        galfus_vm::VmValue::Int32(v) => BoundaryValue::I32(v),
+        galfus_vm::VmValue::Int64(v) => BoundaryValue::I64(v),
+        galfus_vm::VmValue::Uint8(v) => BoundaryValue::U8(v),
+        galfus_vm::VmValue::Uint16(v) => BoundaryValue::U16(v),
+        galfus_vm::VmValue::Uint32(v) => BoundaryValue::U32(v),
+        galfus_vm::VmValue::Uint64(v) => BoundaryValue::U64(v),
+        galfus_vm::VmValue::Float32(v) => BoundaryValue::F32(v),
+        galfus_vm::VmValue::Float64(v) => BoundaryValue::F64(v),
+        // Heap objects are not expected from thread intrinsic effects; fall back to Null.
+        galfus_vm::VmValue::Object(_) | galfus_vm::VmValue::Function { .. } => BoundaryValue::Null,
     }
 }
 
@@ -217,6 +244,10 @@ pub(crate) fn encode_into_thread_heap(
             });
             Ok(galfus_vm::VmValue::Object(reference))
         }
+        (BytecodeType::Nullable(_), BoundaryValue::Null) => Ok(galfus_vm::VmValue::Null),
+        (BytecodeType::Nullable(inner), value) => {
+            encode_into_thread_heap(heap, value, *inner, module_id, module)
+        }
         (BytecodeType::Tuple(element_types), BoundaryValue::Tuple(values)) => {
             if values.len() != element_types.len() {
                 return Err(mismatch());
@@ -278,6 +309,7 @@ pub(crate) fn boundary_type(
         Some(BytecodeType::Array(element)) => Ok(BoundaryType::Array(Box::new(boundary_type(
             module, *element,
         )?))),
+        Some(BytecodeType::Nullable(inner)) => boundary_type(module, *inner),
         Some(BytecodeType::Tuple(elements)) => elements
             .iter()
             .copied()

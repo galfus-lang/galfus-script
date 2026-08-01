@@ -546,8 +546,7 @@ impl Workspace {
         driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
     ) -> Result<(), RunBlocked> {
         let mut execution = self.start_execution(args, providers, driver)?;
-        let _ = execution.run_to_completion();
-
+        let _result = execution.run_to_completion();
         Ok(())
     }
 }
