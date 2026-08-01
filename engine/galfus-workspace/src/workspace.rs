@@ -109,6 +109,23 @@ impl Workspace {
         Ok(LoadResult::Success)
     }
 
+    pub fn register_bridge_module(
+        &mut self,
+        bridge: galfus_contract::BridgeModule,
+    ) -> Result<LoadResult, WorkspaceError> {
+        let module_path = ModulePath::new(&bridge.name).ok_or(WorkspaceError::InvalidPath)?;
+        self.source_state.revision.next();
+        self.source_state.store.load_module(
+            module_path.clone(),
+            Arc::from(bridge.source.as_bytes()),
+            ModuleOrigin::Builtin,
+            self.source_state.revision,
+        );
+        self.source_state.dirty_sources.insert(module_path);
+        self.mark_dirty();
+        Ok(LoadResult::Success)
+    }
+
     pub fn remove_module(&mut self, path: &str) -> Result<RemoveResult, WorkspaceError> {
         let module_path = ModulePath::new(path).ok_or(WorkspaceError::InvalidPath)?;
 
@@ -244,7 +261,7 @@ impl Workspace {
                 continue;
             }
             let builtin_name = path.as_str().strip_suffix(".gfs").unwrap_or(path.as_str());
-            let Some((_, source)) = galfus_builtins::BUILTIN_MODULES
+            let Some((_, source)) = galfus_contract::BUILTIN_MODULES
                 .iter()
                 .find(|(name, _)| *name == builtin_name)
             else {

@@ -6,33 +6,42 @@ This document defines the Galfus standard library design, its API surfaces, and 
 
 ## 1. Design Philosophy
 
-The Galfus standard library is divided into two distinct tiers:
+The Galfus standard library is organized into three distinct tiers defined in `galfus-contract`:
 
 ```txt
-+---------------------------------------------------------+
-|                Tier 2: Rich Utility Modules             |
-|  (text, format, json, regex, math, path, http, crypto)  |
-+---------------------------------------------------------+
-                             |  uses (if needed)
-                             v
-+---------------------------------------------------------+
-|         Tier 1: std/* (Thin Target Standard Surface)     |
-|   (std/io, std/fs, std/net, std/time, std/random...)    |
-+---------------------------------------------------------+
-                             |
-                             +---> Host/OS Capabilities (OS, WASM, Web, Embedded)
++------------------------------------------------------------------+
+|                    3. Bridge Modules (Optional)                  |
+|    (std/io, std/net, std/fs, std/process, std/time, std/gpio...) |
++------------------------------------------------------------------+
+                                  |
+                                  v  uses fn(async) __provider_*
++------------------------------------------------------------------+
+|                       Host OS / Platform APIs                    |
++------------------------------------------------------------------+
+
++------------------------------------------------------------------+
+|                    2. Utility Modules (Universal)                |
+|    (text, format, json, regex, math, path, http, crypto, etc.)   |
++------------------------------------------------------------------+
+
++------------------------------------------------------------------+
+|                 1. Internal Core Modules (VM Native)             |
+|                 (std/async, std/thread)                          |
++------------------------------------------------------------------+
 ```
 
-1. **Tier 1: `std/*` (Thin Target Standard Surface)**
-   - Low-level, host/target-connected capabilities.
-   - Minimal and clean interface matching the target surface.
-   - Requires explicit permissions to access. By default, access is blocked under a closed sandbox.
-   - Implementations are target-dependent (e.g. native OS calls, WASM imports, mobile bridge, or embedded registers).
+1. **Internal Core Modules (`std/async`, `std/thread`)**
+   - Always included by default in every workspace.
+   - Execute entirely within VM engine isolation using `__internal_*` primitives without touching the host OS.
 
-2. **Tier 2: Rich Utility Modules**
-   - Platform-agnostic utility libraries.
-   - Often built on top of `std/*` or providing pure algorithmic tools (e.g. data structure logic, mathematics, regex parsing).
-   - Higher-level, developer-friendly interfaces.
+2. **Utility Modules (`text`, `format`, `json`, `math`, `path`, etc.)**
+   - Pure Galfus Script algorithmic utilities.
+   - Platform-agnostic, developer-friendly interfaces.
+
+3. **Bridge Modules (`std/io`, `std/net`, `std/fs`, `std/process`, `std/time`, etc.)**
+   - **Optional** host capabilities declared as atomic pairs (`HostProvider` + `.gfs` bridge source).
+   - Functions connecting to native host operations MUST use explicit `fn(async) __provider_*` declarations.
+   - Modules exist in a workspace ONLY when registered by the host via `galfus-workspace`. Missing bridges fail at compile-time.
 
 ---
 

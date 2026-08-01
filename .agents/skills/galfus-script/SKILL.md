@@ -102,16 +102,19 @@ export fn main(_args: [[u8]]): i32 {
 }
 ```
 
-Standard Modules:
-- `std/io`: `println`, `print`, `read`
-- `std/async`: `Future<T>`
-- `std/thread`: `createThread`, `getThread`, `hasMessages`, `getMessage`
-- `std/fs`: Filesystem handles & operations
-- `std/net`: Raw TCP/UDP socket networking
-- `std/env`: `args()`, `get(key)`, `cwd()`
-- `text`: Byte array string utilities (`length`, `slice`, `toUpper`, `trim`)
-- `format`: `stringify<T>`, `parse<T>`
-- `json`: `parse<T>`, `stringify<T>`
+Standard Module Architecture:
+1. **Internal Core Modules (Always Available, VM Native)**:
+   - `std/async`: `Future<T>`
+   - `std/thread`: `createThread`, `getThread`, `hasMessages`, `getMessage`
+2. **Utility Modules (Always Available, Pure Galfus Script)**:
+   - `text`: Byte array string utilities (`length`, `slice`, `toUpper`, `trim`)
+   - `format`: `stringify<T>`, `parse<T>`
+   - `json`: `parse<T>`, `stringify<T>`
+   - `math`, `path`, `regex`, `collections`, `crypto`
+3. **Bridge Modules (Optional, Paired with Host Providers)**:
+   - `std/io`: `println`, `print`, `read` (uses `fn(async) __provider_io_*`)
+   - `std/fs`, `std/net`, `std/process`, `std/time`, `std/gpio`
+   - *Note*: Bridge modules use `fn(async) __provider_*` calls and exist only when registered in `galfus-workspace`.
 
 ---
 

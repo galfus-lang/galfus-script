@@ -63,6 +63,19 @@ fn check_source(text: &str) -> (SourceFile, ModuleAst, TypeCheckResult) {
     (source, graph, result)
 }
 
+fn check_source_named(name: &str, text: &str) -> (SourceFile, ModuleAst, TypeCheckResult) {
+    let source = SourceFile::new(SourceId::new(0), name.to_string(), text.to_string());
+
+    let parse_result = parse(&source);
+    let resolve_result = resolve(&source, parse_result.into_ast());
+
+    let graph = resolve_result.into_ast();
+    let result = check_declaration_types(&source, &graph);
+    let result = check_definition_types(&source, &graph, result);
+
+    (source, graph, result)
+}
+
 fn symbol_by_name_and_kind(graph: &ModuleAst, name: &str, kind: SymbolKind) -> SymbolId {
     let resolution = graph.resolution().unwrap();
 

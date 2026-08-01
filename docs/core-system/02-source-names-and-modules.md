@@ -197,16 +197,11 @@ struct User {
 }
 ```
 
-## 2.9 Standard Module Names
+Standard module names are not keywords. They are categorized into three distinct tiers:
 
-Standard module names are not keywords.
-
-```txt
-std/text
-std/math
-std/constraints
-std/range
-```
+1. **Internal Core Modules** (`std/async`, `std/thread`): Always included by default; execute within the VM engine using `__internal_*` primitives.
+2. **Utility Modules** (`text`, `format`, `json`, `math`, `path`, `regex`, `std/constraints`, `std/iterable`): Always included by default; pure Galfus Script algorithmic utilities without native bridge calls.
+3. **Bridge Modules** (`std/io`, `std/net`, `std/fs`, `std/process`, `std/time`, etc.): Optional host capability modules declared in atomic pairs (`HostProvider` + `.gfs` bridge source) and registered via `galfus-workspace`. All provider bridge functions MUST explicitly be declared with `fn(async) __provider_*`.
 
 They are resolved by import resolution, not by lexical reservation.
 

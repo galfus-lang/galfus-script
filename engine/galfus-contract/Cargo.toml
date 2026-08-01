@@ -5,3 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+
+[dev-dependencies]
+galfus-core = { path = "../galfus-core" }
+galfus-frontend = { path = "../galfus-frontend" }

@@ -1,5 +1,6 @@
 //! Host integration contracts for Galfus execution.
 
+pub mod builtins;
 #[cfg(test)]
 mod tests;
 pub mod thread;
@@ -7,6 +8,7 @@ pub mod thread;
 use std::collections::HashMap;
 use std::sync;
 
+pub use builtins::*;
 pub use thread::*;
 
 /// A typed value that crosses the execution boundary safely.

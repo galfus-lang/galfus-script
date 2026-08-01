@@ -147,15 +147,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "galfus-builtins"
-version = "0.0.0"
-dependencies = [
- "galfus-core",
- "galfus-frontend",
- "thiserror",
-]
-
-[[package]]
 name = "galfus-bytecode"
 version = "0.0.0"
 dependencies = [
@@ -191,6 +182,10 @@ dependencies = [
 [[package]]
 name = "galfus-contract"
 version = "0.0.0"
+dependencies = [
+ "galfus-core",
+ "galfus-frontend",
+]
 
 [[package]]
 name = "galfus-core"
@@ -204,6 +199,7 @@ dependencies = [
 name = "galfus-frontend"
 version = "0.0.0"
 dependencies = [
+ "galfus-contract",
  "galfus-core",
  "indexmap",
  "smallvec",
@@ -259,7 +255,6 @@ dependencies = [
 name = "galfus-workspace"
 version = "0.0.0"
 dependencies = [
- "galfus-builtins",
  "galfus-bytecode",
  "galfus-compiler",
  "galfus-contract",

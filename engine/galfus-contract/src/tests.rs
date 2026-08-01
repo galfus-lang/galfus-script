@@ -160,3 +160,79 @@ fn main_kernel_tasks_accept_non_send_state() {
     };
     assert!(matches!(task.run(1), ThreadResult::Completed(0)));
 }
+
+fn assert_builtin_checks(name: &str, source: &str) {
+    assert!(!source.is_empty());
+
+    let source_file = galfus_core::SourceFile::new(
+        galfus_core::SourceId::new(0),
+        name.to_string(),
+        source.to_string(),
+    );
+    let parse_result = galfus_frontend::parse(&source_file);
+    assert!(
+        !parse_result.has_errors(),
+        "{name} parse errors: {:?}",
+        parse_result.diagnostics()
+    );
+
+    let resolve_result = galfus_frontend::resolve(&source_file, parse_result.into_graph());
+    assert!(
+        !resolve_result.has_errors(),
+        "{name} resolve errors: {:?}",
+        resolve_result.diagnostics()
+    );
+
+    let graph = resolve_result.into_graph();
+    let type_result = galfus_frontend::check_declaration_types(&source_file, &graph);
+    assert!(
+        !type_result.has_errors(),
+        "{name} type errors: {:?}",
+        type_result.diagnostics()
+    );
+}
+
+#[test]
+fn test_std_io_source_checks() {
+    assert_builtin_checks("std/io", STD_IO_SOURCE);
+    assert!(STD_IO_SOURCE.contains("print"));
+    assert!(STD_IO_SOURCE.contains("read"));
+}
+
+#[test]
+fn test_text_source_checks() {
+    assert_builtin_checks("text", TEXT_SOURCE);
+    assert!(TEXT_SOURCE.contains("length"));
+    assert!(TEXT_SOURCE.contains("concat"));
+}
+
+#[test]
+fn test_format_source_checks() {
+    assert_builtin_checks("format", FORMAT_SOURCE);
+    assert!(FORMAT_SOURCE.contains("stringify"));
+    assert!(FORMAT_SOURCE.contains("parse"));
+    assert!(FORMAT_SOURCE.contains("Result"));
+}
+
+#[test]
+fn test_format_ansi_source_checks() {
+    assert_builtin_checks("format/ansi", FORMAT_ANSI_SOURCE);
+    assert!(FORMAT_ANSI_SOURCE.contains("Style"));
+    assert!(FORMAT_ANSI_SOURCE.contains("apply"));
+    assert!(FORMAT_ANSI_SOURCE.contains("red"));
+}
+
+#[test]
+fn test_std_async_source_checks() {
+    assert_builtin_checks("std/async", ASYNC_SOURCE);
+    assert!(ASYNC_SOURCE.contains("Future"));
+}
+
+#[test]
+fn test_thread_source_checks() {
+    assert_builtin_checks("std/thread", THREAD_SOURCE);
+    assert!(THREAD_SOURCE.contains("isRunning"));
+    assert!(THREAD_SOURCE.contains("isExited"));
+    assert!(THREAD_SOURCE.contains("exitReason"));
+    assert!(THREAD_SOURCE.contains("fn Thread::send(self, data: [u8]): bool"));
+}

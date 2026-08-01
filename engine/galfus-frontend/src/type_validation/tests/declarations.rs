@@ -379,3 +379,45 @@ fn Point::move(self, dx: i32, dy: i32): Point {
 
     assert!(!result.has_errors(), "{:?}", result.diagnostics());
 }
+
+#[test]
+fn check_user_module_rejects_internal_function_declaration() {
+    let (_source, _graph, result) = check_source_named(
+        "test.gfs",
+        r#"
+fn __internal_custom(): null {
+  return
+}
+"#,
+    );
+
+    assert!(result.has_errors());
+}
+
+#[test]
+fn check_user_module_rejects_provider_function_declaration() {
+    let (_source, _graph, result) = check_source_named(
+        "test.gfs",
+        r#"
+fn(async) __provider_gpio_read(): [u8] {
+  return ""
+}
+"#,
+    );
+
+    assert!(result.has_errors());
+}
+
+#[test]
+fn check_provider_function_without_async_metadata_is_rejected() {
+    let (_source, _graph, result) = check_source_named(
+        "std/gpio",
+        r#"
+fn __provider_gpio_read(): [u8] {
+  return ""
+}
+"#,
+    );
+
+    assert!(result.has_errors());
+}

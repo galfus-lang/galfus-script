@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 galfus-core = { path = "../galfus-core" }
+galfus-contract = { path = "../galfus-contract" }
 
 indexmap.workspace = true
 smallvec.workspace = true

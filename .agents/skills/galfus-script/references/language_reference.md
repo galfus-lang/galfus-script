@@ -357,15 +357,19 @@ export struct User { id: i64 }
 export fn main(args: [[u8]]): i32 { return 0 }
 ```
 
-### 8.2 Standard Builtin Modules
+### 8.2 Standard Builtin Modules Architecture
 
-- `std/io`: `print(text)`, `println(text)`, `read(until)`
-- `std/async`: `Future<T>`
-- `std/thread`: `createThread(fn, key)`, `getThread(key)`, `hasMessages()`, `getMessage()`
-- `std/fs`: File handles and OS level file read/write
-- `std/net`: Sockets (`connect`, `send`, `recv`, `close`)
-- `std/env`: Command line `args()`, `get(key)`, `cwd()`
-- `std/time`: `now()`, `monotonic()`, `ticks()`
-- `text`: Byte array string utilities (`length`, `slice`, `toUpper`, `trim`)
-- `format`: `stringify<T>(val)`, `parse<T>(s)`
-- `json`: `parse<T>(bytes)`, `stringify<T>(val)`
+1. **Internal Core Modules (VM Native, Always Included)**:
+   - `std/async`: `Future<T>`
+   - `std/thread`: `createThread(fn, key)`, `getThread(key)`, `hasMessages()`, `getMessage()` (uses `__internal_*` primitives)
+
+2. **Utility Modules (Pure Galfus Script, Always Included)**:
+   - `text`: Byte array string utilities (`length`, `slice`, `toUpper`, `trim`)
+   - `format`: `stringify<T>(val)`, `parse<T>(s)`
+   - `json`: `parse<T>(bytes)`, `stringify<T>(val)`
+   - `math`, `path`, `regex`, `collections`, `crypto`
+
+3. **Bridge Modules (Optional Host Capabilities)**:
+   - `std/io`: `print(text)`, `println(text)`, `read(until)`
+   - `std/fs`, `std/net`, `std/process`, `std/time`, `std/gpio`
+   - *Note*: Bridge modules use explicit `fn(async) __provider_*` declarations and require host registration in `galfus-workspace`.
