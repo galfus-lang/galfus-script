@@ -11,7 +11,17 @@ impl VirtualMachine {
         match instr {
             // Category E: Memory Ownership
             Instruction::Drop { reg } => {
+                let value = thread.read_reg(reg)?;
                 thread.write_reg(reg, Value::Null)?;
+                if let Value::Future(future_id) = value {
+                    self.release_unreachable(thread);
+                    if !thread.contains_future_handle(future_id) {
+                        return Ok(VmStep::Suspend {
+                            effect: VmEffect::FutureDropped { future_id },
+                            continuation: Continuation::new(None),
+                        });
+                    }
+                }
             }
 
             Instruction::CallNative {
@@ -60,6 +70,7 @@ impl VirtualMachine {
             } => {
                 let val = thread.read_reg(future_id)?;
                 let future_id = match val {
+                    Value::Future(id) => id,
                     Value::Uint64(id) => id,
                     Value::Uint32(id) => id.into(),
                     Value::Int64(id) if id >= 0 => id as u64,

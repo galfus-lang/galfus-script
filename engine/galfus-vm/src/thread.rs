@@ -143,4 +143,36 @@ impl VmThreadState {
             Err(VmError::RegisterOutOfBounds { reg })
         }
     }
+
+    pub fn contains_future_handle(&self, future_id: u64) -> bool {
+        self.call_stack.iter().any(|frame| {
+            frame
+                .registers
+                .iter()
+                .any(|value| matches!(value, Value::Future(id) if *id == future_id))
+        }) || self.module_states.values().any(|state| {
+            state
+                .globals
+                .iter()
+                .any(|value| matches!(value, Value::Future(id) if *id == future_id))
+        }) || self
+            .heap
+            .objects
+            .iter()
+            .flatten()
+            .any(|object| match object {
+                HeapObject::Struct { fields, .. } | HeapObject::Tuple { elements: fields } => {
+                    fields
+                        .iter()
+                        .any(|value| matches!(value, Value::Future(id) if *id == future_id))
+                }
+                HeapObject::Array { elements, .. } => elements
+                    .iter()
+                    .any(|value| matches!(value, Value::Future(id) if *id == future_id)),
+                HeapObject::Choice { payload, .. } => {
+                    matches!(payload, Value::Future(id) if *id == future_id)
+                }
+                HeapObject::ExternalHandle { .. } => false,
+            })
+    }
 }

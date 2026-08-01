@@ -159,6 +159,7 @@ pub(crate) fn vm_value_to_boundary(value: galfus_vm::VmValue) -> galfus_contract
         galfus_vm::VmValue::Uint16(v) => BoundaryValue::U16(v),
         galfus_vm::VmValue::Uint32(v) => BoundaryValue::U32(v),
         galfus_vm::VmValue::Uint64(v) => BoundaryValue::U64(v),
+        galfus_vm::VmValue::Future(v) => BoundaryValue::U64(v),
         galfus_vm::VmValue::Float32(v) => BoundaryValue::F32(v),
         galfus_vm::VmValue::Float64(v) => BoundaryValue::F64(v),
         // Heap objects are not expected from thread intrinsic effects; fall back to Null.

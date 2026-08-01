@@ -130,6 +130,9 @@ pub enum VmEffect {
         arg_types: Vec<TypeIdx>,
         return_type: TypeIdx,
     },
+    FutureDropped {
+        future_id: u64,
+    },
     FutureWaitAll {
         future_ids: Vec<u64>,
         module_id: ModuleId,
@@ -176,6 +179,7 @@ pub enum VmValue {
     Uint16(u16),
     Uint32(u32),
     Uint64(u64),
+    Future(u64),
     Float32(f32),
     Float64(f64),
     Object(VmObjectRef),

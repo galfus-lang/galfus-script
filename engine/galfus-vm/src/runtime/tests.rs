@@ -173,3 +173,65 @@ fn await_future_suspends_and_resumes_through_a_vm_owned_continuation() {
         })
     ));
 }
+
+#[test]
+fn dropping_the_last_future_handle_notifies_the_orchestrator() {
+    let module_id = galfus_core::ModuleId::new(1);
+    let graph = graph_with_node(BytecodeNode {
+        id: module_id,
+        path: galfus_core::ModulePath::new("future_drop.gfs").expect("valid module path"),
+        semantic_revision: galfus_core::SemanticRevision::new(0),
+        module: create_test_module(
+            vec![Instruction::Drop { reg: Reg(0) }, Instruction::RetNull],
+            vec![],
+        ),
+        metadata: None,
+    });
+    let vm = VirtualMachine::new(std::sync::Arc::new(graph));
+    let mut thread = thread::VmThreadState::new();
+    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![])
+        .expect("function is valid");
+    thread
+        .write_reg(Reg(0), Value::Future(7))
+        .expect("register exists");
+
+    let VmStep::Suspend {
+        effect: VmEffect::FutureDropped { future_id },
+        continuation,
+    } = vm
+        .execute_with_budget(&mut thread, 1)
+        .expect("drop reaches the notification point")
+    else {
+        panic!("last future handle must notify the runtime");
+    };
+    assert_eq!(future_id, 7);
+    vm.resume(1, &mut thread, continuation.with_origin(1), Value::Null)
+        .expect("drop continuation resumes");
+}
+
+#[test]
+fn dropping_one_of_multiple_future_handles_keeps_the_future_alive() {
+    let module_id = galfus_core::ModuleId::new(1);
+    let graph = graph_with_node(BytecodeNode {
+        id: module_id,
+        path: galfus_core::ModulePath::new("future_drop_retained.gfs").expect("valid module path"),
+        semantic_revision: galfus_core::SemanticRevision::new(0),
+        module: create_test_module(vec![Instruction::Drop { reg: Reg(0) }], vec![]),
+        metadata: None,
+    });
+    let vm = VirtualMachine::new(std::sync::Arc::new(graph));
+    let mut thread = thread::VmThreadState::new();
+    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![])
+        .expect("function is valid");
+    thread
+        .write_reg(Reg(0), Value::Future(7))
+        .expect("register exists");
+    thread
+        .write_reg(Reg(1), Value::Future(7))
+        .expect("register exists");
+
+    assert!(matches!(
+        vm.execute_with_budget(&mut thread, 1),
+        Ok(VmStep::Continue)
+    ));
+}

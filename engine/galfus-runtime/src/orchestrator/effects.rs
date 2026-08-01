@@ -249,6 +249,19 @@ impl Orchestrator {
             galfus_vm::VmEffect::TimerWait { delay_ms } => {
                 self.kernel.block(thread_id, thread, Some(delay_ms));
             }
+            galfus_vm::VmEffect::FutureDropped { future_id } => {
+                if let Err(error) = self.future_registry.discard(thread_id, future_id) {
+                    self.failure = Some(error.with_stack(execution_stack(&thread)));
+                    self.kernel.cancel(thread_id);
+                    return;
+                }
+                self.resume_or_fail_front(
+                    thread_id,
+                    thread,
+                    continuation,
+                    galfus_vm::VmValue::Null,
+                );
+            }
             galfus_vm::VmEffect::FutureWait {
                 future_id,
                 module_id,
@@ -598,7 +611,7 @@ impl Orchestrator {
                     thread_id,
                     thread,
                     continuation,
-                    galfus_vm::VmValue::Uint64(future_id),
+                    galfus_vm::VmValue::Future(future_id),
                 );
             }
             galfus_vm::VmEffect::CreateFuture {
@@ -660,7 +673,7 @@ impl Orchestrator {
                     thread_id,
                     thread,
                     continuation,
-                    galfus_vm::VmValue::Uint64(future_id),
+                    galfus_vm::VmValue::Future(future_id),
                 );
             }
             galfus_vm::VmEffect::CreateIndirectFuture {
