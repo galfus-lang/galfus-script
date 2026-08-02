@@ -13,7 +13,7 @@ use crate::thread;
 
 use crate::error::{StackFrameInfo, VmError, VmPanic};
 use galfus_bytecode::instruction::{
-    ChoiceLayoutIdx, FuncIdx, Instruction, Reg, StructLayoutIdx, TypeIdx,
+    ChoiceLayoutIdx, ConstIdx, FuncIdx, Instruction, Reg, StructLayoutIdx, TypeIdx,
 };
 use galfus_bytecode::{BytecodeGraph, BytecodeType, Constant, OwnershipKind};
 use galfus_contract::Providers;
@@ -74,7 +74,7 @@ pub enum VmEffect {
     },
     AdapterCall {
         module_id: ModuleId,
-        adapter: String,
+        proxy_module: String,
         symbol: String,
         args: Vec<Value>,
         arg_types: Vec<TypeIdx>,
@@ -654,6 +654,7 @@ impl VirtualMachine {
 
             Instruction::Drop { .. }
             | Instruction::CallNative { .. }
+            | Instruction::AdapterCall { .. }
             | Instruction::AwaitFuture { .. }
             | Instruction::CreateFuture { .. }
             | Instruction::CreateIndirectFuture { .. }

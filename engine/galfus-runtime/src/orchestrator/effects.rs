@@ -182,7 +182,7 @@ impl Orchestrator {
             }
             galfus_vm::VmEffect::AdapterCall {
                 module_id,
-                adapter,
+                proxy_module,
                 symbol,
                 args,
                 arg_types,
@@ -228,7 +228,7 @@ impl Orchestrator {
                     self.kernel.cancel(thread_id);
                     return;
                 };
-                if bindings.lock().unwrap().get_mut(&adapter).is_none() {
+                if bindings.lock().unwrap().get_mut(&proxy_module).is_none() {
                     self.failure = Some(
                         ExecutionFailure::new(
                             ExecutionFailureKind::MissingAdapter,
@@ -253,7 +253,7 @@ impl Orchestrator {
                         request_id,
                         stack,
                         operation: PendingOperation::Adapter {
-                            module: adapter.clone(),
+                            module: proxy_module.clone(),
                             symbol: symbol.clone(),
                         },
                         active: active.clone(),
@@ -264,7 +264,7 @@ impl Orchestrator {
                     bindings,
                     thread_id: thread_id.raw() as usize,
                     request_id,
-                    module: adapter,
+                    module: proxy_module,
                     symbol,
                     args,
                     injector: Arc::new(crate::ExecutionHandle::new(self.sink.clone())),
@@ -1378,9 +1378,30 @@ impl Orchestrator {
             .expect("future target module is loaded")
             .module;
         let function_name = target.functions[func_idx.raw() as usize].name.clone();
-        let is_bodyless = target.functions[func_idx.raw() as usize]
+        let adapter_identity = target.functions[func_idx.raw() as usize]
             .instructions
-            .is_empty();
+            .first()
+            .and_then(|instruction| match instruction {
+                galfus_bytecode::Instruction::AdapterCall {
+                    proxy_module_const,
+                    symbol_const,
+                    ..
+                } => Some((
+                    target
+                        .constants
+                        .constants
+                        .get(proxy_module_const.raw() as usize),
+                    target.constants.constants.get(symbol_const.raw() as usize),
+                )),
+                _ => None,
+            })
+            .and_then(|(proxy_module, symbol)| match (proxy_module, symbol) {
+                (
+                    Some(galfus_bytecode::Constant::String(proxy_module)),
+                    Some(galfus_bytecode::Constant::String(symbol)),
+                ) => Some((proxy_module.clone(), symbol.clone())),
+                _ => None,
+            });
 
         if let Some(name) = function_name.strip_prefix("__provider_") {
             crate::orchestrator::future_registry::Activation::Provider {
@@ -1394,10 +1415,10 @@ impl Orchestrator {
                 args,
                 arg_types,
             }
-        } else if is_bodyless {
+        } else if let Some((proxy_module, symbol)) = adapter_identity {
             crate::orchestrator::future_registry::Activation::Adapter {
-                proxy_module: target.name.clone(),
-                symbol: function_name,
+                proxy_module,
+                symbol,
                 args,
                 arg_types,
             }

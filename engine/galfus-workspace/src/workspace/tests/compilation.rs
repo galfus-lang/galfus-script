@@ -150,6 +150,34 @@ export fn(async) add(left: i32, right: i32): i32
     };
     assert!(is_valid, "{diagnostics}");
     assert_eq!(workspace.external_descriptors[&ModulePath::new("math.gfp").unwrap()].adapter, "demo");
+    assert_eq!(
+        workspace.external_descriptors[&ModulePath::new("math.gfp").unwrap()].exports,
+        vec![galfus_contract::ExternalFunctionSignature {
+            name: "add".to_string(),
+            is_async: true,
+            parameter_types: vec![
+                galfus_contract::BoundaryType::I32,
+                galfus_contract::BoundaryType::I32,
+            ],
+            return_type: galfus_contract::BoundaryType::I32,
+        }]
+    );
+    let graph = workspace.compile().expect("proxy compilation succeeds").graph;
+    let proxy = graph
+        .modules()
+        .find(|module| module.path().as_str() == "math.gfp")
+        .expect("proxy bytecode module");
+    let instructions = &proxy
+        .module
+        .functions
+        .iter()
+        .find(|function| function.name == "add")
+        .expect("proxy export")
+        .instructions;
+    assert!(
+        matches!(instructions.first(), Some(galfus_bytecode::Instruction::AdapterCall { .. })),
+        "{instructions:?}"
+    );
 }
 
 #[test]

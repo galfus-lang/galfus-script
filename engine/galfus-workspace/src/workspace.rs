@@ -12,12 +12,15 @@ use crate::state::{
 };
 use galfus_bytecode::{BytecodeGraph, ImportEdge};
 use galfus_compiler::{CompiledModule, gfp::parse_gfp_frontmatter};
-use galfus_contract::{ExternalModuleDescriptor, Providers};
-use galfus_core::{Diagnostic, DiagnosticBag, ModulePath, SourceFile, Span};
+use galfus_contract::{
+    BoundaryType, ExternalFunctionSignature, ExternalModuleDescriptor, Providers,
+};
+use galfus_core::{Diagnostic, DiagnosticBag, ModulePath, SourceFile, Span, TypeId};
 use galfus_frontend::modules::{
     FrontendModuleKind, FrontendRoots, FrontendSession, FrontendSource, FrontendUpdate,
     SemanticRoot, SemanticRootKind,
 };
+use galfus_frontend::{PrimitiveType, SymbolKind, TypeKind, TypeTable};
 use galfus_runtime::{Execution, Runtime, RuntimeError, format_panic};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -284,6 +287,7 @@ impl Workspace {
                     }
                 };
 
+                self.refresh_external_proxy_descriptors(&mut report.diagnostics);
                 self.validate_registered_adapter_schemas(&mut report.diagnostics);
 
                 if report.diagnostics.has_errors() {
@@ -353,6 +357,121 @@ impl Workspace {
                     Span::empty(WORKSPACE_SOURCE_ID, 0),
                 ));
             }
+        }
+    }
+
+    fn refresh_external_proxy_descriptors(&mut self, diagnostics: &mut DiagnosticBag) {
+        for module in &self.frontend.modules {
+            if module.kind() != FrontendModuleKind::ExternalProxy {
+                continue;
+            }
+            let Some(descriptor) = self.external_descriptors.get_mut(module.path()) else {
+                continue;
+            };
+            descriptor.exports.clear();
+            let Some(type_result) = module.type_result() else {
+                continue;
+            };
+            let Some(resolution) = module.graph().resolution() else {
+                continue;
+            };
+            for export in resolution.exports() {
+                if export.kind() != SymbolKind::Function {
+                    continue;
+                }
+                let Some(function_type) = type_result
+                    .layer()
+                    .symbol_type(export.symbol())
+                    .and_then(|ty| type_result.layer().table().kind(ty))
+                    .and_then(|kind| match kind {
+                        TypeKind::Function(function) => Some(function),
+                        _ => None,
+                    })
+                else {
+                    continue;
+                };
+                let parameter_types = function_type
+                    .parameters()
+                    .iter()
+                    .map(|parameter| {
+                        Self::boundary_type(type_result.layer().table(), parameter.ty())
+                    })
+                    .collect::<Result<Vec<_>, _>>();
+                let return_type =
+                    Self::boundary_type(type_result.layer().table(), function_type.return_type());
+                match parameter_types
+                    .and_then(|parameters| return_type.map(|return_type| (parameters, return_type)))
+                {
+                    Ok((parameter_types, return_type)) => {
+                        descriptor.exports.push(ExternalFunctionSignature {
+                            name: export.name().to_string(),
+                            is_async: true,
+                            parameter_types,
+                            return_type,
+                        })
+                    }
+                    Err(error) => diagnostics.push(Diagnostic::error_with_message(
+                        WorkspaceDiagnosticCode::InvalidExternalProxy,
+                        format!(
+                            "proxy export '{}' is not boundary-representable: {error}",
+                            export.name()
+                        ),
+                        module.source().span(),
+                    )),
+                }
+            }
+        }
+    }
+
+    fn boundary_type(table: &TypeTable, ty: TypeId) -> Result<BoundaryType, String> {
+        match table.kind(ty) {
+            Some(TypeKind::Primitive(primitive)) => match primitive {
+                PrimitiveType::Null => Ok(BoundaryType::Null),
+                PrimitiveType::Bool => Ok(BoundaryType::Bool),
+                PrimitiveType::Int8 => Ok(BoundaryType::I8),
+                PrimitiveType::Int16 => Ok(BoundaryType::I16),
+                PrimitiveType::Int32 => Ok(BoundaryType::I32),
+                PrimitiveType::Int64 => Ok(BoundaryType::I64),
+                PrimitiveType::Uint8 => Ok(BoundaryType::U8),
+                PrimitiveType::Uint16 => Ok(BoundaryType::U16),
+                PrimitiveType::Uint32 => Ok(BoundaryType::U32),
+                PrimitiveType::Uint64 => Ok(BoundaryType::U64),
+                PrimitiveType::Float32 => Ok(BoundaryType::F32),
+                PrimitiveType::Float64 => Ok(BoundaryType::F64),
+                PrimitiveType::Float16 => {
+                    Err("f16 is not supported by the boundary ABI".to_string())
+                }
+            },
+            Some(TypeKind::Array { element }) => Ok(BoundaryType::Array(Box::new(
+                Self::boundary_type(table, *element)?,
+            ))),
+            Some(TypeKind::Tuple { elements }) => elements
+                .iter()
+                .map(|element| Self::boundary_type(table, *element))
+                .collect::<Result<Vec<_>, _>>()
+                .map(BoundaryType::Tuple),
+            Some(TypeKind::Function(_)) => Ok(BoundaryType::Function),
+            Some(TypeKind::GenericInstance { arguments, .. }) if arguments.len() == 1 => {
+                Self::boundary_type(table, arguments[0])
+            }
+            Some(TypeKind::Union { members }) => {
+                let non_null = members
+                    .iter()
+                    .filter(|member| {
+                        !matches!(
+                            table.kind(**member),
+                            Some(TypeKind::Primitive(PrimitiveType::Null))
+                        )
+                    })
+                    .copied()
+                    .collect::<Vec<_>>();
+                if non_null.len() == 1 && non_null.len() + 1 == members.len() {
+                    Self::boundary_type(table, non_null[0])
+                } else {
+                    Err("only nullable unions are supported by the boundary ABI".to_string())
+                }
+            }
+            _ => Err("type is not supported by the boundary ABI".to_string()),
         }
     }
 
@@ -521,6 +640,7 @@ impl Workspace {
                     m.source().clone(),
                     m.graph().clone(),
                     m.type_result().cloned(),
+                    m.source().name().ends_with(".gfp"),
                 )
             })
             .collect();

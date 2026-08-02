@@ -371,6 +371,15 @@ pub enum Instruction {
         arg_types: Vec<TypeIdx>,
         return_type: TypeIdx,
     },
+    AdapterCall {
+        dest: Reg,
+        proxy_module_const: ConstIdx,
+        symbol_const: ConstIdx,
+        args_start: Reg,
+        arg_count: u8,
+        arg_types: Vec<TypeIdx>,
+        return_type: TypeIdx,
+    },
     AwaitFuture {
         dest: Reg,
         future_id: Reg,

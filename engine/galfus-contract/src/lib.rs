@@ -381,14 +381,24 @@ pub enum AdapterLoadError {
     Other(String),
 }
 
-pub trait ModuleAdapter: Send + Sync {
+/// Development-time validation for an external proxy descriptor.
+pub trait ExternalAdapterSchema: Send + Sync {
     fn name(&self) -> &str;
     fn validate_schema(
         &self,
         descriptor: &ExternalModuleDescriptor,
     ) -> Result<(), AdapterValidationError>;
+}
+
+/// Optional package-time binder. Runtime receives only [`ExternalBindings`].
+pub trait ExternalModuleBinder: Send + Sync {
     fn bind_module(
         &self,
         image: &ExternalModuleImage,
     ) -> Result<Box<dyn BoundExternalModule>, AdapterLoadError>;
 }
+
+/// Compatibility composition for hosts that provide both development contracts.
+pub trait ModuleAdapter: ExternalAdapterSchema + ExternalModuleBinder {}
+
+impl<T> ModuleAdapter for T where T: ExternalAdapterSchema + ExternalModuleBinder {}

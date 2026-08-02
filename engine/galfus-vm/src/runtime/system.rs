@@ -63,6 +63,46 @@ impl VirtualMachine {
                     continuation: Continuation::for_provider(dest, module_id, return_type),
                 });
             }
+            Instruction::AdapterCall {
+                dest,
+                proxy_module_const,
+                symbol_const,
+                args_start,
+                arg_count,
+                arg_types,
+                return_type,
+            } => {
+                let constants = &self.current_image(thread)?.constants.constants;
+                let string_constant = |index: ConstIdx| match constants.get(index.raw() as usize) {
+                    Some(Constant::String(value)) => Ok(value.clone()),
+                    Some(value) => Err(VmError::TypeMismatch {
+                        expected: "String constant".to_string(),
+                        found: format!("{value:?}"),
+                    }),
+                    None => Err(VmError::ConstantOutOfBounds { index }),
+                };
+                let proxy_module = string_constant(proxy_module_const)?;
+                let symbol = string_constant(symbol_const)?;
+                let module_id = thread
+                    .call_stack
+                    .last()
+                    .ok_or(VmError::EmptyCallStack)?
+                    .module_id;
+                let args = (0..arg_count)
+                    .map(|index| thread.read_reg(Reg(args_start.raw() + index as u16)))
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::AdapterCall {
+                        module_id,
+                        proxy_module,
+                        symbol,
+                        args,
+                        arg_types,
+                        return_type,
+                    },
+                    continuation: Continuation::for_provider(dest, module_id, return_type),
+                });
+            }
             Instruction::AwaitFuture {
                 dest,
                 future_id,

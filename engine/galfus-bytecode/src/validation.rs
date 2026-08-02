@@ -591,6 +591,34 @@ pub fn validate_bytecode_module(
                         check_reg(Reg(args_start.raw() + arg_count as u16 - 1), &mut errors);
                     }
                 }
+                Instruction::AdapterCall {
+                    dest,
+                    proxy_module_const,
+                    symbol_const,
+                    args_start,
+                    arg_count,
+                    arg_types,
+                    return_type,
+                } => {
+                    check_reg(dest, &mut errors);
+                    check_const(proxy_module_const, &mut errors);
+                    check_const(symbol_const, &mut errors);
+                    check_type(return_type, &mut errors);
+                    if arg_types.len() != arg_count as usize {
+                        errors.push(BytecodeValidationError::FutureArgumentTypeCountMismatch {
+                            func_name: func_name.clone(),
+                            instr_idx,
+                            expected_count: arg_count as usize,
+                            found_count: arg_types.len(),
+                        });
+                    }
+                    for arg_type in arg_types {
+                        check_type(arg_type, &mut errors);
+                    }
+                    if arg_count > 0 {
+                        check_reg(Reg(args_start.raw() + arg_count as u16 - 1), &mut errors);
+                    }
+                }
                 Instruction::AwaitFuture {
                     dest,
                     future_id,
