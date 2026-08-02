@@ -8,6 +8,12 @@ use crate::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BytecodeValidationError {
+    FutureArgumentTypeCountMismatch {
+        func_name: String,
+        instr_idx: usize,
+        expected_count: usize,
+        found_count: usize,
+    },
     InvalidConstantIndex {
         func_name: String,
         instr_idx: usize,
@@ -585,6 +591,34 @@ pub fn validate_bytecode_module(
                         check_reg(Reg(args_start.raw() + arg_count as u16 - 1), &mut errors);
                     }
                 }
+                Instruction::AdapterCall {
+                    dest,
+                    proxy_module_const,
+                    symbol_const,
+                    args_start,
+                    arg_count,
+                    arg_types,
+                    return_type,
+                } => {
+                    check_reg(dest, &mut errors);
+                    check_const(proxy_module_const, &mut errors);
+                    check_const(symbol_const, &mut errors);
+                    check_type(return_type, &mut errors);
+                    if arg_types.len() != arg_count as usize {
+                        errors.push(BytecodeValidationError::FutureArgumentTypeCountMismatch {
+                            func_name: func_name.clone(),
+                            instr_idx,
+                            expected_count: arg_count as usize,
+                            found_count: arg_types.len(),
+                        });
+                    }
+                    for arg_type in arg_types {
+                        check_type(arg_type, &mut errors);
+                    }
+                    if arg_count > 0 {
+                        check_reg(Reg(args_start.raw() + arg_count as u16 - 1), &mut errors);
+                    }
+                }
                 Instruction::AwaitFuture {
                     dest,
                     future_id,
@@ -599,9 +633,49 @@ pub fn validate_bytecode_module(
                     func: func_idx,
                     args_start,
                     arg_count,
+                    ref arg_types,
+                    return_type,
                 } => {
                     check_reg(dest, &mut errors);
                     check_func(func_idx, &mut errors);
+                    if arg_types.len() != arg_count as usize {
+                        errors.push(BytecodeValidationError::FutureArgumentTypeCountMismatch {
+                            func_name: func_name.clone(),
+                            instr_idx,
+                            expected_count: arg_count as usize,
+                            found_count: arg_types.len(),
+                        });
+                    }
+                    for &ty in arg_types {
+                        check_type(ty, &mut errors);
+                    }
+                    check_type(return_type, &mut errors);
+                    if arg_count > 0 {
+                        check_reg(Reg(args_start.raw() + arg_count as u16 - 1), &mut errors);
+                    }
+                }
+                Instruction::CreateIndirectFuture {
+                    dest,
+                    func_reg,
+                    args_start,
+                    arg_count,
+                    ref arg_types,
+                    return_type,
+                } => {
+                    check_reg(dest, &mut errors);
+                    check_reg(func_reg, &mut errors);
+                    if arg_types.len() != arg_count as usize {
+                        errors.push(BytecodeValidationError::FutureArgumentTypeCountMismatch {
+                            func_name: func_name.clone(),
+                            instr_idx,
+                            expected_count: arg_count as usize,
+                            found_count: arg_types.len(),
+                        });
+                    }
+                    for &ty in arg_types {
+                        check_type(ty, &mut errors);
+                    }
+                    check_type(return_type, &mut errors);
                     if arg_count > 0 {
                         check_reg(Reg(args_start.raw() + arg_count as u16 - 1), &mut errors);
                     }
@@ -610,13 +684,16 @@ pub fn validate_bytecode_module(
                     dest,
                     futures_start,
                     count,
+                    return_type,
                 }
                 | Instruction::AwaitRace {
                     dest,
                     futures_start,
                     count,
+                    return_type,
                 } => {
                     check_reg(dest, &mut errors);
+                    check_type(return_type, &mut errors);
                     if count > 0 {
                         check_reg(Reg(futures_start.raw() + count as u16 - 1), &mut errors);
                     }

@@ -1,7 +1,5 @@
-fn(async) __provider_io_write(text: [u8]): null {}
-fn(async) __provider_io_read(terminator: [u8]): [u8] {
-  return ""
-}
+fn(async) __provider_io_write(text: [u8]): null
+fn(async) __provider_io_read(terminator: [u8]): [u8]
 
 export fn read(terminator: [u8] = "\n"): [u8] {
   return await __provider_io_read(terminator)

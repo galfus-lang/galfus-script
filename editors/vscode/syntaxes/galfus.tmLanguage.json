@@ -3,6 +3,17 @@
   "name": "Galfus Script",
   "scopeName": "source.gfs",
   "patterns": [
+    {
+      "begin": "\\A---$",
+      "end": "^---$",
+      "name": "meta.embedded.block.toml",
+      "contentName": "source.toml",
+      "patterns": [
+        {
+          "include": "source.toml"
+        }
+      ]
+    },
     { "include": "#comments" },
     { "include": "#strings" },
     { "include": "#declarations" },
@@ -122,7 +133,7 @@
       "patterns": [
         {
           "name": "keyword.control.gfs",
-          "match": "\\b(if|else|for|loop|break|continue|return|match|instanceof|typeof|transaction|rollback)\\b"
+          "match": "\\b(if|else|for|loop|break|continue|return|match|instanceof|typeof|transaction|rollback|async|await)\\b"
         },
         {
           "name": "keyword.control.import.gfs",

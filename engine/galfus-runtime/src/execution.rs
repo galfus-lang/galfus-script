@@ -103,8 +103,8 @@ impl Execution {
                         self.orchestrator = None;
                     }
                 }
-                ThreadResult::Completed(code) => {
-                    self.result = Some(Ok(BoundaryValue::I32(code)));
+                ThreadResult::Completed(res) => {
+                    self.result = Some(res);
                     self.state = ExecutionState::Completed;
                 }
                 ThreadResult::Blocked { .. } => {
@@ -154,9 +154,20 @@ impl Execution {
                 }
                 ExecutorStepResult::Blocked { .. } => {
                     if !self.sink.has_pending() {
+                        let failure_info = self
+                            .orchestrator
+                            .as_ref()
+                            .and_then(|o| o.failure.as_ref())
+                            .map(|f| f.message.as_str())
+                            .unwrap_or("no failure recorded");
+                        let states_info = self
+                            .orchestrator
+                            .as_ref()
+                            .map(|o| format!("states={:?}", o.debug_states()))
+                            .unwrap_or_default();
                         return Err(ExecutionFailure::new(
                             ExecutionFailureKind::InternalRuntimeFailure,
-                            "execution is blocked",
+                            format!("execution is blocked ({failure_info}, {states_info})"),
                         ));
                     }
                 }
@@ -241,5 +252,40 @@ impl galfus_contract::MessageInjector for ExecutionHandle {
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
         self.resolve_request(thread_id, request_id, result);
+    }
+}
+
+pub(crate) struct FutureCompletionInjector {
+    sink: EventSink,
+    owner_thread_id: crate::registry::ThreadId,
+    future_id: u64,
+}
+
+impl FutureCompletionInjector {
+    pub(crate) fn new(
+        sink: EventSink,
+        owner_thread_id: crate::registry::ThreadId,
+        future_id: u64,
+    ) -> Self {
+        Self {
+            sink,
+            owner_thread_id,
+            future_id,
+        }
+    }
+}
+
+impl galfus_contract::MessageInjector for FutureCompletionInjector {
+    fn inject_system_response(
+        &self,
+        _thread_id: usize,
+        _request_id: u64,
+        result: Result<BoundaryValue, ExecutionFailure>,
+    ) {
+        self.sink.send(RuntimeEvent::FutureCompleted {
+            thread_id: self.owner_thread_id,
+            future_id: self.future_id,
+            result,
+        });
     }
 }

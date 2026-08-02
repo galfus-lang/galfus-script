@@ -577,10 +577,10 @@ fn transport_type(
         }
         TypeKind::Named { symbol } => {
             let symbol_data = resolution.symbol(symbol)?;
-            if symbol_data.kind() == SymbolKind::TypeAlias {
-                if let Some(target_ty) = result.layer().symbol_type(symbol) {
-                    return transport_type(resolution, result, target_ty);
-                }
+            if symbol_data.kind() == SymbolKind::TypeAlias
+                && let Some(target_ty) = result.layer().symbol_type(symbol)
+            {
+                return transport_type(resolution, result, target_ty);
             }
             let name = symbol_data.name().to_string();
             Some(ImportedType::LocalPath { name })

@@ -317,6 +317,8 @@ fn compile_single_module(
         ctx.function_map.insert(func.id, local_idx);
         ctx.function_names.insert(func.id, func.name.clone());
         ctx.function_return_types.insert(func.id, func.return_type);
+        ctx.function_param_types
+            .insert(func.id, func.parameter_types.clone());
     }
 
     let mut execution_metadata = galfus_bytecode::graph::ExecutionMetadata {
@@ -358,6 +360,24 @@ fn compile_single_module(
             local_count,
         );
         let (mut instructions, function_spans) = emitter.emit();
+        let mut temp_count = emitter.temp_count_max;
+        drop(emitter);
+        let mut proxy_metadata = None;
+        if module.is_external_proxy()
+            && mir_func.name != "__init_module"
+            && instructions
+                .iter()
+                .all(|instruction| matches!(instruction, galfus_bytecode::Instruction::RetNull))
+        {
+            proxy_metadata = Some(galfus_bytecode::ExternalProxyMetadata {
+                proxy_module: module.path().as_str().to_string(),
+                symbol: mir_func.name.clone(),
+            });
+            instructions = vec![
+                galfus_bytecode::Instruction::RetNull,
+            ];
+            temp_count = temp_count.max(1);
+        }
         execution_metadata
             .spans
             .insert(local_func_idx, function_spans);
@@ -368,8 +388,9 @@ fn compile_single_module(
             name: mir_func.name.clone(),
             param_count: param_count.try_into().unwrap(),
             local_count,
-            temp_count: emitter.temp_count_max,
+            temp_count,
             return_ty,
+            proxy_metadata,
             instructions,
         });
     }

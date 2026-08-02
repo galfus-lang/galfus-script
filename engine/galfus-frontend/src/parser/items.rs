@@ -169,9 +169,13 @@ impl Parser {
 
         let return_type = self.parse_type()?;
 
-        self.skip_newlines();
-
-        let body = self.parse_function_body()?;
+        let body = if self.at(&TokenKind::LeftBrace) {
+            self.parse_block()
+        } else if self.at(&TokenKind::Arrow) {
+            Some(self.parse_function_body()?)
+        } else {
+            None
+        };
 
         let mut children = Vec::new();
 
@@ -195,13 +199,19 @@ impl Parser {
 
         children.push(parameters);
         children.push(return_type);
-        children.push(body);
+        if let Some(body) = body {
+            children.push(body);
+        }
 
         let start_span = decorators
             .map(|decorators| self.node_span(decorators))
             .unwrap_or(fn_token.span());
 
-        let span = Span::cover(start_span, self.node_span(body)).unwrap_or(fn_token.span());
+        let end_span = body
+            .map(|body_node| self.node_span(body_node))
+            .unwrap_or_else(|| self.node_span(return_type));
+
+        let span = Span::cover(start_span, end_span).unwrap_or(fn_token.span());
 
         Some(self.add_node(SyntaxNodeKind::FunctionItem, span, children))
     }

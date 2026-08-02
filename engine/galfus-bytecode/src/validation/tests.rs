@@ -14,6 +14,7 @@ fn create_dummy_module(instructions: Vec<Instruction>) -> BytecodeModule {
             local_count: 2,
             temp_count: 2,
             return_ty: TypeIdx(0),
+            proxy_metadata: None,
             instructions,
         }],
         types: vec![
@@ -168,6 +169,49 @@ fn test_invalid_function_index() {
             ..
         }
     ));
+}
+
+#[test]
+fn test_future_instructions_require_one_type_per_argument() {
+    let image = create_dummy_module(vec![Instruction::CreateFuture {
+        dest: Reg(1),
+        func: FuncIdx(0),
+        args_start: Reg(0),
+        arg_count: 2,
+        arg_types: vec![TypeIdx(0)],
+        return_type: TypeIdx(0),
+    }]);
+
+    let errors = validate_bytecode_module(&image).unwrap_err();
+    assert!(errors.iter().any(|error| matches!(
+        error,
+        BytecodeValidationError::FutureArgumentTypeCountMismatch {
+            expected_count: 2,
+            found_count: 1,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn test_indirect_future_validates_argument_and_payload_types() {
+    let image = create_dummy_module(vec![Instruction::CreateIndirectFuture {
+        dest: Reg(1),
+        func_reg: Reg(0),
+        args_start: Reg(0),
+        arg_count: 1,
+        arg_types: vec![TypeIdx(99)],
+        return_type: TypeIdx(98),
+    }]);
+
+    let errors = validate_bytecode_module(&image).unwrap_err();
+    assert_eq!(
+        errors
+            .iter()
+            .filter(|error| matches!(error, BytecodeValidationError::InvalidTypeIndex { .. }))
+            .count(),
+        2
+    );
 }
 
 #[test]

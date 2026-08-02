@@ -64,7 +64,11 @@ impl KernelDriver for CooperativeDriver {
                         (None, next) => next,
                     };
                 }
-                ThreadResult::Completed(code) => *self.exit_code.lock().unwrap() = code,
+                ThreadResult::Completed(res) => {
+                    if let Ok(galfus_contract::BoundaryValue::I32(code)) = res {
+                        *self.exit_code.lock().unwrap() = code;
+                    }
+                }
             }
         }
         let code = *self.exit_code.lock().unwrap();
@@ -101,7 +105,12 @@ impl KernelDriver for CooperativeDriver {
                     ExecutorStepResult::Running
                 }
             }
-            ThreadResult::Completed(code) => {
+            ThreadResult::Completed(res) => {
+                let code = if let Ok(galfus_contract::BoundaryValue::I32(c)) = res {
+                    c
+                } else {
+                    0
+                };
                 *self.exit_code.lock().unwrap() = code;
                 let is_empty = self.queue.lock().unwrap().is_empty();
                 if is_empty {

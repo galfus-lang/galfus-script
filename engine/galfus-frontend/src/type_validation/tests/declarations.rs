@@ -7,6 +7,7 @@ fn check_binds_function_symbol_type() {
 fn main(value: i32): null {
   return
 }
+
 "#,
     );
 
@@ -30,6 +31,28 @@ fn main(value: i32): null {
         }
         other => panic!("expected function type, got {other:?}"),
     }
+}
+
+#[test]
+fn check_binds_async_function_as_a_future_of_its_payload() {
+    let (_source, graph, result) =
+        check_source("struct Future<T> { id: i64 }\nfn(async) load(): i32 { return 1 }\n");
+
+    let load = symbol_by_name_and_kind(&graph, "load", SymbolKind::Function);
+    let ty = result.layer().symbol_type(load).unwrap();
+    let TypeKind::Function(function) = result.layer().table().kind(ty).unwrap() else {
+        panic!("expected function type");
+    };
+    let TypeKind::GenericInstance { arguments, .. } =
+        result.layer().table().kind(function.return_type()).unwrap()
+    else {
+        panic!("expected Future payload type");
+    };
+    assert_eq!(arguments.len(), 1);
+    assert_eq!(
+        result.layer().table().kind(arguments[0]),
+        Some(&TypeKind::Primitive(PrimitiveType::Int32))
+    );
 }
 
 #[test]
@@ -378,4 +401,46 @@ fn Point::move(self, dx: i32, dy: i32): Point {
     );
 
     assert!(!result.has_errors(), "{:?}", result.diagnostics());
+}
+
+#[test]
+fn check_user_module_rejects_internal_function_declaration() {
+    let (_source, _graph, result) = check_source_named(
+        "test.gfs",
+        r#"
+fn __internal_custom(): null {
+  return
+}
+"#,
+    );
+
+    assert!(result.has_errors());
+}
+
+#[test]
+fn check_user_module_rejects_provider_function_declaration() {
+    let (_source, _graph, result) = check_source_named(
+        "test.gfs",
+        r#"
+fn(async) __provider_gpio_read(): [u8] {
+  return ""
+}
+"#,
+    );
+
+    assert!(result.has_errors());
+}
+
+#[test]
+fn check_provider_function_without_async_metadata_is_rejected() {
+    let (_source, _graph, result) = check_source_named(
+        "std/gpio",
+        r#"
+fn __provider_gpio_read(): [u8] {
+  return ""
+}
+"#,
+    );
+
+    assert!(result.has_errors());
 }

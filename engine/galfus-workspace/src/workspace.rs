@@ -3,19 +3,25 @@ mod tests;
 
 use std::str;
 
-use crate::config::{WorkspaceConfig, parse_workspace_config};
+use crate::config::{WORKSPACE_SOURCE_ID, WorkspaceConfig, parse_workspace_config};
+use crate::diagnostic::WorkspaceDiagnosticCode;
 use crate::source_store::ModuleOrigin;
 use crate::state::{
     BytecodeState, CheckState, CompileBlocked, CompileState, RunBlocked, SemanticState,
     SourceState, WorkspaceError,
 };
 use galfus_bytecode::{BytecodeGraph, ImportEdge};
-use galfus_compiler::CompiledModule;
-use galfus_contract::Providers;
-use galfus_core::{DiagnosticBag, ModulePath, SourceFile};
-use galfus_frontend::modules::{
-    FrontendRoots, FrontendSession, FrontendSource, FrontendUpdate, SemanticRoot, SemanticRootKind,
+use galfus_compiler::{CompiledModule, gfp::parse_gfp_frontmatter};
+use galfus_contract::{
+    BoundaryType, ExternalFunctionSignature, ExternalModuleDescriptor, ExternalModuleRequirement,
+    Providers,
 };
+use galfus_core::{Diagnostic, DiagnosticBag, ModulePath, SourceFile, Span, TypeId};
+use galfus_frontend::modules::{
+    FrontendModuleKind, FrontendRoots, FrontendSession, FrontendSource, FrontendUpdate,
+    SemanticRoot, SemanticRootKind,
+};
+use galfus_frontend::{PrimitiveType, SymbolKind, TypeKind, TypeTable};
 use galfus_runtime::{Execution, Runtime, RuntimeError, format_panic};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -26,6 +32,8 @@ pub struct Workspace {
     pub semantic_state: SemanticState,
     pub bytecode_state: BytecodeState,
     pub frontend: FrontendSession,
+    pub adapters: HashMap<String, Arc<dyn galfus_contract::ModuleAdapter>>,
+    pub external_descriptors: HashMap<ModulePath, ExternalModuleDescriptor>,
 }
 
 pub enum LoadResult {
@@ -47,6 +55,8 @@ pub struct CheckReport<'a> {
 pub struct CompileReport {
     /// The compiled module graph, ready to be passed to the runtime.
     pub graph: Arc<BytecodeGraph>,
+    /// Declarative external dependencies required to bind the graph at package time.
+    pub external_requirements: Vec<ExternalModuleRequirement>,
 }
 
 impl Default for Workspace {
@@ -63,7 +73,13 @@ impl Workspace {
             semantic_state: SemanticState::new(),
             bytecode_state: BytecodeState::new(),
             frontend: FrontendSession::new(),
+            adapters: HashMap::new(),
+            external_descriptors: HashMap::new(),
         }
+    }
+
+    pub fn register_adapter(&mut self, adapter: Arc<dyn galfus_contract::ModuleAdapter>) {
+        self.adapters.insert(adapter.name().to_string(), adapter);
     }
 
     pub fn load_config(&mut self, config_toml: &[u8]) -> Result<LoadResult, WorkspaceError> {
@@ -88,20 +104,67 @@ impl Workspace {
         module_bytes: &[u8],
     ) -> Result<LoadResult, WorkspaceError> {
         let module_path = ModulePath::new(path).ok_or(WorkspaceError::InvalidPath)?;
-        if self
-            .source_state
-            .store
-            .get(&module_path)
-            .is_some_and(|entry| entry.bytes.as_ref() == module_bytes)
+        if !path.ends_with(".gfp")
+            && self
+                .source_state
+                .store
+                .get(&module_path)
+                .is_some_and(|entry| entry.bytes.as_ref() == module_bytes)
         {
             return Ok(LoadResult::Success);
         }
 
+        let (source_bytes, origin, descriptor) = if path.ends_with(".gfp") {
+            let source = match str::from_utf8(module_bytes) {
+                Ok(source) => source,
+                Err(_) => return Ok(Self::invalid_external_proxy(".gfp source must be UTF-8")),
+            };
+            let (frontmatter, body) = match parse_gfp_frontmatter(source) {
+                Ok(parsed) => parsed,
+                Err(error) => return Ok(Self::invalid_external_proxy(error)),
+            };
+            (
+                Arc::from(body.as_bytes()),
+                ModuleOrigin::ExternalProxy,
+                Some(ExternalModuleDescriptor {
+                    adapter: frontmatter.adapter,
+                    targets: frontmatter.targets,
+                    metadata: frontmatter.metadata,
+                    exports: Vec::new(),
+                }),
+            )
+        } else {
+            (Arc::from(module_bytes), ModuleOrigin::User, None)
+        };
+
         self.source_state.revision.next();
         self.source_state.store.load_module(
             module_path.clone(),
-            Arc::from(module_bytes),
-            ModuleOrigin::User,
+            source_bytes,
+            origin,
+            self.source_state.revision,
+        );
+        if let Some(descriptor) = descriptor {
+            self.external_descriptors
+                .insert(module_path.clone(), descriptor);
+        } else {
+            self.external_descriptors.remove(&module_path);
+        }
+        self.source_state.dirty_sources.insert(module_path);
+        self.mark_dirty();
+        Ok(LoadResult::Success)
+    }
+
+    pub fn register_bridge_module(
+        &mut self,
+        bridge: galfus_contract::BridgeModule,
+    ) -> Result<LoadResult, WorkspaceError> {
+        let module_path = ModulePath::new(&bridge.name).ok_or(WorkspaceError::InvalidPath)?;
+        self.source_state.revision.next();
+        self.source_state.store.load_module(
+            module_path.clone(),
+            Arc::from(bridge.source.as_bytes()),
+            ModuleOrigin::Builtin,
             self.source_state.revision,
         );
         self.source_state.dirty_sources.insert(module_path);
@@ -113,6 +176,7 @@ impl Workspace {
         let module_path = ModulePath::new(path).ok_or(WorkspaceError::InvalidPath)?;
 
         if let Some(entry) = self.source_state.store.remove_module(&module_path) {
+            self.external_descriptors.remove(&module_path);
             self.source_state.revision.next();
             self.source_state.dirty_sources.remove(&module_path);
             self.source_state.removed_modules.push(entry.module_id);
@@ -121,6 +185,16 @@ impl Workspace {
         } else {
             Ok(RemoveResult::NotFound)
         }
+    }
+
+    fn invalid_external_proxy(message: impl Into<String>) -> LoadResult {
+        let mut diagnostics = DiagnosticBag::new();
+        diagnostics.push(Diagnostic::error_with_message(
+            WorkspaceDiagnosticCode::InvalidExternalProxy,
+            message,
+            Span::empty(WORKSPACE_SOURCE_ID, 0),
+        ));
+        LoadResult::Diagnostics(diagnostics)
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -167,7 +241,7 @@ impl Workspace {
                 };
             } else {
                 let roots = self.frontend_roots();
-                let report = loop {
+                let mut report = loop {
                     let source_files = self
                         .source_state
                         .dirty_sources
@@ -177,6 +251,13 @@ impl Workspace {
                             (
                                 entry.module_id,
                                 entry.path.clone(),
+                                match entry.origin {
+                                    ModuleOrigin::User => FrontendModuleKind::Standard,
+                                    ModuleOrigin::Builtin => FrontendModuleKind::Builtin,
+                                    ModuleOrigin::ExternalProxy => {
+                                        FrontendModuleKind::ExternalProxy
+                                    }
+                                },
                                 SourceFile::new(
                                     entry.source_id,
                                     entry.path.to_string(),
@@ -187,10 +268,11 @@ impl Workspace {
                         .collect::<Vec<_>>();
                     let sources = source_files
                         .iter()
-                        .map(|(module_id, path, source)| FrontendSource {
+                        .map(|(module_id, path, kind, source)| FrontendSource {
                             module_id: *module_id,
                             path: path.clone(),
                             source,
+                            kind: *kind,
                         })
                         .collect::<Vec<_>>();
                     let update = FrontendUpdate {
@@ -207,6 +289,9 @@ impl Workspace {
                         break report;
                     }
                 };
+
+                self.refresh_external_proxy_descriptors(&mut report.diagnostics);
+                self.validate_registered_adapter_schemas(&mut report.diagnostics);
 
                 if report.diagnostics.has_errors() {
                     self.semantic_state.check_state = CheckState::Failed {
@@ -244,7 +329,7 @@ impl Workspace {
                 continue;
             }
             let builtin_name = path.as_str().strip_suffix(".gfs").unwrap_or(path.as_str());
-            let Some((_, source)) = galfus_builtins::BUILTIN_MODULES
+            let Some((_, source)) = galfus_contract::BUILTIN_MODULES
                 .iter()
                 .find(|(name, _)| *name == builtin_name)
             else {
@@ -261,6 +346,136 @@ impl Workspace {
             loaded = true;
         }
         loaded
+    }
+
+    fn validate_registered_adapter_schemas(&self, diagnostics: &mut DiagnosticBag) {
+        for descriptor in self.external_descriptors.values() {
+            let Some(adapter) = self.adapters.get(&descriptor.adapter) else {
+                continue;
+            };
+            if let Err(error) = adapter.validate_schema(descriptor) {
+                diagnostics.push(Diagnostic::error_with_message(
+                    WorkspaceDiagnosticCode::InvalidExternalProxy,
+                    error.to_string(),
+                    Span::empty(WORKSPACE_SOURCE_ID, 0),
+                ));
+            }
+        }
+    }
+
+    fn refresh_external_proxy_descriptors(&mut self, diagnostics: &mut DiagnosticBag) {
+        for module in &self.frontend.modules {
+            if module.kind() != FrontendModuleKind::ExternalProxy {
+                continue;
+            }
+            let Some(descriptor) = self.external_descriptors.get_mut(module.path()) else {
+                continue;
+            };
+            descriptor.exports.clear();
+            let Some(type_result) = module.type_result() else {
+                continue;
+            };
+            let Some(resolution) = module.graph().resolution() else {
+                continue;
+            };
+            for export in resolution.exports() {
+                if export.kind() != SymbolKind::Function {
+                    continue;
+                }
+                let Some(function_type) = type_result
+                    .layer()
+                    .symbol_type(export.symbol())
+                    .and_then(|ty| type_result.layer().table().kind(ty))
+                    .and_then(|kind| match kind {
+                        TypeKind::Function(function) => Some(function),
+                        _ => None,
+                    })
+                else {
+                    continue;
+                };
+                let parameter_types = function_type
+                    .parameters()
+                    .iter()
+                    .map(|parameter| {
+                        Self::boundary_type(type_result.layer().table(), parameter.ty())
+                    })
+                    .collect::<Result<Vec<_>, _>>();
+                let return_type =
+                    Self::boundary_type(type_result.layer().table(), function_type.return_type());
+                match parameter_types
+                    .and_then(|parameters| return_type.map(|return_type| (parameters, return_type)))
+                {
+                    Ok((parameter_types, return_type)) => {
+                        descriptor.exports.push(ExternalFunctionSignature {
+                            name: export.name().to_string(),
+                            is_async: true,
+                            parameter_types,
+                            return_type,
+                        })
+                    }
+                    Err(error) => diagnostics.push(Diagnostic::error_with_message(
+                        WorkspaceDiagnosticCode::InvalidExternalProxy,
+                        format!(
+                            "proxy export '{}' is not boundary-representable: {error}",
+                            export.name()
+                        ),
+                        module.source().span(),
+                    )),
+                }
+            }
+        }
+    }
+
+    fn boundary_type(table: &TypeTable, ty: TypeId) -> Result<BoundaryType, String> {
+        match table.kind(ty) {
+            Some(TypeKind::Primitive(primitive)) => match primitive {
+                PrimitiveType::Null => Ok(BoundaryType::Null),
+                PrimitiveType::Bool => Ok(BoundaryType::Bool),
+                PrimitiveType::Int8 => Ok(BoundaryType::I8),
+                PrimitiveType::Int16 => Ok(BoundaryType::I16),
+                PrimitiveType::Int32 => Ok(BoundaryType::I32),
+                PrimitiveType::Int64 => Ok(BoundaryType::I64),
+                PrimitiveType::Uint8 => Ok(BoundaryType::U8),
+                PrimitiveType::Uint16 => Ok(BoundaryType::U16),
+                PrimitiveType::Uint32 => Ok(BoundaryType::U32),
+                PrimitiveType::Uint64 => Ok(BoundaryType::U64),
+                PrimitiveType::Float32 => Ok(BoundaryType::F32),
+                PrimitiveType::Float64 => Ok(BoundaryType::F64),
+                PrimitiveType::Float16 => {
+                    Err("f16 is not supported by the boundary ABI".to_string())
+                }
+            },
+            Some(TypeKind::Array { element }) => Ok(BoundaryType::Array(Box::new(
+                Self::boundary_type(table, *element)?,
+            ))),
+            Some(TypeKind::Tuple { elements }) => elements
+                .iter()
+                .map(|element| Self::boundary_type(table, *element))
+                .collect::<Result<Vec<_>, _>>()
+                .map(BoundaryType::Tuple),
+            Some(TypeKind::Function(_)) => Ok(BoundaryType::Function),
+            Some(TypeKind::GenericInstance { arguments, .. }) if arguments.len() == 1 => {
+                Self::boundary_type(table, arguments[0])
+            }
+            Some(TypeKind::Union { members }) => {
+                let non_null = members
+                    .iter()
+                    .filter(|member| {
+                        !matches!(
+                            table.kind(**member),
+                            Some(TypeKind::Primitive(PrimitiveType::Null))
+                        )
+                    })
+                    .copied()
+                    .collect::<Vec<_>>();
+                if non_null.len() == 1 && non_null.len() + 1 == members.len() {
+                    Self::boundary_type(table, non_null[0])
+                } else {
+                    Err("only nullable unions are supported by the boundary ABI".to_string())
+                }
+            }
+            _ => Err("type is not supported by the boundary ABI".to_string()),
+        }
     }
 
     fn frontend_roots(&self) -> FrontendRoots {
@@ -338,6 +553,7 @@ impl Workspace {
         {
             return Ok(CompileReport {
                 graph: Arc::clone(graph),
+                external_requirements: self.external_requirements_for(graph),
             });
         }
 
@@ -428,6 +644,7 @@ impl Workspace {
                     m.source().clone(),
                     m.graph().clone(),
                     m.type_result().cloned(),
+                    m.source().name().ends_with(".gfp"),
                 )
             })
             .collect();
@@ -474,7 +691,28 @@ impl Workspace {
             graph: Arc::clone(&graph),
         };
 
-        Ok(CompileReport { graph })
+        let external_requirements = self.external_requirements_for(&graph);
+        Ok(CompileReport {
+            graph,
+            external_requirements,
+        })
+    }
+
+    fn external_requirements_for(&self, graph: &BytecodeGraph) -> Vec<ExternalModuleRequirement> {
+        let mut requirements = graph
+            .modules()
+            .filter_map(|module| {
+                self.external_descriptors
+                    .get(module.path())
+                    .cloned()
+                    .map(|descriptor| ExternalModuleRequirement {
+                        proxy_module: module.path().as_str().to_string(),
+                        descriptor,
+                    })
+            })
+            .collect::<Vec<_>>();
+        requirements.sort_by(|left, right| left.proxy_module.cmp(&right.proxy_module));
+        requirements
     }
 
     /// Starts the configured entry as a persistent execution.
@@ -523,8 +761,7 @@ impl Workspace {
         driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
     ) -> Result<(), RunBlocked> {
         let mut execution = self.start_execution(args, providers, driver)?;
-        let _ = execution.run_to_completion();
-
+        let _result = execution.run_to_completion();
         Ok(())
     }
 }

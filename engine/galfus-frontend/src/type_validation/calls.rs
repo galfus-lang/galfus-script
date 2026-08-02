@@ -173,6 +173,31 @@ impl<'a> DeclarationTypeChecker<'a> {
                     );
                 }
             }
+            Some(TypeKind::GenericInstance {
+                base: p_base,
+                arguments: p_arguments,
+            }) => {
+                if let Some(TypeKind::GenericInstance {
+                    base: a_base,
+                    arguments: a_arguments,
+                }) = self.layer.table().kind(arg_ty)
+                {
+                    self.infer_substitutions_from_types(
+                        generic_params,
+                        *p_base,
+                        *a_base,
+                        substitutions,
+                    );
+                    for (p_argument, a_argument) in p_arguments.iter().zip(a_arguments.iter()) {
+                        self.infer_substitutions_from_types(
+                            generic_params,
+                            *p_argument,
+                            *a_argument,
+                            substitutions,
+                        );
+                    }
+                }
+            }
             _ => {}
         }
     }

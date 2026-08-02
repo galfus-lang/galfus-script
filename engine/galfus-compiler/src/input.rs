@@ -15,6 +15,7 @@ pub struct CompiledModule {
     pub(crate) source: SourceFile,
     pub(crate) graph: ModuleGraph,
     pub(crate) type_result: Option<TypeCheckResult>,
+    pub(crate) is_external_proxy: bool,
 }
 
 impl CompiledModule {
@@ -25,6 +26,7 @@ impl CompiledModule {
         source: SourceFile,
         graph: ModuleGraph,
         type_result: Option<TypeCheckResult>,
+        is_external_proxy: bool,
     ) -> Self {
         Self {
             id,
@@ -33,6 +35,7 @@ impl CompiledModule {
             source,
             graph,
             type_result,
+            is_external_proxy,
         }
     }
 
@@ -62,5 +65,9 @@ impl CompiledModule {
 
     pub fn type_result_mut(&mut self) -> Option<&mut TypeCheckResult> {
         self.type_result.as_mut()
+    }
+
+    pub fn is_external_proxy(&self) -> bool {
+        self.is_external_proxy
     }
 }

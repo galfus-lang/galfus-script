@@ -5,7 +5,7 @@ use galfus_ir::mir;
 
 use super::LowerCtx;
 use galfus_bytecode::Instruction;
-use galfus_bytecode::instruction::{GlobalIdx, Reg, TypeIdx};
+use galfus_bytecode::instruction::{GlobalIdx, Reg};
 use galfus_ir::mir::{
     Constant as MirConstant, Instruction as MirInstruction, MirFunction, Operand, Terminator,
 };
@@ -245,139 +245,12 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                         destination,
                     } => {
                         let builtin_name = self.ctx.function_names.get(func).map(|s| s.to_string());
-                        if let Some(name) = builtin_name {
-                            if let Some(native_name) = name.strip_prefix("__internal_thread_") {
-                                if native_name == "create" {
-                                    let func_reg = self.alloc_temp();
-                                    self.load_operand_to(&args[0], func_reg);
-                                    let key_reg = self.alloc_temp();
-                                    self.load_operand_to(&args[1], key_reg);
+                        if let Some(_name) = builtin_name {
+                            let native_async_name = _name.rsplit("::").next().filter(|name| {
+                                name.starts_with("__provider_") || name.starts_with("__internal_")
+                            });
 
-                                    self.instructions.push(Instruction::CreateThread {
-                                        dest: Reg(destination.raw() as u16),
-                                        func: func_reg,
-                                        key: key_reg,
-                                    });
-                                    self.free_temps(2);
-                                    continue;
-                                }
-
-                                if native_name == "spawn" {
-                                    let thread_id_reg = self.alloc_temp();
-                                    self.load_operand_to(&args[0], thread_id_reg);
-                                    let arg_reg = self.alloc_temp();
-                                    self.load_operand_to(&args[1], arg_reg);
-
-                                    self.instructions.push(Instruction::StartThread {
-                                        dest: Reg(destination.raw() as u16),
-                                        thread_id: thread_id_reg,
-                                        arg: arg_reg,
-                                    });
-                                    self.free_temps(2);
-                                    continue;
-                                }
-
-                                if native_name == "get" {
-                                    let key_reg = self.alloc_temp();
-                                    self.load_operand_to(&args[0], key_reg);
-
-                                    self.instructions.push(Instruction::GetThread {
-                                        dest: Reg(destination.raw() as u16),
-                                        key: key_reg,
-                                    });
-                                    self.free_temps(1);
-                                    continue;
-                                }
-
-                                if native_name == "is_running"
-                                    || native_name == "is_exited"
-                                    || native_name == "exit_reason"
-                                {
-                                    let thread_id_reg = self.alloc_temp();
-                                    self.load_operand_to(&args[0], thread_id_reg);
-                                    let dest = Reg(destination.raw() as u16);
-                                    let instruction = match native_name {
-                                        "is_running" => Instruction::ThreadIsRunning {
-                                            dest,
-                                            thread_id: thread_id_reg,
-                                        },
-                                        "is_exited" => Instruction::ThreadIsExited {
-                                            dest,
-                                            thread_id: thread_id_reg,
-                                        },
-                                        "exit_reason" => Instruction::ThreadExitReason {
-                                            dest,
-                                            thread_id: thread_id_reg,
-                                        },
-                                        _ => unreachable!(),
-                                    };
-                                    self.instructions.push(instruction);
-                                    self.free_temps(1);
-                                    continue;
-                                }
-
-                                if native_name == "send" {
-                                    let target_reg = self.alloc_temp();
-                                    self.load_operand_to(&args[0], target_reg);
-                                    let msg_reg = self.alloc_temp();
-                                    self.load_operand_to(&args[1], msg_reg);
-
-                                    self.instructions.push(Instruction::Send {
-                                        dest: Reg(destination.raw() as u16),
-                                        target: target_reg,
-                                        msg: msg_reg,
-                                    });
-                                    self.free_temps(2);
-                                    continue;
-                                }
-
-                                if native_name == "receive" {
-                                    let sender_reg = self.alloc_temp();
-                                    self.load_operand_to(&args[0], sender_reg);
-                                    let timeout_reg = self.alloc_temp();
-                                    self.load_operand_to(&args[1], timeout_reg);
-
-                                    self.instructions.push(Instruction::ReceiveFilter {
-                                        dest: Reg(destination.raw() as u16),
-                                        sender: sender_reg,
-                                        timeout: timeout_reg,
-                                    });
-                                    self.free_temps(2);
-                                    continue;
-                                }
-
-                                if native_name == "has_messages" {
-                                    self.instructions.push(Instruction::MailboxHasMessages {
-                                        dest: Reg(destination.raw() as u16),
-                                    });
-                                    continue;
-                                }
-
-                                if native_name == "get_message" {
-                                    self.instructions.push(Instruction::MailboxGetMessage {
-                                        dest: Reg(destination.raw() as u16),
-                                    });
-                                    continue;
-                                }
-
-                                if native_name == "wait" {
-                                    let thread_id_reg = self.alloc_temp();
-                                    self.load_operand_to(&args[0], thread_id_reg);
-
-                                    self.instructions.push(Instruction::WaitThread {
-                                        dest: Reg(destination.raw() as u16),
-                                        thread_id: thread_id_reg,
-                                    });
-                                    self.free_temps(1);
-                                    continue;
-                                }
-                            }
-
-                            let native_provider_name = name
-                                .strip_prefix("__provider_")
-                                .or_else(|| name.strip_prefix("__builtin_"));
-
-                            if let Some(native_name) = native_provider_name {
+                            if native_async_name.is_some() {
                                 let start_reg = if args.is_empty() {
                                     Reg(0) // Dummy if no args
                                 } else {
@@ -393,15 +266,6 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                     reg
                                 };
 
-                                let name_idx =
-                                    crate::bytecode_emission::constants::get_or_create_constant(
-                                        self.ctx,
-                                        &mir::Constant::String(native_name.to_string()),
-                                    );
-                                let argument_types = args
-                                    .iter()
-                                    .map(|argument| self.get_operand_type(argument))
-                                    .collect::<Vec<_>>();
                                 let return_type = self
                                     .func
                                     .locals
@@ -409,10 +273,49 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                     .find(|local| local.id == *destination)
                                     .expect("native call destination must be a local")
                                     .ty;
-                                let arg_types = argument_types
-                                    .into_iter()
-                                    .map(|ty| {
-                                        crate::bytecode_emission::types::lower_type(self.ctx, ty)
+                                let return_type =
+                                    match self.ctx.type_result.layer().table().kind(return_type) {
+                                        Some(galfus_frontend::TypeKind::GenericInstance {
+                                            arguments,
+                                            ..
+                                        }) => arguments.first().copied().unwrap_or(return_type),
+                                        _ => return_type,
+                                    };
+                                let arg_types = args
+                                    .iter()
+                                    .map(|argument| {
+                                        let is_string_const = match argument {
+                                            mir::Operand::ConstRef(idx) => matches!(
+                                                self.ctx.mir_constants.get(*idx),
+                                                Some(mir::Constant::String(_))
+                                            ),
+                                            mir::Operand::Constant(mir::Constant::String(_)) => {
+                                                true
+                                            }
+                                            _ => false,
+                                        };
+                                        if is_string_const {
+                                            let u8_ty =
+                                                self.ctx.type_result.layer().table().primitive(
+                                                    galfus_frontend::PrimitiveType::Uint8,
+                                                );
+                                            let u8_idx =
+                                                crate::bytecode_emission::types::lower_type(
+                                                    self.ctx, u8_ty,
+                                                );
+                                            let type_idx = galfus_bytecode::instruction::TypeIdx(
+                                                self.ctx.types.len() as u16,
+                                            );
+                                            self.ctx
+                                                .types
+                                                .push(galfus_bytecode::BytecodeType::Array(u8_idx));
+                                            type_idx
+                                        } else {
+                                            let ty = self.get_operand_type(argument);
+                                            crate::bytecode_emission::types::lower_type(
+                                                self.ctx, ty,
+                                            )
+                                        }
                                     })
                                     .collect();
                                 let return_type = crate::bytecode_emission::types::lower_type(
@@ -420,9 +323,13 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                     return_type,
                                 );
 
-                                self.instructions.push(Instruction::CallNative {
+                                let func_idx = *self.ctx.function_map.get(func).expect(&format!(
+                                    "missing lowered function mapping for {:?} while emitting {} ({:?})",
+                                    func, self.func.name, self.func.id
+                                ));
+                                self.instructions.push(Instruction::CreateFuture {
                                     dest: Reg(destination.raw() as u16),
-                                    name_const: name_idx,
+                                    func: func_idx,
                                     args_start: start_reg,
                                     arg_count: args.len() as u8,
                                     arg_types,
@@ -525,7 +432,15 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                         destination,
                     } => {
                         let fut_reg = self.operand_reg(future);
-                        let return_type = TypeIdx(0);
+                        let payload_type = self
+                            .func
+                            .locals
+                            .iter()
+                            .find(|local| local.id == *destination)
+                            .expect("await destination must be a local")
+                            .ty;
+                        let return_type =
+                            crate::bytecode_emission::types::lower_type(self.ctx, payload_type);
                         self.instructions.push(Instruction::AwaitFuture {
                             dest: Reg(destination.raw() as u16),
                             future_id: fut_reg,
@@ -537,6 +452,15 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                         futures,
                         destination,
                     } => {
+                        let payload_type = self
+                            .func
+                            .locals
+                            .iter()
+                            .find(|local| local.id == *destination)
+                            .expect("await(all) destination must be a local")
+                            .ty;
+                        let return_type =
+                            crate::bytecode_emission::types::lower_type(self.ctx, payload_type);
                         let start_reg = if futures.is_empty() {
                             Reg(0)
                         } else {
@@ -554,6 +478,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                             dest: Reg(destination.raw() as u16),
                             futures_start: start_reg,
                             count: futures.len() as u8,
+                            return_type,
                         });
                         if !futures.is_empty() {
                             self.free_temps(futures.len() as u16);
@@ -563,6 +488,15 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                         futures,
                         destination,
                     } => {
+                        let payload_type = self
+                            .func
+                            .locals
+                            .iter()
+                            .find(|local| local.id == *destination)
+                            .expect("await(race) destination must be a local")
+                            .ty;
+                        let return_type =
+                            crate::bytecode_emission::types::lower_type(self.ctx, payload_type);
                         let start_reg = if futures.is_empty() {
                             Reg(0)
                         } else {
@@ -580,6 +514,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                             dest: Reg(destination.raw() as u16),
                             futures_start: start_reg,
                             count: futures.len() as u8,
+                            return_type,
                         });
                         if !futures.is_empty() {
                             self.free_temps(futures.len() as u16);

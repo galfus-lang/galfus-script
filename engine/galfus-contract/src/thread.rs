@@ -15,13 +15,13 @@ pub trait RunnableTask {
 }
 
 /// The result returned after running a slice of a virtual thread.
+#[derive(Debug)]
 pub enum ThreadResult {
-    /// The task has finished its slice or encountered an error.
-    /// The Orchestrator will handle the lifecycle via events. The Host must drop the task.
-    Discarded,
+    /// The thread completed its entry function and returned a result.
+    Completed(Result<crate::BoundaryValue, crate::ExecutionFailure>),
 
-    /// The thread finished execution successfully.
-    Completed(i32),
+    /// The thread yielded back to the scheduler, or panicked (and was discarded).
+    Discarded,
 
     /// The thread needs to call a Provider or is waiting for a message.
     /// The Host should discard the task. The Runtime Orchestrator will

@@ -8,6 +8,9 @@ license.workspace = true
 galfus-core = { path = "../galfus-core" }
 galfus-frontend = { path = "../galfus-frontend" }
 galfus-bytecode = { path = "../galfus-bytecode" }
+galfus-contract = { path = "../galfus-contract" }
 galfus-ir = { path = "../galfus-ir" }
 
 anyhow.workspace = true
+serde = { workspace = true }
+toml = { workspace = true }

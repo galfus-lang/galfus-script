@@ -11,8 +11,6 @@ export constraint Stringable {
   fn stringify(): [u8]
 }
 
-
-
 fn append(a: [u8], b: [u8]): [u8] {
   var result = new([u8], a.length + b.length)
   var i: i32 = 0

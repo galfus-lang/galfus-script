@@ -1,3 +1,5 @@
+mod adapters;
+
 use std::collections;
 use std::sync;
 
@@ -66,13 +68,19 @@ fn startup_graph() -> (sync::Arc<BytecodeGraph>, ModuleId) {
                 local_count: 0,
                 temp_count: 1,
                 return_ty: TypeIdx(0),
+                proxy_metadata: None,
                 instructions: vec![
-                    Instruction::CallNative {
+                    Instruction::CreateFuture {
                         dest: Reg(0),
-                        name_const: ConstIdx(0),
+                        func: FuncIdx(2),
                         args_start: Reg(0),
                         arg_count: 0,
                         arg_types: vec![],
+                        return_type: TypeIdx(0),
+                    },
+                    Instruction::AwaitFuture {
+                        dest: Reg(0),
+                        future_id: Reg(0),
                         return_type: TypeIdx(0),
                     },
                     Instruction::RetNull,
@@ -84,13 +92,19 @@ fn startup_graph() -> (sync::Arc<BytecodeGraph>, ModuleId) {
                 local_count: 0,
                 temp_count: 1,
                 return_ty: TypeIdx(4),
+                proxy_metadata: None,
                 instructions: vec![
-                    Instruction::CallNative {
+                    Instruction::CreateFuture {
                         dest: Reg(1),
-                        name_const: ConstIdx(1),
+                        func: FuncIdx(3),
                         args_start: Reg(0),
                         arg_count: 0,
                         arg_types: vec![],
+                        return_type: TypeIdx(0),
+                    },
+                    Instruction::AwaitFuture {
+                        dest: Reg(1),
+                        future_id: Reg(1),
                         return_type: TypeIdx(0),
                     },
                     Instruction::LoadConst {
@@ -99,6 +113,24 @@ fn startup_graph() -> (sync::Arc<BytecodeGraph>, ModuleId) {
                     },
                     Instruction::Ret { src: Reg(1) },
                 ],
+            },
+            BytecodeFunction {
+                name: "__provider_initialize".to_string(),
+                param_count: 0,
+                local_count: 0,
+                temp_count: 0,
+                return_ty: TypeIdx(0),
+                proxy_metadata: None,
+                instructions: vec![Instruction::RetNull],
+            },
+            BytecodeFunction {
+                name: "__provider_entry".to_string(),
+                param_count: 0,
+                local_count: 0,
+                temp_count: 0,
+                return_ty: TypeIdx(0),
+                proxy_metadata: None,
+                instructions: vec![Instruction::RetNull],
             },
         ],
         types: vec![
@@ -234,10 +266,7 @@ fn run_initializes_dependencies_before_the_entry_module() {
     let dependency = BytecodeModule {
         name: "dependency.gfs".to_string(),
         constants: ConstantPool {
-            constants: vec![
-                Constant::Int32(42),
-                Constant::String("initialize".to_string()),
-            ],
+            constants: vec![Constant::Int32(42)],
         },
         functions: vec![BytecodeFunction {
             name: "__init_module".to_string(),
@@ -245,15 +274,8 @@ fn run_initializes_dependencies_before_the_entry_module() {
             local_count: 0,
             temp_count: 1,
             return_ty: TypeIdx(1),
+            proxy_metadata: None,
             instructions: vec![
-                Instruction::CallNative {
-                    dest: Reg(0),
-                    name_const: ConstIdx(1),
-                    args_start: Reg(0),
-                    arg_count: 0,
-                    arg_types: vec![],
-                    return_type: TypeIdx(1),
-                },
                 Instruction::LoadConst {
                     dest: Reg(0),
                     const_idx: ConstIdx(0),
@@ -291,6 +313,7 @@ fn run_initializes_dependencies_before_the_entry_module() {
             local_count: 0,
             temp_count: 1,
             return_ty: TypeIdx(3),
+            proxy_metadata: None,
             instructions: vec![
                 Instruction::LoadGlobal {
                     dest: Reg(1),
@@ -378,7 +401,12 @@ fn run_initializes_dependencies_before_the_entry_module() {
                 galfus_contract::ThreadResult::Discarded => {
                     galfus_contract::ExecutorStepResult::Running
                 }
-                galfus_contract::ThreadResult::Completed(code) => {
+                galfus_contract::ThreadResult::Completed(res) => {
+                    let code = if let Ok(galfus_contract::BoundaryValue::I32(c)) = res {
+                        c
+                    } else {
+                        0
+                    };
                     galfus_contract::ExecutorStepResult::Completed(code)
                 }
                 galfus_contract::ThreadResult::Blocked { timeout } => {

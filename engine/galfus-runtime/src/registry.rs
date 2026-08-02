@@ -5,25 +5,27 @@ use galfus_vm::thread::VmThreadState;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ThreadState {
     Created,
     Running,
-    Exited(i32),
+    Exited(Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>),
 }
 
 impl ThreadState {
-    pub fn is_running(self) -> bool {
+    pub fn is_running(&self) -> bool {
         matches!(self, Self::Running)
     }
 
-    pub fn is_exited(self) -> bool {
+    pub fn is_exited(&self) -> bool {
         matches!(self, Self::Exited(_))
     }
 
-    pub fn exit_reason(self) -> Option<i32> {
+    pub fn exit_reason(
+        &self,
+    ) -> Option<Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>> {
         match self {
-            Self::Exited(code) => Some(code),
+            Self::Exited(result) => Some(result.clone()),
             Self::Created | Self::Running => None,
         }
     }
@@ -104,11 +106,23 @@ impl ThreadRegistry {
     }
 
     pub fn get_exit_code(&self, id: ThreadId) -> Option<i32> {
-        self.tcbs.get(&id).and_then(|tcb| tcb.state.exit_reason())
+        self.tcbs
+            .get(&id)
+            .and_then(|tcb| tcb.state.exit_reason())
+            .and_then(|result| {
+                if let Ok(galfus_contract::BoundaryValue::I32(code)) = result {
+                    Some(code)
+                } else {
+                    None
+                }
+            })
     }
 
     pub fn debug_states(&self) -> Vec<(ThreadId, ThreadState)> {
-        self.tcbs.iter().map(|(&k, v)| (k, v.state)).collect()
+        self.tcbs
+            .iter()
+            .map(|(&k, v)| (k, v.state.clone()))
+            .collect()
     }
 
     pub fn lookup_key(&self, key: &str) -> Option<ThreadId> {
@@ -132,12 +146,12 @@ impl ThreadRegistry {
     }
 
     pub fn state(&self, id: ThreadId) -> Option<ThreadState> {
-        self.tcbs.get(&id).map(|tcb| tcb.state)
+        self.tcbs.get(&id).map(|tcb| tcb.state.clone())
     }
 
     pub fn mark_running(&mut self, id: ThreadId) -> bool {
         if let Some(tcb) = self.tcbs.get_mut(&id) {
-            if tcb.state == ThreadState::Created {
+            if !tcb.state.is_exited() {
                 tcb.state = ThreadState::Running;
                 return true;
             }
@@ -145,12 +159,14 @@ impl ThreadRegistry {
         false
     }
 
-    pub fn mark_exited(&mut self, id: ThreadId, code: i32) -> bool {
+    pub fn mark_exited(
+        &mut self,
+        id: ThreadId,
+        result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
+    ) -> bool {
         if let Some(tcb) = self.tcbs.get_mut(&id) {
-            if tcb.state.is_running() {
-                tcb.state = ThreadState::Exited(code);
-                return true;
-            }
+            tcb.state = ThreadState::Exited(result);
+            return true;
         }
         false
     }

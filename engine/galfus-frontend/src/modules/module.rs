@@ -1,12 +1,20 @@
 use crate::{ModuleGraph, TypeCheckResult};
 use galfus_core::{ModuleId, ModulePath, Revision, SemanticRevision, SourceFile, SourceId};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrontendModuleKind {
+    Standard,
+    Builtin,
+    ExternalProxy,
+}
+
 #[derive(Debug, Clone)]
 pub struct SemanticModule {
     pub id: ModuleId,
     pub source_id: SourceId,
     pub path: ModulePath,
     pub source_revision: Revision,
+    pub kind: FrontendModuleKind,
     /// Monotonically increasing counter that changes whenever the semantic
     /// analysis result (resolution + type checking) of this module changes.
     pub semantic_revision: SemanticRevision,
@@ -35,6 +43,10 @@ impl SemanticModule {
 
     pub fn source_revision(&self) -> Revision {
         self.source_revision
+    }
+
+    pub fn kind(&self) -> FrontendModuleKind {
+        self.kind
     }
 
     pub fn source(&self) -> &SourceFile {

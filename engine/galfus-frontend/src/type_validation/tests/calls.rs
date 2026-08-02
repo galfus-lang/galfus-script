@@ -77,6 +77,19 @@ var value: i32 = one()
 }
 
 #[test]
+fn check_reports_await_of_non_future() {
+    let (_source, _graph, result) = check_source_named(
+        "await-non-future.gfs",
+        "fn main(): i32 {\n  const value = await 1\n  return value\n}\n",
+    );
+
+    assert!(result.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code().as_str() == TypeDiagnosticCode::AwaitRequiresFuture.as_code()
+            && diagnostic.message().contains("await requires `Future<T>`")
+    }));
+}
+
+#[test]
 fn check_reports_call_argument_type_mismatch() {
     let source = source(
         r#"
@@ -316,6 +329,27 @@ var renamed: User = User::rename(user, "Lia")
     );
 
     assert!(!result.has_errors());
+}
+
+#[test]
+fn check_accepts_await_of_anchored_async_call() {
+    let (_source, _graph, result) = check_source(
+        r#"
+struct Future<T> { id: i64 }
+struct User { id: i32 }
+
+fn(async) User::load(user: User): i32 {
+  return user.id
+}
+
+fn main(user: User): i32 {
+  const future = User::load(user)
+  return await future
+}
+"#,
+    );
+
+    assert!(!result.has_errors(), "{:?}", result.diagnostics());
 }
 
 #[test]

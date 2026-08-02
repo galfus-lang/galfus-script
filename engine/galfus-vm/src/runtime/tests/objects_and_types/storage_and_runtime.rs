@@ -400,6 +400,7 @@ fn test_unwinding_call_stack() {
                 local_count: 4,
                 temp_count: 4,
                 return_ty: TypeIdx(0),
+                proxy_metadata: None,
                 instructions: instrs_main,
             },
             BytecodeFunction {
@@ -408,6 +409,7 @@ fn test_unwinding_call_stack() {
                 local_count: 4,
                 temp_count: 4,
                 return_ty: TypeIdx(0),
+                proxy_metadata: None,
                 instructions: instrs_helper,
             },
         ],

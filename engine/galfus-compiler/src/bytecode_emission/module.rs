@@ -24,6 +24,8 @@ pub fn lower_module(
         ctx.function_map.insert(func.id, FuncIdx(i as u16));
         ctx.function_names.insert(func.id, func.name.clone());
         ctx.function_return_types.insert(func.id, func.return_type);
+        ctx.function_param_types
+            .insert(func.id, func.parameter_types.clone());
     }
 
     let mut functions = Vec::new();
@@ -66,6 +68,7 @@ pub fn lower_module(
             local_count,
             temp_count: emitter.temp_count_max,
             return_ty,
+            proxy_metadata: None,
             instructions,
         });
     }

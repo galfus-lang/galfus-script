@@ -11,7 +11,20 @@ impl VirtualMachine {
         match instr {
             // Category E: Memory Ownership
             Instruction::Drop { reg } => {
+                let value = thread.read_reg(reg)?;
                 thread.write_reg(reg, Value::Null)?;
+                if let Value::Future(future_id) = value {
+                    let released_handles = self.release_unreachable(thread);
+                    thread
+                        .pending_external_handle_drops
+                        .extend(released_handles);
+                    if !thread.contains_future_handle(future_id) {
+                        return Ok(VmStep::Suspend {
+                            effect: VmEffect::FutureDropped { future_id },
+                            continuation: Continuation::new(None),
+                        });
+                    }
+                }
             }
 
             Instruction::CallNative {
@@ -53,40 +66,57 @@ impl VirtualMachine {
                     continuation: Continuation::for_provider(dest, module_id, return_type),
                 });
             }
+            Instruction::AdapterCall {
+                dest,
+                proxy_module_const,
+                symbol_const,
+                args_start,
+                arg_count,
+                arg_types,
+                return_type,
+            } => {
+                let constants = &self.current_image(thread)?.constants.constants;
+                let string_constant = |index: ConstIdx| match constants.get(index.raw() as usize) {
+                    Some(Constant::String(value)) => Ok(value.clone()),
+                    Some(value) => Err(VmError::TypeMismatch {
+                        expected: "String constant".to_string(),
+                        found: format!("{value:?}"),
+                    }),
+                    None => Err(VmError::ConstantOutOfBounds { index }),
+                };
+                let proxy_module = string_constant(proxy_module_const)?;
+                let symbol = string_constant(symbol_const)?;
+                let module_id = thread
+                    .call_stack
+                    .last()
+                    .ok_or(VmError::EmptyCallStack)?
+                    .module_id;
+                let args = (0..arg_count)
+                    .map(|index| thread.read_reg(Reg(args_start.raw() + index as u16)))
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::AdapterCall {
+                        module_id,
+                        proxy_module,
+                        symbol,
+                        args,
+                        arg_types,
+                        return_type,
+                    },
+                    continuation: Continuation::for_provider(dest, module_id, return_type),
+                });
+            }
             Instruction::AwaitFuture {
                 dest,
                 future_id,
                 return_type,
             } => {
                 let val = thread.read_reg(future_id)?;
-                let future_id = match val {
-                    Value::Uint64(id) => id,
-                    Value::Uint32(id) => id.into(),
-                    Value::Int64(id) if id >= 0 => id as u64,
-                    Value::Int32(id) if id >= 0 => id as u64,
-                    Value::Object(obj_ref) => {
-                        if let Ok(HeapObject::Struct { fields, .. }) =
-                            thread.heap.get_object(obj_ref)
-                        {
-                            match fields.first() {
-                                Some(Value::Uint64(id)) => *id,
-                                Some(Value::Uint32(id)) => (*id).into(),
-                                Some(Value::Int64(id)) if *id >= 0 => *id as u64,
-                                Some(Value::Int32(id)) if *id >= 0 => *id as u64,
-                                _ => {
-                                    thread.write_reg(dest, Value::Object(obj_ref))?;
-                                    return Ok(VmStep::Continue);
-                                }
-                            }
-                        } else {
-                            thread.write_reg(dest, Value::Object(obj_ref))?;
-                            return Ok(VmStep::Continue);
-                        }
-                    }
-                    other => {
-                        thread.write_reg(dest, other)?;
-                        return Ok(VmStep::Continue);
-                    }
+                let Value::Future(future_id) = val else {
+                    return Err(VmError::TypeMismatch {
+                        expected: "Future<T>".to_string(),
+                        found: format!("{val:?}"),
+                    });
                 };
                 let module_id = thread
                     .call_stack
@@ -196,39 +226,94 @@ impl VirtualMachine {
                 func: func_idx,
                 args_start,
                 arg_count,
+                ref arg_types,
+                return_type,
             } => {
-                let args = (0..arg_count)
-                    .map(|index| thread.read_reg(Reg(args_start.raw() + index as u16)))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let mut args = Vec::with_capacity(arg_count as usize);
+                for i in 0..arg_count {
+                    args.push(thread.read_reg(Reg(args_start.raw() + i as u16))?);
+                }
+                let module_id = thread
+                    .call_stack
+                    .last()
+                    .ok_or(VmError::EmptyCallStack)?
+                    .module_id;
+                let current_image = &self.graph.get(module_id).unwrap().module;
+                let (target_module_id, func_idx) =
+                    if (func_idx.raw() as usize) < current_image.functions.len() {
+                        (module_id, func_idx)
+                    } else {
+                        let import_idx = (func_idx.raw() as usize) - current_image.functions.len();
+                        let link = self
+                            .graph
+                            .resolve_imports(module_id)
+                            .map_err(|_| VmError::FunctionOutOfBounds { index: func_idx })?;
+                        let import = link
+                            .imports
+                            .get(import_idx)
+                            .ok_or(VmError::FunctionOutOfBounds { index: func_idx })?;
+                        let target_func_idx = match &import.kind {
+                            galfus_bytecode::graph_resolver::ResolvedImportKind::Function(
+                                index,
+                            ) => *index,
+                            _ => return Err(VmError::FunctionOutOfBounds { index: func_idx }),
+                        };
+                        (import.module_id, target_func_idx)
+                    };
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::CreateFuture {
+                        module_id,
+                        target_module_id,
+                        func_idx,
+                        args,
+                        arg_types: arg_types.clone(),
+                        return_type,
+                    },
+                    continuation: Continuation::for_future_handle(dest),
+                });
+            }
+            Instruction::CreateIndirectFuture {
+                dest,
+                func_reg,
+                args_start,
+                arg_count,
+                ref arg_types,
+                return_type,
+            } => {
+                let func_val = thread.read_reg(func_reg)?;
+                let mut args = Vec::with_capacity(arg_count as usize);
+                for i in 0..arg_count {
+                    args.push(thread.read_reg(Reg(args_start.raw() + i as u16))?);
+                }
                 let module_id = thread
                     .call_stack
                     .last()
                     .ok_or(VmError::EmptyCallStack)?
                     .module_id;
                 return Ok(VmStep::Suspend {
-                    effect: VmEffect::CreateFuture {
+                    effect: VmEffect::CreateIndirectFuture {
                         module_id,
-                        func_idx,
+                        func: func_val,
                         args,
+                        arg_types: arg_types.clone(),
+                        return_type,
                     },
-                    continuation: Continuation::for_provider(dest, module_id, TypeIdx(0)),
+                    continuation: Continuation::for_future_handle(dest),
                 });
             }
             Instruction::AwaitAll {
                 dest,
                 futures_start,
                 count,
+                return_type,
             } => {
                 let future_ids = (0..count)
                     .map(|index| {
                         let val = thread.read_reg(Reg(futures_start.raw() + index as u16))?;
                         match val {
-                            Value::Uint64(id) => Ok(id),
-                            Value::Uint32(id) => Ok(id.into()),
-                            Value::Int64(id) if id >= 0 => Ok(id as u64),
-                            Value::Int32(id) if id >= 0 => Ok(id as u64),
+                            Value::Future(id) => Ok(id),
                             value => Err(VmError::TypeMismatch {
-                                expected: "non-negative future ID".to_string(),
+                                expected: "Future<T>".to_string(),
                                 found: format!("{value:?}"),
                             }),
                         }
@@ -243,25 +328,24 @@ impl VirtualMachine {
                     effect: VmEffect::FutureWaitAll {
                         future_ids,
                         module_id,
+                        return_type,
                     },
-                    continuation: Continuation::for_provider(dest, module_id, TypeIdx(0)),
+                    continuation: Continuation::for_provider(dest, module_id, return_type),
                 });
             }
             Instruction::AwaitRace {
                 dest,
                 futures_start,
                 count,
+                return_type,
             } => {
                 let future_ids = (0..count)
                     .map(|index| {
                         let val = thread.read_reg(Reg(futures_start.raw() + index as u16))?;
                         match val {
-                            Value::Uint64(id) => Ok(id),
-                            Value::Uint32(id) => Ok(id.into()),
-                            Value::Int64(id) if id >= 0 => Ok(id as u64),
-                            Value::Int32(id) if id >= 0 => Ok(id as u64),
+                            Value::Future(id) => Ok(id),
                             value => Err(VmError::TypeMismatch {
-                                expected: "non-negative future ID".to_string(),
+                                expected: "Future<T>".to_string(),
                                 found: format!("{value:?}"),
                             }),
                         }
@@ -276,8 +360,9 @@ impl VirtualMachine {
                     effect: VmEffect::FutureWaitRace {
                         future_ids,
                         module_id,
+                        return_type,
                     },
-                    continuation: Continuation::for_provider(dest, module_id, TypeIdx(0)),
+                    continuation: Continuation::for_provider(dest, module_id, return_type),
                 });
             }
             _ => unreachable!("instruction routed to the wrong runtime handler"),

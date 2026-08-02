@@ -2,18 +2,11 @@
 mod tests;
 
 use crate::queue::{BlockedQueue, RunnableQueue};
-use crate::registry::MailboxMessage;
-use crate::registry::{ThreadId, ThreadRegistry};
-use galfus_vm::Continuation;
+use crate::registry::{MailboxMessage, ThreadId, ThreadRegistry, ThreadState};
 use galfus_vm::thread::VmThreadState;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-
-pub struct WaiterEntry {
-    pub waiter_id: ThreadId,
-    pub continuation: Continuation,
-}
 
 /// Manages thread lifecycle, scheduling queues, and timers.
 pub struct VirtualKernel {
@@ -21,7 +14,6 @@ pub struct VirtualKernel {
     registry: ThreadRegistry,
     pub(crate) runnable: RunnableQueue,
     blocked: BlockedQueue,
-    waiters: HashMap<ThreadId, Vec<WaiterEntry>>,
 }
 
 impl VirtualKernel {
@@ -31,7 +23,6 @@ impl VirtualKernel {
             registry: ThreadRegistry::new(),
             runnable: RunnableQueue::new(),
             blocked: BlockedQueue::new(),
-            waiters: HashMap::new(),
         }
     }
 
@@ -85,19 +76,6 @@ impl VirtualKernel {
         self.registry.cancel(id)
     }
 
-    /// Removes every thread from runnable and blocked state during execution shutdown.
-    pub fn cancel_all(&mut self) {
-        let thread_ids = self
-            .registry
-            .debug_states()
-            .into_iter()
-            .map(|(thread_id, _)| thread_id)
-            .collect::<Vec<_>>();
-        for thread_id in thread_ids {
-            self.cancel(thread_id);
-        }
-    }
-
     /// Returns the next runnable ThreadId.
     #[allow(dead_code)]
     pub fn next_runnable(&mut self) -> Option<ThreadId> {
@@ -138,6 +116,10 @@ impl VirtualKernel {
         self.registry.take(id)
     }
 
+    pub fn take_created_thread(&mut self, id: ThreadId) -> Option<VmThreadState> {
+        self.registry.take_created(id)
+    }
+
     pub fn state(&self, id: ThreadId) -> Option<crate::registry::ThreadState> {
         self.registry.state(id)
     }
@@ -146,9 +128,14 @@ impl VirtualKernel {
         self.registry.mark_running(id)
     }
 
-    pub fn mark_exited(&mut self, id: ThreadId, thread: VmThreadState, code: i32) -> bool {
+    pub fn mark_exited(
+        &mut self,
+        id: ThreadId,
+        thread: VmThreadState,
+        result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
+    ) -> bool {
         self.registry.restore_vm_state(id, thread);
-        self.registry.mark_exited(id, code)
+        self.registry.mark_exited(id, result)
     }
 
     pub fn lookup_key(&self, key: &str) -> Option<ThreadId> {
@@ -159,25 +146,8 @@ impl VirtualKernel {
         self.registry.get_mailbox(id)
     }
 
-    /// Registers `waiter_id` to be unblocked when `target_id` exits.
-    pub fn register_waiter(
-        &mut self,
-        target_id: ThreadId,
-        waiter_id: ThreadId,
-        continuation: Continuation,
-    ) {
-        self.waiters
-            .entry(target_id)
-            .or_default()
-            .push(WaiterEntry {
-                waiter_id,
-                continuation,
-            });
-    }
-
-    /// Drains all waiters registered for `target_id`, returning their entries.
-    pub fn drain_waiters(&mut self, target_id: ThreadId) -> Vec<WaiterEntry> {
-        self.waiters.remove(&target_id).unwrap_or_default()
+    pub fn debug_states(&self) -> Vec<(ThreadId, ThreadState)> {
+        self.registry.debug_states()
     }
 }
 

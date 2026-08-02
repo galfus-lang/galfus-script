@@ -4,7 +4,7 @@ use super::*;
 
 impl VirtualMachine {
     #[allow(clippy::collapsible_if)]
-    pub fn release_unreachable(&self, thread: &mut thread::VmThreadState) {
+    pub fn release_unreachable(&self, thread: &mut thread::VmThreadState) -> Vec<(String, String, u64)> {
         use std::collections::{HashSet, VecDeque};
 
         thread.heap.allocations_since_release = 0;
@@ -33,62 +33,60 @@ impl VirtualMachine {
         }
 
         while let Some(obj_ref) = roots.pop_front() {
-            if let Some(obj) = thread.heap.objects.get(obj_ref.raw()) {
-                if let Some(obj) = obj {
-                    match obj {
-                        HeapObject::Struct {
-                            module_id,
-                            layout_idx,
-                            fields,
-                        } => {
-                            if let Some(layout) = self
-                                .graph
-                                .get(*module_id)
-                                .unwrap()
-                                .module
-                                .struct_layouts
-                                .get(layout_idx.raw() as usize)
-                            {
-                                for (i, field_val) in fields.iter().enumerate() {
-                                    if let Value::Object(target_ref) = field_val {
-                                        if let Some(field_layout) = layout.fields.get(i) {
-                                            if field_layout.ownership != OwnershipKind::Weak {
-                                                if reachable.insert(target_ref.raw()) {
-                                                    roots.push_back(*target_ref);
-                                                }
+            if let Some(Some(obj)) = thread.heap.objects.get(obj_ref.raw()) {
+                match obj {
+                    HeapObject::Struct {
+                        module_id,
+                        layout_idx,
+                        fields,
+                    } => {
+                        if let Some(layout) = self
+                            .graph
+                            .get(*module_id)
+                            .unwrap()
+                            .module
+                            .struct_layouts
+                            .get(layout_idx.raw() as usize)
+                        {
+                            for (i, field_val) in fields.iter().enumerate() {
+                                if let Value::Object(target_ref) = field_val {
+                                    if let Some(field_layout) = layout.fields.get(i) {
+                                        if field_layout.ownership != OwnershipKind::Weak {
+                                            if reachable.insert(target_ref.raw()) {
+                                                roots.push_back(*target_ref);
                                             }
                                         }
                                     }
                                 }
                             }
                         }
-                        HeapObject::Array { elements, .. } => {
-                            for el in elements {
-                                if let Value::Object(target_ref) = el {
-                                    if reachable.insert(target_ref.raw()) {
-                                        roots.push_back(*target_ref);
-                                    }
-                                }
-                            }
-                        }
-                        HeapObject::Tuple { elements } => {
-                            for el in elements {
-                                if let Value::Object(target_ref) = el {
-                                    if reachable.insert(target_ref.raw()) {
-                                        roots.push_back(*target_ref);
-                                    }
-                                }
-                            }
-                        }
-                        HeapObject::Choice { payload, .. } => {
-                            if let Value::Object(target_ref) = payload {
+                    }
+                    HeapObject::Array { elements, .. } => {
+                        for el in elements {
+                            if let Value::Object(target_ref) = el {
                                 if reachable.insert(target_ref.raw()) {
                                     roots.push_back(*target_ref);
                                 }
                             }
                         }
-                        HeapObject::ExternalHandle { .. } => {}
                     }
+                    HeapObject::Tuple { elements } => {
+                        for el in elements {
+                            if let Value::Object(target_ref) = el {
+                                if reachable.insert(target_ref.raw()) {
+                                    roots.push_back(*target_ref);
+                                }
+                            }
+                        }
+                    }
+                    HeapObject::Choice { payload, .. } => {
+                        if let Value::Object(target_ref) = payload {
+                            if reachable.insert(target_ref.raw()) {
+                                roots.push_back(*target_ref);
+                            }
+                        }
+                    }
+                    HeapObject::ExternalHandle { .. } => {}
                 }
             }
         }
@@ -101,8 +99,16 @@ impl VirtualMachine {
         }
 
         if dead_objects.is_empty() {
-            return;
+            return Vec::new();
         }
+
+        let released_handles: Vec<(String, String, u64)> = dead_objects
+            .iter()
+            .filter_map(|&idx| match thread.heap.objects[idx].as_ref() {
+                Some(HeapObject::ExternalHandle { proxy_module, kind, id }) => Some((proxy_module.clone(), kind.clone(), *id)),
+                _ => None,
+            })
+            .collect();
 
         for &idx in &dead_objects {
             thread.heap.objects[idx] = None;
@@ -139,5 +145,7 @@ impl VirtualMachine {
                 }
             }
         }
+
+        released_handles
     }
 }

@@ -98,6 +98,101 @@ fn compile_emits_one_module_per_source_module_with_import_slots() {
 }
 
 #[test]
+fn check_accepts_imported_external_proxy_declarations() {
+    let mut workspace = Workspace::new();
+    workspace
+        .load_config(
+            br#"
+            [module]
+            name = "external-proxy"
+            target = "app"
+            entry = "main.gfs"
+            "#,
+        )
+        .expect("valid configuration");
+    workspace
+        .load_module(
+            "main.gfs",
+            br#"
+            import { add } from "./math.gfp"
+
+            export fn main(args: [[u8]]): i32 {
+                return 0
+            }
+            "#,
+        )
+        .expect("valid main module");
+    workspace
+        .load_module(
+            "math.gfp",
+            br#"---
+adapter = "demo"
+[targets]
+test = "memory"
+---
+
+export fn(async) add(left: i32, right: i32): i32
+"#,
+        )
+        .expect("valid proxy source");
+
+    assert_eq!(
+        galfus_frontend::modules::resolve_relative_import(
+            &ModulePath::new("main.gfs").unwrap(),
+            "./math.gfp",
+        ),
+        Some(ModulePath::new("math.gfp").unwrap()),
+    );
+
+    let (is_valid, diagnostics) = {
+        let check = workspace.check();
+        (check.is_valid, format!("{:?}", check.diagnostics))
+    };
+    assert!(is_valid, "{diagnostics}");
+    assert_eq!(workspace.external_descriptors[&ModulePath::new("math.gfp").unwrap()].adapter, "demo");
+    assert_eq!(
+        workspace.external_descriptors[&ModulePath::new("math.gfp").unwrap()].exports,
+        vec![galfus_contract::ExternalFunctionSignature {
+            name: "add".to_string(),
+            is_async: true,
+            parameter_types: vec![
+                galfus_contract::BoundaryType::I32,
+                galfus_contract::BoundaryType::I32,
+            ],
+            return_type: galfus_contract::BoundaryType::I32,
+        }]
+    );
+    let report = workspace.compile().expect("proxy compilation succeeds");
+    assert_eq!(
+        report.external_requirements,
+        vec![galfus_contract::ExternalModuleRequirement {
+            proxy_module: "math.gfp".to_string(),
+            descriptor: workspace.external_descriptors[&ModulePath::new("math.gfp").unwrap()]
+                .clone(),
+        }]
+    );
+    let graph = report.graph;
+    let proxy = graph
+        .modules()
+        .find(|module| module.path().as_str() == "math.gfp")
+        .expect("proxy bytecode module");
+    let function = proxy
+        .module
+        .functions
+        .iter()
+        .find(|function| function.name == "add")
+        .expect("proxy export");
+    let instructions = &function.instructions;
+    assert!(
+        matches!(instructions.first(), Some(galfus_bytecode::Instruction::RetNull)),
+        "{instructions:?}"
+    );
+    let proxy_metadata = function.proxy_metadata.as_ref().expect("proxy metadata");
+    assert_eq!(proxy_metadata.proxy_module, "math.gfp");
+    assert_eq!(proxy_metadata.symbol, "add");
+}
+
+#[test]
 fn compile_updates_changed_modules_and_removes_deleted_modules() {
     let mut workspace = Workspace::new();
     workspace

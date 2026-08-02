@@ -30,6 +30,26 @@ pub(super) struct LoopTargets {
 }
 
 impl<'b, 'a> FunctionBuilder<'b, 'a> {
+    pub(super) fn is_future_type(&self, ty: TypeId) -> bool {
+        let table = self.builder.type_result.layer().table();
+        let Some(TypeKind::GenericInstance { base, .. }) =
+            table.kind(self.builder.resolve_alias_type(ty))
+        else {
+            return false;
+        };
+        match table.kind(*base) {
+            Some(TypeKind::Named { symbol }) => self
+                .builder
+                .graph
+                .resolution()
+                .and_then(|resolution| resolution.symbol(*symbol))
+                .is_some_and(|symbol| symbol.name() == "Future"),
+            Some(TypeKind::Path { segments, .. }) => {
+                segments.last().is_some_and(|segment| segment == "Future")
+            }
+            _ => false,
+        }
+    }
     pub(super) fn node_type(&self, node: NodeId) -> Option<TypeId> {
         let ty = self.builder.type_result.layer().node_type(node);
 

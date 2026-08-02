@@ -80,6 +80,9 @@ pub struct VmThreadState {
     pub module_states: HashMap<ModuleId, RuntimeModuleState>,
     pub entry_func: Option<runtime::Value>,
     pub initializing_module: Option<ModuleId>,
+    /// External handles detached by graph release. The runtime owns dispatching
+    /// their adapter release notifications on the main thread.
+    pub pending_external_handle_drops: Vec<(String, String, u64)>,
 }
 
 impl Default for VmThreadState {
@@ -97,6 +100,7 @@ impl VmThreadState {
             module_states: HashMap::new(),
             entry_func: None,
             initializing_module: None,
+            pending_external_handle_drops: Vec::new(),
         }
     }
 
@@ -111,6 +115,17 @@ impl VmThreadState {
 
     pub fn mark_module_initialized(&mut self, module_id: ModuleId) {
         self.module_states.entry(module_id).or_default().initialized = true;
+    }
+
+    pub fn extract_all_external_handles(&mut self) -> Vec<(String, String, u64)> {
+        let mut extracted = std::mem::take(&mut self.pending_external_handle_drops);
+        for obj in self.heap.objects.iter_mut() {
+            if let Some(crate::runtime::HeapObject::ExternalHandle { proxy_module, kind, id }) = obj {
+                extracted.push((proxy_module.clone(), kind.clone(), *id));
+                *obj = None;
+            }
+        }
+        extracted
     }
 
     pub fn begin_module_initialization(&mut self, module_id: ModuleId) {
@@ -142,5 +157,37 @@ impl VmThreadState {
         } else {
             Err(VmError::RegisterOutOfBounds { reg })
         }
+    }
+
+    pub fn contains_future_handle(&self, future_id: u64) -> bool {
+        self.call_stack.iter().any(|frame| {
+            frame
+                .registers
+                .iter()
+                .any(|value| matches!(value, Value::Future(id) if *id == future_id))
+        }) || self.module_states.values().any(|state| {
+            state
+                .globals
+                .iter()
+                .any(|value| matches!(value, Value::Future(id) if *id == future_id))
+        }) || self
+            .heap
+            .objects
+            .iter()
+            .flatten()
+            .any(|object| match object {
+                HeapObject::Struct { fields, .. } | HeapObject::Tuple { elements: fields } => {
+                    fields
+                        .iter()
+                        .any(|value| matches!(value, Value::Future(id) if *id == future_id))
+                }
+                HeapObject::Array { elements, .. } => elements
+                    .iter()
+                    .any(|value| matches!(value, Value::Future(id) if *id == future_id)),
+                HeapObject::Choice { payload, .. } => {
+                    matches!(payload, Value::Future(id) if *id == future_id)
+                }
+                HeapObject::ExternalHandle { .. } => false,
+            })
     }
 }

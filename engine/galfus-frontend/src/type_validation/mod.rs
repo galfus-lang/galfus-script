@@ -39,6 +39,8 @@ use galfus_core::{DiagnosticBag, NodeId, SourceFile, SymbolId, TypeId};
 pub use model::*;
 use std::collections::HashMap;
 
+pub(crate) const IMPLICIT_FUTURE_SYMBOL: u32 = u32::MAX;
+
 struct DeclarationTypeChecker<'a> {
     source: &'a SourceFile,
     graph: &'a ModuleAst,
@@ -125,6 +127,51 @@ impl<'a> DeclarationTypeChecker<'a> {
             self.imported_path_choices,
             self.range_desugars,
         )
+    }
+
+    pub(super) fn is_async_function(&self, node: NodeId) -> bool {
+        let Some(metadata) = self
+            .graph
+            .syntax()
+            .first_child_of_kind(node, SyntaxNodeKind::KeywordMetadataList)
+        else {
+            return false;
+        };
+
+        self.graph
+            .syntax()
+            .node(metadata)
+            .into_iter()
+            .flat_map(|metadata| metadata.children())
+            .filter_map(|flag| {
+                self.graph
+                    .syntax()
+                    .first_child_of_kind(*flag, SyntaxNodeKind::Identifier)
+            })
+            .any(|flag| self.node_text(flag) == "async")
+    }
+
+    pub(super) fn async_future_type(&mut self, _node: NodeId, payload: TypeId) -> TypeId {
+        let future_base = self.graph.resolution().and_then(|resolution| {
+            resolution
+                .symbols()
+                .iter()
+                .find(|symbol| symbol.name() == "Future")
+                .map(|symbol| {
+                    self.layer
+                        .symbol_type(symbol.id())
+                        .unwrap_or_else(|| self.layer.table_mut().intern_named(symbol.id()))
+                })
+        });
+
+        let future_base = future_base.unwrap_or_else(|| {
+            self.layer
+                .table_mut()
+                .intern_named(SymbolId::new(IMPLICIT_FUTURE_SYMBOL))
+        });
+        self.layer
+            .table_mut()
+            .intern_generic_instance(future_base, vec![payload])
     }
 
     fn check_declarations(&mut self) {

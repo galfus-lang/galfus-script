@@ -6,9 +6,10 @@ struct DummyHost;
 
 struct DummyAdapter(Arc<std::sync::atomic::AtomicUsize>);
 
-impl HostAdapter for DummyAdapter {
+impl BoundExternalModule for DummyAdapter {
     fn dispatch(
         &mut self,
+        _symbol: &str,
         _thread_id: usize,
         _request_id: u64,
         _args: &[BoundaryValue],
@@ -51,34 +52,48 @@ fn providers_default_to_main_thread_affinity() {
 }
 
 #[test]
-fn adapters_are_registered_by_nominal_module_and_symbol() {
-    let mut adapters = Adapters::default();
-    adapters.register(
+fn external_bindings_are_registered_by_nominal_proxy_module() {
+    let mut bindings = ExternalBindings::default();
+    bindings.register_module(
         "graphics",
-        "create",
         Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
             0,
         )))),
     );
-    assert!(adapters.get_mut("graphics", "create").is_some());
-    assert!(adapters.get_mut("graphics", "missing").is_none());
+    assert!(bindings.get_mut("graphics").is_some());
+    assert!(bindings.get_mut("missing").is_none());
 }
 
 #[test]
-fn adapters_own_and_release_nominal_handles() {
+fn external_bindings_own_and_release_nominal_handles() {
     let releases = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let mut adapters = Adapters::default();
-    adapters.register(
-        "graphics",
-        "create",
-        Box::new(DummyAdapter(releases.clone())),
-    );
-    assert!(adapters.register_handle("graphics", "create", "texture", 7));
-    assert!(adapters.contains_handle("texture", 7));
-    assert!(adapters.release_handle("texture", 7));
-    assert!(!adapters.contains_handle("texture", 7));
-    assert!(!adapters.release_handle("texture", 7));
+    let mut bindings = ExternalBindings::default();
+    bindings.register_module("graphics", Box::new(DummyAdapter(releases.clone())));
+    assert!(bindings.register_handle("graphics", "texture", 7));
+    assert!(bindings.contains_handle("graphics", "texture", 7));
+    assert!(bindings.release_handle("graphics", "texture", 7));
+    assert!(!bindings.contains_handle("graphics", "texture", 7));
+    assert!(!bindings.release_handle("graphics", "texture", 7));
     assert_eq!(releases.load(std::sync::atomic::Ordering::Acquire), 1);
+}
+
+#[test]
+fn external_handle_batches_are_registered_atomically() {
+    let mut bindings = ExternalBindings::default();
+    bindings.register_module(
+        "graphics",
+        Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
+            0,
+        )))),
+    );
+    assert!(bindings.register_handle("graphics", "texture", 7));
+
+    assert!(!bindings.register_handles(
+        "graphics",
+        &[("texture".to_string(), 8), ("texture".to_string(), 7)],
+    ));
+    assert!(!bindings.contains_handle("graphics", "texture", 8));
+    assert!(bindings.contains_handle("graphics", "texture", 7));
 }
 
 #[test]
@@ -105,9 +120,10 @@ fn execution_failures_preserve_asynchronous_frames() {
 
 struct CancellationRecordingAdapter(std::sync::Arc<std::sync::atomic::AtomicU64>);
 
-impl HostAdapter for CancellationRecordingAdapter {
+impl BoundExternalModule for CancellationRecordingAdapter {
     fn dispatch(
         &mut self,
+        _symbol: &str,
         _thread_id: usize,
         _request_id: u64,
         _args: &[BoundaryValue],
@@ -115,7 +131,7 @@ impl HostAdapter for CancellationRecordingAdapter {
     ) {
     }
 
-    fn cancel(&mut self, thread_id: usize, request_id: u64) -> CancellationOutcome {
+    fn cancel(&mut self, _symbol: &str, thread_id: usize, request_id: u64) -> CancellationOutcome {
         self.0.store(
             ((thread_id as u64) << 32) | request_id,
             std::sync::atomic::Ordering::Release,
@@ -125,16 +141,15 @@ impl HostAdapter for CancellationRecordingAdapter {
 }
 
 #[test]
-fn adapters_route_cancellation_to_the_owning_symbol() {
+fn external_bindings_route_cancellation_to_the_owning_symbol() {
     let cancellation = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
-    let mut adapters = Adapters::default();
-    adapters.register(
+    let mut bindings = ExternalBindings::default();
+    bindings.register_module(
         "io",
-        "read",
         Box::new(CancellationRecordingAdapter(cancellation.clone())),
     );
 
-    adapters.cancel("io", "read", 3, 4);
+    bindings.cancel("io", "read", 3, 4);
 
     assert_eq!(
         cancellation.load(std::sync::atomic::Ordering::Acquire),
@@ -147,7 +162,7 @@ struct MainThreadOnlyTask(Rc<()>);
 impl RunnableTask for MainThreadOnlyTask {
     fn run(self: Box<Self>, _budget: usize) -> ThreadResult {
         assert_eq!(Rc::strong_count(&self.0), 1);
-        ThreadResult::Completed(0)
+        ThreadResult::Completed(Ok(BoundaryValue::I32(0)))
     }
 }
 
@@ -158,5 +173,84 @@ fn main_kernel_tasks_accept_non_send_state() {
     let KernelTask::Main(task) = task else {
         panic!("main task must preserve its affinity");
     };
-    assert!(matches!(task.run(1), ThreadResult::Completed(0)));
+    assert!(matches!(
+        task.run(1),
+        ThreadResult::Completed(Ok(BoundaryValue::I32(0)))
+    ));
+}
+
+fn assert_builtin_checks(name: &str, source: &str) {
+    assert!(!source.is_empty());
+
+    let source_file = galfus_core::SourceFile::new(
+        galfus_core::SourceId::new(0),
+        name.to_string(),
+        source.to_string(),
+    );
+    let parse_result = galfus_frontend::parse(&source_file);
+    assert!(
+        !parse_result.has_errors(),
+        "{name} parse errors: {:?}",
+        parse_result.diagnostics()
+    );
+
+    let resolve_result = galfus_frontend::resolve(&source_file, parse_result.into_graph());
+    assert!(
+        !resolve_result.has_errors(),
+        "{name} resolve errors: {:?}",
+        resolve_result.diagnostics()
+    );
+
+    let graph = resolve_result.into_graph();
+    let type_result = galfus_frontend::check_declaration_types(&source_file, &graph);
+    assert!(
+        !type_result.has_errors(),
+        "{name} type errors: {:?}",
+        type_result.diagnostics()
+    );
+}
+
+#[test]
+fn test_std_io_source_checks() {
+    assert_builtin_checks("std/io", STD_IO_SOURCE);
+    assert!(STD_IO_SOURCE.contains("print"));
+    assert!(STD_IO_SOURCE.contains("read"));
+}
+
+#[test]
+fn test_text_source_checks() {
+    assert_builtin_checks("text", TEXT_SOURCE);
+    assert!(TEXT_SOURCE.contains("length"));
+    assert!(TEXT_SOURCE.contains("concat"));
+}
+
+#[test]
+fn test_format_source_checks() {
+    assert_builtin_checks("format", FORMAT_SOURCE);
+    assert!(FORMAT_SOURCE.contains("stringify"));
+    assert!(FORMAT_SOURCE.contains("parse"));
+    assert!(FORMAT_SOURCE.contains("Result"));
+}
+
+#[test]
+fn test_format_ansi_source_checks() {
+    assert_builtin_checks("format/ansi", FORMAT_ANSI_SOURCE);
+    assert!(FORMAT_ANSI_SOURCE.contains("Style"));
+    assert!(FORMAT_ANSI_SOURCE.contains("apply"));
+    assert!(FORMAT_ANSI_SOURCE.contains("red"));
+}
+
+#[test]
+fn test_std_async_source_checks() {
+    assert_builtin_checks("std/async", ASYNC_SOURCE);
+    assert!(ASYNC_SOURCE.contains("Future"));
+}
+
+#[test]
+fn test_thread_source_checks() {
+    assert_builtin_checks("std/thread", THREAD_SOURCE);
+    assert!(THREAD_SOURCE.contains("isRunning"));
+    assert!(THREAD_SOURCE.contains("isExited"));
+    assert!(THREAD_SOURCE.contains("exitReason"));
+    assert!(THREAD_SOURCE.contains("fn Thread::send(self, data: [u8]): bool"));
 }

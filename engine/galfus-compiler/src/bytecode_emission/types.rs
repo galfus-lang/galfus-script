@@ -149,6 +149,20 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: TypeId) -> TypeIdx {
             let elem_idx = crate::bytecode_emission::types::lower_type(ctx, *element);
             BytecodeType::Array(elem_idx)
         }
+        Some(TypeKind::Union { members }) => {
+            let null_ty = table.primitive(PrimitiveType::Null);
+            let mut non_null_members = members
+                .iter()
+                .copied()
+                .filter(|member| resolve_type_with_substitutions(ctx, *member) != null_ty);
+            match (non_null_members.next(), non_null_members.next()) {
+                (Some(member), None) if members.len() == 2 => {
+                    let member = crate::bytecode_emission::types::lower_type(ctx, member);
+                    BytecodeType::Nullable(member)
+                }
+                _ => BytecodeType::Null,
+            }
+        }
         Some(TypeKind::Tuple { elements }) => {
             let elem_idxs = elements
                 .iter()

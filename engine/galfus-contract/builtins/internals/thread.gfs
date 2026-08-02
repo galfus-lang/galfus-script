@@ -1,14 +1,14 @@
-fn(async) __internal_thread_create(func: fn([[u8]]): i32, key: [u8] | null): i64 { return -1 }
-fn(async) __internal_thread_get(key: [u8]): i64 { return -1 }
-fn(async) __internal_thread_spawn(id: i64, args: [[u8]] | null): bool { return false }
-fn(async) __internal_thread_is_running(id: i64): bool { return false }
-fn(async) __internal_thread_is_exited(id: i64): bool { return false }
-fn(async) __internal_thread_exit_reason(id: i64): i32 | null { return null }
-fn(async) __internal_thread_send(id: i64, data: [u8]): bool { return false }
-fn(async) __internal_thread_receive(id: i64, timeout: i32): [u8] | null { return null }
-fn(async) __internal_thread_has_messages(): bool { return false }
-fn(async) __internal_thread_get_message(): [u8] | null { return null }
-fn(async) __internal_thread_wait(id: i64): i32 | null { return null }
+fn(async) __internal_thread_create(func: fn([[u8]]): i32, key: [u8] | null): i64
+fn(async) __internal_thread_get(key: [u8]): i64
+fn(async) __internal_thread_spawn(id: i64, args: [[u8]] | null): bool
+fn(async) __internal_thread_is_running(id: i64): bool
+fn(async) __internal_thread_is_exited(id: i64): bool
+fn(async) __internal_thread_exit_reason(id: i64): i32 | null
+fn(async) __internal_thread_send(id: i64, data: [u8]): bool
+fn(async) __internal_thread_receive(id: i64, timeout: i32): [u8] | null
+fn(async) __internal_thread_has_messages(): bool
+fn(async) __internal_thread_get_message(): [u8] | null
+fn(async) __internal_thread_wait(id: i64): i32 | null
 
 export struct Thread {
     id: i64,

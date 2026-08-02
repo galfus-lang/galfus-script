@@ -1,0 +1,67 @@
+pub const ASYNC_SOURCE: &str = include_str!("../builtins/internals/async.gfs");
+pub const THREAD_SOURCE: &str = include_str!("../builtins/internals/thread.gfs");
+pub const CONSTRAINTS_SOURCE: &str = include_str!("../builtins/internals/constraints.gfs");
+pub const ITERABLE_SOURCE: &str = include_str!("../builtins/internals/iterable.gfs");
+pub const TEXT_SOURCE: &str = include_str!("../builtins/utilities/text.gfs");
+pub const FORMAT_SOURCE: &str = include_str!("../builtins/utilities/format.gfs");
+pub const FORMAT_ANSI_SOURCE: &str = include_str!("../builtins/utilities/format/ansi.gfs");
+pub const STD_IO_SOURCE: &str = include_str!("../builtins/bridges/io.gfs");
+
+/// Internal core modules that are built-in to the VM and auto-inferred by the language engine.
+pub static INTERNAL_CORE_MODULES: &[(&str, &str)] = &[
+    ("std/async", ASYNC_SOURCE),
+    ("std/thread", THREAD_SOURCE),
+    ("std/constraints", CONSTRAINTS_SOURCE),
+    ("std/iterable", ITERABLE_SOURCE),
+];
+
+/// Utility modules that are pure Galfus Script algorithmic libraries without native bridge functions.
+pub static UTILITY_MODULES: &[(&str, &str)] = &[
+    ("text", TEXT_SOURCE),
+    ("format", FORMAT_SOURCE),
+    ("format/ansi", FORMAT_ANSI_SOURCE),
+];
+
+/// Bridge templates for optional host capability modules.
+pub static BRIDGE_TEMPLATES: &[(&str, &str)] = &[("std/io", STD_IO_SOURCE)];
+
+/// Combined builtin modules for standard workspace lookup.
+pub static BUILTIN_MODULES: &[(&str, &str)] = &[
+    ("std/async", ASYNC_SOURCE),
+    ("std/thread", THREAD_SOURCE),
+    ("std/constraints", CONSTRAINTS_SOURCE),
+    ("std/iterable", ITERABLE_SOURCE),
+    ("text", TEXT_SOURCE),
+    ("format", FORMAT_SOURCE),
+    ("format/ansi", FORMAT_ANSI_SOURCE),
+    ("std/io", STD_IO_SOURCE),
+];
+
+pub fn is_internal_module(source: &str) -> bool {
+    INTERNAL_CORE_MODULES
+        .iter()
+        .any(|(name, _)| *name == source)
+}
+
+pub fn is_utility_module(source: &str) -> bool {
+    UTILITY_MODULES.iter().any(|(name, _)| *name == source)
+}
+
+pub fn is_builtin_module(source: &str) -> bool {
+    BUILTIN_MODULES.iter().any(|(name, _)| *name == source)
+}
+
+/// An atomic pairing of a HostProvider and its Galfus `.gfs` interface module.
+pub struct BridgeModule {
+    pub name: String,
+    pub source: String,
+}
+
+impl BridgeModule {
+    pub fn new(name: impl Into<String>, source: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            source: source.into(),
+        }
+    }
+}

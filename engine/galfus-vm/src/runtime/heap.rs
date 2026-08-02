@@ -132,6 +132,8 @@ impl VirtualMachine {
             (Value::Uint64(_), BytecodeType::Uint64) => true,
             (Value::Float32(_), BytecodeType::Float32) => true,
             (Value::Float64(_), BytecodeType::Float64) => true,
+            (Value::Null, BytecodeType::Nullable(_)) => true,
+            (value, BytecodeType::Nullable(inner)) => self.check_value_type(thread, value, *inner),
             (Value::Object(obj_ref), BytecodeType::Struct(expected_layout_idx)) => {
                 if let Ok(HeapObject::Struct { layout_idx, .. }) = thread.heap.get_object(*obj_ref)
                 {
@@ -270,6 +272,9 @@ impl VirtualMachine {
         };
 
         match (actual_ty, expected_ty) {
+            (_, BytecodeType::Nullable(expected_inner)) => {
+                self.type_idx_matches_inner(thread, actual, *expected_inner, seen)
+            }
             (BytecodeType::Array(actual_el), BytecodeType::Array(expected_el)) => {
                 self.type_idx_matches_inner(thread, *actual_el, *expected_el, seen)
             }

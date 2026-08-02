@@ -1,0 +1,226 @@
+use super::*;
+use std::sync::{Arc, atomic::AtomicBool};
+
+fn owner() -> ThreadId {
+    ThreadId::from_raw(1).unwrap()
+}
+
+fn foreign_owner() -> ThreadId {
+    ThreadId::from_raw(2).unwrap()
+}
+
+fn activation() -> Activation {
+    Activation::GalfusFunction {
+        module_id: ModuleId::new(1),
+        func_idx: FuncIdx(0),
+        args: vec![],
+        arg_types: vec![],
+    }
+}
+
+fn waiter() -> Waiter {
+    Waiter {
+        continuation: PendingContinuation {
+            thread_id: owner(),
+            continuation: galfus_vm::Continuation::for_provider(
+                galfus_bytecode::instruction::Reg(0),
+                ModuleId::new(1),
+                TypeIdx(0),
+            ),
+            module_id: ModuleId::new(1),
+            return_type: TypeIdx(0),
+            request_id: 7,
+            stack: vec![],
+            operation: super::super::pending::PendingOperation::Future,
+            active: Arc::new(AtomicBool::new(true)),
+        },
+    }
+}
+
+#[test]
+fn resolved_future_keeps_its_cached_result_for_later_awaits() {
+    let mut registry = FutureRegistry::new();
+    registry
+        .create(
+            owner(),
+            7,
+            Some(TypeIdx(3)),
+            Some(ModuleId::new(1)),
+            activation(),
+        )
+        .unwrap();
+    registry
+        .complete(owner(), 7, Ok(BoundaryValue::I32(42)))
+        .unwrap();
+
+    assert!(matches!(
+        registry.add_waiter(owner(), 7, waiter()),
+        Ok(WaitDisposition::Resolved {
+            result: Ok(BoundaryValue::I32(42)),
+            ..
+        })
+    ));
+    assert!(matches!(
+        registry.get(owner(), 7).map(|record| &record.state),
+        Some(FutureState::Resolved(Ok(BoundaryValue::I32(42))))
+    ));
+}
+
+#[test]
+fn created_future_is_discarded_without_starting_its_activation() {
+    let mut registry = FutureRegistry::new();
+    registry
+        .create(owner(), 7, None, None, activation())
+        .unwrap();
+    registry.discard(owner(), 7).unwrap();
+
+    assert!(matches!(
+        registry.take_activation_for_start(owner(), 7),
+        Err(_)
+    ));
+    assert!(matches!(registry.add_waiter(owner(), 7, waiter()), Err(_)));
+}
+
+#[test]
+fn running_future_is_discarded_and_exposes_its_activation_for_cancellation() {
+    let mut registry = FutureRegistry::new();
+    registry
+        .create(owner(), 7, None, None, activation())
+        .unwrap();
+    registry.take_activation_for_start(owner(), 7).unwrap();
+
+    let disp = registry.discard(owner(), 7);
+    // Record is removed, but we can verify it was returned
+    assert!(matches!(
+        disp,
+        Ok(DiscardDisposition::Running(
+            Activation::GalfusFunction { .. }
+        ))
+    ));
+}
+
+#[test]
+fn duplicate_completion_is_rejected_without_replacing_the_cache() {
+    let mut registry = FutureRegistry::new();
+    registry
+        .create(owner(), 7, None, None, activation())
+        .unwrap();
+    registry
+        .complete(owner(), 7, Ok(BoundaryValue::I32(1)))
+        .unwrap();
+
+    assert!(
+        registry
+            .complete(owner(), 7, Ok(BoundaryValue::I32(2)))
+            .is_err()
+    );
+    assert!(matches!(
+        registry.get(owner(), 7).map(|record| &record.state),
+        Some(FutureState::Resolved(Ok(BoundaryValue::I32(1))))
+    ));
+}
+
+#[test]
+fn discarded_future_cannot_be_completed_later() {
+    let mut registry = FutureRegistry::new();
+    registry
+        .create(owner(), 7, None, None, activation())
+        .unwrap();
+    registry.discard(owner(), 7).unwrap();
+
+    assert!(
+        registry
+            .complete(owner(), 7, Ok(BoundaryValue::I32(42)))
+            .is_err()
+    );
+    assert!(registry.get(owner(), 7).is_none());
+}
+
+#[test]
+fn completion_drains_all_registered_waiters_once() {
+    let mut registry = FutureRegistry::new();
+    registry
+        .create(owner(), 7, None, None, activation())
+        .unwrap();
+    assert!(matches!(
+        registry.add_waiter(owner(), 7, waiter()),
+        Ok(WaitDisposition::Registered)
+    ));
+    assert!(matches!(
+        registry.add_waiter(owner(), 7, waiter()),
+        Ok(WaitDisposition::Registered)
+    ));
+
+    let waiters = registry
+        .complete(owner(), 7, Ok(BoundaryValue::I32(42)))
+        .unwrap();
+    assert_eq!(waiters.len(), 2);
+    assert!(matches!(
+        registry.add_waiter(owner(), 7, waiter()),
+        Ok(WaitDisposition::Resolved {
+            result: Ok(BoundaryValue::I32(42)),
+            ..
+        })
+    ));
+}
+
+#[test]
+fn duplicate_ids_and_foreign_owners_are_rejected() {
+    let mut registry = FutureRegistry::new();
+    registry
+        .create(owner(), 7, None, None, activation())
+        .unwrap();
+
+    assert!(
+        registry
+            .create(owner(), 7, None, None, activation())
+            .is_err()
+    );
+    assert!(registry.add_waiter(foreign_owner(), 7, waiter()).is_err());
+    assert!(
+        registry
+            .take_activation_for_start(foreign_owner(), 7)
+            .is_err()
+    );
+}
+
+#[test]
+fn dropping_its_final_handle_removes_its_registry_record() {
+    let mut registry = FutureRegistry::new();
+    registry
+        .create(owner(), 7, None, None, activation())
+        .unwrap();
+    registry
+        .complete(owner(), 7, Ok(BoundaryValue::I32(42)))
+        .unwrap();
+
+    let _ = registry.discard(owner(), 7).unwrap();
+
+    // In Phase 1, discarding a resolved future should remove it from the registry.
+    assert!(registry.get(owner(), 7).is_none());
+}
+
+#[test]
+fn late_completion_after_discard_is_ignored_and_recorded_deterministically() {
+    let mut registry = FutureRegistry::new();
+    registry
+        .create(owner(), 7, None, None, activation())
+        .unwrap();
+    registry.discard(owner(), 7).unwrap();
+
+    let err = match registry.complete(owner(), 7, Ok(BoundaryValue::I32(42))) {
+        Err(e) => e,
+        Ok(_) => panic!("Expected error"),
+    };
+
+    assert_eq!(
+        err.kind,
+        galfus_contract::ExecutionFailureKind::DuplicateCompletion
+    );
+
+    // The state should remain Discarded or a tombstone variant (to be implemented in Phase 1)
+    assert!(matches!(
+        registry.get(owner(), 7).map(|record| &record.state),
+        Some(FutureState::Discarded) | None
+    ));
+}

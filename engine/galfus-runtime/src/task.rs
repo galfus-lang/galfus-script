@@ -44,11 +44,22 @@ pub(crate) fn decode_from_thread_heap(
         (BytecodeType::Float64, galfus_vm::VmValue::Float64(value)) => {
             Ok(BoundaryValue::F64(value))
         }
+        (
+            BytecodeType::Function { .. },
+            galfus_vm::VmValue::Function {
+                module_id,
+                func_idx,
+            },
+        ) => Ok(BoundaryValue::Function {
+            module_id: module_id.raw(),
+            func_idx: func_idx.raw(),
+        }),
         (BytecodeType::ExternalHandle(kind), galfus_vm::VmValue::Object(reference)) => match heap
             .get_object(reference)
         {
-            Ok(galfus_vm::HeapObject::ExternalHandle { kind: actual, id }) if actual == kind => {
+            Ok(galfus_vm::HeapObject::ExternalHandle { proxy_module, kind: actual, id }) if actual == kind => {
                 Ok(BoundaryValue::Handle {
+                    proxy_module: Some(proxy_module.clone()),
                     kind: kind.clone(),
                     id: *id,
                 })
@@ -84,6 +95,10 @@ pub(crate) fn decode_from_thread_heap(
                 element_type: boundary_type(module, *element_type)?,
                 values,
             })
+        }
+        (BytecodeType::Nullable(_), galfus_vm::VmValue::Null) => Ok(BoundaryValue::Null),
+        (BytecodeType::Nullable(inner), value) => {
+            decode_from_thread_heap(heap, value, *inner, module)
         }
         (BytecodeType::Tuple(element_types), galfus_vm::VmValue::Object(reference)) => {
             let galfus_vm::HeapObject::Tuple { elements } = heap
@@ -139,6 +154,30 @@ pub(crate) fn decode_from_thread_heap(
     }
 }
 
+/// Converts a scalar `VmValue` produced by a VM intrinsic effect into a `BoundaryValue`
+/// without requiring heap or type-table context. Only covers the primitive types returned
+/// by thread intrinsics (i64, bool, i32, null).
+pub(crate) fn vm_value_to_boundary(value: galfus_vm::VmValue) -> galfus_contract::BoundaryValue {
+    use galfus_contract::BoundaryValue;
+    match value {
+        galfus_vm::VmValue::Null => BoundaryValue::Null,
+        galfus_vm::VmValue::Bool(v) => BoundaryValue::Bool(v),
+        galfus_vm::VmValue::Int8(v) => BoundaryValue::I8(v),
+        galfus_vm::VmValue::Int16(v) => BoundaryValue::I16(v),
+        galfus_vm::VmValue::Int32(v) => BoundaryValue::I32(v),
+        galfus_vm::VmValue::Int64(v) => BoundaryValue::I64(v),
+        galfus_vm::VmValue::Uint8(v) => BoundaryValue::U8(v),
+        galfus_vm::VmValue::Uint16(v) => BoundaryValue::U16(v),
+        galfus_vm::VmValue::Uint32(v) => BoundaryValue::U32(v),
+        galfus_vm::VmValue::Uint64(v) => BoundaryValue::U64(v),
+        galfus_vm::VmValue::Future(v) => BoundaryValue::U64(v),
+        galfus_vm::VmValue::Float32(v) => BoundaryValue::F32(v),
+        galfus_vm::VmValue::Float64(v) => BoundaryValue::F64(v),
+        // Heap objects are not expected from thread intrinsic effects; fall back to Null.
+        galfus_vm::VmValue::Object(_) | galfus_vm::VmValue::Function { .. } => BoundaryValue::Null,
+    }
+}
+
 pub(crate) fn encode_into_thread_heap(
     heap: &mut galfus_vm::thread::PrivateHeap,
     value: galfus_contract::BoundaryValue,
@@ -175,11 +214,21 @@ pub(crate) fn encode_into_thread_heap(
         (BytecodeType::Float64, BoundaryValue::F64(value)) => {
             Ok(galfus_vm::VmValue::Float64(value))
         }
-        (BytecodeType::ExternalHandle(kind), BoundaryValue::Handle { kind: actual, id })
+        (
+            BytecodeType::Function { .. },
+            BoundaryValue::Function {
+                module_id,
+                func_idx,
+            },
+        ) => Ok(galfus_vm::VmValue::Function {
+            module_id: galfus_core::ModuleId::new(module_id),
+            func_idx: galfus_bytecode::instruction::FuncIdx(func_idx),
+        }),
+        (BytecodeType::ExternalHandle(kind), BoundaryValue::Handle { proxy_module, kind: actual, id })
             if kind == &actual =>
         {
             Ok(galfus_vm::VmValue::Object(heap.alloc(
-                galfus_vm::HeapObject::ExternalHandle { kind: actual, id },
+                galfus_vm::HeapObject::ExternalHandle { proxy_module: proxy_module.clone().unwrap_or_default(), kind: actual, id },
             )))
         }
         (BytecodeType::Array(element_type), BoundaryValue::Bytes(bytes))
@@ -216,6 +265,10 @@ pub(crate) fn encode_into_thread_heap(
                 elements,
             });
             Ok(galfus_vm::VmValue::Object(reference))
+        }
+        (BytecodeType::Nullable(_), BoundaryValue::Null) => Ok(galfus_vm::VmValue::Null),
+        (BytecodeType::Nullable(inner), value) => {
+            encode_into_thread_heap(heap, value, *inner, module_id, module)
         }
         (BytecodeType::Tuple(element_types), BoundaryValue::Tuple(values)) => {
             if values.len() != element_types.len() {
@@ -274,10 +327,12 @@ pub(crate) fn boundary_type(
         Some(BytecodeType::Uint64) => Ok(BoundaryType::U64),
         Some(BytecodeType::Float32) => Ok(BoundaryType::F32),
         Some(BytecodeType::Float64) => Ok(BoundaryType::F64),
+        Some(BytecodeType::Function { .. }) => Ok(BoundaryType::Function),
         Some(BytecodeType::ExternalHandle(kind)) => Ok(BoundaryType::Handle { kind: kind.clone() }),
         Some(BytecodeType::Array(element)) => Ok(BoundaryType::Array(Box::new(boundary_type(
             module, *element,
         )?))),
+        Some(BytecodeType::Nullable(inner)) => boundary_type(module, *inner),
         Some(BytecodeType::Tuple(elements)) => elements
             .iter()
             .copied()
@@ -294,6 +349,7 @@ pub struct RuntimeTask {
     pub thread: Option<galfus_vm::thread::VmThreadState>,
     pub vm: Arc<VirtualMachine>,
     pub events: crate::event::EventSink,
+    pub future_completion: Option<(registry::ThreadId, u64)>,
 }
 
 impl RuntimeTask {
@@ -302,12 +358,14 @@ impl RuntimeTask {
         thread: galfus_vm::thread::VmThreadState,
         vm: Arc<VirtualMachine>,
         events: crate::event::EventSink,
+        future_completion: Option<(registry::ThreadId, u64)>,
     ) -> Self {
         Self {
             thread_id,
             thread: Some(thread),
             vm,
             events,
+            future_completion,
         }
     }
 }
@@ -408,7 +466,7 @@ impl RunnableTask for RuntimeTask {
                         thread,
                         module_id,
                     });
-                    return ThreadResult::Completed(0);
+                    return ThreadResult::Completed(Ok(galfus_contract::BoundaryValue::I32(0)));
                 }
                 let module = &self
                     .vm
@@ -418,42 +476,33 @@ impl RunnableTask for RuntimeTask {
                     .module;
                 let result = match decode_from_thread_heap(&thread.heap, value, return_type, module)
                 {
-                    Ok(galfus_contract::BoundaryValue::I32(code)) => code,
-                    Ok(value) => {
-                        let failure = ExecutionFailure::new(
-                            ExecutionFailureKind::BoundaryCodecFailure,
-                            format!("entry result must be i32, found {value:?}"),
-                        )
-                        .with_thread_id(self.thread_id.raw())
-                        .with_module_id(module_id.raw().into())
-                        .with_stack(execution_stack(&thread));
-                        self.events.send(crate::event::RuntimeEvent::Failed {
-                            thread_id: self.thread_id,
-                            error: failure.clone(),
-                        });
-                        return ThreadResult::Discarded;
-                    }
-                    Err(error) => {
-                        let failure = ExecutionFailure::new(
-                            ExecutionFailureKind::BoundaryCodecFailure,
-                            format!("invalid entry result: {error:?}"),
-                        )
-                        .with_thread_id(self.thread_id.raw())
-                        .with_module_id(module_id.raw().into())
-                        .with_stack(execution_stack(&thread));
-                        self.events.send(crate::event::RuntimeEvent::Failed {
-                            thread_id: self.thread_id,
-                            error: failure.clone(),
-                        });
-                        return ThreadResult::Discarded;
-                    }
+                    Ok(value) => Ok(value),
+                    Err(e) => Err(ExecutionFailure::new(
+                        ExecutionFailureKind::BoundaryCodecFailure,
+                        format!("failed to decode thread return value: {e:?}"),
+                    )
+                    .with_thread_id(self.thread_id.raw())
+                    .with_module_id(module_id.raw().into())
+                    .with_stack(execution_stack(&thread))),
                 };
-                self.events.send(crate::event::RuntimeEvent::Exited {
-                    thread_id: self.thread_id,
-                    thread,
-                    code: result,
-                });
-                ThreadResult::Completed(result)
+
+                if let Some((owner_thread_id, future_id)) = self.future_completion {
+                    self.events
+                        .send(crate::event::RuntimeEvent::FutureWorkerCompleted {
+                            worker_thread_id: self.thread_id,
+                            owner_thread_id,
+                            future_id,
+                            thread,
+                            result: result.clone(),
+                        });
+                } else {
+                    self.events.send(crate::event::RuntimeEvent::Exited {
+                        thread_id: self.thread_id,
+                        thread,
+                        result: result.clone(),
+                    });
+                }
+                return ThreadResult::Completed(result);
             }
             galfus_vm::VmStep::Suspend {
                 effect,

@@ -13,7 +13,7 @@ use crate::thread;
 
 use crate::error::{StackFrameInfo, VmError, VmPanic};
 use galfus_bytecode::instruction::{
-    ChoiceLayoutIdx, FuncIdx, Instruction, Reg, StructLayoutIdx, TypeIdx,
+    ChoiceLayoutIdx, ConstIdx, FuncIdx, Instruction, Reg, StructLayoutIdx, TypeIdx,
 };
 use galfus_bytecode::{BytecodeGraph, BytecodeType, Constant, OwnershipKind};
 use galfus_contract::Providers;
@@ -45,13 +45,17 @@ impl Continuation {
         self
     }
 
-    pub(crate) fn for_provider(dest: Reg, module_id: ModuleId, return_type: TypeIdx) -> Self {
+    pub fn for_provider(dest: Reg, module_id: ModuleId, return_type: TypeIdx) -> Self {
         Self {
             dest: Some(dest),
             expected_result: Some((module_id, return_type)),
             resumed: Arc::new(AtomicBool::new(false)),
             origin_thread_id: None,
         }
+    }
+
+    pub fn for_future_handle(dest: Reg) -> Self {
+        Self::new(Some(dest))
     }
 }
 
@@ -70,7 +74,7 @@ pub enum VmEffect {
     },
     AdapterCall {
         module_id: ModuleId,
-        adapter: String,
+        proxy_module: String,
         symbol: String,
         args: Vec<Value>,
         arg_types: Vec<TypeIdx>,
@@ -114,17 +118,39 @@ pub enum VmEffect {
         thread_id: u64,
     },
     CreateFuture {
+        /// Module whose type table encodes the call arguments and Future payload.
         module_id: ModuleId,
+        /// Resolved module that owns `func_idx`.
+        target_module_id: ModuleId,
         func_idx: FuncIdx,
         args: Vec<Value>,
+        arg_types: Vec<TypeIdx>,
+        return_type: TypeIdx,
+    },
+    CreateIndirectFuture {
+        module_id: ModuleId,
+        func: Value,
+        args: Vec<Value>,
+        arg_types: Vec<TypeIdx>,
+        return_type: TypeIdx,
+    },
+    FutureDropped {
+        future_id: u64,
+    },
+    ExternalHandleDropped {
+        proxy_module: String,
+        kind: String,
+        id: u64,
     },
     FutureWaitAll {
         future_ids: Vec<u64>,
         module_id: ModuleId,
+        return_type: TypeIdx,
     },
     FutureWaitRace {
         future_ids: Vec<u64>,
         module_id: ModuleId,
+        return_type: TypeIdx,
     },
     Blocked,
 }
@@ -164,6 +190,7 @@ pub enum VmValue {
     Uint16(u16),
     Uint32(u32),
     Uint64(u64),
+    Future(u64),
     Float32(f32),
     Float64(f64),
     Object(VmObjectRef),
@@ -199,6 +226,7 @@ pub enum HeapObject {
         payload: Value,
     },
     ExternalHandle {
+        proxy_module: String,
         kind: String,
         id: u64,
     },
@@ -239,6 +267,7 @@ pub struct VirtualMachine {
 
 impl VirtualMachine {
     /// Resumes a suspended VM operation exactly once without exposing register layout.
+    #[allow(clippy::result_large_err)]
     pub fn resume(
         &self,
         thread_id: u64,
@@ -303,6 +332,10 @@ impl VirtualMachine {
             | (BytecodeType::Uint64, Value::Uint64(_))
             | (BytecodeType::Float32, Value::Float32(_))
             | (BytecodeType::Float64, Value::Float64(_)) => true,
+            (BytecodeType::Nullable(_), Value::Null) => true,
+            (BytecodeType::Nullable(inner), value) => {
+                self.value_matches_type(thread, value, module_id, *inner)
+            }
             (BytecodeType::Array(element_type), Value::Object(reference)) => {
                 let Ok(HeapObject::Array {
                     element_ty,
@@ -356,6 +389,10 @@ impl VirtualMachine {
                     None => matches!(payload, Value::Null),
                 }
             }
+            (BytecodeType::ExternalHandle(kind), Value::Object(reference)) => matches!(
+                thread.heap.get_object(reference),
+                Ok(HeapObject::ExternalHandle { kind: actual, .. }) if actual == kind
+            ),
             _ => false,
         }
     }
@@ -526,6 +563,12 @@ impl VirtualMachine {
     }
 
     pub fn step(&self, thread: &mut thread::VmThreadState) -> Result<VmStep, VmError> {
+        if let Some((proxy_module, kind, id)) = thread.pending_external_handle_drops.pop() {
+            return Ok(VmStep::Suspend {
+                effect: VmEffect::ExternalHandleDropped { proxy_module, kind, id },
+                continuation: Continuation::new(None),
+            });
+        }
         let instr = {
             let frame = thread
                 .call_stack
@@ -542,6 +585,27 @@ impl VirtualMachine {
         };
 
         let release_instruction = instr.clone();
+        if matches!(
+            instr,
+            Instruction::CallNative { .. }
+                | Instruction::ReceiveFilter { .. }
+                | Instruction::MailboxHasMessages { .. }
+                | Instruction::MailboxGetMessage { .. }
+                | Instruction::CreateThread { .. }
+                | Instruction::StartThread { .. }
+                | Instruction::GetThread { .. }
+                | Instruction::ThreadIsRunning { .. }
+                | Instruction::ThreadIsExited { .. }
+                | Instruction::ThreadExitReason { .. }
+                | Instruction::WaitThread { .. }
+                | Instruction::Send { .. }
+        ) {
+            return Err(VmError::UnimplementedInstruction {
+                instruction:
+                    "legacy immediate boundary instruction; use an async Future activation"
+                        .to_string(),
+            });
+        }
         let step = match instr {
             Instruction::LoadConst { .. }
             | Instruction::Move { .. }
@@ -607,8 +671,10 @@ impl VirtualMachine {
 
             Instruction::Drop { .. }
             | Instruction::CallNative { .. }
+            | Instruction::AdapterCall { .. }
             | Instruction::AwaitFuture { .. }
             | Instruction::CreateFuture { .. }
+            | Instruction::CreateIndirectFuture { .. }
             | Instruction::AwaitAll { .. }
             | Instruction::AwaitRace { .. }
             | Instruction::Len { .. }
@@ -641,7 +707,10 @@ impl VirtualMachine {
         if matches!(instr, Instruction::Drop { .. })
             || thread.heap.allocations_since_release >= RELEASE_ALLOCATION_THRESHOLD
         {
-            self.release_unreachable(thread);
+            let released_handles = self.release_unreachable(thread);
+            thread
+                .pending_external_handle_drops
+                .extend(released_handles);
         }
     }
 }

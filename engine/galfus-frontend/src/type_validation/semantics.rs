@@ -15,6 +15,7 @@ impl<'a> DeclarationTypeChecker<'a> {
         self.check_struct_literal_spread_targets(root);
         self.check_builtin_constraint_imports(root);
         self.check_builtin_symbol_visibility(root);
+        self.check_bridge_and_internal_symbols(root);
     }
 
     fn check_return_context(&mut self, node: NodeId, inside_function: bool) {
@@ -668,6 +669,91 @@ impl<'a> DeclarationTypeChecker<'a> {
 
                 _ => {}
             }
+        }
+    }
+
+    fn check_bridge_and_internal_symbols(&mut self, root: NodeId) {
+        let path = self.source.name();
+        let name = path.strip_suffix(".gfs").unwrap_or(path);
+        let is_internal_module = galfus_contract::is_internal_module(name);
+        let is_bridge_module = is_internal_module
+            || galfus_contract::is_builtin_module(name)
+            || path.starts_with("std/");
+
+        self.check_node_bridge_and_internal_rules(root, is_internal_module, is_bridge_module);
+    }
+
+    fn check_node_bridge_and_internal_rules(
+        &mut self,
+        node: NodeId,
+        is_internal_module: bool,
+        is_bridge_module: bool,
+    ) {
+        let Some(syntax_node) = self.graph.syntax().node(node) else {
+            return;
+        };
+
+        if syntax_node.kind() == SyntaxNodeKind::FunctionItem
+            && let Some(ident) = self
+                .graph
+                .syntax()
+                .first_child_of_kind(node, SyntaxNodeKind::Identifier)
+        {
+            let name = self.node_text(ident);
+            let is_async = self
+                .graph
+                .syntax()
+                .first_child_of_kind(node, SyntaxNodeKind::KeywordMetadataList)
+                .and_then(|meta| {
+                    self.graph
+                        .syntax()
+                        .first_child_of_kind(meta, SyntaxNodeKind::KeywordMetadataFlag)
+                })
+                .and_then(|flag| {
+                    self.graph
+                        .syntax()
+                        .first_child_of_kind(flag, SyntaxNodeKind::Identifier)
+                })
+                .map(|flag_ident| self.node_text(flag_ident))
+                .map(|text| text == "async")
+                .unwrap_or(false);
+
+            if name.starts_with("__internal_") {
+                if !is_internal_module {
+                    self.report_cannot_infer_type(
+                        node,
+                        "__internal_* functions are reserved for internal core modules".to_string(),
+                    );
+                } else if !is_async {
+                    self.report_cannot_infer_type(
+                        node,
+                        format!(
+                            "internal function '{name}' must be explicitly marked with 'fn(async)'"
+                        ),
+                    );
+                }
+            } else if name.starts_with("__provider_") {
+                if !is_bridge_module {
+                    self.report_cannot_infer_type(
+                        node,
+                        "__provider_* functions are reserved for bridge modules".to_string(),
+                    );
+                }
+
+                if !is_async {
+                    self.report_cannot_infer_type(
+                        node,
+                        format!(
+                            "provider function '{name}' must be explicitly marked with 'fn(async)'"
+                        ),
+                    );
+                }
+            }
+        }
+
+        let children = syntax_node.children().to_vec();
+        for child in children {
+            self.check_node_bridge_and_internal_rules(child, is_internal_module, is_bridge_module);
         }
     }
 }

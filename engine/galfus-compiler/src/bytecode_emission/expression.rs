@@ -603,7 +603,12 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                 self.free_temp_if_operand(length);
             }
             RValue::CreateFuture { func, args } => {
-                let func_idx = galfus_bytecode::instruction::FuncIdx(func.raw() as u16);
+                let func_idx = *self.ctx.function_map.get(func).unwrap_or_else(|| {
+                    panic!(
+                        "missing lowered function mapping for {:?} while emitting {} ({:?})",
+                        func, self.func.name, self.func.id
+                    )
+                });
                 let start_reg = if args.is_empty() {
                     Reg(0)
                 } else {
@@ -617,11 +622,30 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     }
                     first
                 };
+                let arg_types = args
+                    .iter()
+                    .map(|argument| {
+                        crate::bytecode_emission::types::lower_type(
+                            self.ctx,
+                            self.get_operand_type(argument),
+                        )
+                    })
+                    .collect();
+                let future_ty = self
+                    .func
+                    .locals
+                    .iter()
+                    .find(|local| local.id.raw() as u16 == dest.raw())
+                    .map(|local| local.ty)
+                    .expect("CreateFuture destination must be a MIR local");
+                let return_type = self.future_payload_type_index(future_ty);
                 self.instructions.push(Instruction::CreateFuture {
                     dest,
                     func: func_idx,
                     args_start: start_reg,
                     arg_count: args.len() as u8,
+                    arg_types,
+                    return_type,
                 });
                 if !args.is_empty() {
                     self.free_temps(args.len() as u16);
@@ -645,11 +669,36 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     }
                     first
                 };
-                self.instructions.push(Instruction::CallDynamic {
+
+                let function_ty = crate::bytecode_emission::types::resolve_type_with_substitutions(
+                    self.ctx,
+                    self.get_operand_type(func_op),
+                );
+                let table = self.ctx.type_result.layer().table();
+                let TypeKind::Function(function) = table
+                    .kind(function_ty)
+                    .unwrap_or_else(|| panic!("indirect future target must have a function type"))
+                else {
+                    panic!("indirect future target must have a function type");
+                };
+                let arg_types = args
+                    .iter()
+                    .map(|argument| {
+                        crate::bytecode_emission::types::lower_type(
+                            self.ctx,
+                            self.get_operand_type(argument),
+                        )
+                    })
+                    .collect();
+                let return_type = self.future_payload_type_index(function.return_type());
+
+                self.instructions.push(Instruction::CreateIndirectFuture {
                     dest,
                     func_reg,
                     args_start: start_reg,
                     arg_count: args.len() as u8,
+                    arg_types,
+                    return_type,
                 });
                 self.free_temp_if_operand(func_op);
                 if !args.is_empty() {
@@ -763,6 +812,25 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
         }
     }
 
+    fn future_payload_type_index(
+        &mut self,
+        future_ty: TypeId,
+    ) -> galfus_bytecode::instruction::TypeIdx {
+        let future_ty =
+            crate::bytecode_emission::types::resolve_type_with_substitutions(self.ctx, future_ty);
+        let table = self.ctx.type_result.layer().table();
+        let TypeKind::GenericInstance { arguments, .. } = table
+            .kind(future_ty)
+            .unwrap_or_else(|| panic!("async function must return Future<T>"))
+        else {
+            panic!("async function must return Future<T>");
+        };
+        let payload_ty = *arguments
+            .first()
+            .expect("Future<T> must carry a payload type");
+        crate::bytecode_emission::types::lower_type(self.ctx, payload_ty)
+    }
+
     pub(crate) fn get_operand_type(&self, operand: &Operand) -> TypeId {
         match operand {
             Operand::Local(local_id) => {
@@ -773,6 +841,17 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                 let constant = &self.ctx.mir_constants[*idx];
                 let layer = self.ctx.type_result.layer();
                 let table = layer.table();
+                if matches!(constant, MirConstant::String(_)) {
+                    let u8_ty = table.primitive(PrimitiveType::Uint8);
+                    for i in 0..table.len() {
+                        let ty_id = TypeId::new(i as u32);
+                        if let Some(TypeKind::Array { element }) = table.kind(ty_id) {
+                            if *element == u8_ty {
+                                return ty_id;
+                            }
+                        }
+                    }
+                }
                 let prim = match constant {
                     MirConstant::Null => PrimitiveType::Null,
                     MirConstant::Bool(_) => PrimitiveType::Bool,
@@ -786,26 +865,24 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     | MirConstant::Uint64(_) => PrimitiveType::Int32,
                     MirConstant::Float32(_) | MirConstant::Float64(_) => PrimitiveType::Float32,
                     MirConstant::Function(_) => PrimitiveType::Null,
-                    MirConstant::String(_) => {
-                        // Find String type in type table
-                        for i in 0..table.len() {
-                            let ty_id = TypeId::new(i as u32);
-                            if matches!(
-                                table.kind(ty_id),
-                                Some(TypeKind::Primitive(PrimitiveType::Uint8))
-                            ) {
-                                // Fallback to Int32 if not found
-                            }
-                        }
-                        PrimitiveType::Int32
-                    }
+                    MirConstant::String(_) => unreachable!(),
                 };
                 table.primitive(prim)
             }
             Operand::Constant(constant) => {
                 let layer = self.ctx.type_result.layer();
                 let table = layer.table();
-                // Simple mapping for constants
+                if matches!(constant, MirConstant::String(_)) {
+                    let u8_ty = table.primitive(PrimitiveType::Uint8);
+                    for i in 0..table.len() {
+                        let ty_id = TypeId::new(i as u32);
+                        if let Some(TypeKind::Array { element }) = table.kind(ty_id) {
+                            if *element == u8_ty {
+                                return ty_id;
+                            }
+                        }
+                    }
+                }
                 let prim = match constant {
                     MirConstant::Null => PrimitiveType::Null,
                     MirConstant::Bool(_) => PrimitiveType::Bool,
@@ -819,19 +896,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     | MirConstant::Uint64(_) => PrimitiveType::Int32,
                     MirConstant::Float32(_) | MirConstant::Float64(_) => PrimitiveType::Float64,
                     MirConstant::Function(_) => PrimitiveType::Null,
-                    MirConstant::String(_) => {
-                        // Find String type in type table
-                        for i in 0..table.len() {
-                            let ty_id = TypeId::new(i as u32);
-                            if matches!(
-                                table.kind(ty_id),
-                                Some(TypeKind::Primitive(PrimitiveType::Uint8))
-                            ) {
-                                // Fallback to Int32 if not found
-                            }
-                        }
-                        PrimitiveType::Int32
-                    }
+                    MirConstant::String(_) => unreachable!(),
                 };
                 for i in 0..table.len() {
                     let ty_id = TypeId::new(i as u32);

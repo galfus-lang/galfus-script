@@ -536,15 +536,7 @@ impl VirtualMachine {
                 thread_id,
                 arg,
             } => {
-                let tid_val = match thread.read_reg(thread_id)? {
-                    Value::Int64(id) => id as u64,
-                    _ => {
-                        return Err(VmError::TypeMismatch {
-                            expected: "Int64".into(),
-                            found: "other".into(),
-                        });
-                    }
-                };
+                let tid_val = thread_id_value(thread, thread_id)?;
                 let arg_val = thread.read_reg(arg)?.clone();
                 return Ok(VmStep::Suspend {
                     effect: VmEffect::StartThread {
@@ -752,7 +744,29 @@ impl VirtualMachine {
 
 fn thread_id_value(thread: &thread::VmThreadState, register: Reg) -> Result<u64, VmError> {
     match thread.read_reg(register)? {
-        Value::Int64(id) => Ok(id as u64),
+        Value::Int64(id) if id >= 0 => Ok(id as u64),
+        Value::Int32(id) if id >= 0 => Ok(id as u64),
+        Value::Uint64(id) => Ok(id),
+        Value::Uint32(id) => Ok(id as u64),
+        Value::Object(obj_ref) => {
+            if let Ok(HeapObject::Struct { fields, .. }) = thread.heap.get_object(obj_ref) {
+                match fields.first() {
+                    Some(Value::Int64(id)) if *id >= 0 => Ok(*id as u64),
+                    Some(Value::Int32(id)) if *id >= 0 => Ok(*id as u64),
+                    Some(Value::Uint64(id)) => Ok(*id),
+                    Some(Value::Uint32(id)) => Ok(*id as u64),
+                    _ => Err(VmError::TypeMismatch {
+                        expected: "Thread ID".into(),
+                        found: format!("{fields:?}"),
+                    }),
+                }
+            } else {
+                Err(VmError::TypeMismatch {
+                    expected: "Thread ID".into(),
+                    found: format!("{obj_ref:?}"),
+                })
+            }
+        }
         value => Err(VmError::TypeMismatch {
             expected: "Int64".into(),
             found: format!("{value:?}"),

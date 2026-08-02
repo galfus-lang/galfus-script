@@ -157,6 +157,31 @@ fn codec_rejects_an_array_with_a_different_declared_element_type() {
 }
 
 #[test]
+fn codec_round_trips_nullable_values() {
+    let module = module(vec![
+        BytecodeType::Int32,
+        BytecodeType::Nullable(TypeIdx(0)),
+    ]);
+    let mut heap = galfus_vm::thread::PrivateHeap::new();
+
+    for value in [BoundaryValue::I32(7), BoundaryValue::Null] {
+        let encoded = encode_into_thread_heap(
+            &mut heap,
+            value.clone(),
+            TypeIdx(1),
+            galfus_core::ModuleId::new(1),
+            &module,
+        )
+        .expect("nullable value encodes");
+
+        assert_eq!(
+            decode_from_thread_heap(&heap, encoded, TypeIdx(1), &module),
+            Ok(value)
+        );
+    }
+}
+
+#[test]
 fn codec_encodes_a_choice_with_its_declared_variant_payload() {
     let module = BytecodeModule {
         choice_layouts: vec![ChoiceLayout {
@@ -206,6 +231,7 @@ fn codec_round_trips_nominal_external_handles() {
     let module = module(vec![BytecodeType::ExternalHandle("file".to_string())]);
     let mut heap = galfus_vm::thread::PrivateHeap::new();
     let value = BoundaryValue::Handle {
+        proxy_module: Some("".to_string()),
         kind: "file".to_string(),
         id: 9,
     };
@@ -225,6 +251,32 @@ fn codec_round_trips_nominal_external_handles() {
 }
 
 #[test]
+fn codec_round_trips_function_references() {
+    let module = module(vec![BytecodeType::Function {
+        params: vec![],
+        ret: TypeIdx(0),
+    }]);
+    let mut heap = galfus_vm::thread::PrivateHeap::new();
+    let value = BoundaryValue::Function {
+        module_id: 3,
+        func_idx: 7,
+    };
+
+    let encoded = encode_into_thread_heap(
+        &mut heap,
+        value.clone(),
+        TypeIdx(0),
+        galfus_core::ModuleId::new(1),
+        &module,
+    )
+    .expect("function reference encodes");
+    assert_eq!(
+        decode_from_thread_heap(&heap, encoded, TypeIdx(0), &module),
+        Ok(value)
+    );
+}
+
+#[test]
 fn codec_rejects_external_handles_with_the_wrong_kind() {
     let module = module(vec![BytecodeType::ExternalHandle("file".to_string())]);
     let mut heap = galfus_vm::thread::PrivateHeap::new();
@@ -232,6 +284,7 @@ fn codec_rejects_external_handles_with_the_wrong_kind() {
         encode_into_thread_heap(
             &mut heap,
             BoundaryValue::Handle {
+                proxy_module: Some("".to_string()),
                 kind: "socket".to_string(),
                 id: 9
             },

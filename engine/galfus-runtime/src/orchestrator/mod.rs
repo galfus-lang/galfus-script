@@ -4,6 +4,7 @@ mod tests;
 pub(crate) mod cancellation;
 pub(crate) mod effects;
 pub(crate) mod external;
+pub(crate) mod future_registry;
 pub(crate) mod pending;
 pub(crate) mod startup;
 
@@ -24,8 +25,49 @@ use std::sync::{
 };
 use std::thread::{self, ThreadId};
 
-use pending::{LateCompletion, MAX_LATE_COMPLETIONS, PendingContinuation, PendingKey};
+use future_registry::FutureRegistry;
+use pending::{
+    LateCompletion, MAX_LATE_COMPLETIONS, PendingContinuation, PendingKey, PendingOperation,
+};
 pub(crate) use startup::StartupPlan;
+
+fn collect_external_handles(value: &BoundaryValue, handles: &mut Vec<(String, u64)>) {
+    match value {
+        BoundaryValue::Array { values, .. } | BoundaryValue::Tuple(values) => {
+            for value in values {
+                collect_external_handles(value, handles);
+            }
+        }
+        BoundaryValue::Choice {
+            payload: Some(payload),
+            ..
+        } => collect_external_handles(payload, handles),
+        BoundaryValue::Handle { kind, id, .. } => handles.push((kind.clone(), *id)),
+        _ => {}
+    }
+}
+
+fn stamp_external_handles(value: &mut BoundaryValue, proxy_module: Option<&str>) {
+    match value {
+        BoundaryValue::Array { values, .. } | BoundaryValue::Tuple(values) => {
+            for value in values {
+                stamp_external_handles(value, proxy_module);
+            }
+        }
+        BoundaryValue::Choice {
+            payload: Some(payload),
+            ..
+        } => stamp_external_handles(payload, proxy_module),
+        BoundaryValue::Handle { proxy_module: pm, .. } => {
+            if pm.is_none() {
+                if let Some(m) = proxy_module {
+                    *pm = Some(m.to_string());
+                }
+            }
+        }
+        _ => {}
+    }
+}
 
 /// Proof that orchestration runs on its bound host main thread.
 #[derive(Clone, Copy)]
@@ -63,11 +105,41 @@ pub(crate) struct Orchestrator {
     pending_continuations: HashMap<PendingKey, PendingContinuation>,
     startup_plans: HashMap<crate::registry::ThreadId, StartupPlan>,
     next_request_id: u64,
-    adapters: Option<Arc<std::sync::Mutex<galfus_contract::Adapters>>>,
+    external_bindings: Option<Arc<std::sync::Mutex<galfus_contract::ExternalBindings>>>,
     initialization_complete: Arc<AtomicBool>,
     shutting_down: bool,
     late_completions: VecDeque<LateCompletion>,
     root_thread_id: Option<crate::registry::ThreadId>,
+    future_workers: HashMap<crate::registry::ThreadId, (crate::registry::ThreadId, u64)>,
+    thread_exit_waits: HashMap<crate::registry::ThreadId, Vec<(crate::registry::ThreadId, u64)>>,
+    mailbox_future_waits: HashMap<crate::registry::ThreadId, Vec<MailboxFutureWait>>,
+    virtual_time_ms: u64,
+    pub(crate) future_registry: FutureRegistry,
+    aggregate_coordinators: HashMap<u64, AggregateCoordinator>,
+    aggregate_registration: Option<(u64, usize)>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum AggregateMode {
+    All,
+    Race,
+}
+
+pub(crate) struct AggregateCoordinator {
+    pub(crate) mode: AggregateMode,
+    pub(crate) future_ids: Vec<u64>,
+    pub(crate) pending: PendingContinuation,
+    pub(crate) results: Vec<Option<Result<BoundaryValue, ExecutionFailure>>>,
+    pub(crate) winner: Option<Result<BoundaryValue, ExecutionFailure>>,
+    pub(crate) armed: bool,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct MailboxFutureWait {
+    owner_thread_id: crate::registry::ThreadId,
+    future_id: u64,
+    sender_id: Option<u64>,
+    deadline_ms: Option<u64>,
 }
 
 impl Orchestrator {
@@ -85,11 +157,18 @@ impl Orchestrator {
             pending_continuations: HashMap::new(),
             startup_plans: HashMap::new(),
             next_request_id: 1,
-            adapters: None,
+            external_bindings: None,
             initialization_complete: Arc::new(AtomicBool::new(true)),
             shutting_down: false,
             late_completions: VecDeque::new(),
             root_thread_id: None,
+            future_workers: HashMap::new(),
+            thread_exit_waits: HashMap::new(),
+            mailbox_future_waits: HashMap::new(),
+            virtual_time_ms: 0,
+            future_registry: FutureRegistry::new(),
+            aggregate_coordinators: HashMap::new(),
+            aggregate_registration: None,
         }
     }
 
@@ -121,12 +200,12 @@ impl Orchestrator {
         self.vm = Some(vm);
     }
 
-    pub(crate) fn set_adapters(
+    pub(crate) fn set_external_bindings(
         &mut self,
-        adapters: Option<Arc<std::sync::Mutex<galfus_contract::Adapters>>>,
+        bindings: Option<Arc<std::sync::Mutex<galfus_contract::ExternalBindings>>>,
     ) {
         self.assert_main_thread();
-        self.adapters = adapters;
+        self.external_bindings = bindings;
     }
 
     pub(crate) fn kernel_mut(&mut self, token: MainThreadToken) -> &mut VirtualKernel {
@@ -177,7 +256,7 @@ impl Orchestrator {
                 .with_module_id(initialized_module_id.raw().into())
                 .with_stack(execution_stack(&thread)),
             );
-            self.kernel.cancel(thread_id);
+            self.cancel_and_teardown_thread(thread_id);
             return;
         };
 
@@ -203,7 +282,7 @@ impl Orchestrator {
                 .with_module_id(initialized_module_id.raw().into()),
             );
             self.startup_plans.remove(&thread_id);
-            self.kernel.cancel(thread_id);
+            self.cancel_and_teardown_thread(thread_id);
             return;
         }
         self.kernel.enqueue_runnable(thread_id, thread);
@@ -228,7 +307,7 @@ impl Orchestrator {
                     error.with_thread_id(thread_id.raw()),
                     execution_stack(&thread),
                 ));
-                self.kernel.cancel(thread_id);
+                self.cancel_and_teardown_thread(thread_id);
             }
         }
     }
@@ -252,7 +331,7 @@ impl Orchestrator {
                     error.with_thread_id(thread_id.raw()),
                     execution_stack(&thread),
                 ));
-                self.kernel.cancel(thread_id);
+                self.cancel_and_teardown_thread(thread_id);
             }
         }
     }
@@ -293,6 +372,25 @@ impl Orchestrator {
             self.record_late_completion(thread_id, id);
             return;
         }
+        self.resume_pending(thread_id, pending, result, key);
+    }
+
+    fn resume_pending(
+        &mut self,
+        thread_id: crate::registry::ThreadId,
+        pending: PendingContinuation,
+        result: Result<BoundaryValue, ExecutionFailure>,
+        key: PendingKey,
+    ) {
+        if let PendingOperation::AggregateMember {
+            coordinator_id,
+            index,
+        } = pending.operation
+        {
+            self.complete_aggregate_member(coordinator_id, index, result);
+            return;
+        }
+        self.kernel.unblock(thread_id);
         let Some(mut thread) = self.kernel.take_thread(thread_id) else {
             return;
         };
@@ -330,7 +428,7 @@ impl Orchestrator {
                             .with_module_id(pending.module_id.raw().into())
                             .with_stack(pending.stack.clone()),
                         );
-                        self.kernel.cancel(thread_id);
+                        self.cancel_and_teardown_thread(thread_id);
                         return;
                     }
                 };
@@ -353,9 +451,294 @@ impl Orchestrator {
                     .with_cause(error),
                     None => error,
                 });
-                self.kernel.cancel(thread_id);
+                self.cancel_and_teardown_thread(thread_id);
             }
         }
+    }
+
+    pub(super) fn complete_future(
+        &mut self,
+        thread_id: crate::registry::ThreadId,
+        future_id: u64,
+        mut result: Result<BoundaryValue, ExecutionFailure>,
+    ) {
+        let adapter_proxy_module = self
+            .future_registry
+            .adapter_proxy_module(thread_id, future_id);
+        
+        if let Ok(value) = &mut result {
+            stamp_external_handles(value, adapter_proxy_module.as_deref());
+        }
+
+        if let (Some((payload_module_id, payload_type)), Ok(value)) = (
+            self.future_registry.payload_schema(thread_id, future_id),
+            &result,
+        ) {
+            let module = &self
+                .vm
+                .as_ref()
+                .expect("VM is configured before execution")
+                .graph
+                .get(payload_module_id)
+                .expect("future payload module is loaded")
+                .module;
+            let mut payload_heap = galfus_vm::thread::PrivateHeap::new();
+            if let Err(error) = crate::task::encode_into_thread_heap(
+                &mut payload_heap,
+                value.clone(),
+                payload_type,
+                payload_module_id,
+                module,
+            ) {
+                self.failure = Some(
+                    ExecutionFailure::new(
+                        ExecutionFailureKind::BoundaryCodecFailure,
+                        format!("invalid future worker result: {error:?}"),
+                    )
+                    .with_thread_id(thread_id.raw())
+                    .with_future_id(future_id)
+                    .with_module_id(payload_module_id.raw().into()),
+                );
+                self.cancel_and_teardown_thread(thread_id);
+                return;
+            }
+        }
+        let waiters = match self
+            .future_registry
+            .complete(thread_id, future_id, result.clone())
+        {
+            Ok(waiters) => waiters,
+            Err(error) => {
+                if error.kind == ExecutionFailureKind::DuplicateCompletion {
+                    self.record_late_completion(thread_id, future_id);
+                    return;
+                }
+                self.failure = Some(error);
+                self.cancel_and_teardown_thread(thread_id);
+                return;
+            }
+        };
+        if let (Some(proxy_module), Ok(value)) = (adapter_proxy_module, &result)
+            && !self.register_external_handles(&proxy_module, value)
+        {
+            self.failure = Some(
+                ExecutionFailure::new(
+                    ExecutionFailureKind::BoundaryCodecFailure,
+                    "adapter returned an external handle without a unique bound owner",
+                )
+                .with_thread_id(thread_id.raw())
+                .with_future_id(future_id),
+            );
+            self.cancel_and_teardown_thread(thread_id);
+            return;
+        }
+        for waiter in waiters {
+            let waiter_thread_id = waiter.continuation.thread_id;
+            self.resume_pending(
+                waiter_thread_id,
+                waiter.continuation,
+                result.clone(),
+                PendingKey::Future(future_id),
+            );
+        }
+    }
+
+    fn register_external_handles(&mut self, proxy_module: &str, value: &BoundaryValue) -> bool {
+        let mut handles = Vec::new();
+        collect_external_handles(value, &mut handles);
+        if handles.is_empty() {
+            return true;
+        }
+        let Some(bindings) = &self.external_bindings else {
+            return false;
+        };
+        let mut bindings = bindings.lock().unwrap();
+        bindings.register_handles(proxy_module, &handles)
+    }
+
+    pub(super) fn register_thread_exit_future(
+        &mut self,
+        target_thread_id: crate::registry::ThreadId,
+        owner_thread_id: crate::registry::ThreadId,
+        future_id: u64,
+    ) {
+        self.thread_exit_waits
+            .entry(target_thread_id)
+            .or_default()
+            .push((owner_thread_id, future_id));
+    }
+
+    pub(super) fn register_mailbox_future_wait(
+        &mut self,
+        target_thread_id: crate::registry::ThreadId,
+        owner_thread_id: crate::registry::ThreadId,
+        future_id: u64,
+        sender_id: Option<u64>,
+        timeout_ms: Option<u64>,
+    ) {
+        self.mailbox_future_waits
+            .entry(target_thread_id)
+            .or_default()
+            .push(MailboxFutureWait {
+                owner_thread_id,
+                future_id,
+                sender_id,
+                deadline_ms: timeout_ms.map(|timeout| self.virtual_time_ms.saturating_add(timeout)),
+            });
+    }
+
+    pub(super) fn complete_mailbox_future_waits(
+        &mut self,
+        target_thread_id: crate::registry::ThreadId,
+    ) {
+        loop {
+            let Some(wait) = self
+                .mailbox_future_waits
+                .get(&target_thread_id)
+                .and_then(|waits| waits.first().copied())
+            else {
+                return;
+            };
+            let message = self
+                .kernel
+                .get_mailbox(target_thread_id)
+                .and_then(|mailbox| {
+                    let mut mailbox = mailbox.lock().unwrap();
+                    let index = wait.sender_id.map_or_else(
+                        || (!mailbox.is_empty()).then_some(0),
+                        |sender_id| {
+                            mailbox
+                                .iter()
+                                .position(|message| message.sender_id == sender_id)
+                        },
+                    )?;
+                    mailbox.remove(index)
+                });
+            let Some(message) = message else {
+                return;
+            };
+            let remove_entry = {
+                let waits = self
+                    .mailbox_future_waits
+                    .get_mut(&target_thread_id)
+                    .expect("mailbox wait is registered");
+                waits.remove(0);
+                waits.is_empty()
+            };
+            if remove_entry {
+                self.mailbox_future_waits.remove(&target_thread_id);
+            }
+            self.complete_future(
+                wait.owner_thread_id,
+                wait.future_id,
+                Ok(BoundaryValue::Bytes(message.data)),
+            );
+        }
+    }
+
+    pub(super) fn expire_mailbox_future_waits(&mut self, delta_ms: u64) {
+        self.virtual_time_ms = self.virtual_time_ms.saturating_add(delta_ms);
+        let mut expired = Vec::new();
+        self.mailbox_future_waits.retain(|_, waits| {
+            let mut index = 0;
+            while index < waits.len() {
+                if waits[index]
+                    .deadline_ms
+                    .is_some_and(|deadline| deadline <= self.virtual_time_ms)
+                {
+                    expired.push(waits.remove(index));
+                } else {
+                    index += 1;
+                }
+            }
+            !waits.is_empty()
+        });
+        for wait in expired {
+            self.complete_future(
+                wait.owner_thread_id,
+                wait.future_id,
+                Ok(BoundaryValue::Null),
+            );
+        }
+    }
+
+    pub(super) fn remove_mailbox_future_wait(
+        &mut self,
+        owner_thread_id: crate::registry::ThreadId,
+        future_id: u64,
+    ) {
+        self.mailbox_future_waits.retain(|_, waits| {
+            waits.retain(|wait| {
+                wait.owner_thread_id != owner_thread_id || wait.future_id != future_id
+            });
+            !waits.is_empty()
+        });
+    }
+
+    fn complete_aggregate_member(
+        &mut self,
+        coordinator_id: u64,
+        index: usize,
+        result: Result<BoundaryValue, ExecutionFailure>,
+    ) {
+        let Some(coordinator) = self.aggregate_coordinators.get_mut(&coordinator_id) else {
+            return;
+        };
+        if index >= coordinator.results.len() || coordinator.results[index].is_some() {
+            return;
+        }
+        coordinator.results[index] = Some(result.clone());
+        if matches!(coordinator.mode, AggregateMode::Race) && coordinator.winner.is_none() {
+            coordinator.winner = Some(result);
+        }
+        if !coordinator.armed {
+            return;
+        }
+        self.finish_aggregate_if_ready(coordinator_id);
+    }
+
+    pub(super) fn finish_aggregate_if_ready(&mut self, coordinator_id: u64) {
+        let Some(coordinator) = self.aggregate_coordinators.get(&coordinator_id) else {
+            return;
+        };
+        let result = match coordinator.mode {
+            AggregateMode::All if coordinator.results.iter().all(Option::is_some) => {
+                let values = coordinator
+                    .results
+                    .iter()
+                    .map(|result| result.as_ref().expect("all results are present").clone())
+                    .collect::<Result<Vec<_>, _>>();
+                values.map(BoundaryValue::Tuple)
+            }
+            AggregateMode::Race => match coordinator.winner.clone() {
+                Some(result) => result,
+                None => return,
+            },
+            AggregateMode::All => return,
+        };
+        let Some(coordinator) = self.aggregate_coordinators.remove(&coordinator_id) else {
+            return;
+        };
+        if matches!(coordinator.mode, AggregateMode::Race) {
+            for future_id in coordinator.future_ids {
+                let disposition = self
+                    .future_registry
+                    .discard_for_race(coordinator.pending.thread_id, future_id);
+                if let Ok(future_registry::DiscardDisposition::Running(activation)) = disposition {
+                    self.cancel_future_activation(
+                        coordinator.pending.thread_id,
+                        future_id,
+                        activation,
+                    );
+                }
+            }
+        }
+        self.resume_pending(
+            coordinator.pending.thread_id,
+            coordinator.pending,
+            result,
+            PendingKey::Future(coordinator_id),
+        );
     }
 
     /// Dispatches all currently runnable threads from the VirtualKernel to the driver.
@@ -371,6 +754,7 @@ impl Orchestrator {
                     thread,
                     self.vm.as_ref().unwrap().clone(),
                     self.sink.clone(),
+                    self.future_workers.get(&thread_id).copied(),
                 ));
 
                 let kernel_task = KernelTask::Any(task);
@@ -390,7 +774,8 @@ impl Orchestrator {
         while let Ok((_event_id, event)) = self.receiver.try_recv() {
             self.sink.mark_received();
             match event {
-                RuntimeEvent::ThreadSpawned { thread } => {
+                RuntimeEvent::ThreadSpawned { mut thread } => {
+                    self.flush_thread_handle_drops(&mut thread);
                     let id = self.kernel.spawn(thread, None);
                     let thread = self
                         .kernel
@@ -400,32 +785,32 @@ impl Orchestrator {
                 }
                 RuntimeEvent::Exited {
                     thread_id,
-                    thread,
-                    code,
+                    mut thread,
+                    result,
                 } => {
-                    self.kernel.mark_exited(thread_id, thread, code);
-                    let waiters = self.kernel.drain_waiters(thread_id);
-                    for waiter in waiters {
-                        if let Some(waiter_thread) = self.kernel.take_thread(waiter.waiter_id) {
-                            self.resume_or_fail_front(
-                                waiter.waiter_id,
-                                waiter_thread,
-                                waiter.continuation,
-                                galfus_vm::VmValue::Int32(code),
-                            );
-                        }
+                    self.teardown_thread_handles(&mut thread);
+                    self.kernel.mark_exited(thread_id, thread, result.clone());
+                    let waiters = self
+                        .thread_exit_waits
+                        .remove(&thread_id)
+                        .unwrap_or_default();
+                    for (owner_thread_id, future_id) in waiters {
+                        self.complete_future(owner_thread_id, future_id, result.clone());
                     }
                 }
                 RuntimeEvent::Initialized {
                     thread_id,
-                    thread,
+                    mut thread,
                     module_id,
-                } => self.advance_startup(thread_id, thread, module_id),
+                } => {
+                    self.flush_thread_handle_drops(&mut thread);
+                    self.advance_startup(thread_id, thread, module_id)
+                }
                 RuntimeEvent::Failed { thread_id, error } => {
                     self.failure = Some(error.with_thread_id(thread_id.raw()));
                     self.cancel_pending_continuations(thread_id);
                     self.startup_plans.remove(&thread_id);
-                    self.kernel.cancel(thread_id);
+                    self.cancel_and_teardown_thread(thread_id);
                 }
                 RuntimeEvent::EffectCompleted {
                     thread_id,
@@ -436,40 +821,106 @@ impl Orchestrator {
                     thread_id,
                     future_id,
                     result,
-                } => self.complete_pending(thread_id, PendingKey::Future(future_id), result),
+                } => self.complete_future(thread_id, future_id, result),
+                RuntimeEvent::FutureWorkerCompleted {
+                    worker_thread_id,
+                    owner_thread_id,
+                    future_id,
+                    mut thread,
+                    result,
+                } => {
+                    self.future_workers.remove(&worker_thread_id);
+                    self.teardown_thread_handles(&mut thread);
+                    self.kernel
+                        .mark_exited(worker_thread_id, thread, result.clone());
+                    self.complete_future(owner_thread_id, future_id, result);
+                }
                 RuntimeEvent::Tick { delta_ms } => {
                     self.kernel.tick(delta_ms);
+                    self.expire_mailbox_future_waits(delta_ms);
                 }
                 RuntimeEvent::CancelExecution => {
                     self.shutting_down = true;
                     self.cancel_all_pending_continuations();
+                    self.cancel_all_futures();
                     self.startup_plans.clear();
-                    self.kernel.cancel_all();
+                    self.cancel_and_teardown_all_threads();
                     self.failure = Some(galfus_contract::ExecutionFailure::new(
                         galfus_contract::ExecutionFailureKind::Cancelled,
                         "execution cancelled",
                     ));
                 }
                 RuntimeEvent::Syscall { thread_id, .. } if self.shutting_down => {
-                    self.kernel.cancel(thread_id);
+                    self.cancel_and_teardown_thread(thread_id);
                 }
                 RuntimeEvent::Syscall {
                     thread_id,
-                    thread,
+                    mut thread,
                     effect,
                     continuation,
                 } => {
+                    self.flush_thread_handle_drops(&mut thread);
                     self.handle_effect(thread_id, thread, effect, continuation);
                 }
-                RuntimeEvent::Yielded { thread_id, thread } => {
+                RuntimeEvent::Yielded {
+                    thread_id,
+                    mut thread,
+                } => {
+                    self.flush_thread_handle_drops(&mut thread);
                     self.kernel.enqueue_runnable(thread_id, thread);
                 }
                 RuntimeEvent::CancelThread { thread_id } => {
                     self.cancel_pending_continuations(thread_id);
+                    self.cancel_thread_futures(thread_id);
                     self.startup_plans.remove(&thread_id);
-                    self.kernel.cancel(thread_id);
+                    self.cancel_and_teardown_thread(thread_id);
                 }
             }
+        }
+    }
+
+    fn flush_thread_handle_drops(&mut self, thread: &mut galfus_vm::thread::VmThreadState) {
+        let handles = std::mem::take(&mut thread.pending_external_handle_drops);
+        if handles.is_empty() {
+            return;
+        }
+        if let Some(bindings) = &self.external_bindings {
+            let mut bindings = bindings.lock().unwrap();
+            for (proxy_module, kind, id) in handles {
+                bindings.release_handle(&proxy_module, &kind, id);
+            }
+        }
+    }
+
+    fn teardown_thread_handles(&mut self, thread: &mut galfus_vm::thread::VmThreadState) {
+        let handles = thread.extract_all_external_handles();
+        if handles.is_empty() {
+            return;
+        }
+        if let Some(bindings) = &self.external_bindings {
+            let mut bindings = bindings.lock().unwrap();
+            for (proxy_module, kind, id) in handles {
+                bindings.release_handle(&proxy_module, &kind, id);
+            }
+        }
+    }
+
+    pub(crate) fn cancel_and_teardown_thread(&mut self, thread_id: crate::registry::ThreadId) {
+        if let Some(mut thread) = self.kernel.take_thread(thread_id) {
+            self.teardown_thread_handles(&mut thread);
+        }
+        self.kernel.cancel(thread_id);
+    }
+
+    pub(crate) fn cancel_and_teardown_all_threads(&mut self) {
+        let thread_ids = self
+            .kernel
+            .debug_states()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect::<Vec<_>>();
+        for thread_id in thread_ids {
+            self.cancel_and_teardown_thread(thread_id);
         }
     }
 }
@@ -489,9 +940,17 @@ impl Orchestrator {
                 .root_thread_id
                 .and_then(|id| self.kernel.get_exit_code(id))
                 .unwrap_or(0);
-            return galfus_contract::ThreadResult::Completed(code);
+            return galfus_contract::ThreadResult::Completed(Ok(
+                galfus_contract::BoundaryValue::I32(code),
+            ));
         }
 
         galfus_contract::ThreadResult::Discarded
+    }
+
+    pub(crate) fn debug_states(
+        &self,
+    ) -> Vec<(crate::registry::ThreadId, crate::registry::ThreadState)> {
+        self.kernel.debug_states()
     }
 }

@@ -250,6 +250,7 @@ Compiler-known metadata:
 
 ```txt
 fn(stamp)
+fn(async)
 loop(after)
 loop(name: ...)
 for(name: ...)
@@ -259,6 +260,9 @@ enum(IntegerType)
 Examples:
 
 ```galfus
+fn(async) loadData(): [u8] {
+}
+
 loop(after) ready {
 }
 

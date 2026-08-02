@@ -1,5 +1,6 @@
 pub mod bytecode_emission;
 pub mod compile;
+pub mod gfp;
 pub mod input;
 pub mod semantic_to_mir;
 

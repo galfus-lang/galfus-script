@@ -95,15 +95,10 @@ fn validate_function(func: &MirFunction) -> Result<(), Vec<ValidationError>> {
                 }
                 | mir::Instruction::AwaitRace {
                     destination: dest, ..
-                } => {
-                    if !assigned_locals.insert(*dest) {
-                        errors.push(ValidationError {
-                            message: format!(
-                                "SSA Violation: Local {:?} assigned multiple times",
-                                dest
-                            ),
-                        });
-                    }
+                } if !assigned_locals.insert(*dest) => {
+                    errors.push(ValidationError {
+                        message: format!("SSA Violation: Local {:?} assigned multiple times", dest),
+                    });
                 }
                 _ => {}
             }

@@ -286,7 +286,28 @@ fn format(value: bool): [u8] {
 
 Use distinct names or constraint-based behavior.
 
-## 10.13 Contract
+## 10.13 Asynchronous Functions
+
+Asynchronous functions are declared with the `async` keyword metadata: `fn(async)`.
+
+```galfus
+fn(async) fetchUser(id: i64): User {
+  const user = await loadUser(id)
+  return user
+}
+```
+
+Anonymous function expressions may also be marked as `async`:
+
+```galfus
+const load = fn(async) (id: i64): User => await loadUser(id)
+```
+
+Async functions allow the use of `await` expressions within their body.
+
+The return type annotation of an `fn(async)` function specifies the inner payload type (e.g. `: User` or `: [u8]`), NOT `Future<T>`. Applying the `fn(async)` metadata automatically wraps the return value in `Future<T>` for callers.
+
+## 10.14 Contract
 
 The checker MUST:
 
@@ -300,6 +321,7 @@ The checker MUST:
 - Reject decorators on stamped functions.
 - Reject stamped recursion.
 - Reject function overloads by signature.
+- Support `fn(async)` metadata for asynchronous function declarations and expressions.
 
 ---
 

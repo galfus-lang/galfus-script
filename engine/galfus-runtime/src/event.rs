@@ -26,7 +26,7 @@ pub enum RuntimeEvent {
     Exited {
         thread_id: ThreadId,
         thread: VmThreadState,
-        code: i32,
+        result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
     },
     /// A module initializer completed and the startup sequence can advance.
     Initialized {
@@ -54,6 +54,14 @@ pub enum RuntimeEvent {
     FutureCompleted {
         thread_id: ThreadId,
         future_id: u64,
+        result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
+    },
+    /// A dedicated worker completed a Galfus future activation.
+    FutureWorkerCompleted {
+        worker_thread_id: ThreadId,
+        owner_thread_id: ThreadId,
+        future_id: u64,
+        thread: VmThreadState,
         result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
     },
     /// Advances the virtual clock for blocked threads.

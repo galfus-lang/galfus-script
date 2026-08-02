@@ -180,7 +180,41 @@ Explicit cast syntax:
 
 Casts must be validated by type rules.
 
-## 8.11 Unary Operators
+## 8.11 Await Expressions
+
+`await` expressions suspend execution until an asynchronous operation or `Future<T>` resolves.
+
+### Single Await
+
+Awaits a single asynchronous expression, unwrapping `Future<T>` into type `T`.
+
+```galfus
+const user = await loadUser(id)
+```
+
+### Concurrent Await All (`await(all)`)
+
+Awaits a tuple of asynchronous expressions concurrently. Resolves to a tuple of unwrapped values `(T1, T2, ...)` when all futures complete.
+
+```galfus
+const result = await(all) (
+  loadUser(id),
+  loadPermissions(id),
+)
+```
+
+### Concurrent Await Race (`await(race)`)
+
+Awaits a tuple of asynchronous expressions concurrently and resolves to the value of whichever completes first. Returns a union type `T1 | T2 | ...`.
+
+```galfus
+const winner = await(race) (
+  fetchFromPrimary(),
+  fetchFromBackup(),
+)
+```
+
+## 8.12 Unary Operators
 
 ```txt
 !
@@ -198,7 +232,7 @@ Meanings:
 copy -> deep copy expression
 ```
 
-## 8.12 Binary Operators
+## 8.13 Binary Operators
 
 Arithmetic:
 
@@ -226,7 +260,7 @@ Bitwise:
 
 `+` is not string concatenation.
 
-## 8.13 Null Fallback
+## 8.14 Null Fallback
 
 ```galfus
 var value = maybeValue ?? fallback
@@ -239,7 +273,7 @@ if maybeValue is not null -> maybeValue
 else -> fallback
 ```
 
-## 8.14 Assignment Operators
+## 8.15 Assignment Operators
 
 ```txt
 =
@@ -263,14 +297,14 @@ cache ??= createCache()
 
 The target must be writable and nullable.
 
-## 8.15 Operator Precedence
+## 8.16 Operator Precedence
 
 Recommended precedence from highest to lowest:
 
 ```txt
 1. primary: literals, names, grouped, arrays, tuples, new
 2. postfix/access: call, index, ., ?., ::
-3. unary: !, ~, -, copy, explicit cast
+3. unary: !, ~, -, copy, explicit cast, await
 4. exponent: **
 5. multiplicative: *, /, %
 6. additive: +, -
@@ -300,7 +334,7 @@ Valid:
 a < b && b < c
 ```
 
-## 8.16 Contract
+## 8.17 Contract
 
 The parser/checker MUST:
 
@@ -309,6 +343,7 @@ The parser/checker MUST:
 - Reject assignment in value-required positions.
 - Type null-safe access as nullable.
 - Support `copy` as a unary expression form.
+- Support `await`, `await(all)`, and `await(race)` expressions.
 - Keep `values.length` as the only built-in array property.
 - Reject invalid assignment targets.
 
