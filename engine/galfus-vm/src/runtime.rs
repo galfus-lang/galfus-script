@@ -265,6 +265,7 @@ pub struct VirtualMachine {
 
 impl VirtualMachine {
     /// Resumes a suspended VM operation exactly once without exposing register layout.
+    #[allow(clippy::result_large_err)]
     pub fn resume(
         &self,
         thread_id: u64,

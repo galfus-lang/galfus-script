@@ -271,11 +271,8 @@ impl ExternalBindings {
         thread_id: usize,
         request_id: u64,
     ) -> Option<CancellationOutcome> {
-        if let Some(module) = self.get_mut(proxy_module) {
-            Some(module.cancel(symbol, thread_id, request_id))
-        } else {
-            None
-        }
+        self.get_mut(proxy_module)
+            .map(|module| module.cancel(symbol, thread_id, request_id))
     }
 
     pub fn register_handle(
@@ -301,6 +298,11 @@ impl ExternalBindings {
         if handles.iter().any(|(kind, id)| {
             !batch.insert((kind.clone(), *id)) || self.handles.contains_key(&(kind.clone(), *id))
         }) {
+            if let Some(module) = self.modules.get_mut(proxy_module) {
+                for (kind, id) in handles {
+                    module.release_handle(kind, *id);
+                }
+            }
             return false;
         }
         for (kind, id) in handles {

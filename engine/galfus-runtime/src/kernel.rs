@@ -76,19 +76,6 @@ impl VirtualKernel {
         self.registry.cancel(id)
     }
 
-    /// Removes every thread from runnable and blocked state during execution shutdown.
-    pub fn cancel_all(&mut self) {
-        let thread_ids = self
-            .registry
-            .debug_states()
-            .into_iter()
-            .map(|(thread_id, _)| thread_id)
-            .collect::<Vec<_>>();
-        for thread_id in thread_ids {
-            self.cancel(thread_id);
-        }
-    }
-
     /// Returns the next runnable ThreadId.
     #[allow(dead_code)]
     pub fn next_runnable(&mut self) -> Option<ThreadId> {

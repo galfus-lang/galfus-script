@@ -476,10 +476,8 @@ impl FrontendSession {
             .map(|module_index| self.imported_surface_types_for_module(module_index, &surfaces))
             .collect::<Vec<_>>();
 
-        for ((module_index, imported_type), previous_result) in imported_types
-            .iter()
-            .enumerate()
-            .zip(baseline_results.into_iter())
+        for ((module_index, imported_type), previous_result) in
+            imported_types.iter().enumerate().zip(baseline_results)
         {
             if !changed_modules.contains(&self.modules[module_index].id()) {
                 continue;

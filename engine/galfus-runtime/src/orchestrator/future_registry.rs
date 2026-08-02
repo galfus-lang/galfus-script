@@ -76,12 +76,14 @@ pub struct FutureRecord {
 #[derive(Default)]
 pub struct FutureRegistry {
     records: HashMap<(ThreadId, u64), FutureRecord>,
+    tombstones: std::collections::VecDeque<(ThreadId, u64)>,
 }
 
 impl FutureRegistry {
     pub fn new() -> Self {
         Self {
             records: HashMap::new(),
+            tombstones: std::collections::VecDeque::new(),
         }
     }
 
@@ -264,42 +266,55 @@ impl FutureRegistry {
         future_id: u64,
         force: bool,
     ) -> Result<DiscardDisposition, ExecutionFailure> {
-        let record = self
-            .records
-            .get_mut(&(owner_thread_id, future_id))
-            .ok_or_else(|| {
-                ExecutionFailure::new(
-                    galfus_contract::ExecutionFailureKind::InvalidContinuation,
-                    "unknown future",
-                )
-                .with_thread_id(owner_thread_id.raw())
-                .with_future_id(future_id)
-            })?;
-        if !force && !record.waiters.is_empty() {
-            return Ok(DiscardDisposition::Retained);
-        }
-        match record.state {
-            FutureState::Created => {
-                record.activation = None;
-                record.active.store(false, Ordering::Release);
-                record.state = FutureState::Discarded;
-                Ok(DiscardDisposition::Created)
-            }
-            FutureState::Running => {
-                let activation = record.running_activation.take().ok_or_else(|| {
+        let (is_terminal, res) = {
+            let record = self
+                .records
+                .get_mut(&(owner_thread_id, future_id))
+                .ok_or_else(|| {
                     ExecutionFailure::new(
                         galfus_contract::ExecutionFailureKind::InvalidContinuation,
-                        "running future has no activation descriptor",
+                        "unknown future",
                     )
                     .with_thread_id(owner_thread_id.raw())
                     .with_future_id(future_id)
                 })?;
-                record.state = FutureState::Discarded;
-                record.active.store(false, Ordering::Release);
-                Ok(DiscardDisposition::Running(activation))
+            if !force && !record.waiters.is_empty() {
+                return Ok(DiscardDisposition::Retained);
             }
-            FutureState::Resolved(_) | FutureState::Discarded => Ok(DiscardDisposition::Terminal),
+            match record.state {
+                FutureState::Created => {
+                    record.activation = None;
+                    record.active.store(false, Ordering::Release);
+                    record.state = FutureState::Discarded;
+                    (true, Ok(DiscardDisposition::Created))
+                }
+                FutureState::Running => {
+                    let activation = record.running_activation.take().ok_or_else(|| {
+                        ExecutionFailure::new(
+                            galfus_contract::ExecutionFailureKind::InvalidContinuation,
+                            "running future has no activation descriptor",
+                        )
+                        .with_thread_id(owner_thread_id.raw())
+                        .with_future_id(future_id)
+                    })?;
+                    record.state = FutureState::Discarded;
+                    record.active.store(false, Ordering::Release);
+                    (true, Ok(DiscardDisposition::Running(activation)))
+                }
+                FutureState::Resolved(_) | FutureState::Discarded => {
+                    (true, Ok(DiscardDisposition::Terminal))
+                }
+            }
+        };
+
+        if is_terminal {
+            self.records.remove(&(owner_thread_id, future_id));
+            if self.tombstones.len() >= 1024 {
+                self.tombstones.pop_front();
+            }
+            self.tombstones.push_back((owner_thread_id, future_id));
         }
+        res
     }
 
     pub fn complete(
@@ -308,17 +323,26 @@ impl FutureRegistry {
         future_id: u64,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) -> Result<Vec<Waiter>, ExecutionFailure> {
-        let record = self
-            .records
-            .get_mut(&(owner_thread_id, future_id))
-            .ok_or_else(|| {
-                ExecutionFailure::new(
-                    galfus_contract::ExecutionFailureKind::InvalidContinuation,
-                    "unknown future completion",
-                )
-                .with_thread_id(owner_thread_id.raw())
-                .with_future_id(future_id)
-            })?;
+        let record = match self.records.get_mut(&(owner_thread_id, future_id)) {
+            Some(r) => r,
+            None => {
+                if self.tombstones.contains(&(owner_thread_id, future_id)) {
+                    return Err(ExecutionFailure::new(
+                        galfus_contract::ExecutionFailureKind::DuplicateCompletion,
+                        "future completed after being discarded",
+                    )
+                    .with_thread_id(owner_thread_id.raw())
+                    .with_future_id(future_id));
+                } else {
+                    return Err(ExecutionFailure::new(
+                        galfus_contract::ExecutionFailureKind::InvalidContinuation,
+                        "unknown future completion",
+                    )
+                    .with_thread_id(owner_thread_id.raw())
+                    .with_future_id(future_id));
+                }
+            }
+        };
         if matches!(
             record.state,
             FutureState::Resolved(_) | FutureState::Discarded

@@ -234,7 +234,7 @@ impl Orchestrator {
                 .with_module_id(initialized_module_id.raw().into())
                 .with_stack(execution_stack(&thread)),
             );
-            self.kernel.cancel(thread_id);
+            self.cancel_and_teardown_thread(thread_id);
             return;
         };
 
@@ -260,7 +260,7 @@ impl Orchestrator {
                 .with_module_id(initialized_module_id.raw().into()),
             );
             self.startup_plans.remove(&thread_id);
-            self.kernel.cancel(thread_id);
+            self.cancel_and_teardown_thread(thread_id);
             return;
         }
         self.kernel.enqueue_runnable(thread_id, thread);
@@ -285,7 +285,7 @@ impl Orchestrator {
                     error.with_thread_id(thread_id.raw()),
                     execution_stack(&thread),
                 ));
-                self.kernel.cancel(thread_id);
+                self.cancel_and_teardown_thread(thread_id);
             }
         }
     }
@@ -309,7 +309,7 @@ impl Orchestrator {
                     error.with_thread_id(thread_id.raw()),
                     execution_stack(&thread),
                 ));
-                self.kernel.cancel(thread_id);
+                self.cancel_and_teardown_thread(thread_id);
             }
         }
     }
@@ -406,7 +406,7 @@ impl Orchestrator {
                             .with_module_id(pending.module_id.raw().into())
                             .with_stack(pending.stack.clone()),
                         );
-                        self.kernel.cancel(thread_id);
+                        self.cancel_and_teardown_thread(thread_id);
                         return;
                     }
                 };
@@ -429,7 +429,7 @@ impl Orchestrator {
                     .with_cause(error),
                     None => error,
                 });
-                self.kernel.cancel(thread_id);
+                self.cancel_and_teardown_thread(thread_id);
             }
         }
     }
@@ -472,7 +472,7 @@ impl Orchestrator {
                     .with_future_id(future_id)
                     .with_module_id(payload_module_id.raw().into()),
                 );
-                self.kernel.cancel(thread_id);
+                self.cancel_and_teardown_thread(thread_id);
                 return;
             }
         }
@@ -487,7 +487,7 @@ impl Orchestrator {
                     return;
                 }
                 self.failure = Some(error);
-                self.kernel.cancel(thread_id);
+                self.cancel_and_teardown_thread(thread_id);
                 return;
             }
         };
@@ -502,7 +502,7 @@ impl Orchestrator {
                 .with_thread_id(thread_id.raw())
                 .with_future_id(future_id),
             );
-            self.kernel.cancel(thread_id);
+            self.cancel_and_teardown_thread(thread_id);
             return;
         }
         for waiter in waiters {
@@ -747,7 +747,8 @@ impl Orchestrator {
         while let Ok((_event_id, event)) = self.receiver.try_recv() {
             self.sink.mark_received();
             match event {
-                RuntimeEvent::ThreadSpawned { thread } => {
+                RuntimeEvent::ThreadSpawned { mut thread } => {
+                    self.flush_thread_handle_drops(&mut thread);
                     let id = self.kernel.spawn(thread, None);
                     let thread = self
                         .kernel
@@ -757,9 +758,10 @@ impl Orchestrator {
                 }
                 RuntimeEvent::Exited {
                     thread_id,
-                    thread,
+                    mut thread,
                     result,
                 } => {
+                    self.teardown_thread_handles(&mut thread);
                     self.kernel.mark_exited(thread_id, thread, result.clone());
                     let waiters = self
                         .thread_exit_waits
@@ -771,14 +773,17 @@ impl Orchestrator {
                 }
                 RuntimeEvent::Initialized {
                     thread_id,
-                    thread,
+                    mut thread,
                     module_id,
-                } => self.advance_startup(thread_id, thread, module_id),
+                } => {
+                    self.flush_thread_handle_drops(&mut thread);
+                    self.advance_startup(thread_id, thread, module_id)
+                }
                 RuntimeEvent::Failed { thread_id, error } => {
                     self.failure = Some(error.with_thread_id(thread_id.raw()));
                     self.cancel_pending_continuations(thread_id);
                     self.startup_plans.remove(&thread_id);
-                    self.kernel.cancel(thread_id);
+                    self.cancel_and_teardown_thread(thread_id);
                 }
                 RuntimeEvent::EffectCompleted {
                     thread_id,
@@ -794,10 +799,11 @@ impl Orchestrator {
                     worker_thread_id,
                     owner_thread_id,
                     future_id,
-                    thread,
+                    mut thread,
                     result,
                 } => {
                     self.future_workers.remove(&worker_thread_id);
+                    self.teardown_thread_handles(&mut thread);
                     self.kernel
                         .mark_exited(worker_thread_id, thread, result.clone());
                     self.complete_future(owner_thread_id, future_id, result);
@@ -811,33 +817,83 @@ impl Orchestrator {
                     self.cancel_all_pending_continuations();
                     self.cancel_all_futures();
                     self.startup_plans.clear();
-                    self.kernel.cancel_all();
+                    self.cancel_and_teardown_all_threads();
                     self.failure = Some(galfus_contract::ExecutionFailure::new(
                         galfus_contract::ExecutionFailureKind::Cancelled,
                         "execution cancelled",
                     ));
                 }
                 RuntimeEvent::Syscall { thread_id, .. } if self.shutting_down => {
-                    self.kernel.cancel(thread_id);
+                    self.cancel_and_teardown_thread(thread_id);
                 }
                 RuntimeEvent::Syscall {
                     thread_id,
-                    thread,
+                    mut thread,
                     effect,
                     continuation,
                 } => {
+                    self.flush_thread_handle_drops(&mut thread);
                     self.handle_effect(thread_id, thread, effect, continuation);
                 }
-                RuntimeEvent::Yielded { thread_id, thread } => {
+                RuntimeEvent::Yielded {
+                    thread_id,
+                    mut thread,
+                } => {
+                    self.flush_thread_handle_drops(&mut thread);
                     self.kernel.enqueue_runnable(thread_id, thread);
                 }
                 RuntimeEvent::CancelThread { thread_id } => {
                     self.cancel_pending_continuations(thread_id);
                     self.cancel_thread_futures(thread_id);
                     self.startup_plans.remove(&thread_id);
-                    self.kernel.cancel(thread_id);
+                    self.cancel_and_teardown_thread(thread_id);
                 }
             }
+        }
+    }
+
+    fn flush_thread_handle_drops(&mut self, thread: &mut galfus_vm::thread::VmThreadState) {
+        let handles = std::mem::take(&mut thread.pending_external_handle_drops);
+        if handles.is_empty() {
+            return;
+        }
+        if let Some(bindings) = &self.external_bindings {
+            let mut bindings = bindings.lock().unwrap();
+            for (kind, id) in handles {
+                bindings.release_handle(&kind, id);
+            }
+        }
+    }
+
+    fn teardown_thread_handles(&mut self, thread: &mut galfus_vm::thread::VmThreadState) {
+        let handles = thread.extract_all_external_handles();
+        if handles.is_empty() {
+            return;
+        }
+        if let Some(bindings) = &self.external_bindings {
+            let mut bindings = bindings.lock().unwrap();
+            for (kind, id) in handles {
+                bindings.release_handle(&kind, id);
+            }
+        }
+    }
+
+    pub(crate) fn cancel_and_teardown_thread(&mut self, thread_id: crate::registry::ThreadId) {
+        if let Some(mut thread) = self.kernel.take_thread(thread_id) {
+            self.teardown_thread_handles(&mut thread);
+        }
+        self.kernel.cancel(thread_id);
+    }
+
+    pub(crate) fn cancel_and_teardown_all_threads(&mut self) {
+        let thread_ids = self
+            .kernel
+            .debug_states()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect::<Vec<_>>();
+        for thread_id in thread_ids {
+            self.cancel_and_teardown_thread(thread_id);
         }
     }
 }

@@ -117,6 +117,17 @@ impl VmThreadState {
         self.module_states.entry(module_id).or_default().initialized = true;
     }
 
+    pub fn extract_all_external_handles(&mut self) -> Vec<(String, u64)> {
+        let mut extracted = std::mem::take(&mut self.pending_external_handle_drops);
+        for obj in self.heap.objects.iter_mut() {
+            if let Some(crate::runtime::HeapObject::ExternalHandle { kind, id }) = obj {
+                extracted.push((kind.clone(), *id));
+                *obj = None;
+            }
+        }
+        extracted
+    }
+
     pub fn begin_module_initialization(&mut self, module_id: ModuleId) {
         self.initializing_module = Some(module_id);
     }

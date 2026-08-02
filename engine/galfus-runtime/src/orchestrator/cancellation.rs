@@ -58,7 +58,7 @@ impl Orchestrator {
                     .collect::<Vec<_>>();
                 for worker_id in workers {
                     self.future_workers.remove(&worker_id);
-                    self.kernel.cancel(worker_id);
+                    self.cancel_and_teardown_thread(worker_id);
                 }
             }
             Activation::Internal { .. } => {}
