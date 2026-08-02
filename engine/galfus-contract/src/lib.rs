@@ -291,6 +291,25 @@ impl ExternalBindings {
         self.handles.insert((kind.into(), id), owner).is_none()
     }
 
+    /// Atomically attaches every returned external handle to one adapter.
+    /// A duplicate is rejected without registering any handle from the batch.
+    pub fn register_handles(&mut self, proxy_module: &str, handles: &[(String, u64)]) -> bool {
+        if !self.modules.contains_key(proxy_module) {
+            return false;
+        }
+        let mut batch = std::collections::HashSet::new();
+        if handles.iter().any(|(kind, id)| {
+            !batch.insert((kind.clone(), *id)) || self.handles.contains_key(&(kind.clone(), *id))
+        }) {
+            return false;
+        }
+        for (kind, id) in handles {
+            self.handles
+                .insert((kind.clone(), *id), proxy_module.to_string());
+        }
+        true
+    }
+
     pub fn contains_handle(&self, kind: &str, id: u64) -> bool {
         self.handles.contains_key(&(kind.to_string(), id))
     }

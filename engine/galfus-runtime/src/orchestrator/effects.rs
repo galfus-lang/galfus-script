@@ -20,6 +20,7 @@ impl Orchestrator {
         if matches!(
             &effect,
             galfus_vm::VmEffect::ProviderCall { .. }
+                | galfus_vm::VmEffect::AdapterCall { .. }
                 | galfus_vm::VmEffect::SendMsg { .. }
                 | galfus_vm::VmEffect::ReceiveFilter { .. }
                 | galfus_vm::VmEffect::CreateThread { .. }
@@ -294,6 +295,20 @@ impl Orchestrator {
                 ) = disposition
                 {
                     self.cancel_future_activation(thread_id, future_id, activation);
+                }
+                self.resume_or_fail_front(
+                    thread_id,
+                    thread,
+                    continuation,
+                    galfus_vm::VmValue::Null,
+                );
+            }
+            galfus_vm::VmEffect::ExternalHandleDropped { kind, id } => {
+                if let Some(bindings) = &self.external_bindings {
+                    // `ExternalBindings` removes the ownership entry before
+                    // notifying the adapter, making repeated graph-release
+                    // notifications harmless.
+                    bindings.lock().unwrap().release_handle(&kind, id);
                 }
                 self.resume_or_fail_front(
                     thread_id,

@@ -55,7 +55,9 @@ impl RunnableTask for AdapterDispatchTask {
         ThreadResult::Discarded
     }
     fn into_any_thread(self: Box<Self>) -> Option<Box<dyn RunnableTask + Send>> {
-        Some(self)
+        // Bound adapters are main-thread-only. Adapters may use the injector
+        // from their own workers, but dispatch itself never leaves this lane.
+        None
     }
 }
 

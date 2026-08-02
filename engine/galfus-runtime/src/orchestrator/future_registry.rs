@@ -165,6 +165,18 @@ impl FutureRegistry {
         }
     }
 
+    pub fn adapter_proxy_module(
+        &self,
+        owner_thread_id: ThreadId,
+        future_id: u64,
+    ) -> Option<String> {
+        let record = self.records.get(&(owner_thread_id, future_id))?;
+        match record.running_activation.as_ref()? {
+            Activation::Adapter { proxy_module, .. } => Some(proxy_module.clone()),
+            _ => None,
+        }
+    }
+
     pub fn add_waiter(
         &mut self,
         owner_thread_id: ThreadId,

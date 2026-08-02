@@ -31,6 +31,22 @@ use pending::{
 };
 pub(crate) use startup::StartupPlan;
 
+fn collect_external_handles(value: &BoundaryValue, handles: &mut Vec<(String, u64)>) {
+    match value {
+        BoundaryValue::Array { values, .. } | BoundaryValue::Tuple(values) => {
+            for value in values {
+                collect_external_handles(value, handles);
+            }
+        }
+        BoundaryValue::Choice {
+            payload: Some(payload),
+            ..
+        } => collect_external_handles(payload, handles),
+        BoundaryValue::Handle { kind, id } => handles.push((kind.clone(), *id)),
+        _ => {}
+    }
+}
+
 /// Proof that orchestration runs on its bound host main thread.
 #[derive(Clone, Copy)]
 pub(crate) struct MainThreadToken {
@@ -424,6 +440,9 @@ impl Orchestrator {
         future_id: u64,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
+        let adapter_proxy_module = self
+            .future_registry
+            .adapter_proxy_module(thread_id, future_id);
         if let (Some((payload_module_id, payload_type)), Ok(value)) = (
             self.future_registry.payload_schema(thread_id, future_id),
             &result,
@@ -472,6 +491,20 @@ impl Orchestrator {
                 return;
             }
         };
+        if let (Some(proxy_module), Ok(value)) = (adapter_proxy_module, &result)
+            && !self.register_external_handles(&proxy_module, value)
+        {
+            self.failure = Some(
+                ExecutionFailure::new(
+                    ExecutionFailureKind::BoundaryCodecFailure,
+                    "adapter returned an external handle without a unique bound owner",
+                )
+                .with_thread_id(thread_id.raw())
+                .with_future_id(future_id),
+            );
+            self.kernel.cancel(thread_id);
+            return;
+        }
         for waiter in waiters {
             let waiter_thread_id = waiter.continuation.thread_id;
             self.resume_pending(
@@ -481,6 +514,19 @@ impl Orchestrator {
                 PendingKey::Future(future_id),
             );
         }
+    }
+
+    fn register_external_handles(&mut self, proxy_module: &str, value: &BoundaryValue) -> bool {
+        let mut handles = Vec::new();
+        collect_external_handles(value, &mut handles);
+        if handles.is_empty() {
+            return true;
+        }
+        let Some(bindings) = &self.external_bindings else {
+            return false;
+        };
+        let mut bindings = bindings.lock().unwrap();
+        bindings.register_handles(proxy_module, &handles)
     }
 
     pub(super) fn register_thread_exit_future(

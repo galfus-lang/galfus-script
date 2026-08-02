@@ -80,6 +80,9 @@ pub struct VmThreadState {
     pub module_states: HashMap<ModuleId, RuntimeModuleState>,
     pub entry_func: Option<runtime::Value>,
     pub initializing_module: Option<ModuleId>,
+    /// External handles detached by graph release. The runtime owns dispatching
+    /// their adapter release notifications on the main thread.
+    pub pending_external_handle_drops: Vec<(String, u64)>,
 }
 
 impl Default for VmThreadState {
@@ -97,6 +100,7 @@ impl VmThreadState {
             module_states: HashMap::new(),
             entry_func: None,
             initializing_module: None,
+            pending_external_handle_drops: Vec::new(),
         }
     }
 

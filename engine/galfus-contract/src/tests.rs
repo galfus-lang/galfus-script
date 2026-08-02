@@ -78,6 +78,25 @@ fn external_bindings_own_and_release_nominal_handles() {
 }
 
 #[test]
+fn external_handle_batches_are_registered_atomically() {
+    let mut bindings = ExternalBindings::default();
+    bindings.register_module(
+        "graphics",
+        Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
+            0,
+        )))),
+    );
+    assert!(bindings.register_handle("graphics", "texture", 7));
+
+    assert!(!bindings.register_handles(
+        "graphics",
+        &[("texture".to_string(), 8), ("texture".to_string(), 7)],
+    ));
+    assert!(!bindings.contains_handle("texture", 8));
+    assert!(bindings.contains_handle("texture", 7));
+}
+
+#[test]
 fn execution_failures_preserve_machine_readable_context() {
     let failure = ExecutionFailure::new(ExecutionFailureKind::ProviderFailure, "request failed")
         .with_thread_id(7)

@@ -98,9 +98,15 @@ fn test_ownership_deterministic_release() {
     assert!(thread.heap.objects[node1_ref.raw()].is_some());
     assert!(thread.heap.objects[node2_ref.raw()].is_some());
 
-    vm.release_unreachable(&mut thread);
+    let handle_ref = thread.heap.alloc(HeapObject::ExternalHandle {
+        kind: "texture".to_string(),
+        id: 42,
+    });
+    let released_handles = vm.release_unreachable(&mut thread);
     assert!(thread.heap.objects[node1_ref.raw()].is_none());
     assert!(thread.heap.objects[node2_ref.raw()].is_none());
+    assert!(thread.heap.objects[handle_ref.raw()].is_none());
+    assert_eq!(released_handles, vec![("texture".to_string(), 42)]);
 }
 
 #[test]

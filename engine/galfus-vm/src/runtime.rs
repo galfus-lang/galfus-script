@@ -137,6 +137,10 @@ pub enum VmEffect {
     FutureDropped {
         future_id: u64,
     },
+    ExternalHandleDropped {
+        kind: String,
+        id: u64,
+    },
     FutureWaitAll {
         future_ids: Vec<u64>,
         module_id: ModuleId,
@@ -552,6 +556,12 @@ impl VirtualMachine {
     }
 
     pub fn step(&self, thread: &mut thread::VmThreadState) -> Result<VmStep, VmError> {
+        if let Some((kind, id)) = thread.pending_external_handle_drops.pop() {
+            return Ok(VmStep::Suspend {
+                effect: VmEffect::ExternalHandleDropped { kind, id },
+                continuation: Continuation::new(None),
+            });
+        }
         let instr = {
             let frame = thread
                 .call_stack
@@ -690,7 +700,10 @@ impl VirtualMachine {
         if matches!(instr, Instruction::Drop { .. })
             || thread.heap.allocations_since_release >= RELEASE_ALLOCATION_THRESHOLD
         {
-            self.release_unreachable(thread);
+            let released_handles = self.release_unreachable(thread);
+            thread
+                .pending_external_handle_drops
+                .extend(released_handles);
         }
     }
 }
