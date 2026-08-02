@@ -69,35 +69,11 @@ impl VirtualMachine {
                 return_type,
             } => {
                 let val = thread.read_reg(future_id)?;
-                let future_id = match val {
-                    Value::Future(id) => id,
-                    Value::Uint64(id) => id,
-                    Value::Uint32(id) => id.into(),
-                    Value::Int64(id) if id >= 0 => id as u64,
-                    Value::Int32(id) if id >= 0 => id as u64,
-                    Value::Object(obj_ref) => {
-                        if let Ok(HeapObject::Struct { fields, .. }) =
-                            thread.heap.get_object(obj_ref)
-                        {
-                            match fields.first() {
-                                Some(Value::Uint64(id)) => *id,
-                                Some(Value::Uint32(id)) => (*id).into(),
-                                Some(Value::Int64(id)) if *id >= 0 => *id as u64,
-                                Some(Value::Int32(id)) if *id >= 0 => *id as u64,
-                                _ => {
-                                    thread.write_reg(dest, Value::Object(obj_ref))?;
-                                    return Ok(VmStep::Continue);
-                                }
-                            }
-                        } else {
-                            thread.write_reg(dest, Value::Object(obj_ref))?;
-                            return Ok(VmStep::Continue);
-                        }
-                    }
-                    other => {
-                        thread.write_reg(dest, other)?;
-                        return Ok(VmStep::Continue);
-                    }
+                let Value::Future(future_id) = val else {
+                    return Err(VmError::TypeMismatch {
+                        expected: "Future<T>".to_string(),
+                        found: format!("{val:?}"),
+                    });
                 };
                 let module_id = thread
                     .call_stack
@@ -250,7 +226,7 @@ impl VirtualMachine {
                         arg_types: arg_types.clone(),
                         return_type,
                     },
-                    continuation: Continuation::for_provider(dest, module_id, TypeIdx(0)),
+                    continuation: Continuation::for_future_handle(dest),
                 });
             }
             Instruction::CreateIndirectFuture {
@@ -279,7 +255,7 @@ impl VirtualMachine {
                         arg_types: arg_types.clone(),
                         return_type,
                     },
-                    continuation: Continuation::for_provider(dest, module_id, TypeIdx(0)),
+                    continuation: Continuation::for_future_handle(dest),
                 });
             }
             Instruction::AwaitAll {
@@ -293,12 +269,8 @@ impl VirtualMachine {
                         let val = thread.read_reg(Reg(futures_start.raw() + index as u16))?;
                         match val {
                             Value::Future(id) => Ok(id),
-                            Value::Uint64(id) => Ok(id),
-                            Value::Uint32(id) => Ok(id.into()),
-                            Value::Int64(id) if id >= 0 => Ok(id as u64),
-                            Value::Int32(id) if id >= 0 => Ok(id as u64),
                             value => Err(VmError::TypeMismatch {
-                                expected: "non-negative future ID".to_string(),
+                                expected: "Future<T>".to_string(),
                                 found: format!("{value:?}"),
                             }),
                         }
@@ -329,12 +301,8 @@ impl VirtualMachine {
                         let val = thread.read_reg(Reg(futures_start.raw() + index as u16))?;
                         match val {
                             Value::Future(id) => Ok(id),
-                            Value::Uint64(id) => Ok(id),
-                            Value::Uint32(id) => Ok(id.into()),
-                            Value::Int64(id) if id >= 0 => Ok(id as u64),
-                            Value::Int32(id) if id >= 0 => Ok(id as u64),
                             value => Err(VmError::TypeMismatch {
-                                expected: "non-negative future ID".to_string(),
+                                expected: "Future<T>".to_string(),
                                 found: format!("{value:?}"),
                             }),
                         }

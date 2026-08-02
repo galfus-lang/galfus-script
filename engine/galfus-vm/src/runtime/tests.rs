@@ -125,10 +125,6 @@ fn await_future_suspends_and_resumes_through_a_vm_owned_continuation() {
         semantic_revision: galfus_core::SemanticRevision::new(0),
         module: create_test_module(
             vec![
-                Instruction::LoadConst {
-                    dest: Reg(0),
-                    const_idx: ConstIdx(0),
-                },
                 Instruction::AwaitFuture {
                     dest: Reg(1),
                     future_id: Reg(0),
@@ -136,7 +132,7 @@ fn await_future_suspends_and_resumes_through_a_vm_owned_continuation() {
                 },
                 Instruction::Ret { src: Reg(1) },
             ],
-            vec![Constant::Int64(42)],
+            vec![],
         ),
         metadata: None,
     });
@@ -144,6 +140,9 @@ fn await_future_suspends_and_resumes_through_a_vm_owned_continuation() {
     let mut thread = thread::VmThreadState::new();
     vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![])
         .expect("function is valid");
+    thread
+        .write_reg(Reg(0), Value::Future(42))
+        .expect("future handle fits in the register");
 
     let VmStep::Suspend {
         effect:
@@ -154,7 +153,7 @@ fn await_future_suspends_and_resumes_through_a_vm_owned_continuation() {
             },
         continuation,
     } = vm
-        .execute_with_budget(&mut thread, 2)
+        .execute_with_budget(&mut thread, 1)
         .expect("await reaches the suspension point")
     else {
         panic!("await instruction must suspend as a future effect");

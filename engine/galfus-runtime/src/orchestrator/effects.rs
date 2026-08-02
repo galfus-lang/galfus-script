@@ -17,6 +17,33 @@ impl Orchestrator {
         effect: galfus_vm::VmEffect,
         continuation: galfus_vm::Continuation,
     ) {
+        if matches!(
+            &effect,
+            galfus_vm::VmEffect::ProviderCall { .. }
+                | galfus_vm::VmEffect::SendMsg { .. }
+                | galfus_vm::VmEffect::ReceiveFilter { .. }
+                | galfus_vm::VmEffect::CreateThread { .. }
+                | galfus_vm::VmEffect::StartThread { .. }
+                | galfus_vm::VmEffect::GetThread { .. }
+                | galfus_vm::VmEffect::ThreadIsRunning { .. }
+                | galfus_vm::VmEffect::ThreadIsExited { .. }
+                | galfus_vm::VmEffect::ThreadExitReason { .. }
+                | galfus_vm::VmEffect::MailboxHasMessages
+                | galfus_vm::VmEffect::MailboxGetMessage
+                | galfus_vm::VmEffect::WaitThread { .. }
+        ) {
+            self.failure = Some(
+                ExecutionFailure::new(
+                    ExecutionFailureKind::InvalidBytecode,
+                    "legacy immediate boundary effect; use an async Future activation",
+                )
+                .with_thread_id(thread_id.raw())
+                .with_stack(execution_stack(&thread)),
+            );
+            self.kernel.cancel(thread_id);
+            return;
+        }
+
         match effect {
             galfus_vm::VmEffect::ProviderCall {
                 module_id,
@@ -253,6 +280,7 @@ impl Orchestrator {
                 self.kernel.block(thread_id, thread, Some(delay_ms));
             }
             galfus_vm::VmEffect::FutureDropped { future_id } => {
+                self.remove_mailbox_future_wait(thread_id, future_id);
                 let disposition = match self.future_registry.discard(thread_id, future_id) {
                     Ok(disposition) => disposition,
                     Err(error) => {
@@ -605,6 +633,7 @@ impl Orchestrator {
                                                     },
                                                 );
                                                 self.kernel.unblock(target_id);
+                                                self.complete_mailbox_future_waits(target_id);
                                                 true
                                             } else {
                                                 false
@@ -644,10 +673,13 @@ impl Orchestrator {
                                 }
                                 "__internal_thread_receive" => {
                                     let sender_id = thread_arg(0).map(|id| id.raw());
-                                    Some(Ok(self
-                                        .kernel
-                                        .get_mailbox(thread_id)
-                                        .and_then(|mailbox| {
+                                    let timeout_ms = args.get(1).and_then(|value| match value {
+                                        BoundaryValue::I32(ms) if *ms >= 0 => Some(*ms as u64),
+                                        BoundaryValue::I64(ms) if *ms >= 0 => Some(*ms as u64),
+                                        _ => None,
+                                    });
+                                    let message =
+                                        self.kernel.get_mailbox(thread_id).and_then(|mailbox| {
                                             let mut mailbox = mailbox.lock().unwrap();
                                             let index = sender_id.map_or_else(
                                                 || (!mailbox.is_empty()).then_some(0),
@@ -658,9 +690,19 @@ impl Orchestrator {
                                                 },
                                             )?;
                                             mailbox.remove(index)
-                                        })
-                                        .map(|message| BoundaryValue::Bytes(message.data))
-                                        .unwrap_or(BoundaryValue::Null)))
+                                        });
+                                    match message {
+                                        Some(message) => {
+                                            Some(Ok(BoundaryValue::Bytes(message.data)))
+                                        }
+                                        None => {
+                                            self.register_mailbox_future_wait(
+                                                thread_id, thread_id, future_id, sender_id,
+                                                timeout_ms,
+                                            );
+                                            None
+                                        }
+                                    }
                                 }
                                 "__internal_thread_create" => {
                                     let key = args.get(1).and_then(|value| match value {
@@ -1071,8 +1113,27 @@ impl Orchestrator {
                     .module;
                 let mut encoded_args = Vec::with_capacity(args.len());
                 for (arg, ty) in args.into_iter().zip(arg_types.iter()) {
-                    match crate::task::decode_from_thread_heap(&thread.heap, arg, *ty, module) {
+                    match crate::task::decode_from_thread_heap(
+                        &thread.heap,
+                        arg.clone(),
+                        *ty,
+                        module,
+                    ) {
                         Ok(value) => encoded_args.push(value),
+                        Err(_) if matches!(arg, galfus_vm::VmValue::Function { .. }) => {
+                            let galfus_vm::VmValue::Function {
+                                module_id,
+                                func_idx,
+                            } = arg
+                            else {
+                                unreachable!();
+                            };
+                            encoded_args.push(BoundaryValue::Function {
+                                module_id: module_id.raw(),
+                                func_idx: func_idx.raw(),
+                            });
+                            continue;
+                        }
                         Err(error) => {
                             self.failure = Some(
                                 ExecutionFailure::new(
@@ -1086,7 +1147,7 @@ impl Orchestrator {
                             self.kernel.cancel(thread_id);
                             return;
                         }
-                    }
+                    };
                 }
 
                 let activation =

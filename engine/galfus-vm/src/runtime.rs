@@ -53,6 +53,10 @@ impl Continuation {
             origin_thread_id: None,
         }
     }
+
+    pub fn for_future_handle(dest: Reg) -> Self {
+        Self::new(Some(dest))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -564,6 +568,27 @@ impl VirtualMachine {
         };
 
         let release_instruction = instr.clone();
+        if matches!(
+            instr,
+            Instruction::CallNative { .. }
+                | Instruction::ReceiveFilter { .. }
+                | Instruction::MailboxHasMessages { .. }
+                | Instruction::MailboxGetMessage { .. }
+                | Instruction::CreateThread { .. }
+                | Instruction::StartThread { .. }
+                | Instruction::GetThread { .. }
+                | Instruction::ThreadIsRunning { .. }
+                | Instruction::ThreadIsExited { .. }
+                | Instruction::ThreadExitReason { .. }
+                | Instruction::WaitThread { .. }
+                | Instruction::Send { .. }
+        ) {
+            return Err(VmError::UnimplementedInstruction {
+                instruction:
+                    "legacy immediate boundary instruction; use an async Future activation"
+                        .to_string(),
+            });
+        }
         let step = match instr {
             Instruction::LoadConst { .. }
             | Instruction::Move { .. }

@@ -423,7 +423,7 @@ fn test_store_index_out_of_bounds_returns_error() {
 }
 
 #[test]
-fn test_receive_returns_the_matching_mailbox_message() {
+fn test_legacy_receive_instruction_is_rejected() {
     let mut image = create_test_module(
         vec![
             Instruction::ReceiveFilter {
@@ -453,23 +453,17 @@ fn test_receive_returns_the_matching_mailbox_message() {
         vec![VmValue::Int64(7), VmValue::Int32(10)],
     )
     .unwrap();
-    let step = vm.execute_with_budget(&mut thread, 100).unwrap();
-
-    let crate::VmStep::Suspend { effect, .. } = step else {
-        panic!("should suspend");
+    let Err(error) = vm.execute_with_budget(&mut thread, 100) else {
+        panic!("legacy receive is not a Future activation");
     };
-
-    assert_eq!(
-        effect,
-        crate::VmEffect::ReceiveFilter {
-            sender_id: 7,
-            timeout: Some(10),
-        }
-    );
+    assert!(matches!(
+        error.error,
+        VmError::UnimplementedInstruction { .. }
+    ));
 }
 
 #[test]
-fn test_current_thread_mailbox_functions_read_and_consume_messages() {
+fn test_legacy_mailbox_instruction_is_rejected() {
     let image = create_test_module(
         vec![
             Instruction::MailboxHasMessages { dest: Reg(0) },
@@ -491,9 +485,11 @@ fn test_current_thread_mailbox_functions_read_and_consume_messages() {
     let mut thread = thread::VmThreadState::new();
     vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![])
         .unwrap();
-    let step = vm.execute_with_budget(&mut thread, 100).unwrap();
-    let crate::VmStep::Suspend { effect, .. } = step else {
-        panic!("should suspend");
+    let Err(error) = vm.execute_with_budget(&mut thread, 100) else {
+        panic!("legacy mailbox access is not a Future activation");
     };
-    assert_eq!(effect, crate::VmEffect::MailboxHasMessages);
+    assert!(matches!(
+        error.error,
+        VmError::UnimplementedInstruction { .. }
+    ));
 }

@@ -245,11 +245,8 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                         destination,
                     } => {
                         let builtin_name = self.ctx.function_names.get(func).map(|s| s.to_string());
-                        if let Some(name) = builtin_name {
-                            let simple_name = name.rsplit("::").next().unwrap_or(name.as_str());
-                            if let Some(native_name) =
-                                simple_name.strip_prefix("__internal_thread_")
-                            {
+                        if let Some(_name) = builtin_name {
+                            if let Some(native_name) = None::<&str> {
                                 if native_name == "create" {
                                     let func_reg = self.alloc_temp();
                                     self.load_operand_to(&args[0], func_reg);
@@ -376,12 +373,11 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                 }
                             }
 
-                            let simple_name = name.rsplit("::").next().unwrap_or(name.as_str());
-                            let native_provider_name = simple_name
-                                .strip_prefix("__provider_")
-                                .or_else(|| simple_name.strip_prefix("__builtin_"));
+                            let native_async_name = _name.rsplit("::").next().filter(|name| {
+                                name.starts_with("__provider_") || name.starts_with("__internal_")
+                            });
 
-                            if let Some(native_name) = native_provider_name {
+                            if native_async_name.is_some() {
                                 let start_reg = if args.is_empty() {
                                     Reg(0) // Dummy if no args
                                 } else {
@@ -397,11 +393,6 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                     reg
                                 };
 
-                                let name_idx =
-                                    crate::bytecode_emission::constants::get_or_create_constant(
-                                        self.ctx,
-                                        &mir::Constant::String(native_name.to_string()),
-                                    );
                                 let return_type = self
                                     .func
                                     .locals
@@ -459,9 +450,13 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                     return_type,
                                 );
 
-                                self.instructions.push(Instruction::CallNative {
+                                let func_idx = *self.ctx.function_map.get(func).expect(&format!(
+                                    "missing lowered function mapping for {:?} while emitting {} ({:?})",
+                                    func, self.func.name, self.func.id
+                                ));
+                                self.instructions.push(Instruction::CreateFuture {
                                     dest: Reg(destination.raw() as u16),
-                                    name_const: name_idx,
+                                    func: func_idx,
                                     args_start: start_reg,
                                     arg_count: args.len() as u8,
                                     arg_types,

@@ -74,6 +74,8 @@ pub(crate) struct Orchestrator {
     root_thread_id: Option<crate::registry::ThreadId>,
     future_workers: HashMap<crate::registry::ThreadId, (crate::registry::ThreadId, u64)>,
     thread_exit_waits: HashMap<crate::registry::ThreadId, Vec<(crate::registry::ThreadId, u64)>>,
+    mailbox_future_waits: HashMap<crate::registry::ThreadId, Vec<MailboxFutureWait>>,
+    virtual_time_ms: u64,
     pub(crate) future_registry: FutureRegistry,
     aggregate_coordinators: HashMap<u64, AggregateCoordinator>,
     aggregate_registration: Option<(u64, usize)>,
@@ -92,6 +94,14 @@ pub(crate) struct AggregateCoordinator {
     pub(crate) results: Vec<Option<Result<BoundaryValue, ExecutionFailure>>>,
     pub(crate) winner: Option<Result<BoundaryValue, ExecutionFailure>>,
     pub(crate) armed: bool,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct MailboxFutureWait {
+    owner_thread_id: crate::registry::ThreadId,
+    future_id: u64,
+    sender_id: Option<u64>,
+    deadline_ms: Option<u64>,
 }
 
 impl Orchestrator {
@@ -116,6 +126,8 @@ impl Orchestrator {
             root_thread_id: None,
             future_workers: HashMap::new(),
             thread_exit_waits: HashMap::new(),
+            mailbox_future_waits: HashMap::new(),
+            virtual_time_ms: 0,
             future_registry: FutureRegistry::new(),
             aggregate_coordinators: HashMap::new(),
             aggregate_registration: None,
@@ -483,6 +495,113 @@ impl Orchestrator {
             .push((owner_thread_id, future_id));
     }
 
+    pub(super) fn register_mailbox_future_wait(
+        &mut self,
+        target_thread_id: crate::registry::ThreadId,
+        owner_thread_id: crate::registry::ThreadId,
+        future_id: u64,
+        sender_id: Option<u64>,
+        timeout_ms: Option<u64>,
+    ) {
+        self.mailbox_future_waits
+            .entry(target_thread_id)
+            .or_default()
+            .push(MailboxFutureWait {
+                owner_thread_id,
+                future_id,
+                sender_id,
+                deadline_ms: timeout_ms.map(|timeout| self.virtual_time_ms.saturating_add(timeout)),
+            });
+    }
+
+    pub(super) fn complete_mailbox_future_waits(
+        &mut self,
+        target_thread_id: crate::registry::ThreadId,
+    ) {
+        loop {
+            let Some(wait) = self
+                .mailbox_future_waits
+                .get(&target_thread_id)
+                .and_then(|waits| waits.first().copied())
+            else {
+                return;
+            };
+            let message = self
+                .kernel
+                .get_mailbox(target_thread_id)
+                .and_then(|mailbox| {
+                    let mut mailbox = mailbox.lock().unwrap();
+                    let index = wait.sender_id.map_or_else(
+                        || (!mailbox.is_empty()).then_some(0),
+                        |sender_id| {
+                            mailbox
+                                .iter()
+                                .position(|message| message.sender_id == sender_id)
+                        },
+                    )?;
+                    mailbox.remove(index)
+                });
+            let Some(message) = message else {
+                return;
+            };
+            let remove_entry = {
+                let waits = self
+                    .mailbox_future_waits
+                    .get_mut(&target_thread_id)
+                    .expect("mailbox wait is registered");
+                waits.remove(0);
+                waits.is_empty()
+            };
+            if remove_entry {
+                self.mailbox_future_waits.remove(&target_thread_id);
+            }
+            self.complete_future(
+                wait.owner_thread_id,
+                wait.future_id,
+                Ok(BoundaryValue::Bytes(message.data)),
+            );
+        }
+    }
+
+    pub(super) fn expire_mailbox_future_waits(&mut self, delta_ms: u64) {
+        self.virtual_time_ms = self.virtual_time_ms.saturating_add(delta_ms);
+        let mut expired = Vec::new();
+        self.mailbox_future_waits.retain(|_, waits| {
+            let mut index = 0;
+            while index < waits.len() {
+                if waits[index]
+                    .deadline_ms
+                    .is_some_and(|deadline| deadline <= self.virtual_time_ms)
+                {
+                    expired.push(waits.remove(index));
+                } else {
+                    index += 1;
+                }
+            }
+            !waits.is_empty()
+        });
+        for wait in expired {
+            self.complete_future(
+                wait.owner_thread_id,
+                wait.future_id,
+                Ok(BoundaryValue::Null),
+            );
+        }
+    }
+
+    pub(super) fn remove_mailbox_future_wait(
+        &mut self,
+        owner_thread_id: crate::registry::ThreadId,
+        future_id: u64,
+    ) {
+        self.mailbox_future_waits.retain(|_, waits| {
+            waits.retain(|wait| {
+                wait.owner_thread_id != owner_thread_id || wait.future_id != future_id
+            });
+            !waits.is_empty()
+        });
+    }
+
     fn complete_aggregate_member(
         &mut self,
         coordinator_id: u64,
@@ -639,6 +758,7 @@ impl Orchestrator {
                 }
                 RuntimeEvent::Tick { delta_ms } => {
                     self.kernel.tick(delta_ms);
+                    self.expire_mailbox_future_waits(delta_ms);
                 }
                 RuntimeEvent::CancelExecution => {
                     self.shutting_down = true;
