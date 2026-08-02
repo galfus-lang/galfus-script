@@ -162,7 +162,16 @@ export fn(async) add(left: i32, right: i32): i32
             return_type: galfus_contract::BoundaryType::I32,
         }]
     );
-    let graph = workspace.compile().expect("proxy compilation succeeds").graph;
+    let report = workspace.compile().expect("proxy compilation succeeds");
+    assert_eq!(
+        report.external_requirements,
+        vec![galfus_contract::ExternalModuleRequirement {
+            proxy_module: "math.gfp".to_string(),
+            descriptor: workspace.external_descriptors[&ModulePath::new("math.gfp").unwrap()]
+                .clone(),
+        }]
+    );
+    let graph = report.graph;
     let proxy = graph
         .modules()
         .find(|module| module.path().as_str() == "math.gfp")

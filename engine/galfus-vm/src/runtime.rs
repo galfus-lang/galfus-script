@@ -386,6 +386,10 @@ impl VirtualMachine {
                     None => matches!(payload, Value::Null),
                 }
             }
+            (BytecodeType::ExternalHandle(kind), Value::Object(reference)) => matches!(
+                thread.heap.get_object(reference),
+                Ok(HeapObject::ExternalHandle { kind: actual, .. }) if actual == kind
+            ),
             _ => false,
         }
     }

@@ -223,6 +223,48 @@ impl FutureRegistry {
         self.discard_inner(owner_thread_id, future_id, true)
     }
 
+    pub fn discard_all_for_owner(&mut self, owner_thread_id: ThreadId) -> Vec<(u64, Activation)> {
+        self.records
+            .iter_mut()
+            .filter_map(|((owner, future_id), record)| {
+                if *owner != owner_thread_id {
+                    return None;
+                }
+                match record.state {
+                    FutureState::Created => {
+                        record.activation = None;
+                        record.active.store(false, Ordering::Release);
+                        record.state = FutureState::Discarded;
+                        None
+                    }
+                    FutureState::Running => {
+                        let activation = record.running_activation.take()?;
+                        record.active.store(false, Ordering::Release);
+                        record.state = FutureState::Discarded;
+                        Some((*future_id, activation))
+                    }
+                    FutureState::Resolved(_) | FutureState::Discarded => None,
+                }
+            })
+            .collect()
+    }
+
+    pub fn discard_all(&mut self) -> Vec<(ThreadId, u64, Activation)> {
+        let owners = self
+            .records
+            .keys()
+            .map(|(owner, _)| *owner)
+            .collect::<std::collections::HashSet<_>>();
+        owners
+            .into_iter()
+            .flat_map(|owner| {
+                self.discard_all_for_owner(owner)
+                    .into_iter()
+                    .map(move |(future_id, activation)| (owner, future_id, activation))
+            })
+            .collect()
+    }
+
     fn discard_inner(
         &mut self,
         owner_thread_id: ThreadId,

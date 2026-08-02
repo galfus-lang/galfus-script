@@ -13,7 +13,8 @@ use crate::state::{
 use galfus_bytecode::{BytecodeGraph, ImportEdge};
 use galfus_compiler::{CompiledModule, gfp::parse_gfp_frontmatter};
 use galfus_contract::{
-    BoundaryType, ExternalFunctionSignature, ExternalModuleDescriptor, Providers,
+    BoundaryType, ExternalFunctionSignature, ExternalModuleDescriptor, ExternalModuleRequirement,
+    Providers,
 };
 use galfus_core::{Diagnostic, DiagnosticBag, ModulePath, SourceFile, Span, TypeId};
 use galfus_frontend::modules::{
@@ -54,6 +55,8 @@ pub struct CheckReport<'a> {
 pub struct CompileReport {
     /// The compiled module graph, ready to be passed to the runtime.
     pub graph: Arc<BytecodeGraph>,
+    /// Declarative external dependencies required to bind the graph at package time.
+    pub external_requirements: Vec<ExternalModuleRequirement>,
 }
 
 impl Default for Workspace {
@@ -550,6 +553,7 @@ impl Workspace {
         {
             return Ok(CompileReport {
                 graph: Arc::clone(graph),
+                external_requirements: self.external_requirements_for(graph),
             });
         }
 
@@ -687,7 +691,28 @@ impl Workspace {
             graph: Arc::clone(&graph),
         };
 
-        Ok(CompileReport { graph })
+        let external_requirements = self.external_requirements_for(&graph);
+        Ok(CompileReport {
+            graph,
+            external_requirements,
+        })
+    }
+
+    fn external_requirements_for(&self, graph: &BytecodeGraph) -> Vec<ExternalModuleRequirement> {
+        let mut requirements = graph
+            .modules()
+            .filter_map(|module| {
+                self.external_descriptors
+                    .get(module.path())
+                    .cloned()
+                    .map(|descriptor| ExternalModuleRequirement {
+                        proxy_module: module.path().as_str().to_string(),
+                        descriptor,
+                    })
+            })
+            .collect::<Vec<_>>();
+        requirements.sort_by(|left, right| left.proxy_module.cmp(&right.proxy_module));
+        requirements
     }
 
     /// Starts the configured entry as a persistent execution.

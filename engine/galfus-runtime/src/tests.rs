@@ -1,3 +1,5 @@
+mod adapters;
+
 use std::collections;
 use std::sync;
 

@@ -809,6 +809,7 @@ impl Orchestrator {
                 RuntimeEvent::CancelExecution => {
                     self.shutting_down = true;
                     self.cancel_all_pending_continuations();
+                    self.cancel_all_futures();
                     self.startup_plans.clear();
                     self.kernel.cancel_all();
                     self.failure = Some(galfus_contract::ExecutionFailure::new(
@@ -832,6 +833,7 @@ impl Orchestrator {
                 }
                 RuntimeEvent::CancelThread { thread_id } => {
                     self.cancel_pending_continuations(thread_id);
+                    self.cancel_thread_futures(thread_id);
                     self.startup_plans.remove(&thread_id);
                     self.kernel.cancel(thread_id);
                 }

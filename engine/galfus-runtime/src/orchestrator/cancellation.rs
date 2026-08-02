@@ -4,6 +4,18 @@ use crate::orchestrator::pending::PendingOperation;
 use std::sync::atomic::Ordering;
 
 impl Orchestrator {
+    pub(super) fn cancel_thread_futures(&mut self, thread_id: crate::registry::ThreadId) {
+        for (future_id, activation) in self.future_registry.discard_all_for_owner(thread_id) {
+            self.cancel_future_activation(thread_id, future_id, activation);
+        }
+    }
+
+    pub(super) fn cancel_all_futures(&mut self) {
+        for (thread_id, future_id, activation) in self.future_registry.discard_all() {
+            self.cancel_future_activation(thread_id, future_id, activation);
+        }
+    }
+
     pub(super) fn cancel_future_activation(
         &mut self,
         thread_id: crate::registry::ThreadId,
