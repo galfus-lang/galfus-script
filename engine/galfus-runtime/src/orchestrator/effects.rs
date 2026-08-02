@@ -479,7 +479,6 @@ impl Orchestrator {
                         crate::orchestrator::future_registry::Activation::Provider {
                             name,
                             args,
-                            arg_types: _,
                         } => {
                             let vm = self.vm.as_ref().expect("VM is configured before execution");
                             let Some(providers) = vm.providers() else {
@@ -537,7 +536,6 @@ impl Orchestrator {
                             proxy_module,
                             symbol,
                             args,
-                            arg_types: _,
                         } => {
                             let Some(bindings) = self.external_bindings.clone() else {
                                 self.failure = Some(
@@ -590,7 +588,6 @@ impl Orchestrator {
                         crate::orchestrator::future_registry::Activation::Internal {
                             operation,
                             args,
-                            arg_types: _,
                         } => {
                             let thread_arg = |index: usize| {
                                 args.get(index).and_then(|value| match value {
@@ -1070,7 +1067,6 @@ impl Orchestrator {
                                 crate::orchestrator::future_registry::Activation::Internal {
                                     operation: "thread-exit".to_string(),
                                     args: vec![],
-                                    arg_types: vec![],
                                 },
                             ) {
                                 self.failure = Some(error.with_stack(execution_stack(&thread)));
@@ -1422,20 +1418,17 @@ impl Orchestrator {
             crate::orchestrator::future_registry::Activation::Provider {
                 name: name.to_string(),
                 args,
-                arg_types,
             }
         } else if function_name.starts_with("__internal_") {
             crate::orchestrator::future_registry::Activation::Internal {
                 operation: function_name,
                 args,
-                arg_types,
             }
         } else if let Some((proxy_module, symbol)) = adapter_identity {
             crate::orchestrator::future_registry::Activation::Adapter {
                 proxy_module,
                 symbol,
                 args,
-                arg_types,
             }
         } else {
             crate::orchestrator::future_registry::Activation::GalfusFunction {

@@ -23,18 +23,15 @@ pub enum Activation {
     Internal {
         operation: String,
         args: Vec<BoundaryValue>,
-        arg_types: Vec<TypeIdx>,
     },
     Provider {
         name: String,
         args: Vec<BoundaryValue>,
-        arg_types: Vec<TypeIdx>,
     },
     Adapter {
         proxy_module: String,
         symbol: String,
         args: Vec<BoundaryValue>,
-        arg_types: Vec<TypeIdx>,
     },
 }
 
@@ -67,8 +64,6 @@ pub enum DiscardDisposition {
 }
 
 pub struct FutureRecord {
-    pub owner_thread_id: ThreadId,
-    pub future_id: u64,
     pub payload_type: Option<TypeIdx>,
     pub payload_module_id: Option<ModuleId>,
     pub activation: Option<Activation>,
@@ -107,8 +102,6 @@ impl FutureRegistry {
             .with_future_id(future_id));
         }
         let record = FutureRecord {
-            owner_thread_id,
-            future_id,
             payload_type,
             payload_module_id,
             activation: Some(activation),
@@ -357,7 +350,6 @@ impl FutureRegistry {
             Activation::Internal {
                 operation: "intrinsic".to_string(),
                 args: vec![],
-                arg_types: vec![],
             },
         )?;
         let _waiters = self.complete(owner_thread_id, future_id, result)?;
@@ -383,6 +375,7 @@ impl FutureRegistry {
             .map(|record| record.active.clone())
     }
 
+    #[cfg(test)]
     pub fn get(&self, thread_id: ThreadId, future_id: u64) -> Option<&FutureRecord> {
         self.records.get(&(thread_id, future_id))
     }
