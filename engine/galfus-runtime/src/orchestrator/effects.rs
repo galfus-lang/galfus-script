@@ -303,12 +303,12 @@ impl Orchestrator {
                     galfus_vm::VmValue::Null,
                 );
             }
-            galfus_vm::VmEffect::ExternalHandleDropped { kind, id } => {
+            galfus_vm::VmEffect::ExternalHandleDropped { proxy_module, kind, id } => {
                 if let Some(bindings) = &self.external_bindings {
                     // `ExternalBindings` removes the ownership entry before
                     // notifying the adapter, making repeated graph-release
                     // notifications harmless.
-                    bindings.lock().unwrap().release_handle(&kind, id);
+                    bindings.lock().unwrap().release_handle(&proxy_module, &kind, id);
                 }
                 self.resume_or_fail_front(
                     thread_id,
@@ -1390,29 +1390,9 @@ impl Orchestrator {
             .module;
         let function_name = target.functions[func_idx.raw() as usize].name.clone();
         let adapter_identity = target.functions[func_idx.raw() as usize]
-            .instructions
-            .first()
-            .and_then(|instruction| match instruction {
-                galfus_bytecode::Instruction::AdapterCall {
-                    proxy_module_const,
-                    symbol_const,
-                    ..
-                } => Some((
-                    target
-                        .constants
-                        .constants
-                        .get(proxy_module_const.raw() as usize),
-                    target.constants.constants.get(symbol_const.raw() as usize),
-                )),
-                _ => None,
-            })
-            .and_then(|(proxy_module, symbol)| match (proxy_module, symbol) {
-                (
-                    Some(galfus_bytecode::Constant::String(proxy_module)),
-                    Some(galfus_bytecode::Constant::String(symbol)),
-                ) => Some((proxy_module.clone(), symbol.clone())),
-                _ => None,
-            });
+            .proxy_metadata
+            .as_ref()
+            .map(|meta| (meta.proxy_module.clone(), meta.symbol.clone()));
 
         if let Some(name) = function_name.strip_prefix("__provider_") {
             crate::orchestrator::future_registry::Activation::Provider {

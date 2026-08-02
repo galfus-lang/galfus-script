@@ -480,7 +480,7 @@ impl VirtualMachine {
                     variant_idx,
                     payload: Value::Null,
                 },
-                HeapObject::ExternalHandle { kind, id } => HeapObject::ExternalHandle { kind, id },
+                HeapObject::ExternalHandle { proxy_module, kind, id } => HeapObject::ExternalHandle { proxy_module, kind, id },
             };
 
             let copied_ref = thread.heap.alloc(placeholder);

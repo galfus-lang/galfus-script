@@ -70,10 +70,10 @@ fn external_bindings_own_and_release_nominal_handles() {
     let mut bindings = ExternalBindings::default();
     bindings.register_module("graphics", Box::new(DummyAdapter(releases.clone())));
     assert!(bindings.register_handle("graphics", "texture", 7));
-    assert!(bindings.contains_handle("texture", 7));
-    assert!(bindings.release_handle("texture", 7));
-    assert!(!bindings.contains_handle("texture", 7));
-    assert!(!bindings.release_handle("texture", 7));
+    assert!(bindings.contains_handle("graphics", "texture", 7));
+    assert!(bindings.release_handle("graphics", "texture", 7));
+    assert!(!bindings.contains_handle("graphics", "texture", 7));
+    assert!(!bindings.release_handle("graphics", "texture", 7));
     assert_eq!(releases.load(std::sync::atomic::Ordering::Acquire), 1);
 }
 
@@ -92,8 +92,8 @@ fn external_handle_batches_are_registered_atomically() {
         "graphics",
         &[("texture".to_string(), 8), ("texture".to_string(), 7)],
     ));
-    assert!(!bindings.contains_handle("texture", 8));
-    assert!(bindings.contains_handle("texture", 7));
+    assert!(!bindings.contains_handle("graphics", "texture", 8));
+    assert!(bindings.contains_handle("graphics", "texture", 7));
 }
 
 #[test]

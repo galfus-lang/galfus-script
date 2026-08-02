@@ -362,37 +362,19 @@ fn compile_single_module(
         let (mut instructions, function_spans) = emitter.emit();
         let mut temp_count = emitter.temp_count_max;
         drop(emitter);
+        let mut proxy_metadata = None;
         if module.is_external_proxy()
             && mir_func.name != "__init_module"
             && instructions
                 .iter()
                 .all(|instruction| matches!(instruction, galfus_bytecode::Instruction::RetNull))
         {
-            let dest = galfus_bytecode::instruction::Reg(param_count + local_count);
-            let proxy_module_const = crate::bytecode_emission::constants::get_or_create_constant(
-                &mut ctx,
-                &galfus_ir::mir::Constant::String(module.path().as_str().to_string()),
-            );
-            let symbol_const = crate::bytecode_emission::constants::get_or_create_constant(
-                &mut ctx,
-                &galfus_ir::mir::Constant::String(mir_func.name.clone()),
-            );
-            let arg_types = mir_func
-                .parameter_types
-                .iter()
-                .map(|&ty| crate::bytecode_emission::types::lower_type(&mut ctx, ty))
-                .collect();
+            proxy_metadata = Some(galfus_bytecode::ExternalProxyMetadata {
+                proxy_module: module.path().as_str().to_string(),
+                symbol: mir_func.name.clone(),
+            });
             instructions = vec![
-                galfus_bytecode::Instruction::AdapterCall {
-                    dest,
-                    proxy_module_const,
-                    symbol_const,
-                    args_start: galfus_bytecode::instruction::Reg(0),
-                    arg_count: param_count as u8,
-                    arg_types,
-                    return_type: return_ty,
-                },
-                galfus_bytecode::Instruction::Ret { src: dest },
+                galfus_bytecode::Instruction::RetNull,
             ];
             temp_count = temp_count.max(1);
         }
@@ -408,6 +390,7 @@ fn compile_single_module(
             local_count,
             temp_count,
             return_ty,
+            proxy_metadata,
             instructions,
         });
     }

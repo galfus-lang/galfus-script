@@ -12,6 +12,7 @@ fn test_dynamic_call_returns_to_destination() {
                 local_count: 2,
                 temp_count: 2,
                 return_ty: TypeIdx(0),
+                proxy_metadata: None,
                 instructions: vec![
                     Instruction::LoadConst {
                         dest: Reg(0),
@@ -32,6 +33,7 @@ fn test_dynamic_call_returns_to_destination() {
                 local_count: 1,
                 temp_count: 0,
                 return_ty: TypeIdx(0),
+                proxy_metadata: None,
                 instructions: vec![
                     Instruction::LoadConst {
                         dest: Reg(0),

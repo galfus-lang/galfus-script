@@ -176,17 +176,20 @@ export fn(async) add(left: i32, right: i32): i32
         .modules()
         .find(|module| module.path().as_str() == "math.gfp")
         .expect("proxy bytecode module");
-    let instructions = &proxy
+    let function = proxy
         .module
         .functions
         .iter()
         .find(|function| function.name == "add")
-        .expect("proxy export")
-        .instructions;
+        .expect("proxy export");
+    let instructions = &function.instructions;
     assert!(
-        matches!(instructions.first(), Some(galfus_bytecode::Instruction::AdapterCall { .. })),
+        matches!(instructions.first(), Some(galfus_bytecode::Instruction::RetNull)),
         "{instructions:?}"
     );
+    let proxy_metadata = function.proxy_metadata.as_ref().expect("proxy metadata");
+    assert_eq!(proxy_metadata.proxy_module, "math.gfp");
+    assert_eq!(proxy_metadata.symbol, "add");
 }
 
 #[test]

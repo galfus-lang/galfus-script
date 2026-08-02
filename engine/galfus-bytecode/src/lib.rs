@@ -136,12 +136,19 @@ pub struct ExportSlot {
 // =========================================================================
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct ExternalProxyMetadata {
+    pub proxy_module: String,
+    pub symbol: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct BytecodeFunction {
     pub name: String,
     pub param_count: u8,
     pub local_count: u16,
     pub temp_count: u16,
     pub return_ty: TypeIdx,
+    pub proxy_metadata: Option<ExternalProxyMetadata>,
     pub instructions: Vec<Instruction>,
 }
 

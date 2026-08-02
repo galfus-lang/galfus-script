@@ -82,7 +82,7 @@ pub struct VmThreadState {
     pub initializing_module: Option<ModuleId>,
     /// External handles detached by graph release. The runtime owns dispatching
     /// their adapter release notifications on the main thread.
-    pub pending_external_handle_drops: Vec<(String, u64)>,
+    pub pending_external_handle_drops: Vec<(String, String, u64)>,
 }
 
 impl Default for VmThreadState {
@@ -117,11 +117,11 @@ impl VmThreadState {
         self.module_states.entry(module_id).or_default().initialized = true;
     }
 
-    pub fn extract_all_external_handles(&mut self) -> Vec<(String, u64)> {
+    pub fn extract_all_external_handles(&mut self) -> Vec<(String, String, u64)> {
         let mut extracted = std::mem::take(&mut self.pending_external_handle_drops);
         for obj in self.heap.objects.iter_mut() {
-            if let Some(crate::runtime::HeapObject::ExternalHandle { kind, id }) = obj {
-                extracted.push((kind.clone(), *id));
+            if let Some(crate::runtime::HeapObject::ExternalHandle { proxy_module, kind, id }) = obj {
+                extracted.push((proxy_module.clone(), kind.clone(), *id));
                 *obj = None;
             }
         }

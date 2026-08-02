@@ -68,6 +68,7 @@ fn startup_graph() -> (sync::Arc<BytecodeGraph>, ModuleId) {
                 local_count: 0,
                 temp_count: 1,
                 return_ty: TypeIdx(0),
+                proxy_metadata: None,
                 instructions: vec![
                     Instruction::CreateFuture {
                         dest: Reg(0),
@@ -91,6 +92,7 @@ fn startup_graph() -> (sync::Arc<BytecodeGraph>, ModuleId) {
                 local_count: 0,
                 temp_count: 1,
                 return_ty: TypeIdx(4),
+                proxy_metadata: None,
                 instructions: vec![
                     Instruction::CreateFuture {
                         dest: Reg(1),
@@ -118,6 +120,7 @@ fn startup_graph() -> (sync::Arc<BytecodeGraph>, ModuleId) {
                 local_count: 0,
                 temp_count: 0,
                 return_ty: TypeIdx(0),
+                proxy_metadata: None,
                 instructions: vec![Instruction::RetNull],
             },
             BytecodeFunction {
@@ -126,6 +129,7 @@ fn startup_graph() -> (sync::Arc<BytecodeGraph>, ModuleId) {
                 local_count: 0,
                 temp_count: 0,
                 return_ty: TypeIdx(0),
+                proxy_metadata: None,
                 instructions: vec![Instruction::RetNull],
             },
         ],
@@ -270,6 +274,7 @@ fn run_initializes_dependencies_before_the_entry_module() {
             local_count: 0,
             temp_count: 1,
             return_ty: TypeIdx(1),
+            proxy_metadata: None,
             instructions: vec![
                 Instruction::LoadConst {
                     dest: Reg(0),
@@ -308,6 +313,7 @@ fn run_initializes_dependencies_before_the_entry_module() {
             local_count: 0,
             temp_count: 1,
             return_ty: TypeIdx(3),
+            proxy_metadata: None,
             instructions: vec![
                 Instruction::LoadGlobal {
                     dest: Reg(1),

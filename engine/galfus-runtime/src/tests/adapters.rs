@@ -51,6 +51,7 @@ impl BoundExternalModule for DemoAdapter {
                     0,
                     0,
                     Ok(BoundaryValue::Handle {
+                        proxy_module: None,
                         kind: "texture".to_string(),
                         id: 7,
                     }),
@@ -98,6 +99,7 @@ fn adapter_graph() -> (Arc<BytecodeGraph>, ModuleId) {
                 local_count: 0,
                 temp_count: 2,
                 return_ty: TypeIdx(1),
+                proxy_metadata: None,
                 instructions: vec![
                     Instruction::CreateFuture {
                         dest: Reg(1),
@@ -126,17 +128,12 @@ fn adapter_graph() -> (Arc<BytecodeGraph>, ModuleId) {
                 local_count: 0,
                 temp_count: 1,
                 return_ty: TypeIdx(0),
+                proxy_metadata: Some(galfus_bytecode::ExternalProxyMetadata {
+                    proxy_module: "graphics.gfp".to_string(),
+                    symbol: "acquire".to_string(),
+                }),
                 instructions: vec![
-                    Instruction::AdapterCall {
-                        dest: Reg(0),
-                        proxy_module_const: ConstIdx(0),
-                        symbol_const: ConstIdx(1),
-                        args_start: Reg(0),
-                        arg_count: 0,
-                        arg_types: vec![],
-                        return_type: TypeIdx(0),
-                    },
-                    Instruction::Ret { src: Reg(0) },
+                    Instruction::RetNull,
                 ],
             },
         ],

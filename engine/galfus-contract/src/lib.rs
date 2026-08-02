@@ -68,6 +68,7 @@ pub enum BoundaryValue {
         payload: Option<Box<BoundaryValue>>,
     },
     Handle {
+        proxy_module: Option<String>, // Set by Orchestrator upon future completion
         kind: String, // ExternalHandleKind
         id: u64,      // ExternalHandleId
     },
@@ -246,7 +247,7 @@ pub trait BoundExternalModule: Send {
 #[derive(Default)]
 pub struct ExternalBindings {
     modules: HashMap<String, Box<dyn BoundExternalModule>>,
-    handles: HashMap<(String, u64), String>,
+    handles: std::collections::HashSet<(String, String, u64)>, // (proxy_module, kind, id)
 }
 
 impl ExternalBindings {
@@ -285,7 +286,7 @@ impl ExternalBindings {
         if !self.modules.contains_key(&owner) {
             return false;
         }
-        self.handles.insert((kind.into(), id), owner).is_none()
+        self.handles.insert((owner, kind.into(), id))
     }
 
     /// Atomically attaches every returned external handle to one adapter.
@@ -296,7 +297,7 @@ impl ExternalBindings {
         }
         let mut batch = std::collections::HashSet::new();
         if handles.iter().any(|(kind, id)| {
-            !batch.insert((kind.clone(), *id)) || self.handles.contains_key(&(kind.clone(), *id))
+            !batch.insert((kind.clone(), *id)) || self.handles.contains(&(proxy_module.to_string(), kind.clone(), *id))
         }) {
             if let Some(module) = self.modules.get_mut(proxy_module) {
                 for (kind, id) in handles {
@@ -307,20 +308,20 @@ impl ExternalBindings {
         }
         for (kind, id) in handles {
             self.handles
-                .insert((kind.clone(), *id), proxy_module.to_string());
+                .insert((proxy_module.to_string(), kind.clone(), *id));
         }
         true
     }
 
-    pub fn contains_handle(&self, kind: &str, id: u64) -> bool {
-        self.handles.contains_key(&(kind.to_string(), id))
+    pub fn contains_handle(&self, proxy_module: &str, kind: &str, id: u64) -> bool {
+        self.handles.contains(&(proxy_module.to_string(), kind.to_string(), id))
     }
 
-    pub fn release_handle(&mut self, kind: &str, id: u64) -> bool {
-        let Some(proxy_module) = self.handles.remove(&(kind.to_string(), id)) else {
+    pub fn release_handle(&mut self, proxy_module: &str, kind: &str, id: u64) -> bool {
+        if !self.handles.remove(&(proxy_module.to_string(), kind.to_string(), id)) {
             return false;
-        };
-        if let Some(module) = self.get_mut(&proxy_module) {
+        }
+        if let Some(module) = self.get_mut(proxy_module) {
             module.release_handle(kind, id);
         }
         true

@@ -42,7 +42,29 @@ fn collect_external_handles(value: &BoundaryValue, handles: &mut Vec<(String, u6
             payload: Some(payload),
             ..
         } => collect_external_handles(payload, handles),
-        BoundaryValue::Handle { kind, id } => handles.push((kind.clone(), *id)),
+        BoundaryValue::Handle { kind, id, .. } => handles.push((kind.clone(), *id)),
+        _ => {}
+    }
+}
+
+fn stamp_external_handles(value: &mut BoundaryValue, proxy_module: Option<&str>) {
+    match value {
+        BoundaryValue::Array { values, .. } | BoundaryValue::Tuple(values) => {
+            for value in values {
+                stamp_external_handles(value, proxy_module);
+            }
+        }
+        BoundaryValue::Choice {
+            payload: Some(payload),
+            ..
+        } => stamp_external_handles(payload, proxy_module),
+        BoundaryValue::Handle { proxy_module: pm, .. } => {
+            if pm.is_none() {
+                if let Some(m) = proxy_module {
+                    *pm = Some(m.to_string());
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -438,11 +460,16 @@ impl Orchestrator {
         &mut self,
         thread_id: crate::registry::ThreadId,
         future_id: u64,
-        result: Result<BoundaryValue, ExecutionFailure>,
+        mut result: Result<BoundaryValue, ExecutionFailure>,
     ) {
         let adapter_proxy_module = self
             .future_registry
             .adapter_proxy_module(thread_id, future_id);
+        
+        if let Ok(value) = &mut result {
+            stamp_external_handles(value, adapter_proxy_module.as_deref());
+        }
+
         if let (Some((payload_module_id, payload_type)), Ok(value)) = (
             self.future_registry.payload_schema(thread_id, future_id),
             &result,
@@ -859,8 +886,8 @@ impl Orchestrator {
         }
         if let Some(bindings) = &self.external_bindings {
             let mut bindings = bindings.lock().unwrap();
-            for (kind, id) in handles {
-                bindings.release_handle(&kind, id);
+            for (proxy_module, kind, id) in handles {
+                bindings.release_handle(&proxy_module, &kind, id);
             }
         }
     }
@@ -872,8 +899,8 @@ impl Orchestrator {
         }
         if let Some(bindings) = &self.external_bindings {
             let mut bindings = bindings.lock().unwrap();
-            for (kind, id) in handles {
-                bindings.release_handle(&kind, id);
+            for (proxy_module, kind, id) in handles {
+                bindings.release_handle(&proxy_module, &kind, id);
             }
         }
     }
