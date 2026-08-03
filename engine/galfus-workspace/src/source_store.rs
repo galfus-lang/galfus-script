@@ -3,8 +3,6 @@ mod tests;
 
 use galfus_core::{ModuleId, ModulePath, Revision, SourceId};
 use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +43,19 @@ impl SourceStore {
         }
     }
 
+    fn fnv1a_32(domain: &[u8], payload: &[u8]) -> u32 {
+        let mut hash: u32 = 2166136261;
+        for &b in domain {
+            hash ^= b as u32;
+            hash = hash.wrapping_mul(16777619);
+        }
+        for &b in payload {
+            hash ^= b as u32;
+            hash = hash.wrapping_mul(16777619);
+        }
+        hash
+    }
+
     pub fn load_module(
         &mut self,
         path: ModulePath,
@@ -54,23 +65,15 @@ impl SourceStore {
     ) -> Result<(ModuleId, SourceId), LoadModuleError> {
         let logical_path = path.as_str();
 
-        let mut hasher = DefaultHasher::new();
-        "galfus:module:v1:".hash(&mut hasher);
-        logical_path.hash(&mut hasher);
-        let hash = hasher.finish();
-        let module_id_raw = (hash ^ (hash >> 32)) as u32;
-        let module_id_raw = if module_id_raw == 0 { 1 } else { module_id_raw };
+        let hash = Self::fnv1a_32(b"galfus:module:v1:", logical_path.as_bytes());
+        let module_id_raw = if hash == 0 { 1 } else { hash };
         let module_id = ModuleId::new(module_id_raw);
 
-        let mut hasher = DefaultHasher::new();
-        "galfus:source:v1:".hash(&mut hasher);
-        logical_path.hash(&mut hasher);
-        let hash = hasher.finish();
-        let source_id_raw = (hash ^ (hash >> 32)) as u32;
-        let source_id_raw = if source_id_raw == u32::MAX {
+        let hash = Self::fnv1a_32(b"galfus:source:v1:", logical_path.as_bytes());
+        let source_id_raw = if hash == u32::MAX {
             u32::MAX - 1
         } else {
-            source_id_raw
+            hash
         };
         let source_id = SourceId::new(source_id_raw);
 

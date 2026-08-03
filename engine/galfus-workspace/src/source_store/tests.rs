@@ -35,7 +35,7 @@ fn updating_a_path_preserves_its_stable_ids() {
 }
 
 #[test]
-fn reloading_a_removed_path_allocates_fresh_ids() {
+fn reloading_a_removed_path_preserves_stable_ids() {
     let mut store = SourceStore::new();
     let module_path = path("src/main.gfs");
 
@@ -57,6 +57,6 @@ fn reloading_a_removed_path_allocates_fresh_ids() {
         )
         .expect("load returns IDs");
 
-    assert_ne!(reloaded.0, initial.0);
-    assert_ne!(reloaded.1, initial.1);
+    assert_eq!(reloaded.0, initial.0, "ModuleId must be stable across reloads");
+    assert_eq!(reloaded.1, initial.1, "SourceId must be stable across reloads");
 }
