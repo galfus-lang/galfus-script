@@ -11,6 +11,7 @@ use crate::modules::module::{FrontendModuleKind, SemanticModule};
 use crate::modules::resolution::{
     is_builtin_module, is_resolvable_import, resolve_relative_import,
 };
+use crate::modules::snapshot::FrontendSnapshot;
 use crate::{
     ImportedSurfaceTypes, ModuleSurface, SyntaxNodeKind, build_module_surface,
     check_declaration_types, check_definition_types_with_surfaces,
@@ -78,8 +79,9 @@ pub struct FrontendReport {
     pub semantic_revision: galfus_core::SemanticRevision,
     /// Modules whose semantic result was recomputed in this check.
     pub changed_modules: HashSet<ModuleId>,
-    /// Builtin modules required by explicit imports or compiler desugaring.
-    pub required_builtin_modules: HashSet<ModulePath>,
+    /// Builtin modules required by explicit imports or compiler desugaring,
+    /// ordered by their canonical module path.
+    pub required_builtin_modules: Vec<ModulePath>,
     pub diagnostics: DiagnosticBag,
 }
 
@@ -178,7 +180,16 @@ impl FrontendSession {
         &self.string_table
     }
 
-    fn required_builtin_modules(&self) -> HashSet<ModulePath> {
+    pub fn snapshot(&self, semantic_revision: galfus_core::SemanticRevision) -> FrontendSnapshot {
+        FrontendSnapshot::new(
+            semantic_revision,
+            self.modules.clone(),
+            self.semantic_graph.clone(),
+            self.string_table.clone(),
+        )
+    }
+
+    fn required_builtin_modules(&self) -> Vec<ModulePath> {
         let mut required = HashSet::new();
         for (module_index, module) in self.modules.iter().enumerate() {
             for import in self.module_imports(module_index) {
@@ -202,6 +213,8 @@ impl FrontendSession {
                     .insert(ModulePath::new("std/constraints.gfs").expect("valid builtin path"));
             }
         }
+        let mut required = required.into_iter().collect::<Vec<_>>();
+        required.sort();
         required
     }
 

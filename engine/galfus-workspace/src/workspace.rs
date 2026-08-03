@@ -18,8 +18,8 @@ use galfus_contract::{
 };
 use galfus_core::{Diagnostic, DiagnosticBag, ModulePath, SourceFile, Span, TypeId};
 use galfus_frontend::modules::{
-    FrontendModuleKind, FrontendRoots, FrontendSession, FrontendSource, FrontendUpdate,
-    SemanticRoot, SemanticRootKind,
+    FrontendModuleKind, FrontendRoots, FrontendSession, FrontendSnapshot, FrontendSource,
+    FrontendUpdate, SemanticRoot, SemanticRootKind,
 };
 use galfus_frontend::{PrimitiveType, SymbolKind, TypeKind, TypeTable};
 use galfus_runtime::{Execution, Runtime, RuntimeError, format_panic};
@@ -32,6 +32,7 @@ pub struct Workspace {
     pub semantic_state: SemanticState,
     pub bytecode_state: BytecodeState,
     pub frontend: FrontendSession,
+    frontend_snapshot: Option<FrontendSnapshot>,
     pub adapters: HashMap<String, Arc<dyn galfus_contract::ModuleAdapter>>,
     pub external_descriptors: HashMap<ModulePath, ExternalModuleDescriptor>,
 }
@@ -73,6 +74,7 @@ impl Workspace {
             semantic_state: SemanticState::new(),
             bytecode_state: BytecodeState::new(),
             frontend: FrontendSession::new(),
+            frontend_snapshot: None,
             adapters: HashMap::new(),
             external_descriptors: HashMap::new(),
         }
@@ -246,6 +248,7 @@ impl Workspace {
             current_revision: self.source_state.revision,
             previous_checked_revision: previous,
         };
+        self.frontend_snapshot = None;
 
         // Mark compile stale when check is invalidated.
         if let CompileState::Ready {
@@ -269,6 +272,7 @@ impl Workspace {
                     revision: self.source_state.revision,
                     diagnostics: DiagnosticBag::new(),
                 };
+                self.frontend_snapshot = None;
             } else {
                 let roots = self.frontend_roots();
                 let mut report = loop {
@@ -350,7 +354,9 @@ impl Workspace {
                         revision: report.source_revision,
                         diagnostics: report.diagnostics,
                     };
+                    self.frontend_snapshot = None;
                 } else {
+                    self.frontend_snapshot = Some(self.frontend.snapshot(report.semantic_revision));
                     self.semantic_state.check_state = CheckState::Passed {
                         revision: report.source_revision,
                         semantic_revision: report.semantic_revision,
@@ -374,10 +380,7 @@ impl Workspace {
         }
     }
 
-    fn load_required_builtins(
-        &mut self,
-        paths: &HashSet<ModulePath>,
-    ) -> Result<bool, WorkspaceError> {
+    fn load_required_builtins(&mut self, paths: &[ModulePath]) -> Result<bool, WorkspaceError> {
         let mut loaded = false;
         for path in paths {
             if self.source_state.store.get(path).is_some() {
@@ -613,6 +616,11 @@ impl Workspace {
                 ..
             } => (*semantic_revision, changed_modules.clone()),
         };
+        let frontend_snapshot = self
+            .frontend_snapshot
+            .as_ref()
+            .expect("passed frontend check has a snapshot");
+        debug_assert_eq!(frontend_snapshot.semantic_revision(), semantic_revision);
 
         // Skip recompilation if already up-to-date.
         if let CompileState::Ready {
@@ -639,7 +647,7 @@ impl Workspace {
         // The first compilation has no graph to upsert into, so it must emit
         // every semantic module even if the last frontend delta was narrower.
         let compilation_targets = if let Some(cached_graph) = cached_graph {
-            self.frontend
+            frontend_snapshot
                 .modules()
                 .iter()
                 .filter(|module| changed_modules.contains(&module.id()))
@@ -651,18 +659,18 @@ impl Workspace {
                 .map(|module| module.id())
                 .collect::<HashSet<_>>()
         } else {
-            self.frontend
+            frontend_snapshot
                 .modules()
                 .iter()
                 .map(|module| module.id())
                 .collect::<HashSet<_>>()
         };
 
-        let semantic_graph = self.frontend.semantic_graph();
+        let semantic_graph = frontend_snapshot.semantic_graph();
         let mut reachable_modules = HashSet::new();
 
         // Build CompiledModule list from the frontend's semantic modules.
-        let semantic_modules = self.frontend.modules();
+        let semantic_modules = frontend_snapshot.modules();
 
         let mut path_to_id = HashMap::new();
         for module in semantic_modules {
@@ -744,7 +752,7 @@ impl Workspace {
             &mut compiled_modules,
             &mut self.bytecode_state.compiler_state,
             &compilation_targets,
-            self.frontend.string_table(),
+            frontend_snapshot.string_table(),
             base_graph.version(),
             semantic_revision,
             removed_modules,

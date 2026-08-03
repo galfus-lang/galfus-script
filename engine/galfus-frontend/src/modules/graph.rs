@@ -194,7 +194,9 @@ impl SemanticModuleGraph {
     }
 
     pub fn modules(&self) -> impl Iterator<Item = &SemanticModule> {
-        self.modules.values()
+        let mut modules = self.modules.iter().collect::<Vec<_>>();
+        modules.sort_by_key(|(id, _)| id.raw());
+        modules.into_iter().map(|(_, module)| module)
     }
 
     pub fn semantic_revision(&self, id: ModuleId) -> Option<SemanticRevision> {
