@@ -351,7 +351,7 @@ impl<'a> Resolver<'a> {
 
             self.diagnostics.push(Diagnostic::error_with_message(
                 ResolverDiagnosticCode::DuplicateSymbol,
-                format!("duplicate symbol"),
+                format!("duplicate symbol `{}`", self.string_table.resolve(name_id).unwrap_or("")),
                 span,
             ));
 
