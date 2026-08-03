@@ -383,3 +383,44 @@ fn check_removes_modules_and_refreshes_dependent_edges() {
             && edge.to().is_none()
     }));
 }
+
+#[test]
+fn check_reports_required_builtins_in_canonical_path_order() {
+    let main = SourceFile::new(
+        SourceId::new(1),
+        "src/main.gfs".to_string(),
+        r#"
+            import ansi from "format/ansi"
+            import io from "std/io"
+            import format from "format"
+            import text from "text"
+
+            fn main(): i32 { return 0 }
+        "#
+        .to_string(),
+    );
+    let sources = [FrontendSource {
+        module_id: ModuleId::new(1),
+        path: path("src/main.gfs"),
+        source: &main,
+        kind: FrontendModuleKind::Standard,
+    }];
+    let mut session = FrontendSession::new();
+
+    let report = session.check(FrontendUpdate {
+        source_revision: Revision::new(1),
+        sources: &sources,
+        removed_modules: &[],
+        roots: &FrontendRoots::default(),
+    });
+
+    let required = report
+        .required_builtin_modules
+        .iter()
+        .map(|path| path.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        required,
+        ["format.gfs", "format/ansi.gfs", "std/io.gfs", "text.gfs"]
+    );
+}

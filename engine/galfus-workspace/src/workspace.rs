@@ -374,10 +374,7 @@ impl Workspace {
         }
     }
 
-    fn load_required_builtins(
-        &mut self,
-        paths: &HashSet<ModulePath>,
-    ) -> Result<bool, WorkspaceError> {
+    fn load_required_builtins(&mut self, paths: &[ModulePath]) -> Result<bool, WorkspaceError> {
         let mut loaded = false;
         for path in paths {
             if self.source_state.store.get(path).is_some() {

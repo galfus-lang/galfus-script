@@ -78,8 +78,9 @@ pub struct FrontendReport {
     pub semantic_revision: galfus_core::SemanticRevision,
     /// Modules whose semantic result was recomputed in this check.
     pub changed_modules: HashSet<ModuleId>,
-    /// Builtin modules required by explicit imports or compiler desugaring.
-    pub required_builtin_modules: HashSet<ModulePath>,
+    /// Builtin modules required by explicit imports or compiler desugaring,
+    /// ordered by their canonical module path.
+    pub required_builtin_modules: Vec<ModulePath>,
     pub diagnostics: DiagnosticBag,
 }
 
@@ -178,7 +179,7 @@ impl FrontendSession {
         &self.string_table
     }
 
-    fn required_builtin_modules(&self) -> HashSet<ModulePath> {
+    fn required_builtin_modules(&self) -> Vec<ModulePath> {
         let mut required = HashSet::new();
         for (module_index, module) in self.modules.iter().enumerate() {
             for import in self.module_imports(module_index) {
@@ -202,6 +203,8 @@ impl FrontendSession {
                     .insert(ModulePath::new("std/constraints.gfs").expect("valid builtin path"));
             }
         }
+        let mut required = required.into_iter().collect::<Vec<_>>();
+        required.sort();
         required
     }
 
