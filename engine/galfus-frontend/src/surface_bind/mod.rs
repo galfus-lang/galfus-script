@@ -3,8 +3,8 @@ mod export;
 mod tests;
 
 use crate::{
-    ImportedMemberKey, ImportedSurfaceTypes, ImportedType, ModuleAst, ResolutionLayer, SymbolKind,
-    SyntaxNodeKind, TypeCheckResult, TypeKind, StringTable,
+    ImportedMemberKey, ImportedSurfaceTypes, ImportedType, ModuleAst, ResolutionLayer, StringTable,
+    SymbolKind, SyntaxNodeKind, TypeCheckResult, TypeKind,
     type_validation::{
         ImportedChoiceSurface, ImportedConstraintSurface, ImportedFunctionParameterType,
     },
@@ -201,7 +201,8 @@ pub fn build_module_surface(
                     .and_then(|ty| transport_type(resolution, type_result, string_table, ty))
             };
 
-            let members = surface_members_for_export(graph, type_result, string_table, export.symbol());
+            let members =
+                surface_members_for_export(graph, type_result, string_table, export.symbol());
             let generic_parameters = surface_generic_parameters(
                 graph,
                 export.symbol(),
@@ -317,7 +318,11 @@ fn surface_members_for_export(
 
                     Some((
                         member.declaration(),
-                        ModuleSurfaceMember::new(string_table.resolve(*name).unwrap_or("").to_string(), member.kind(), Some(ty)),
+                        ModuleSurfaceMember::new(
+                            string_table.resolve(*name).unwrap_or("").to_string(),
+                            member.kind(),
+                            Some(ty),
+                        ),
                     ))
                 }
 
@@ -329,18 +334,30 @@ fn surface_members_for_export(
 
                     Some((
                         member.declaration(),
-                        ModuleSurfaceMember::new(string_table.resolve(*name).unwrap_or("").to_string(), member.kind(), Some(ty)),
+                        ModuleSurfaceMember::new(
+                            string_table.resolve(*name).unwrap_or("").to_string(),
+                            member.kind(),
+                            Some(ty),
+                        ),
                     ))
                 }
 
                 SymbolKind::EnumVariant => Some((
                     member.declaration(),
-                    ModuleSurfaceMember::new(string_table.resolve(*name).unwrap_or("").to_string(), member.kind(), None),
+                    ModuleSurfaceMember::new(
+                        string_table.resolve(*name).unwrap_or("").to_string(),
+                        member.kind(),
+                        None,
+                    ),
                 )),
 
                 SymbolKind::ChoiceVariant => {
-                    let payload_types =
-                        choice_payload_types(graph, type_result, string_table, member.declaration())?;
+                    let payload_types = choice_payload_types(
+                        graph,
+                        type_result,
+                        string_table,
+                        member.declaration(),
+                    )?;
 
                     Some((
                         member.declaration(),
@@ -567,7 +584,12 @@ fn transport_type(
                 })
                 .collect::<Option<Vec<_>>>()?;
 
-            let return_type = Box::new(transport_type(resolution, result, string_table, function.return_type())?);
+            let return_type = Box::new(transport_type(
+                resolution,
+                result,
+                string_table,
+                function.return_type(),
+            )?);
 
             Some(ImportedType::Function {
                 parameters,
@@ -581,12 +603,18 @@ fn transport_type(
             {
                 return transport_type(resolution, result, string_table, target_ty);
             }
-            let name = string_table.resolve(symbol_data.name()).unwrap_or("").to_string();
+            let name = string_table
+                .resolve(symbol_data.name())
+                .unwrap_or("")
+                .to_string();
             Some(ImportedType::LocalPath { name })
         }
         TypeKind::Path { root, segments } => {
             let symbol_data = resolution.symbol(root)?;
-            let mut name = string_table.resolve(symbol_data.name()).unwrap_or("").to_string();
+            let mut name = string_table
+                .resolve(symbol_data.name())
+                .unwrap_or("")
+                .to_string();
             for segment in segments {
                 name.push_str("::");
                 name.push_str(&segment);

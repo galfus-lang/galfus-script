@@ -300,10 +300,13 @@ fn compile_single_module(
     // export slots for specialized functions are always appended in the same order.
     let mut specialized_target_entries: Vec<_> =
         specialized_targets.iter().map(|(k, v)| (*k, *v)).collect();
-    specialized_target_entries
-        .sort_by_key(|&(specialised_id, (target_mod_id, target_func_id))| {
-            (target_mod_id.raw(), target_func_id.raw(), specialised_id.raw())
-        });
+    specialized_target_entries.sort_by_key(|&(specialised_id, (target_mod_id, target_func_id))| {
+        (
+            target_mod_id.raw(),
+            target_func_id.raw(),
+            specialised_id.raw(),
+        )
+    });
     for (_specialised_id, (target_module_id, target_func_id)) in &specialized_target_entries {
         if *target_module_id != modules[mod_idx].id() {
             continue;

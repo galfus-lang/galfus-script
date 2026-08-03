@@ -184,5 +184,8 @@ fn iter_returns_entries_sorted_by_module_id() {
     let ids: Vec<u32> = store.iter().map(|e| e.module_id.raw()).collect();
     let mut sorted = ids.clone();
     sorted.sort();
-    assert_eq!(ids, sorted, "iter() must yield entries in ascending ModuleId order");
+    assert_eq!(
+        ids, sorted,
+        "iter() must yield entries in ascending ModuleId order"
+    );
 }

@@ -476,7 +476,9 @@ impl FrontendSession {
             .modules
             .iter()
             .zip(baseline_results.iter())
-            .map(|(module, result)| build_module_surface(module.graph(), result, &self.string_table))
+            .map(|(module, result)| {
+                build_module_surface(module.graph(), result, &self.string_table)
+            })
             .collect::<Vec<_>>();
 
         let imported_types = (0..self.modules.len())
