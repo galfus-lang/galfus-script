@@ -58,7 +58,9 @@ fn stamp_external_handles(value: &mut BoundaryValue, proxy_module: Option<&str>)
             payload: Some(payload),
             ..
         } => stamp_external_handles(payload, proxy_module),
-        BoundaryValue::Handle { proxy_module: pm, .. } => {
+        BoundaryValue::Handle {
+            proxy_module: pm, ..
+        } => {
             if pm.is_none() {
                 if let Some(m) = proxy_module {
                     *pm = Some(m.to_string());
@@ -465,7 +467,7 @@ impl Orchestrator {
         let adapter_proxy_module = self
             .future_registry
             .adapter_proxy_module(thread_id, future_id);
-        
+
         if let Ok(value) = &mut result {
             stamp_external_handles(value, adapter_proxy_module.as_deref());
         }

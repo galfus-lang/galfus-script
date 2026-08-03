@@ -269,9 +269,10 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     .graph
                     .resolution()
                     .and_then(|res| {
+                        let name_id = self.ctx.string_table.get(name);
                         res.symbols()
                             .iter()
-                            .position(|s| s.name() == name)
+                            .position(|s| name_id.is_some() && s.name() == name_id.unwrap())
                             .map(|idx| idx as u16)
                     })
                     .unwrap_or(0);

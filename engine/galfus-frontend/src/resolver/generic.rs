@@ -109,6 +109,7 @@ impl<'a> Resolver<'a> {
 
         let symbol_name = self.node_text(name);
 
-        self.declare_symbol(symbol_name, SymbolKind::GenericParameter, name, scope);
+        let name_id = self.string_table.intern(&symbol_name);
+        self.declare_symbol(name_id, SymbolKind::GenericParameter, name, scope);
     }
 }

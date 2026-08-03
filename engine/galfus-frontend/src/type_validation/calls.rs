@@ -76,7 +76,12 @@ impl<'a> DeclarationTypeChecker<'a> {
                         .graph
                         .resolution()
                         .and_then(|res| res.symbol(param))
-                        .map(|s| s.name().to_string())
+                        .map(|s| {
+                            self.string_table
+                                .resolve(s.name())
+                                .unwrap_or("")
+                                .to_string()
+                        })
                         .unwrap_or_else(|| "T".to_string());
                     self.report_cannot_infer_type(
                         node,

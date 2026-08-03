@@ -74,7 +74,10 @@ impl<'a> DeclarationTypeChecker<'a> {
             return;
         }
 
-        self.report_assignment_to_immutable(target, symbol_data.name());
+        self.report_assignment_to_immutable(
+            target,
+            self.string_table.resolve(symbol_data.name()).unwrap_or(""),
+        );
     }
 
     fn assignment_target_type(&mut self, target: NodeId) -> Option<TypeId> {
@@ -166,8 +169,12 @@ impl<'a> DeclarationTypeChecker<'a> {
         };
 
         let resolution = self.graph.resolution()?;
-        let struct_name = resolution.symbol(symbol)?.name();
+        let struct_symbol_data = resolution.symbol(symbol)?;
         let root = self.graph.syntax().root()?;
+        let struct_name = self
+            .string_table
+            .resolve(struct_symbol_data.name())
+            .unwrap_or("");
         let struct_item = self.struct_item_node_by_name(root, struct_name)?;
 
         self.find_struct_field_node_by_name(struct_item, member_name)

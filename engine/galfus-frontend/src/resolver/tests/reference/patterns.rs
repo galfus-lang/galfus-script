@@ -16,7 +16,8 @@ fn resolve_declares_instanceof_type_pattern_binding_in_arm_scope() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -41,7 +42,7 @@ fn resolve_declares_instanceof_type_pattern_binding_in_arm_scope() {
         .scope(resolution.node_scope(arm).unwrap())
         .unwrap();
     let binding_symbol = resolution
-        .symbol(arm_scope.symbol("count").unwrap())
+        .symbol(arm_scope.symbol(string_table.intern("count")).unwrap())
         .unwrap();
 
     assert_eq!(arm_scope.kind(), ScopeKind::InstanceofArm);
@@ -52,7 +53,10 @@ fn resolve_declares_instanceof_type_pattern_binding_in_arm_scope() {
         .symbol(resolution.reference_symbol(expression).unwrap())
         .unwrap();
 
-    assert_eq!(reference_symbol.name(), "count");
+    assert_eq!(
+        string_table.resolve(reference_symbol.name()).unwrap_or(""),
+        "count"
+    );
     assert_eq!(reference_symbol.kind(), SymbolKind::TypePatternBinding);
 }
 
@@ -71,7 +75,8 @@ fn resolve_declares_instanceof_fallback_binding_in_arm_scope() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -96,7 +101,7 @@ fn resolve_declares_instanceof_fallback_binding_in_arm_scope() {
         .scope(resolution.node_scope(arm).unwrap())
         .unwrap();
     let binding_symbol = resolution
-        .symbol(arm_scope.symbol("other").unwrap())
+        .symbol(arm_scope.symbol(string_table.intern("other")).unwrap())
         .unwrap();
 
     assert_eq!(binding_symbol.kind(), SymbolKind::PatternBinding);
@@ -106,7 +111,10 @@ fn resolve_declares_instanceof_fallback_binding_in_arm_scope() {
         .symbol(resolution.reference_symbol(expression).unwrap())
         .unwrap();
 
-    assert_eq!(reference_symbol.name(), "other");
+    assert_eq!(
+        string_table.resolve(reference_symbol.name()).unwrap_or(""),
+        "other"
+    );
     assert_eq!(reference_symbol.kind(), SymbolKind::PatternBinding);
 }
 
@@ -130,7 +138,8 @@ fn resolve_instanceof_type_pattern_binding_reaches_block_arm_body() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -147,7 +156,10 @@ fn resolve_instanceof_type_pattern_binding_reaches_block_arm_body() {
         .symbol(resolution.reference_symbol(expression).unwrap())
         .unwrap();
 
-    assert_eq!(reference_symbol.name(), "count");
+    assert_eq!(
+        string_table.resolve(reference_symbol.name()).unwrap_or(""),
+        "count"
+    );
     assert_eq!(reference_symbol.kind(), SymbolKind::TypePatternBinding);
 }
 
@@ -166,7 +178,8 @@ fn resolve_declares_match_binding_pattern_in_arm_scope() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -191,7 +204,7 @@ fn resolve_declares_match_binding_pattern_in_arm_scope() {
         .scope(resolution.node_scope(arm).unwrap())
         .unwrap();
     let binding_symbol = resolution
-        .symbol(arm_scope.symbol("other").unwrap())
+        .symbol(arm_scope.symbol(string_table.intern("other")).unwrap())
         .unwrap();
 
     assert_eq!(binding_symbol.kind(), SymbolKind::PatternBinding);
@@ -201,7 +214,10 @@ fn resolve_declares_match_binding_pattern_in_arm_scope() {
         .symbol(resolution.reference_symbol(expression).unwrap())
         .unwrap();
 
-    assert_eq!(reference_symbol.name(), "other");
+    assert_eq!(
+        string_table.resolve(reference_symbol.name()).unwrap_or(""),
+        "other"
+    );
     assert_eq!(reference_symbol.kind(), SymbolKind::PatternBinding);
 }
 
@@ -226,7 +242,8 @@ fn resolve_declares_choice_payload_binding_in_arm_scope() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -251,7 +268,7 @@ fn resolve_declares_choice_payload_binding_in_arm_scope() {
         .scope(resolution.node_scope(arm).unwrap())
         .unwrap();
     let binding_symbol = resolution
-        .symbol(arm_scope.symbol("value").unwrap())
+        .symbol(arm_scope.symbol(string_table.intern("value")).unwrap())
         .unwrap();
 
     assert_eq!(binding_symbol.kind(), SymbolKind::PatternBinding);
@@ -261,7 +278,10 @@ fn resolve_declares_choice_payload_binding_in_arm_scope() {
         .symbol(resolution.reference_symbol(expression).unwrap())
         .unwrap();
 
-    assert_eq!(reference_symbol.name(), "value");
+    assert_eq!(
+        string_table.resolve(reference_symbol.name()).unwrap_or(""),
+        "value"
+    );
     assert_eq!(reference_symbol.kind(), SymbolKind::PatternBinding);
 }
 
@@ -286,7 +306,8 @@ fn resolve_binds_variant_pattern_member() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -310,10 +331,16 @@ fn resolve_binds_variant_pattern_member() {
         .symbol(resolution.path_reference_symbol(pattern).unwrap())
         .unwrap();
 
-    assert_eq!(root_symbol.name(), "Color");
+    assert_eq!(
+        string_table.resolve(root_symbol.name()).unwrap_or(""),
+        "Color"
+    );
     assert_eq!(root_symbol.kind(), SymbolKind::Enum);
 
-    assert_eq!(member_symbol.name(), "Red");
+    assert_eq!(
+        string_table.resolve(member_symbol.name()).unwrap_or(""),
+        "Red"
+    );
     assert_eq!(member_symbol.kind(), SymbolKind::EnumVariant);
 }
 
@@ -336,7 +363,8 @@ fn resolve_reports_unknown_variant_pattern_member() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(resolve_result.has_errors());
 

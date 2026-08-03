@@ -14,7 +14,8 @@ fn resolve_reports_unknown_path_expression_root() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(resolve_result.has_errors());
 
@@ -49,7 +50,8 @@ fn resolve_binds_top_level_initializer_name_expression() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -63,7 +65,7 @@ fn resolve_binds_top_level_initializer_name_expression() {
     let symbol = resolution.reference_symbol(expression).unwrap();
     let symbol = resolution.symbol(symbol).unwrap();
 
-    assert_eq!(symbol.name(), "first");
+    assert_eq!(string_table.resolve(symbol.name()).unwrap_or(""), "first");
     assert_eq!(symbol.kind(), SymbolKind::Const);
 }
 
@@ -82,7 +84,8 @@ fn resolve_binds_parameter_default_name_expression() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -96,7 +99,10 @@ fn resolve_binds_parameter_default_name_expression() {
     let symbol = resolution.reference_symbol(expression).unwrap();
     let symbol = resolution.symbol(symbol).unwrap();
 
-    assert_eq!(symbol.name(), "fallback");
+    assert_eq!(
+        string_table.resolve(symbol.name()).unwrap_or(""),
+        "fallback"
+    );
     assert_eq!(symbol.kind(), SymbolKind::Const);
 }
 
@@ -111,7 +117,8 @@ fn resolve_reports_unknown_top_level_initializer_name_expression() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(resolve_result.has_errors());
 
@@ -147,7 +154,8 @@ fn resolve_reports_unknown_name_expression() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(resolve_result.has_errors());
 
@@ -183,7 +191,8 @@ fn resolve_does_not_bind_builtin_type_as_value_name() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(resolve_result.has_errors());
 
@@ -220,7 +229,8 @@ fn main(): null {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(
         !resolve_result.has_errors(),
@@ -243,10 +253,16 @@ fn main(): null {
         .symbol(resolution.path_reference_symbol(expression).unwrap())
         .unwrap();
 
-    assert_eq!(root_symbol.name(), "User");
+    assert_eq!(
+        string_table.resolve(root_symbol.name()).unwrap_or(""),
+        "User"
+    );
     assert_eq!(root_symbol.kind(), SymbolKind::Struct);
 
-    assert_eq!(member_symbol.name(), "User::rename");
+    assert_eq!(
+        string_table.resolve(member_symbol.name()).unwrap_or(""),
+        "User::rename"
+    );
     assert_eq!(member_symbol.kind(), SymbolKind::Function);
 
     assert_eq!(

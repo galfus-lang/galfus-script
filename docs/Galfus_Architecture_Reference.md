@@ -145,3 +145,30 @@ spans. Execution failures retain VM frames with module ID, function index, and
 instruction offset across asynchronous suspension. The current structured
 failure API does not expose resolved source spans directly.
 Function-symbol and source-path mappings are planned metadata extensions.
+
+---
+
+## 9. Architecture Invariants
+
+Principles exist as objective contracts per layer. Each invariant must have at least one corresponding test or check.
+
+- **Frontend**: Must produce a canonical, deterministic `SemanticGraph`. No state leakage between compilations.
+- **Package/Workspace**: Must maintain isolated module namespaces without implicit global dependencies.
+- **VM**: Given the same initial state and the same ordered sequence of external completions, the VM must produce the same state transitions and effects.
+- **Kernel**: The Kernel must apply a canonical scheduling policy with stable ordering and explicit tie-break rules.
+- **Host**: The Host must validate requests; deliver explicit completions; never modify VM state directly; and fail explicitly when a provider or function does not exist.
+
+---
+
+## 10. Runtime Ownership Matrix
+
+Without an authoritative source, new features can duplicate cleanup or leave features unowned. Every new runtime entity must update this matrix.
+
+| Entity              | Created by     | Authoritative owner           | Transfer trigger        | Terminal states                | Cancellation/failure cleanup | Final release  |
+| ------------------- | -------------- | ----------------------------- | ----------------------- | ------------------------------ | ---------------------------- | -------------- |
+| **Thread state**    | Kernel/runtime | Kernel                        | Scheduling transition   | Completed, Failed, Cancelled   | Kernel                       | Kernel         |
+| **Future value**    | VM/runtime     | Future registry               | Completion delivery     | Resolved, Failed, Cancelled    | Registry                     | Registry       |
+| **Request**         | Runtime        | Host boundary while in flight | Dispatch/completion     | Completed, Rejected, Cancelled | Boundary/runtime             | Runtime        |
+| **Completion**      | Host           | Host boundary                 | Delivery to injector    | Delivered, Dropped             | Boundary                     | Runtime        |
+| **Timer**           | Runtime/kernel | Timer registry                | Expiration/cancellation | Fired, Cancelled               | Timer registry               | Timer registry |
+| **External handle** | Provider       | Provider/handle registry      | Explicit release        | Released, Invalidated          | Provider boundary            | Provider       |

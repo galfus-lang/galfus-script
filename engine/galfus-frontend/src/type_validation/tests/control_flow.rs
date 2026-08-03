@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_if_bool_condition() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn main(): null {
   if true {
@@ -35,12 +35,13 @@ fn main(): null {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -53,7 +54,7 @@ fn main(): null {
 
 #[test]
 fn check_accepts_break_inside_loop() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn main(): null {
   loop {
@@ -70,7 +71,7 @@ fn main(): null {
 
 #[test]
 fn check_accepts_continue_inside_loop() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn main(): null {
   loop {
@@ -99,12 +100,13 @@ fn main(): null {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -129,12 +131,13 @@ fn main(): null {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -147,7 +150,7 @@ fn main(): null {
 
 #[test]
 fn check_accepts_named_control_target() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn main(): null {
   loop(name: outer) {
@@ -165,7 +168,7 @@ fn main(): null {
 
 #[test]
 fn check_accepts_named_for_control_target() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn main(values: [i32]): null {
   for(name: values) value in values {
@@ -196,12 +199,13 @@ fn main(): null {
 
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
         diagnostic.code().as_str() == TypeDiagnosticCode::DuplicateControlTarget.as_code()
@@ -226,12 +230,13 @@ fn main(): null {
 
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
         diagnostic.code().as_str() == TypeDiagnosticCode::UnresolvedControlTarget.as_code()
@@ -256,12 +261,13 @@ fn main(): null {
 
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
         diagnostic.code().as_str() == TypeDiagnosticCode::InvalidKeywordMetadata.as_code()
@@ -288,12 +294,13 @@ fn(stamp) stamped_fn(): null {
 
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
         diagnostic.code().as_str() == TypeDiagnosticCode::InvalidDecoratorUsage.as_code()

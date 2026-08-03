@@ -99,7 +99,8 @@ fn test_ownership_deterministic_release() {
     assert!(thread.heap.objects[node1_ref.raw()].is_some());
     assert!(thread.heap.objects[node2_ref.raw()].is_some());
 
-    let handle_ref = thread.heap.alloc(HeapObject::ExternalHandle { proxy_module: "".to_string(),
+    let handle_ref = thread.heap.alloc(HeapObject::ExternalHandle {
+        proxy_module: "".to_string(),
         kind: "texture".to_string(),
         id: 42,
     });
@@ -107,7 +108,10 @@ fn test_ownership_deterministic_release() {
     assert!(thread.heap.objects[node1_ref.raw()].is_none());
     assert!(thread.heap.objects[node2_ref.raw()].is_none());
     assert!(thread.heap.objects[handle_ref.raw()].is_none());
-    assert_eq!(released_handles, vec![("".to_string(), "texture".to_string(), 42)]);
+    assert_eq!(
+        released_handles,
+        vec![("".to_string(), "texture".to_string(), 42)]
+    );
 }
 
 #[test]

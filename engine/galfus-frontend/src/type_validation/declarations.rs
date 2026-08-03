@@ -32,12 +32,13 @@ impl<'a> DeclarationTypeChecker<'a> {
                 continue;
             }
 
-            if let Some(ty) = self.layer.table_mut().primitive_family(symbol.name()) {
+            let name_str = self.string_table.resolve(symbol.name()).unwrap_or("");
+            if let Some(ty) = self.layer.table_mut().primitive_family(name_str) {
                 self.layer.bind_symbol_type(symbol.id(), ty);
                 continue;
             }
 
-            let Some(primitive) = primitive_type_by_name(symbol.name()) else {
+            let Some(primitive) = primitive_type_by_name(name_str) else {
                 continue;
             };
 

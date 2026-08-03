@@ -13,11 +13,20 @@ use std::collections::HashMap;
 pub(super) struct MyWorkspaceContext<'a> {
     modules: &'a [CompiledModule],
     pub(super) state: &'a mut CompilerState,
+    pub(super) string_table: &'a galfus_frontend::StringTable,
 }
 
 impl<'a> MyWorkspaceContext<'a> {
-    pub(super) fn new(modules: &'a [CompiledModule], state: &'a mut CompilerState) -> Self {
-        Self { modules, state }
+    pub(super) fn new(
+        modules: &'a [CompiledModule],
+        state: &'a mut CompilerState,
+        string_table: &'a galfus_frontend::StringTable,
+    ) -> Self {
+        Self {
+            modules,
+            state,
+            string_table,
+        }
     }
 
     fn translate_symbol(
@@ -34,7 +43,8 @@ impl<'a> MyWorkspaceContext<'a> {
             Some(s) => s,
             None => return sym,
         };
-        let sym_name = caller_sym_data.name();
+        let sym_name_id = caller_sym_data.name();
+        let sym_name = self.string_table.resolve(sym_name_id).unwrap_or("");
 
         let target_res = match self.modules[target_mod_idx].graph().resolution() {
             Some(res) => res,
@@ -42,7 +52,7 @@ impl<'a> MyWorkspaceContext<'a> {
         };
 
         for target_sym in target_res.symbols() {
-            if target_sym.name() == sym_name {
+            if self.string_table.resolve(target_sym.name()).unwrap_or("") == sym_name {
                 return target_sym.id();
             }
         }
@@ -231,6 +241,9 @@ impl<'a> MyWorkspaceContext<'a> {
 }
 
 impl<'a> WorkspaceContext for MyWorkspaceContext<'a> {
+    fn string_table(&self) -> &galfus_frontend::StringTable {
+        self.string_table
+    }
     fn resolve_import(
         &self,
         caller_module_id: galfus_core::ModuleId,
@@ -276,6 +289,7 @@ impl<'a> WorkspaceContext for MyWorkspaceContext<'a> {
             target_module.graph(),
             type_res,
             target_module.source().text(),
+            self.string_table,
         );
         let function_item = builder.function_item_for_symbol(target_symbol)?;
         Some(builder.generic_parameters_for_function_item(function_item))
@@ -375,6 +389,7 @@ impl<'a> WorkspaceContext for MyWorkspaceContext<'a> {
             target_module.graph(),
             type_res,
             target_module.source().text(),
+            self.string_table,
         )
         .with_workspace_module_id(target_module.id());
         builder = builder.with_workspace_ctx(self);
@@ -427,7 +442,10 @@ impl<'a> WorkspaceContext for MyWorkspaceContext<'a> {
         let target_symbol = resolution
             .symbols()
             .iter()
-            .find(|symbol| symbol.kind() == SymbolKind::Function && symbol.name() == function_name)
+            .find(|symbol| {
+                symbol.kind() == SymbolKind::Function
+                    && self.string_table.resolve(symbol.name()).unwrap_or("") == function_name
+            })
             .map(|symbol| symbol.id())?;
         let generic_params = self.get_generic_params(target_mod_idx, target_symbol)?;
         if generic_params.len() != concrete_types.len() {
@@ -471,6 +489,7 @@ impl<'a> MyWorkspaceContext<'a> {
             target_module.graph(),
             type_res,
             target_module.source().text(),
+            self.string_table,
         )
         .with_workspace_module_id(target_module.id());
         let Some(target_symbol) = builder.function_symbol_for_item(function_item) else {

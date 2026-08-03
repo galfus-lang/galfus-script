@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_binds_generic_cast_type_in_anchored_function() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, _string_table) = check_source(
         r#"
 struct Range<T: i32 | f32> {
   value: T,
@@ -30,7 +30,7 @@ fn Range<T>::next(self): T {
 
 #[test]
 fn check_accepts_explicit_generic_function_call() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn identity<T: int>(value: T): T {
           return value
@@ -45,7 +45,7 @@ fn check_accepts_explicit_generic_function_call() {
 
 #[test]
 fn check_binds_explicit_generic_call_return_type() {
-    let (source, graph, result) = check_source(
+    let (source, graph, result, _string_table) = check_source(
         r#"
         fn identity<T: int>(value: T): T {
           return value
@@ -73,7 +73,7 @@ fn check_binds_explicit_generic_call_return_type() {
 
 #[test]
 fn check_accepts_explicit_generic_function_call_with_array_type_argument() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn identity<T: [u8]>(value: T): T {
           return value
@@ -89,7 +89,7 @@ fn check_accepts_explicit_generic_function_call_with_array_type_argument() {
 
 #[test]
 fn check_accepts_explicit_generic_function_call_with_multiple_arguments() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn first<A: int, B: bool>(left: A, right: B): A {
           return left
@@ -104,7 +104,7 @@ fn check_accepts_explicit_generic_function_call_with_multiple_arguments() {
 
 #[test]
 fn check_accepts_generic_bound_union_with_constraint_member() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         constraint Stringable {
           fn text(): [u8],
@@ -149,7 +149,8 @@ fn check_reports_explicit_generic_argument_count_mismatch_for_missing_argument()
         parse_result.diagnostics()
     );
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -157,8 +158,8 @@ fn check_reports_explicit_generic_argument_count_mismatch_for_missing_argument()
     );
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -188,7 +189,8 @@ fn check_reports_explicit_generic_argument_count_mismatch_for_extra_argument() {
         parse_result.diagnostics()
     );
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -196,8 +198,8 @@ fn check_reports_explicit_generic_argument_count_mismatch_for_extra_argument() {
     );
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -227,7 +229,8 @@ fn check_reports_explicit_generic_call_argument_type_mismatch_after_substitution
         parse_result.diagnostics()
     );
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -235,8 +238,8 @@ fn check_reports_explicit_generic_call_argument_type_mismatch_after_substitution
     );
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -264,7 +267,8 @@ fn check_reports_generic_arguments_on_non_generic_function() {
         parse_result.diagnostics()
     );
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -272,8 +276,8 @@ fn check_reports_generic_arguments_on_non_generic_function() {
     );
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -297,12 +301,13 @@ fn check_allows_unbounded_generic_function_parameter() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(!result.has_errors());
 }
@@ -322,12 +327,13 @@ fn check_reports_generic_argument_outside_declared_bound() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {

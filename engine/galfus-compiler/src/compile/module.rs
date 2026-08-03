@@ -34,9 +34,10 @@ use std::collections::{HashMap, HashSet};
 pub fn compile_modules(
     modules: &mut [CompiledModule],
     state: &mut CompilerState,
+    string_table: &galfus_frontend::StringTable,
 ) -> Result<Vec<BytecodeNode>> {
     let module_ids = modules.iter().map(CompiledModule::id).collect();
-    compile_changed_modules(modules, state, &module_ids)
+    compile_changed_modules(modules, state, &module_ids, string_table)
 }
 
 /// Compile only modules identified by `changed_modules`.
@@ -48,6 +49,7 @@ pub fn compile_changed_modules(
     modules: &mut [CompiledModule],
     state: &mut CompilerState,
     changed_modules: &HashSet<galfus_core::ModuleId>,
+    string_table: &galfus_frontend::StringTable,
 ) -> Result<Vec<BytecodeNode>> {
     if changed_modules.is_empty() {
         return Ok(Vec::new());
@@ -55,7 +57,7 @@ pub fn compile_changed_modules(
 
     // Phase 1: Build MIR only for changed modules. Generic specializations can
     // add functions to an imported module, which then becomes affected too.
-    let mut ws_ctx = MyWorkspaceContext::new(modules, state);
+    let mut ws_ctx = MyWorkspaceContext::new(modules, state, string_table);
     let mut affected_modules = modules
         .iter()
         .enumerate()
@@ -78,6 +80,7 @@ pub fn compile_changed_modules(
             module.graph(),
             type_res,
             module.source().text(),
+            string_table,
         )
         .with_workspace_module_id(module.id())
         .with_workspace_ctx(&mut ws_ctx)
@@ -122,8 +125,13 @@ pub fn compile_changed_modules(
         }
         let path = modules[mod_idx].path().clone();
         let semantic_revision = modules[mod_idx].semantic_revision();
-        let (image, metadata) =
-            compile_single_module(modules, &mir_modules, &specialized_targets, mod_idx)?;
+        let (image, metadata) = compile_single_module(
+            modules,
+            &mir_modules,
+            &specialized_targets,
+            mod_idx,
+            string_table,
+        )?;
         if let Err(errors) = galfus_bytecode::validation::validate_bytecode_module(&image) {
             return Err(anyhow::anyhow!(
                 "BytecodeModule validation failed for `{}`: {:?}",
@@ -148,12 +156,13 @@ pub fn compile_transaction(
     modules: &mut [CompiledModule],
     state: &mut CompilerState,
     changed_modules: &HashSet<galfus_core::ModuleId>,
+    string_table: &galfus_frontend::StringTable,
     base_version: u64,
     semantic_revision: galfus_core::SemanticRevision,
     removed_modules: Vec<galfus_core::ModuleId>,
     edges: Vec<ImportEdge>,
 ) -> Result<BytecodeGraphTransaction> {
-    let upserted_modules = compile_changed_modules(modules, state, changed_modules)?;
+    let upserted_modules = compile_changed_modules(modules, state, changed_modules, string_table)?;
     Ok(BytecodeGraphTransaction {
         base_version,
         semantic_revision,
@@ -171,6 +180,7 @@ fn compile_single_module(
         (galfus_core::ModuleId, galfus_core::FunctionId),
     >,
     mod_idx: usize,
+    string_table: &galfus_frontend::StringTable,
 ) -> Result<(BytecodeModule, galfus_bytecode::graph::ExecutionMetadata)> {
     use crate::compile::resolve::{
         collect_call_targets, resolve_import_target, resolve_local_call_target,
@@ -212,8 +222,15 @@ fn compile_single_module(
     let mut import_func_map: HashMap<(galfus_core::ModuleId, galfus_core::FunctionId), FuncIdx> =
         HashMap::new();
 
-    for (&local_id, &(target_module_id, target_func_id)) in &cross_module_calls {
-        let entry = import_func_map
+    // Iterate in deterministic order: sort by (target_module_id, target_func_id) so the
+    // import_slots vec is always built in the same order regardless of HashMap iteration order.
+    let mut cross_module_call_entries: Vec<_> = cross_module_calls.iter().collect();
+    cross_module_call_entries
+        .sort_by_key(|entry| (entry.1.0.raw(), entry.1.1.raw(), entry.0.raw()));
+    for entry in &cross_module_call_entries {
+        let local_id = *entry.0;
+        let (target_module_id, target_func_id) = *entry.1;
+        let slot = import_func_map
             .entry((target_module_id, target_func_id))
             .or_insert_with(|| {
                 let slot_idx = own_func_count + import_slots.len() as u16;
@@ -248,7 +265,7 @@ fn compile_single_module(
 
                 FuncIdx(slot_idx)
             });
-        let _ = (local_id, entry);
+        let _ = (local_id, slot);
     }
 
     // Build local func map: local func_id → local FuncIdx (0-based within this module).
@@ -279,11 +296,22 @@ fn compile_single_module(
             }
         }
     }
-    for &(target_module_id, target_func_id) in specialized_targets.values() {
-        if target_module_id != modules[mod_idx].id() {
+    // Iterate in deterministic order: sort by (target_module_id, target_func_id) to ensure
+    // export slots for specialized functions are always appended in the same order.
+    let mut specialized_target_entries: Vec<_> =
+        specialized_targets.iter().map(|(k, v)| (*k, *v)).collect();
+    specialized_target_entries.sort_by_key(|&(specialised_id, (target_mod_id, target_func_id))| {
+        (
+            target_mod_id.raw(),
+            target_func_id.raw(),
+            specialised_id.raw(),
+        )
+    });
+    for (_specialised_id, (target_module_id, target_func_id)) in &specialized_target_entries {
+        if *target_module_id != modules[mod_idx].id() {
             continue;
         }
-        let Some(&local_idx) = local_func_map.get(&target_func_id) else {
+        let Some(&local_idx) = local_func_map.get(target_func_id) else {
             continue;
         };
         if export_slots
@@ -309,6 +337,7 @@ fn compile_single_module(
         module.graph(),
         module.source().text(),
         &mir_mod.constant_pool,
+        string_table,
     );
 
     // Register local functions in ctx.
@@ -373,16 +402,14 @@ fn compile_single_module(
                 proxy_module: module.path().as_str().to_string(),
                 symbol: mir_func.name.clone(),
             });
-            instructions = vec![
-                galfus_bytecode::Instruction::RetNull,
-            ];
+            instructions = vec![galfus_bytecode::Instruction::RetNull];
             temp_count = temp_count.max(1);
         }
         execution_metadata
             .spans
             .insert(local_func_idx, function_spans);
 
-        rewrite_global_indices(&mut instructions, modules, mod_idx)?;
+        rewrite_global_indices(&mut instructions, modules, mod_idx, string_table)?;
 
         functions.push(BytecodeFunction {
             name: mir_func.name.clone(),

@@ -17,7 +17,8 @@ fn resolve_binds_struct_field_named_type() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -31,7 +32,7 @@ fn resolve_binds_struct_field_named_type() {
     let symbol = resolution.type_reference_symbol(named_type).unwrap();
     let symbol = resolution.symbol(symbol).unwrap();
 
-    assert_eq!(symbol.name(), "Profile");
+    assert_eq!(string_table.resolve(symbol.name()).unwrap_or(""), "Profile");
     assert_eq!(symbol.kind(), SymbolKind::Struct);
 }
 
@@ -48,7 +49,8 @@ fn resolve_binds_builtin_named_types() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(!resolve_result.has_errors());
 
@@ -70,10 +72,10 @@ fn resolve_binds_builtin_named_types() {
         .unwrap();
 
     assert_eq!(int_symbol.kind(), SymbolKind::BuiltinType);
-    assert_eq!(int_symbol.name(), "i32");
+    assert_eq!(string_table.resolve(int_symbol.name()).unwrap_or(""), "i32");
 
     assert_eq!(int8_symbol.kind(), SymbolKind::BuiltinType);
-    assert_eq!(int8_symbol.name(), "i8");
+    assert_eq!(string_table.resolve(int8_symbol.name()).unwrap_or(""), "i8");
 }
 
 #[test]
@@ -89,7 +91,8 @@ fn resolve_binds_import_namespace_type_path_root() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -103,7 +106,7 @@ fn resolve_binds_import_namespace_type_path_root() {
     let symbol = resolution.type_reference_symbol(path_type).unwrap();
     let symbol = resolution.symbol(symbol).unwrap();
 
-    assert_eq!(symbol.name(), "user");
+    assert_eq!(string_table.resolve(symbol.name()).unwrap_or(""), "user");
     assert_eq!(symbol.kind(), SymbolKind::ImportNamespace);
 }
 
@@ -122,7 +125,8 @@ fn resolve_binds_local_type_path_root() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -136,7 +140,7 @@ fn resolve_binds_local_type_path_root() {
     let symbol = resolution.type_reference_symbol(path_type).unwrap();
     let symbol = resolution.symbol(symbol).unwrap();
 
-    assert_eq!(symbol.name(), "User");
+    assert_eq!(string_table.resolve(symbol.name()).unwrap_or(""), "User");
     assert_eq!(symbol.kind(), SymbolKind::Struct);
 }
 
@@ -155,7 +159,8 @@ fn resolve_binds_local_type_path_member() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -173,10 +178,16 @@ fn resolve_binds_local_type_path_member() {
         .symbol(resolution.type_path_reference_symbol(path_type).unwrap())
         .unwrap();
 
-    assert_eq!(root_symbol.name(), "User");
+    assert_eq!(
+        string_table.resolve(root_symbol.name()).unwrap_or(""),
+        "User"
+    );
     assert_eq!(root_symbol.kind(), SymbolKind::Struct);
 
-    assert_eq!(member_symbol.name(), "Id");
+    assert_eq!(
+        string_table.resolve(member_symbol.name()).unwrap_or(""),
+        "Id"
+    );
     assert_eq!(member_symbol.kind(), SymbolKind::StructField);
 }
 
@@ -195,7 +206,8 @@ fn resolve_binds_constraint_field_type_path_member() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -213,10 +225,16 @@ fn resolve_binds_constraint_field_type_path_member() {
         .symbol(resolution.type_path_reference_symbol(path_type).unwrap())
         .unwrap();
 
-    assert_eq!(root_symbol.name(), "Entity");
+    assert_eq!(
+        string_table.resolve(root_symbol.name()).unwrap_or(""),
+        "Entity"
+    );
     assert_eq!(root_symbol.kind(), SymbolKind::Constraint);
 
-    assert_eq!(member_symbol.name(), "Id");
+    assert_eq!(
+        string_table.resolve(member_symbol.name()).unwrap_or(""),
+        "Id"
+    );
     assert_eq!(member_symbol.kind(), SymbolKind::ConstraintField);
 }
 
@@ -235,7 +253,8 @@ fn resolve_reports_unknown_local_type_path_member() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(resolve_result.has_errors());
 

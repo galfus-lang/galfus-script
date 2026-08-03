@@ -74,10 +74,16 @@ impl<'a> DeclarationTypeChecker<'a> {
 
         let base_name = self.constraint_base_name(base)?;
 
+        let base_name_id = self.string_table.get(base_name.as_str());
+
         resolution
             .symbols()
             .iter()
-            .find(|symbol| symbol.name() == base_name && symbol.kind() == SymbolKind::Constraint)
+            .find(|symbol| {
+                base_name_id.is_some()
+                    && symbol.name() == base_name_id.unwrap()
+                    && symbol.kind() == SymbolKind::Constraint
+            })
             .map(|symbol| symbol.id())
     }
 

@@ -15,7 +15,8 @@ fn resolve_binds_block_local_name_expression() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -29,7 +30,7 @@ fn resolve_binds_block_local_name_expression() {
     let symbol = resolution.reference_symbol(expression).unwrap();
     let symbol = resolution.symbol(symbol).unwrap();
 
-    assert_eq!(symbol.name(), "first");
+    assert_eq!(string_table.resolve(symbol.name()).unwrap_or(""), "first");
     assert_eq!(symbol.kind(), SymbolKind::Var);
 }
 
@@ -52,7 +53,8 @@ fn resolve_binds_name_from_parent_block_scope() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -66,7 +68,7 @@ fn resolve_binds_name_from_parent_block_scope() {
     let symbol = resolution.reference_symbol(expression).unwrap();
     let symbol = resolution.symbol(symbol).unwrap();
 
-    assert_eq!(symbol.name(), "outer");
+    assert_eq!(string_table.resolve(symbol.name()).unwrap_or(""), "outer");
     assert_eq!(symbol.kind(), SymbolKind::Var);
 }
 
@@ -90,7 +92,8 @@ fn resolve_prefers_nearest_scope_symbol() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -120,7 +123,10 @@ fn resolve_prefers_nearest_scope_symbol() {
 
     let inner_block_scope = resolution.node_scope(inner_block).unwrap();
 
-    assert_eq!(referenced_symbol.name(), "value");
+    assert_eq!(
+        string_table.resolve(referenced_symbol.name()).unwrap_or(""),
+        "value"
+    );
     assert_eq!(referenced_symbol.kind(), SymbolKind::Var);
     assert_eq!(referenced_symbol.scope(), inner_block_scope);
 }
@@ -141,7 +147,8 @@ fn resolve_binds_import_namespace_name_expression() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -155,7 +162,7 @@ fn resolve_binds_import_namespace_name_expression() {
     let symbol = resolution.reference_symbol(expression).unwrap();
     let symbol = resolution.symbol(symbol).unwrap();
 
-    assert_eq!(symbol.name(), "user");
+    assert_eq!(string_table.resolve(symbol.name()).unwrap_or(""), "user");
     assert_eq!(symbol.kind(), SymbolKind::ImportNamespace);
 }
 
@@ -175,7 +182,8 @@ fn resolve_binds_import_namespace_path_expression_root() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -189,7 +197,7 @@ fn resolve_binds_import_namespace_path_expression_root() {
     let symbol = resolution.reference_symbol(expression).unwrap();
     let symbol = resolution.symbol(symbol).unwrap();
 
-    assert_eq!(symbol.name(), "user");
+    assert_eq!(string_table.resolve(symbol.name()).unwrap_or(""), "user");
     assert_eq!(symbol.kind(), SymbolKind::ImportNamespace);
 }
 
@@ -208,7 +216,8 @@ fn resolve_binds_local_path_expression_root() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -222,7 +231,7 @@ fn resolve_binds_local_path_expression_root() {
     let symbol = resolution.reference_symbol(expression).unwrap();
     let symbol = resolution.symbol(symbol).unwrap();
 
-    assert_eq!(symbol.name(), "local");
+    assert_eq!(string_table.resolve(symbol.name()).unwrap_or(""), "local");
     assert_eq!(symbol.kind(), SymbolKind::Var);
 }
 
@@ -245,7 +254,8 @@ fn resolve_binds_enum_variant_path_expression_member() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -263,10 +273,16 @@ fn resolve_binds_enum_variant_path_expression_member() {
         .symbol(resolution.path_reference_symbol(expression).unwrap())
         .unwrap();
 
-    assert_eq!(root_symbol.name(), "Status");
+    assert_eq!(
+        string_table.resolve(root_symbol.name()).unwrap_or(""),
+        "Status"
+    );
     assert_eq!(root_symbol.kind(), SymbolKind::Enum);
 
-    assert_eq!(member_symbol.name(), "On");
+    assert_eq!(
+        string_table.resolve(member_symbol.name()).unwrap_or(""),
+        "On"
+    );
     assert_eq!(member_symbol.kind(), SymbolKind::EnumVariant);
 
     assert_eq!(
@@ -294,7 +310,8 @@ fn resolve_binds_choice_variant_path_expression_member() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -309,7 +326,10 @@ fn resolve_binds_choice_variant_path_expression_member() {
         .symbol(resolution.path_reference_symbol(expression).unwrap())
         .unwrap();
 
-    assert_eq!(member_symbol.name(), "Ok");
+    assert_eq!(
+        string_table.resolve(member_symbol.name()).unwrap_or(""),
+        "Ok"
+    );
     assert_eq!(member_symbol.kind(), SymbolKind::ChoiceVariant);
 
     assert_eq!(
@@ -336,7 +356,8 @@ fn resolve_binds_constraint_function_path_expression_member() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -355,10 +376,16 @@ fn resolve_binds_constraint_function_path_expression_member() {
         .symbol(resolution.path_reference_symbol(expression).unwrap())
         .unwrap();
 
-    assert_eq!(root_symbol.name(), "Stringable");
+    assert_eq!(
+        string_table.resolve(root_symbol.name()).unwrap_or(""),
+        "Stringable"
+    );
     assert_eq!(root_symbol.kind(), SymbolKind::Constraint);
 
-    assert_eq!(member_symbol.name(), "toString");
+    assert_eq!(
+        string_table.resolve(member_symbol.name()).unwrap_or(""),
+        "toString"
+    );
     assert_eq!(member_symbol.kind(), SymbolKind::ConstraintFunction);
 
     assert_eq!(
@@ -386,7 +413,8 @@ fn resolve_reports_unknown_path_expression_member_on_local_type() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(resolve_result.has_errors());
 

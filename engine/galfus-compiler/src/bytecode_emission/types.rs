@@ -238,7 +238,11 @@ pub fn get_or_create_struct_layout(ctx: &mut LowerCtx, struct_symbol: SymbolId) 
 
     let resolution = ctx.graph.resolution().unwrap();
     let symbol_data = resolution.symbol(struct_symbol).unwrap();
-    let struct_name = symbol_data.name().to_string();
+    let struct_name = ctx
+        .string_table
+        .resolve(symbol_data.name())
+        .unwrap_or("")
+        .to_string();
 
     let raw_fields = crate::bytecode_emission::types::get_struct_fields(ctx, struct_symbol);
     let fields = raw_fields
@@ -290,7 +294,12 @@ fn get_struct_constraints(ctx: &LowerCtx, struct_symbol: SymbolId) -> Vec<String
                 .or_else(|| resolution.and_then(|res| res.type_path_reference_symbol(base)))
                 .and_then(|symbol| resolution.and_then(|res| res.symbol(symbol)))
                 .filter(|symbol| symbol.kind() == SymbolKind::Constraint)
-                .map(|symbol| symbol.name().to_string())
+                .map(|symbol| {
+                    ctx.string_table
+                        .resolve(symbol.name())
+                        .unwrap_or("")
+                        .to_string()
+                })
         })
         .collect()
 }
@@ -302,7 +311,11 @@ pub fn get_or_create_choice_layout(ctx: &mut LowerCtx, choice_symbol: SymbolId) 
 
     let resolution = ctx.graph.resolution().unwrap();
     let symbol_data = resolution.symbol(choice_symbol).unwrap();
-    let choice_name = symbol_data.name().to_string();
+    let choice_name = ctx
+        .string_table
+        .resolve(symbol_data.name())
+        .unwrap_or("")
+        .to_string();
 
     if let Some(pos) = ctx
         .choice_layouts
@@ -396,7 +409,9 @@ fn get_struct_fields_internal(
     if let Some(item_node) = crate::bytecode_emission::helpers::find_struct_item_by_name(
         ctx,
         root,
-        struct_symbol_data.name(),
+        ctx.string_table
+            .resolve(struct_symbol_data.name())
+            .unwrap_or(""),
     ) {
         let syntax = ctx.graph.syntax();
         let field_children = syntax
@@ -454,7 +469,7 @@ fn get_struct_fields_internal(
                 .filter(|sd| sd.kind() == SymbolKind::StructField)
                 .and_then(|_| ctx.type_result.layer().symbol_type(symbol));
             if let Some(ty) = field_ty {
-                let name_str = name.to_string();
+                let name_str = ctx.string_table.resolve(*name).unwrap_or("").to_string();
                 if let Some(existing) = fields.iter_mut().find(|(n, _)| *n == name_str) {
                     existing.1 = ty;
                 } else {
@@ -549,7 +564,7 @@ fn choice_variant_payload_types(
         if let Some(node) = crate::bytecode_emission::helpers::find_choice_variant_node_by_name(
             ctx,
             child,
-            variant_data.name(),
+            ctx.string_table.resolve(variant_data.name()).unwrap_or(""),
         ) {
             variant_node = Some(node);
             break;

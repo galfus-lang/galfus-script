@@ -15,7 +15,8 @@ fn resolve_declares_struct_field_symbols_in_struct_scope() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -29,13 +30,13 @@ fn resolve_declares_struct_field_symbols_in_struct_scope() {
         .unwrap();
 
     let id = resolution
-        .symbol(struct_scope.symbol("id").unwrap())
+        .symbol(struct_scope.symbol(string_table.intern("id")).unwrap())
         .unwrap();
     let name = resolution
-        .symbol(struct_scope.symbol("name").unwrap())
+        .symbol(struct_scope.symbol(string_table.intern("name")).unwrap())
         .unwrap();
     let parent = resolution
-        .symbol(struct_scope.symbol("parent").unwrap())
+        .symbol(struct_scope.symbol(string_table.intern("parent")).unwrap())
         .unwrap();
 
     assert_eq!(id.kind(), SymbolKind::StructField);
@@ -57,7 +58,8 @@ fn resolve_declares_enum_variant_symbols_in_enum_scope() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -71,9 +73,11 @@ fn resolve_declares_enum_variant_symbols_in_enum_scope() {
         .unwrap();
 
     let off = resolution
-        .symbol(enum_scope.symbol("Off").unwrap())
+        .symbol(enum_scope.symbol(string_table.intern("Off")).unwrap())
         .unwrap();
-    let on = resolution.symbol(enum_scope.symbol("On").unwrap()).unwrap();
+    let on = resolution
+        .symbol(enum_scope.symbol(string_table.intern("On")).unwrap())
+        .unwrap();
 
     assert_eq!(off.kind(), SymbolKind::EnumVariant);
     assert_eq!(on.kind(), SymbolKind::EnumVariant);
@@ -93,7 +97,8 @@ fn resolve_declares_choice_variant_symbols_in_choice_scope() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -107,10 +112,10 @@ fn resolve_declares_choice_variant_symbols_in_choice_scope() {
         .unwrap();
 
     let ok = resolution
-        .symbol(choice_scope.symbol("Ok").unwrap())
+        .symbol(choice_scope.symbol(string_table.intern("Ok")).unwrap())
         .unwrap();
     let err = resolution
-        .symbol(choice_scope.symbol("Err").unwrap())
+        .symbol(choice_scope.symbol(string_table.intern("Err")).unwrap())
         .unwrap();
 
     assert_eq!(ok.kind(), SymbolKind::ChoiceVariant);
@@ -131,7 +136,8 @@ fn resolve_declares_constraint_member_symbols_in_constraint_scope() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -145,10 +151,14 @@ fn resolve_declares_constraint_member_symbols_in_constraint_scope() {
         .unwrap();
 
     let id = resolution
-        .symbol(constraint_scope.symbol("id").unwrap())
+        .symbol(constraint_scope.symbol(string_table.intern("id")).unwrap())
         .unwrap();
     let to_string = resolution
-        .symbol(constraint_scope.symbol("toString").unwrap())
+        .symbol(
+            constraint_scope
+                .symbol(string_table.intern("toString"))
+                .unwrap(),
+        )
         .unwrap();
 
     assert_eq!(id.kind(), SymbolKind::ConstraintField);
@@ -169,7 +179,8 @@ fn resolve_reports_duplicate_struct_field_symbol() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(resolve_result.has_errors());
 
@@ -197,7 +208,8 @@ fn resolve_reports_duplicate_constraint_member_symbol() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(resolve_result.has_errors());
 
@@ -224,7 +236,8 @@ fn resolve_type_member_symbols_do_not_shadow_type_references() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(!resolve_result.has_errors());
 }

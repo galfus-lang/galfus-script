@@ -45,7 +45,8 @@ fn test_mir_builder_phase3() {
     let source = SourceFile::new(source_id, "test.gfs".to_string(), code.to_string());
 
     let parse_result = parse(&source);
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = galfus_frontend::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     let graph = resolve_result.into_graph();
     assert!(
         !graph.has_errors(),
@@ -53,15 +54,19 @@ fn test_mir_builder_phase3() {
         graph.diagnostics()
     );
 
-    let type_result =
-        check_definition_types(&source, &graph, check_declaration_types(&source, &graph));
+    let type_result = check_definition_types(
+        &source,
+        &graph,
+        check_declaration_types(&source, &graph, &string_table),
+        &string_table,
+    );
     assert!(
         !type_result.has_errors(),
         "Typecheck errors occurred: {:?}",
         type_result.diagnostics()
     );
 
-    let builder = MirBuilder::new(&graph, &type_result, code);
+    let builder = MirBuilder::new(&graph, &type_result, code, &string_table);
     let mir_module = builder.build();
 
     assert!(mir_module.functions.len() >= 2);

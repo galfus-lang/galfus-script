@@ -28,7 +28,8 @@ fn test_mir_builder_phase4() {
     let source = SourceFile::new(source_id, "test.gfs".to_string(), code.to_string());
 
     let parse_result = parse(&source);
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = galfus_frontend::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     let graph = resolve_result.into_graph();
     assert!(
         !graph.has_errors(),
@@ -36,15 +37,19 @@ fn test_mir_builder_phase4() {
         graph.diagnostics()
     );
 
-    let type_result =
-        check_definition_types(&source, &graph, check_declaration_types(&source, &graph));
+    let type_result = check_definition_types(
+        &source,
+        &graph,
+        check_declaration_types(&source, &graph, &string_table),
+        &string_table,
+    );
     assert!(
         !type_result.has_errors(),
         "Typecheck errors occurred: {:?}",
         type_result.diagnostics()
     );
 
-    let mir_module = MirBuilder::new(&graph, &type_result, code).build();
+    let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
 
     // Verify globals: g_var and g_const
     assert_eq!(mir_module.globals.len(), 2);
@@ -118,7 +123,8 @@ fn test_mir_lowering_basic() {
     let source = SourceFile::new(source_id, "test.gfs".to_string(), code.to_string());
 
     let parse_result = parse(&source);
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = galfus_frontend::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     let graph = resolve_result.into_graph();
     assert!(
         !graph.has_errors(),
@@ -126,16 +132,20 @@ fn test_mir_lowering_basic() {
         graph.diagnostics()
     );
 
-    let type_result =
-        check_definition_types(&source, &graph, check_declaration_types(&source, &graph));
+    let type_result = check_definition_types(
+        &source,
+        &graph,
+        check_declaration_types(&source, &graph, &string_table),
+        &string_table,
+    );
     assert!(
         !type_result.has_errors(),
         "Typecheck error: {:?}",
         type_result.diagnostics()
     );
 
-    let mir_module = MirBuilder::new(&graph, &type_result, code).build();
-    let (module_image, _) = lower_module(&mir_module, &type_result, &graph, code);
+    let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
+    let (module_image, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
 
     // Verify bytecode module metadata
     assert!(!module_image.functions.is_empty());
@@ -173,7 +183,8 @@ fn test_mir_lowering_defaults_integer_constants_to_int32() {
     );
 
     let parse_result = parse(&source);
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = galfus_frontend::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     let graph = resolve_result.into_graph();
     assert!(
         !graph.has_errors(),
@@ -181,15 +192,15 @@ fn test_mir_lowering_defaults_integer_constants_to_int32() {
         graph.diagnostics()
     );
 
-    let type_result = check_declaration_types(&source, &graph);
+    let type_result = check_declaration_types(&source, &graph, &string_table);
     assert!(
         !type_result.has_errors(),
         "Typecheck error: {:?}",
         type_result.diagnostics()
     );
 
-    let mir_module = MirBuilder::new(&graph, &type_result, code).build();
-    let (module_image, _) = lower_module(&mir_module, &type_result, &graph, code);
+    let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
+    let (module_image, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
 
     assert!(
         module_image
@@ -241,7 +252,8 @@ fn test_mir_lowering_advanced() {
     let source = SourceFile::new(source_id, "test_adv.gfs".to_string(), code.to_string());
 
     let parse_result = parse(&source);
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = galfus_frontend::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     let graph = resolve_result.into_graph();
     assert!(
         !graph.has_errors(),
@@ -249,15 +261,15 @@ fn test_mir_lowering_advanced() {
         graph.diagnostics()
     );
 
-    let type_result = check_declaration_types(&source, &graph);
+    let type_result = check_declaration_types(&source, &graph, &string_table);
     assert!(
         !type_result.has_errors(),
         "Typecheck error: {:?}",
         type_result.diagnostics()
     );
 
-    let mir_module = MirBuilder::new(&graph, &type_result, code).build();
-    let (module_image, _) = lower_module(&mir_module, &type_result, &graph, code);
+    let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
+    let (module_image, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
 
     // Verify functions
     assert!(!module_image.functions.is_empty());
@@ -313,7 +325,8 @@ fn test_mir_builder_for_loop() {
     let source = SourceFile::new(source_id, "test_for.gfs".to_string(), code.to_string());
 
     let parse_result = parse(&source);
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = galfus_frontend::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     let graph = resolve_result.into_graph();
     assert!(
         !graph.has_errors(),
@@ -321,14 +334,14 @@ fn test_mir_builder_for_loop() {
         graph.diagnostics()
     );
 
-    let type_result = check_declaration_types(&source, &graph);
+    let type_result = check_declaration_types(&source, &graph, &string_table);
     assert!(
         !type_result.has_errors(),
         "Typecheck error: {:?}",
         type_result.diagnostics()
     );
 
-    let mir_module = MirBuilder::new(&graph, &type_result, code).build();
+    let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
 
     assert_eq!(mir_module.functions.len(), 1);
     let func = &mir_module.functions[0];
@@ -358,17 +371,22 @@ fn test_async_call_emits_typed_future_instruction() {
     "#;
     let source = SourceFile::new(source_id, "typed_future.gfs".to_string(), code.to_string());
     let parse_result = parse(&source);
-    let graph = resolve(&source, parse_result.into_graph()).into_graph();
-    let type_result =
-        check_definition_types(&source, &graph, check_declaration_types(&source, &graph));
+    let mut string_table = galfus_frontend::StringTable::new();
+    let graph = resolve(&source, parse_result.into_graph(), &mut string_table).into_graph();
+    let type_result = check_definition_types(
+        &source,
+        &graph,
+        check_declaration_types(&source, &graph, &string_table),
+        &string_table,
+    );
     assert!(
         !type_result.has_errors(),
         "Typecheck error: {:?}",
         type_result.diagnostics()
     );
 
-    let mir_module = MirBuilder::new(&graph, &type_result, code).build();
-    let (module, _) = lower_module(&mir_module, &type_result, &graph, code);
+    let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
+    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
     let main = module
         .functions
         .iter()
@@ -418,17 +436,22 @@ fn test_indirect_async_call_emits_typed_future_instruction() {
         code.to_string(),
     );
     let parse_result = parse(&source);
-    let graph = resolve(&source, parse_result.into_graph()).into_graph();
-    let type_result =
-        check_definition_types(&source, &graph, check_declaration_types(&source, &graph));
+    let mut string_table = galfus_frontend::StringTable::new();
+    let graph = resolve(&source, parse_result.into_graph(), &mut string_table).into_graph();
+    let type_result = check_definition_types(
+        &source,
+        &graph,
+        check_declaration_types(&source, &graph, &string_table),
+        &string_table,
+    );
     assert!(
         !type_result.has_errors(),
         "Typecheck error: {:?}",
         type_result.diagnostics()
     );
 
-    let mir_module = MirBuilder::new(&graph, &type_result, code).build();
-    let (module, _) = lower_module(&mir_module, &type_result, &graph, code);
+    let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
+    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
     let main = module
         .functions
         .iter()

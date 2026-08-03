@@ -207,7 +207,11 @@ impl<'a> Resolver<'a> {
             return;
         };
 
-        let name = symbol_data.name().to_string();
+        let name = self
+            .string_table
+            .resolve(symbol_data.name())
+            .unwrap_or("")
+            .to_string();
         let kind = symbol_data.kind();
 
         self.resolution

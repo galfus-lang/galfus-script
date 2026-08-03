@@ -14,6 +14,7 @@ pub enum WorkspaceDiagnosticCode {
     ExportTargetMissing,
     UnsupportedWorkspaceTarget,
     InvalidExternalProxy,
+    ModuleCollision,
 }
 
 impl DiagnosticCodeKind for WorkspaceDiagnosticCode {
@@ -31,6 +32,7 @@ impl DiagnosticCodeKind for WorkspaceDiagnosticCode {
             Self::ExportTargetMissing => "W0010",
             Self::UnsupportedWorkspaceTarget => "W0011",
             Self::InvalidExternalProxy => "W0012",
+            Self::ModuleCollision => "W0013",
         }
     }
 
@@ -48,6 +50,7 @@ impl DiagnosticCodeKind for WorkspaceDiagnosticCode {
             Self::ExportTargetMissing => "export target missing",
             Self::UnsupportedWorkspaceTarget => "unsupported project target",
             Self::InvalidExternalProxy => "invalid external proxy",
+            Self::ModuleCollision => "module collision detected",
         }
     }
 }

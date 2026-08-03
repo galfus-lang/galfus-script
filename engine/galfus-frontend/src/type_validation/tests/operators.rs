@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_numeric_binary_expression() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var value: i32 = 1 + 2
 "#,
@@ -14,7 +14,7 @@ var value: i32 = 1 + 2
 
 #[test]
 fn check_promotes_integer_binary_expression_to_wider_type() {
-    let (source, graph, result) = check_source(
+    let (source, graph, result, _string_table) = check_source(
         r#"
 var left: i32 = 1
 var right: i64 = 2
@@ -52,12 +52,13 @@ var value = left + right
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -70,7 +71,7 @@ var value = left + right
 
 #[test]
 fn check_accepts_mixed_numeric_comparison_expression() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var left: i32 = 1
 var right: i64 = 2
@@ -92,12 +93,13 @@ var value: i32 = 1 + true
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -108,7 +110,7 @@ var value: i32 = 1 + true
 
 #[test]
 fn check_accepts_numeric_comparison_expression() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var value: bool = 1 < 2
 "#,
@@ -119,7 +121,7 @@ var value: bool = 1 < 2
 
 #[test]
 fn check_accepts_equality_expression() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var value: bool = 1 == 2
 "#,
@@ -139,12 +141,13 @@ var value: bool = 1 == true
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -155,7 +158,7 @@ var value: bool = 1 == true
 
 #[test]
 fn check_accepts_bool_binary_expression() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var value: bool = true && false
 "#,
@@ -175,12 +178,13 @@ var value: bool = true && 1
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -191,7 +195,7 @@ var value: bool = true && 1
 
 #[test]
 fn check_accepts_numeric_unary_expression() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var value: i32 = -1
 "#,
@@ -202,7 +206,7 @@ var value: i32 = -1
 
 #[test]
 fn check_accepts_bool_unary_expression() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var value: bool = !true
 "#,
@@ -222,12 +226,13 @@ var value: bool = !1
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -238,7 +243,7 @@ var value: bool = !1
 
 #[test]
 fn check_accepts_integer_bitwise_expression() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var value: i32 = 1 & 2
 "#,
@@ -249,7 +254,7 @@ var value: i32 = 1 & 2
 
 #[test]
 fn check_accepts_integer_shift_expression() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var value: i32 = 1 << 2
 "#,

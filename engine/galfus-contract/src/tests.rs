@@ -188,13 +188,15 @@ fn assert_builtin_checks(name: &str, source: &str) {
         source.to_string(),
     );
     let parse_result = galfus_frontend::parse(&source_file);
+    let mut string_table = galfus_frontend::StringTable::new();
     assert!(
         !parse_result.has_errors(),
         "{name} parse errors: {:?}",
         parse_result.diagnostics()
     );
 
-    let resolve_result = galfus_frontend::resolve(&source_file, parse_result.into_graph());
+    let resolve_result =
+        galfus_frontend::resolve(&source_file, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{name} resolve errors: {:?}",
@@ -202,7 +204,7 @@ fn assert_builtin_checks(name: &str, source: &str) {
     );
 
     let graph = resolve_result.into_graph();
-    let type_result = galfus_frontend::check_declaration_types(&source_file, &graph);
+    let type_result = galfus_frontend::check_declaration_types(&source_file, &graph, &string_table);
     assert!(
         !type_result.has_errors(),
         "{name} type errors: {:?}",

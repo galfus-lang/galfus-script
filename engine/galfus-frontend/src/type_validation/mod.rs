@@ -57,6 +57,7 @@ struct DeclarationTypeChecker<'a> {
     control_targets: Vec<control_flow::ControlTarget>,
 
     range_desugars: HashMap<NodeId, RangeDesugarTarget>,
+    string_table: &'a crate::StringTable,
 }
 
 #[derive(Debug, Clone)]
@@ -74,7 +75,12 @@ struct LoweredImportedConstraintMember {
 }
 
 impl<'a> DeclarationTypeChecker<'a> {
-    fn new(source: &'a SourceFile, graph: &'a ModuleAst, layer: TypeLayer) -> Self {
+    fn new(
+        source: &'a SourceFile,
+        graph: &'a ModuleAst,
+        layer: TypeLayer,
+        string_table: &'a crate::StringTable,
+    ) -> Self {
         Self {
             source,
             graph,
@@ -91,6 +97,7 @@ impl<'a> DeclarationTypeChecker<'a> {
             control_targets: Vec::new(),
 
             range_desugars: HashMap::new(),
+            string_table,
         }
     }
 
@@ -98,6 +105,7 @@ impl<'a> DeclarationTypeChecker<'a> {
         source: &'a SourceFile,
         graph: &'a ModuleAst,
         previous_result: TypeCheckResult,
+        string_table: &'a crate::StringTable,
     ) -> Self {
         Self {
             source,
@@ -115,6 +123,7 @@ impl<'a> DeclarationTypeChecker<'a> {
             control_targets: Vec::new(),
 
             range_desugars: previous_result.range_desugars,
+            string_table,
         }
     }
 
@@ -156,7 +165,7 @@ impl<'a> DeclarationTypeChecker<'a> {
             resolution
                 .symbols()
                 .iter()
-                .find(|symbol| symbol.name() == "Future")
+                .find(|symbol| self.string_table.resolve(symbol.name()) == Some("Future"))
                 .map(|symbol| {
                     self.layer
                         .symbol_type(symbol.id())
@@ -464,10 +473,15 @@ impl<'a> DeclarationTypeChecker<'a> {
     }
 }
 
-pub fn check_declaration_types(source: &SourceFile, graph: &ModuleAst) -> TypeCheckResult {
-    let lowering = bind_types(source, graph);
+pub fn check_declaration_types(
+    source: &SourceFile,
+    graph: &ModuleAst,
+    string_table: &crate::StringTable,
+) -> TypeCheckResult {
+    let lowering = bind_types(source, graph, string_table);
 
-    let mut checker = DeclarationTypeChecker::new(source, graph, lowering.into_layer());
+    let mut checker =
+        DeclarationTypeChecker::new(source, graph, lowering.into_layer(), string_table);
     checker.check_declarations();
     checker.into_result()
 }
@@ -476,8 +490,9 @@ pub fn check_definition_types(
     source: &SourceFile,
     graph: &ModuleAst,
     previous_result: TypeCheckResult,
+    string_table: &crate::StringTable,
 ) -> TypeCheckResult {
-    let mut checker = DeclarationTypeChecker::resume(source, graph, previous_result);
+    let mut checker = DeclarationTypeChecker::resume(source, graph, previous_result, string_table);
     checker.check_definitions();
     checker.into_result()
 }
@@ -487,8 +502,9 @@ pub fn check_definition_types_with_surfaces(
     graph: &ModuleAst,
     previous_result: TypeCheckResult,
     imported_types: &ImportedSurfaceTypes,
+    string_table: &crate::StringTable,
 ) -> TypeCheckResult {
-    let mut checker = DeclarationTypeChecker::resume(source, graph, previous_result);
+    let mut checker = DeclarationTypeChecker::resume(source, graph, previous_result, string_table);
     checker.bind_imported_symbol_types(imported_types.symbol_types());
     checker.bind_imported_path_types(imported_types.path_types());
     checker.bind_imported_member_types(imported_types.member_types());

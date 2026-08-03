@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_match_literal_patterns() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn code(value: i32): i32 {
   return match value {
@@ -34,12 +34,13 @@ fn code(value: i32): i32 {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -64,12 +65,13 @@ fn code(value: i32): i32 {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -82,7 +84,7 @@ fn code(value: i32): i32 {
 
 #[test]
 fn check_accepts_enum_variant_patterns() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 enum Direction {
   North,
@@ -103,7 +105,7 @@ fn code(direction: Direction): i32 {
 
 #[test]
 fn check_accepts_choice_payload_pattern() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 choice Result {
   Ok(i32),
@@ -124,7 +126,7 @@ fn unwrap(result: Result): i32 {
 
 #[test]
 fn check_accepts_generic_choice_payload_pattern_from_subject() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 choice Outcome<T> {
   Ok(T),
@@ -145,7 +147,7 @@ fn unwrap(value: Outcome<i32>): i32 {
 
 #[test]
 fn check_infers_match_literal_from_generic_choice_payload_type() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, _string_table) = check_source(
         r#"
 choice Outcome<T> {
   Ok(T),
@@ -190,12 +192,13 @@ fn unwrap(result: Result): i32 {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -223,12 +226,13 @@ fn unwrap(result: Result): i32 {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -239,7 +243,7 @@ fn unwrap(result: Result): i32 {
 
 #[test]
 fn check_accepts_exhaustive_choice_match() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         choice Result {
           Ok(i32),
@@ -260,7 +264,7 @@ fn check_accepts_exhaustive_choice_match() {
 
 #[test]
 fn check_accepts_choice_match_with_wildcard_default() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         choice Result {
           Ok(i32),
@@ -281,7 +285,7 @@ fn check_accepts_choice_match_with_wildcard_default() {
 
 #[test]
 fn check_accepts_choice_match_with_binding_default() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         choice Result {
           Ok(i32),
@@ -324,7 +328,8 @@ fn check_reports_non_exhaustive_choice_match() {
         parse_result.diagnostics()
     );
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -332,8 +337,8 @@ fn check_reports_non_exhaustive_choice_match() {
     );
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -367,7 +372,8 @@ fn check_reports_multiple_missing_choice_match_variants() {
         parse_result.diagnostics()
     );
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -375,8 +381,8 @@ fn check_reports_multiple_missing_choice_match_variants() {
     );
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -410,7 +416,8 @@ fn check_reports_non_exhaustive_enum_match() {
         parse_result.diagnostics()
     );
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -418,8 +425,8 @@ fn check_reports_non_exhaustive_enum_match() {
     );
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -444,12 +451,13 @@ fn code(value: i32): i32 {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {

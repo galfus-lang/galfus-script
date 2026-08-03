@@ -182,7 +182,12 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                             });
                         }
                         SymbolKind::ChoiceVariant => {
-                            let variant_name = variant_data.name().to_string();
+                            let variant_name = self
+                                .builder
+                                .string_table
+                                .resolve(variant_data.name())
+                                .unwrap_or("")
+                                .to_string();
                             let bool_ty = self
                                 .builder
                                 .type_result

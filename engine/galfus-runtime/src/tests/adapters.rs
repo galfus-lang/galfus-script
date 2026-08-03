@@ -132,9 +132,7 @@ fn adapter_graph() -> (Arc<BytecodeGraph>, ModuleId) {
                     proxy_module: "graphics.gfp".to_string(),
                     symbol: "acquire".to_string(),
                 }),
-                instructions: vec![
-                    Instruction::RetNull,
-                ],
+                instructions: vec![Instruction::RetNull],
             },
         ],
         types: vec![

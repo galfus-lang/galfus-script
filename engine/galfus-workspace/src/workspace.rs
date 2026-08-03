@@ -5,7 +5,7 @@ use std::str;
 
 use crate::config::{WORKSPACE_SOURCE_ID, WorkspaceConfig, parse_workspace_config};
 use crate::diagnostic::WorkspaceDiagnosticCode;
-use crate::source_store::ModuleOrigin;
+use crate::source_store::{LoadModuleError, ModuleOrigin};
 use crate::state::{
     BytecodeState, CheckState, CompileBlocked, CompileState, RunBlocked, SemanticState,
     SourceState, WorkspaceError,
@@ -138,12 +138,27 @@ impl Workspace {
         };
 
         self.source_state.revision.next();
-        self.source_state.store.load_module(
-            module_path.clone(),
-            source_bytes,
-            origin,
-            self.source_state.revision,
-        );
+        self.source_state
+            .store
+            .load_module(
+                module_path.clone(),
+                source_bytes,
+                origin,
+                self.source_state.revision,
+            )
+            .map_err(|err| match err {
+                LoadModuleError::Collision {
+                    attempted,
+                    existing,
+                    identity,
+                    id,
+                } => WorkspaceError::Collision {
+                    attempted: attempted.as_str().to_string(),
+                    existing: existing.as_str().to_string(),
+                    identity,
+                    id,
+                },
+            })?;
         if let Some(descriptor) = descriptor {
             self.external_descriptors
                 .insert(module_path.clone(), descriptor);
@@ -161,12 +176,27 @@ impl Workspace {
     ) -> Result<LoadResult, WorkspaceError> {
         let module_path = ModulePath::new(&bridge.name).ok_or(WorkspaceError::InvalidPath)?;
         self.source_state.revision.next();
-        self.source_state.store.load_module(
-            module_path.clone(),
-            Arc::from(bridge.source.as_bytes()),
-            ModuleOrigin::Builtin,
-            self.source_state.revision,
-        );
+        self.source_state
+            .store
+            .load_module(
+                module_path.clone(),
+                Arc::from(bridge.source.as_bytes()),
+                ModuleOrigin::Builtin,
+                self.source_state.revision,
+            )
+            .map_err(|err| match err {
+                LoadModuleError::Collision {
+                    attempted,
+                    existing,
+                    identity,
+                    id,
+                } => WorkspaceError::Collision {
+                    attempted: attempted.as_str().to_string(),
+                    existing: existing.as_str().to_string(),
+                    identity,
+                    id,
+                },
+            })?;
         self.source_state.dirty_sources.insert(module_path);
         self.mark_dirty();
         Ok(LoadResult::Success)
@@ -242,30 +272,31 @@ impl Workspace {
             } else {
                 let roots = self.frontend_roots();
                 let mut report = loop {
-                    let source_files = self
-                        .source_state
-                        .dirty_sources
-                        .iter()
-                        .filter_map(|path| self.source_state.store.get(path))
-                        .map(|entry| {
-                            (
-                                entry.module_id,
-                                entry.path.clone(),
-                                match entry.origin {
-                                    ModuleOrigin::User => FrontendModuleKind::Standard,
-                                    ModuleOrigin::Builtin => FrontendModuleKind::Builtin,
-                                    ModuleOrigin::ExternalProxy => {
-                                        FrontendModuleKind::ExternalProxy
-                                    }
-                                },
-                                SourceFile::new(
-                                    entry.source_id,
-                                    entry.path.to_string(),
-                                    str::from_utf8(&entry.bytes).unwrap_or("").to_string(),
-                                ),
-                            )
-                        })
-                        .collect::<Vec<_>>();
+                    let source_files = {
+                        let mut sorted_dirty: Vec<_> =
+                            self.source_state.dirty_sources.iter().collect();
+                        sorted_dirty.sort();
+                        sorted_dirty
+                    }
+                    .into_iter()
+                    .filter_map(|path| self.source_state.store.get(path))
+                    .map(|entry| {
+                        (
+                            entry.module_id,
+                            entry.path.clone(),
+                            match entry.origin {
+                                ModuleOrigin::User => FrontendModuleKind::Standard,
+                                ModuleOrigin::Builtin => FrontendModuleKind::Builtin,
+                                ModuleOrigin::ExternalProxy => FrontendModuleKind::ExternalProxy,
+                            },
+                            SourceFile::new(
+                                entry.source_id,
+                                entry.path.to_string(),
+                                str::from_utf8(&entry.bytes).unwrap_or("").to_string(),
+                            ),
+                        )
+                    })
+                    .collect::<Vec<_>>();
                     let sources = source_files
                         .iter()
                         .map(|(module_id, path, kind, source)| FrontendSource {
@@ -281,12 +312,33 @@ impl Workspace {
                         removed_modules: self.source_state.removed_modules.as_slice(),
                         roots: &roots,
                     };
-                    let report = self.frontend.check(update);
+                    let mut report = self.frontend.check(update);
                     self.source_state.dirty_sources.clear();
                     self.source_state.removed_modules.clear();
 
-                    if !self.load_required_builtins(&report.required_builtin_modules) {
-                        break report;
+                    match self.load_required_builtins(&report.required_builtin_modules) {
+                        Ok(false) => break report,
+                        Ok(true) => continue,
+                        Err(WorkspaceError::Collision {
+                            attempted,
+                            existing,
+                            identity,
+                            id,
+                        }) => {
+                            report.diagnostics.push(Diagnostic::error_with_message(
+                                WorkspaceDiagnosticCode::ModuleCollision,
+                                format!(
+                                    "Cannot load builtin module '{}' because {} {} collides with existing module '{}'",
+                                    attempted,
+                                    identity.label(),
+                                    id,
+                                    existing
+                                ),
+                                Span::empty(galfus_core::SourceId::new(0), 0),
+                            ));
+                            break report;
+                        }
+                        Err(_) => break report,
                     }
                 };
 
@@ -322,7 +374,10 @@ impl Workspace {
         }
     }
 
-    fn load_required_builtins(&mut self, paths: &HashSet<ModulePath>) -> bool {
+    fn load_required_builtins(
+        &mut self,
+        paths: &HashSet<ModulePath>,
+    ) -> Result<bool, WorkspaceError> {
         let mut loaded = false;
         for path in paths {
             if self.source_state.store.get(path).is_some() {
@@ -336,16 +391,31 @@ impl Workspace {
                 continue;
             };
             self.source_state.revision.next();
-            self.source_state.store.load_module(
-                path.clone(),
-                Arc::from(source.as_bytes()),
-                ModuleOrigin::Builtin,
-                self.source_state.revision,
-            );
+            self.source_state
+                .store
+                .load_module(
+                    path.clone(),
+                    Arc::from(source.as_bytes()),
+                    ModuleOrigin::Builtin,
+                    self.source_state.revision,
+                )
+                .map_err(|err| match err {
+                    LoadModuleError::Collision {
+                        attempted,
+                        existing,
+                        identity,
+                        id,
+                    } => WorkspaceError::Collision {
+                        attempted: attempted.as_str().to_string(),
+                        existing: existing.as_str().to_string(),
+                        identity,
+                        id,
+                    },
+                })?;
             self.source_state.dirty_sources.insert(path.clone());
             loaded = true;
         }
-        loaded
+        Ok(loaded)
     }
 
     fn validate_registered_adapter_schemas(&self, diagnostics: &mut DiagnosticBag) {
@@ -364,7 +434,7 @@ impl Workspace {
     }
 
     fn refresh_external_proxy_descriptors(&mut self, diagnostics: &mut DiagnosticBag) {
-        for module in &self.frontend.modules {
+        for module in self.frontend.modules() {
             if module.kind() != FrontendModuleKind::ExternalProxy {
                 continue;
             }
@@ -570,7 +640,7 @@ impl Workspace {
         // every semantic module even if the last frontend delta was narrower.
         let compilation_targets = if let Some(cached_graph) = cached_graph {
             self.frontend
-                .modules
+                .modules()
                 .iter()
                 .filter(|module| changed_modules.contains(&module.id()))
                 .filter(|module| {
@@ -582,7 +652,7 @@ impl Workspace {
                 .collect::<HashSet<_>>()
         } else {
             self.frontend
-                .modules
+                .modules()
                 .iter()
                 .map(|module| module.id())
                 .collect::<HashSet<_>>()
@@ -592,7 +662,7 @@ impl Workspace {
         let mut reachable_modules = HashSet::new();
 
         // Build CompiledModule list from the frontend's semantic modules.
-        let semantic_modules = &self.frontend.modules;
+        let semantic_modules = self.frontend.modules();
 
         let mut path_to_id = HashMap::new();
         for module in semantic_modules {
@@ -674,6 +744,7 @@ impl Workspace {
             &mut compiled_modules,
             &mut self.bytecode_state.compiler_state,
             &compilation_targets,
+            self.frontend.string_table(),
             base_graph.version(),
             semantic_revision,
             removed_modules,

@@ -85,11 +85,12 @@ pub struct FrontendReport {
 
 #[derive(Default)]
 pub struct FrontendSession {
-    pub modules: Vec<SemanticModule>,
+    pub(super) modules: Vec<SemanticModule>,
     module_by_path: HashMap<ModulePath, usize>,
     semantic_graph: SemanticModuleGraph,
     pub diagnostics: DiagnosticBag,
-    /// Global counter. Incremented each time any module's semantic result changes.
+    string_table: crate::StringTable,
+    /// Incremented each time a module's semantic result changes in this session.
     next_semantic_revision: u64,
 }
 
@@ -169,6 +170,14 @@ impl FrontendSession {
         &self.semantic_graph
     }
 
+    pub fn modules(&self) -> &[SemanticModule] {
+        &self.modules
+    }
+
+    pub fn string_table(&self) -> &crate::StringTable {
+        &self.string_table
+    }
+
     fn required_builtin_modules(&self) -> HashSet<ModulePath> {
         let mut required = HashSet::new();
         for (module_index, module) in self.modules.iter().enumerate() {
@@ -202,7 +211,11 @@ impl FrontendSession {
         source_revision: Revision,
     ) -> SemanticModule {
         let parse_result = parse(input.source);
-        let resolve_result = resolve(input.source, parse_result.into_graph());
+        let resolve_result = resolve(
+            input.source,
+            parse_result.into_graph(),
+            &mut self.string_table,
+        );
         let graph = resolve_result.into_graph();
         self.next_semantic_revision += 1;
 
@@ -462,14 +475,18 @@ impl FrontendSession {
         let baseline_results = self
             .modules
             .iter()
-            .map(|module| check_declaration_types(module.source(), module.graph()))
+            .map(|module| {
+                check_declaration_types(module.source(), module.graph(), &self.string_table)
+            })
             .collect::<Vec<_>>();
 
         let surfaces = self
             .modules
             .iter()
             .zip(baseline_results.iter())
-            .map(|(module, result)| build_module_surface(module.graph(), result))
+            .map(|(module, result)| {
+                build_module_surface(module.graph(), result, &self.string_table)
+            })
             .collect::<Vec<_>>();
 
         let imported_types = (0..self.modules.len())
@@ -492,6 +509,7 @@ impl FrontendSession {
                 self.modules[module_index].graph(),
                 previous_result,
                 imported_type,
+                &self.string_table,
             );
 
             self.modules[module_index].type_result = Some(result);

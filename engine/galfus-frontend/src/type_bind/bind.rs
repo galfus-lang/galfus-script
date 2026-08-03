@@ -24,29 +24,43 @@ impl TypeBindResult {
 
 pub type TypeLoweringResult = TypeBindResult;
 
-pub fn bind_types(source: &SourceFile, graph: &ModuleAst) -> TypeBindResult {
-    let mut binder = TypeBinder::new(source, graph);
+pub fn bind_types(
+    source: &SourceFile,
+    graph: &ModuleAst,
+    string_table: &crate::StringTable,
+) -> TypeBindResult {
+    let mut binder = TypeBinder::new(source, graph, string_table);
     binder.bind();
 
     TypeBindResult::new(binder.into_layer())
 }
 
-pub fn lower_types(source: &SourceFile, graph: &ModuleAst) -> TypeLoweringResult {
-    bind_types(source, graph)
+pub fn lower_types(
+    source: &SourceFile,
+    graph: &ModuleAst,
+    string_table: &crate::StringTable,
+) -> TypeLoweringResult {
+    bind_types(source, graph, string_table)
 }
 
 struct TypeBinder<'a> {
     source: &'a SourceFile,
     graph: &'a ModuleAst,
     layer: TypeLayer,
+    string_table: &'a crate::StringTable,
 }
 
 impl<'a> TypeBinder<'a> {
-    fn new(source: &'a SourceFile, graph: &'a ModuleAst) -> Self {
+    fn new(
+        source: &'a SourceFile,
+        graph: &'a ModuleAst,
+        string_table: &'a crate::StringTable,
+    ) -> Self {
         Self {
             source,
             graph,
             layer: TypeLayer::new(),
+            string_table,
         }
     }
 
@@ -178,10 +192,11 @@ impl<'a> TypeBinder<'a> {
         };
 
         if symbol_data.kind() == SymbolKind::BuiltinType {
-            if let Some(family) = self.layer.table_mut().primitive_family(symbol_data.name()) {
+            let symbol_name = self.string_table.resolve(symbol_data.name()).unwrap_or("");
+            if let Some(family) = self.layer.table_mut().primitive_family(symbol_name) {
                 return family;
             }
-            if let Some(primitive) = primitive_type_by_name(symbol_data.name()) {
+            if let Some(primitive) = primitive_type_by_name(symbol_name) {
                 return self.layer.table().primitive(primitive);
             }
 

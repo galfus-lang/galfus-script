@@ -14,7 +14,8 @@ fn resolve_binds_parameter_name_expression() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -32,7 +33,7 @@ fn resolve_binds_parameter_name_expression() {
     let symbol = resolution.reference_symbol(expression).unwrap();
     let symbol = resolution.symbol(symbol).unwrap();
 
-    assert_eq!(symbol.name(), "value");
+    assert_eq!(string_table.resolve(symbol.name()).unwrap_or(""), "value");
     assert_eq!(symbol.kind(), SymbolKind::Parameter);
 }
 
@@ -50,7 +51,8 @@ fn resolve_declares_function_expression_parameter_in_function_scope() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -67,7 +69,7 @@ fn resolve_declares_function_expression_parameter_in_function_scope() {
         .scope(resolution.node_scope(function).unwrap())
         .unwrap();
     let parameter_symbol = resolution
-        .symbol(function_scope.symbol("value").unwrap())
+        .symbol(function_scope.symbol(string_table.intern("value")).unwrap())
         .unwrap();
 
     assert_eq!(function_scope.kind(), ScopeKind::FunctionExpression);
@@ -78,7 +80,10 @@ fn resolve_declares_function_expression_parameter_in_function_scope() {
         .symbol(resolution.reference_symbol(expression).unwrap())
         .unwrap();
 
-    assert_eq!(reference_symbol.name(), "value");
+    assert_eq!(
+        string_table.resolve(reference_symbol.name()).unwrap_or(""),
+        "value"
+    );
     assert_eq!(reference_symbol.kind(), SymbolKind::Parameter);
     assert_eq!(reference_symbol.scope(), function_scope.id());
 }
@@ -104,7 +109,8 @@ fn resolve_block_function_parameter_reaches_block_body() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -124,7 +130,10 @@ fn resolve_block_function_parameter_reaches_block_body() {
         .symbol(resolution.reference_symbol(expression).unwrap())
         .unwrap();
 
-    assert_eq!(reference_symbol.name(), "value");
+    assert_eq!(
+        string_table.resolve(reference_symbol.name()).unwrap_or(""),
+        "value"
+    );
     assert_eq!(reference_symbol.kind(), SymbolKind::Parameter);
     assert_eq!(reference_symbol.scope(), function_scope_id);
 }
@@ -143,7 +152,8 @@ fn resolve_function_expression_body_can_capture_parent_scope_name() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -160,7 +170,10 @@ fn resolve_function_expression_body_can_capture_parent_scope_name() {
         .symbol(resolution.reference_symbol(expression).unwrap())
         .unwrap();
 
-    assert_eq!(reference_symbol.name(), "offset");
+    assert_eq!(
+        string_table.resolve(reference_symbol.name()).unwrap_or(""),
+        "offset"
+    );
     assert_eq!(reference_symbol.kind(), SymbolKind::Parameter);
 }
 
@@ -178,7 +191,8 @@ fn resolve_reports_duplicate_function_expression_parameter() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(resolve_result.has_errors());
 
@@ -213,7 +227,8 @@ fn resolve_declares_for_binding_in_for_scope() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -230,7 +245,7 @@ fn resolve_declares_for_binding_in_for_scope() {
         .scope(resolution.node_scope(for_statement).unwrap())
         .unwrap();
     let binding_symbol = resolution
-        .symbol(for_scope.symbol("item").unwrap())
+        .symbol(for_scope.symbol(string_table.intern("item")).unwrap())
         .unwrap();
 
     assert_eq!(for_scope.kind(), ScopeKind::For);
@@ -241,7 +256,10 @@ fn resolve_declares_for_binding_in_for_scope() {
         .symbol(resolution.reference_symbol(expression).unwrap())
         .unwrap();
 
-    assert_eq!(reference_symbol.name(), "item");
+    assert_eq!(
+        string_table.resolve(reference_symbol.name()).unwrap_or(""),
+        "item"
+    );
     assert_eq!(reference_symbol.kind(), SymbolKind::ForBinding);
 }
 
@@ -266,7 +284,8 @@ fn resolve_for_iterable_uses_parent_scope_before_for_binding_scope() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -283,7 +302,10 @@ fn resolve_for_iterable_uses_parent_scope_before_for_binding_scope() {
         .symbol(resolution.reference_symbol(iterable).unwrap())
         .unwrap();
 
-    assert_eq!(reference_symbol.name(), "items");
+    assert_eq!(
+        string_table.resolve(reference_symbol.name()).unwrap_or(""),
+        "items"
+    );
     assert_eq!(reference_symbol.kind(), SymbolKind::Parameter);
 }
 
@@ -303,7 +325,8 @@ fn resolve_reports_unknown_for_iterable_name() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(resolve_result.has_errors());
 

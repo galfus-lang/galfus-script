@@ -14,7 +14,7 @@ mod tests;
 mod type_member;
 mod type_reference;
 
-use crate::{AsNameId, ModuleAst, NameId, ResolverDiagnosticCode, SyntaxLayer, SyntaxNodeKind};
+use crate::{ModuleAst, NameId, ResolverDiagnosticCode, SyntaxLayer, SyntaxNodeKind};
 pub use export::*;
 use galfus_core::{Diagnostic, DiagnosticBag, NodeId, ScopeId, SourceFile, Span, SymbolId};
 pub use import::*;
@@ -58,10 +58,15 @@ pub struct Resolver<'a> {
     diagnostics: DiagnosticBag,
 
     resolution: ResolutionLayer,
+    string_table: &'a mut crate::StringTable,
 }
 
 impl<'a> Resolver<'a> {
-    pub fn new(source: &'a SourceFile, syntax: &'a SyntaxLayer) -> Self {
+    pub fn new(
+        source: &'a SourceFile,
+        syntax: &'a SyntaxLayer,
+        string_table: &'a mut crate::StringTable,
+    ) -> Self {
         let resolution = ResolutionLayer::new();
 
         let mut resolver = Self {
@@ -69,6 +74,7 @@ impl<'a> Resolver<'a> {
             syntax,
             diagnostics: DiagnosticBag::new(),
             resolution,
+            string_table,
         };
 
         resolver.create_builtin_scope();
@@ -83,6 +89,20 @@ impl<'a> Resolver<'a> {
         self.resolve_source_file();
 
         (self.resolution, self.diagnostics)
+    }
+
+    fn lookup_symbol_by_name(&self, scope: ScopeId, name: &str) -> Option<SymbolId> {
+        self.string_table
+            .get(name)
+            .and_then(|name_id| self.resolution.lookup_symbol(scope, name_id))
+    }
+
+    fn lookup_direct_symbol_by_name(&self, scope: ScopeId, name: &str) -> Option<SymbolId> {
+        self.string_table.get(name).and_then(|name_id| {
+            self.resolution
+                .scope(scope)
+                .and_then(|scope| scope.symbol(name_id))
+        })
     }
 
     fn resolve_source_file(&mut self) {
@@ -203,7 +223,7 @@ impl<'a> Resolver<'a> {
         };
 
         let symbol_name = self.function_symbol_name(item, name);
-        let name_id = NameId::intern(&symbol_name);
+        let name_id = self.string_table.intern(&symbol_name);
 
         self.declare_symbol(name_id, SymbolKind::Function, name, scope);
     }
@@ -217,7 +237,7 @@ impl<'a> Resolver<'a> {
         };
 
         let symbol_name = self.node_text(name);
-        let name_id = NameId::intern(&symbol_name);
+        let name_id = self.string_table.intern(&symbol_name);
 
         self.declare_symbol(name_id, kind, name, scope);
     }
@@ -270,7 +290,7 @@ impl<'a> Resolver<'a> {
 
             SyntaxNodeKind::Identifier => {
                 let symbol_name = self.node_text(pattern);
-                let name_id = NameId::intern(&symbol_name);
+                let name_id = self.string_table.intern(&symbol_name);
                 self.declare_symbol(name_id, kind, pattern, scope);
             }
 
@@ -295,7 +315,7 @@ impl<'a> Resolver<'a> {
                     1 => {
                         if let Some(name) = node.first_child() {
                             let symbol_name = self.node_text(name);
-                            let name_id = NameId::intern(&symbol_name);
+                            let name_id = self.string_table.intern(&symbol_name);
                             self.declare_symbol(name_id, kind, name, scope);
                         }
                     }
@@ -324,14 +344,13 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    pub(super) fn declare_symbol<N: AsNameId>(
+    pub(super) fn declare_symbol(
         &mut self,
-        name: N,
+        name_id: NameId,
         kind: SymbolKind,
         declaration: NodeId,
         scope: ScopeId,
     ) -> Option<SymbolId> {
-        let name_id = name.to_name_id();
         if self
             .resolution
             .scope(scope)
@@ -346,7 +365,10 @@ impl<'a> Resolver<'a> {
 
             self.diagnostics.push(Diagnostic::error_with_message(
                 ResolverDiagnosticCode::DuplicateSymbol,
-                format!("duplicate symbol `{name_id}`"),
+                format!(
+                    "duplicate symbol `{}`",
+                    self.string_table.resolve(name_id).unwrap_or("")
+                ),
                 span,
             ));
 
@@ -373,8 +395,12 @@ impl<'a> Resolver<'a> {
     }
 }
 
-pub fn resolve(source: &SourceFile, mut graph: ModuleAst) -> ResolveResult {
-    let resolver = Resolver::new(source, graph.syntax());
+pub fn resolve(
+    source: &SourceFile,
+    mut graph: ModuleAst,
+    string_table: &mut crate::StringTable,
+) -> ResolveResult {
+    let resolver = Resolver::new(source, graph.syntax(), string_table);
     let (resolution, diagnostics) = resolver.resolve();
 
     graph.extend_diagnostics(diagnostics.into_vec());

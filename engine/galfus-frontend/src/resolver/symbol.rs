@@ -66,11 +66,7 @@ impl Symbol {
         self.kind
     }
 
-    pub fn name(&self) -> &'static str {
-        self.name.as_str()
-    }
-
-    pub fn name_id(&self) -> NameId {
+    pub fn name(&self) -> NameId {
         self.name
     }
 

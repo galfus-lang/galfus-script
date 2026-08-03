@@ -4,7 +4,10 @@ use super::*;
 
 impl VirtualMachine {
     #[allow(clippy::collapsible_if)]
-    pub fn release_unreachable(&self, thread: &mut thread::VmThreadState) -> Vec<(String, String, u64)> {
+    pub fn release_unreachable(
+        &self,
+        thread: &mut thread::VmThreadState,
+    ) -> Vec<(String, String, u64)> {
         use std::collections::{HashSet, VecDeque};
 
         thread.heap.allocations_since_release = 0;
@@ -105,7 +108,11 @@ impl VirtualMachine {
         let released_handles: Vec<(String, String, u64)> = dead_objects
             .iter()
             .filter_map(|&idx| match thread.heap.objects[idx].as_ref() {
-                Some(HeapObject::ExternalHandle { proxy_module, kind, id }) => Some((proxy_module.clone(), kind.clone(), *id)),
+                Some(HeapObject::ExternalHandle {
+                    proxy_module,
+                    kind,
+                    id,
+                }) => Some((proxy_module.clone(), kind.clone(), *id)),
                 _ => None,
             })
             .collect();

@@ -54,18 +54,20 @@ pub(crate) fn decode_from_thread_heap(
             module_id: module_id.raw(),
             func_idx: func_idx.raw(),
         }),
-        (BytecodeType::ExternalHandle(kind), galfus_vm::VmValue::Object(reference)) => match heap
-            .get_object(reference)
-        {
-            Ok(galfus_vm::HeapObject::ExternalHandle { proxy_module, kind: actual, id }) if actual == kind => {
-                Ok(BoundaryValue::Handle {
+        (BytecodeType::ExternalHandle(kind), galfus_vm::VmValue::Object(reference)) => {
+            match heap.get_object(reference) {
+                Ok(galfus_vm::HeapObject::ExternalHandle {
+                    proxy_module,
+                    kind: actual,
+                    id,
+                }) if actual == kind => Ok(BoundaryValue::Handle {
                     proxy_module: Some(proxy_module.clone()),
                     kind: kind.clone(),
                     id: *id,
-                })
+                }),
+                _ => Err(mismatch()),
             }
-            _ => Err(mismatch()),
-        },
+        }
         (BytecodeType::Array(element_type), galfus_vm::VmValue::Object(reference)) => {
             let galfus_vm::HeapObject::Array { elements, .. } = heap
                 .get_object(reference)
@@ -224,13 +226,20 @@ pub(crate) fn encode_into_thread_heap(
             module_id: galfus_core::ModuleId::new(module_id),
             func_idx: galfus_bytecode::instruction::FuncIdx(func_idx),
         }),
-        (BytecodeType::ExternalHandle(kind), BoundaryValue::Handle { proxy_module, kind: actual, id })
-            if kind == &actual =>
-        {
-            Ok(galfus_vm::VmValue::Object(heap.alloc(
-                galfus_vm::HeapObject::ExternalHandle { proxy_module: proxy_module.clone().unwrap_or_default(), kind: actual, id },
-            )))
-        }
+        (
+            BytecodeType::ExternalHandle(kind),
+            BoundaryValue::Handle {
+                proxy_module,
+                kind: actual,
+                id,
+            },
+        ) if kind == &actual => Ok(galfus_vm::VmValue::Object(heap.alloc(
+            galfus_vm::HeapObject::ExternalHandle {
+                proxy_module: proxy_module.clone().unwrap_or_default(),
+                kind: actual,
+                id,
+            },
+        ))),
         (BytecodeType::Array(element_type), BoundaryValue::Bytes(bytes))
             if matches!(
                 module.types.get(element_type.raw() as usize),

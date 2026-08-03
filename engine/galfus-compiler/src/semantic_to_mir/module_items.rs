@@ -37,7 +37,11 @@ impl<'a> MirBuilder<'a> {
 
         // Get function symbol and type
         let symbol = resolution.declaration_symbol(name_node)?;
-        let name = resolution.symbol(symbol)?.name().to_string();
+        let name = self
+            .string_table
+            .resolve(resolution.symbol(symbol)?.name())
+            .unwrap_or("")
+            .to_string();
         let func_type = self.type_result.layer().symbol_type(symbol)?;
         let func_id = specialized_id.unwrap_or_else(|| FunctionId::new(symbol.raw()));
 
@@ -579,7 +583,12 @@ impl<'a> MirBuilder<'a> {
 
         let mut fields = Vec::new();
         let root = self.graph.syntax().root().unwrap();
-        if let Some(item_node) = self.find_struct_item_by_name(root, struct_symbol_data.name()) {
+        if let Some(item_node) = self.find_struct_item_by_name(
+            root,
+            self.string_table
+                .resolve(struct_symbol_data.name())
+                .unwrap_or(""),
+        ) {
             let syntax = self.graph.syntax();
             let field_children = syntax
                 .first_child_of_kind(item_node, SyntaxNodeKind::StructFieldList)
@@ -679,7 +688,12 @@ impl<'a> MirBuilder<'a> {
         let resolution = self.graph.resolution()?;
         let struct_symbol_data = resolution.symbol(struct_symbol)?;
         let root = self.graph.syntax().root().unwrap();
-        let struct_item = self.find_struct_item_by_name(root, struct_symbol_data.name())?;
+        let struct_item = self.find_struct_item_by_name(
+            root,
+            self.string_table
+                .resolve(struct_symbol_data.name())
+                .unwrap_or(""),
+        )?;
 
         let field_node = self.find_struct_field_node_by_name(struct_item, field_name)?;
         let syntax = self.graph.syntax();

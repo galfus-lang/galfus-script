@@ -303,12 +303,19 @@ impl Orchestrator {
                     galfus_vm::VmValue::Null,
                 );
             }
-            galfus_vm::VmEffect::ExternalHandleDropped { proxy_module, kind, id } => {
+            galfus_vm::VmEffect::ExternalHandleDropped {
+                proxy_module,
+                kind,
+                id,
+            } => {
                 if let Some(bindings) = &self.external_bindings {
                     // `ExternalBindings` removes the ownership entry before
                     // notifying the adapter, making repeated graph-release
                     // notifications harmless.
-                    bindings.lock().unwrap().release_handle(&proxy_module, &kind, id);
+                    bindings
+                        .lock()
+                        .unwrap()
+                        .release_handle(&proxy_module, &kind, id);
                 }
                 self.resume_or_fail_front(
                     thread_id,

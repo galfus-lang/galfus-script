@@ -226,10 +226,12 @@ impl<'a> DeclarationTypeChecker<'a> {
         let struct_name = self.node_text(name_node);
         let resolution = self.graph.resolution()?;
 
+        let struct_name_id = self.string_table.get(&struct_name)?;
+
         let symbol = resolution
             .symbols()
             .iter()
-            .find(|symbol| symbol.name() == struct_name && symbol.kind() == SymbolKind::Struct)
+            .find(|symbol| symbol.name() == struct_name_id && symbol.kind() == SymbolKind::Struct)
             .map(|symbol| symbol.id())?;
 
         Some((symbol, struct_name))
@@ -239,7 +241,12 @@ impl<'a> DeclarationTypeChecker<'a> {
         let resolution = self.graph.resolution()?;
         let symbol_data = resolution.symbol(symbol)?;
 
-        Some(symbol_data.name().to_string())
+        Some(
+            self.string_table
+                .resolve(symbol_data.name())
+                .unwrap_or("")
+                .to_string(),
+        )
     }
 
     fn struct_satisfies_fields(&self, struct_symbol: SymbolId) -> Vec<StructFieldInfo> {
@@ -269,7 +276,7 @@ impl<'a> DeclarationTypeChecker<'a> {
 
                 Some(StructFieldInfo {
                     node: symbol_data.declaration(),
-                    name: name.to_string(),
+                    name: self.string_table.resolve(*name).unwrap_or("").to_string(),
                     ty,
                 })
             })
@@ -302,7 +309,7 @@ impl<'a> DeclarationTypeChecker<'a> {
                 let ty = self.layer.symbol_type(*symbol)?;
 
                 Some(ConstraintFieldInfo {
-                    name: name.to_string(),
+                    name: self.string_table.resolve(*name).unwrap_or("").to_string(),
                     ty,
                 })
             })
@@ -335,7 +342,7 @@ impl<'a> DeclarationTypeChecker<'a> {
                 let ty = self.layer.symbol_type(*symbol)?;
 
                 Some(ConstraintFunctionInfo {
-                    name: name.to_string(),
+                    name: self.string_table.resolve(*name).unwrap_or("").to_string(),
                     ty,
                 })
             })
@@ -516,15 +523,20 @@ impl<'a> DeclarationTypeChecker<'a> {
             }
         }
 
+        let function_name_id = self.string_table.get(function_name);
+
         resolution
             .symbols()
             .iter()
             .find(|symbol| {
                 symbol.kind() == SymbolKind::Function
                     && (symbol.declaration() == function
-                        || symbol.name() == function_name
-                        || symbol
-                            .name()
+                        || (function_name_id.is_some()
+                            && symbol.name() == function_name_id.unwrap())
+                        || self
+                            .string_table
+                            .resolve(symbol.name())
+                            .unwrap_or("")
                             .ends_with(format!("::{function_name}").as_str()))
             })
             .map(|symbol| symbol.id())
