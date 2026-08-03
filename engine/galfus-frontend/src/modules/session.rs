@@ -11,6 +11,7 @@ use crate::modules::module::{FrontendModuleKind, SemanticModule};
 use crate::modules::resolution::{
     is_builtin_module, is_resolvable_import, resolve_relative_import,
 };
+use crate::modules::snapshot::FrontendSnapshot;
 use crate::{
     ImportedSurfaceTypes, ModuleSurface, SyntaxNodeKind, build_module_surface,
     check_declaration_types, check_definition_types_with_surfaces,
@@ -177,6 +178,15 @@ impl FrontendSession {
 
     pub fn string_table(&self) -> &crate::StringTable {
         &self.string_table
+    }
+
+    pub fn snapshot(&self, semantic_revision: galfus_core::SemanticRevision) -> FrontendSnapshot {
+        FrontendSnapshot::new(
+            semantic_revision,
+            self.modules.clone(),
+            self.semantic_graph.clone(),
+            self.string_table.clone(),
+        )
     }
 
     fn required_builtin_modules(&self) -> Vec<ModulePath> {

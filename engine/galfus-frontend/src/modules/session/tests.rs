@@ -482,3 +482,52 @@ fn check_exposes_semantic_modules_in_canonical_module_id_order() {
         [ModuleId::new(7), ModuleId::new(13), ModuleId::new(41)]
     );
 }
+
+#[test]
+fn snapshot_preserves_the_checked_frontend_state() {
+    let initial = SourceFile::new(
+        SourceId::new(1),
+        "src/main.gfs".to_string(),
+        "fn initial(): i32 { return 0 }".to_string(),
+    );
+    let initial_sources = [FrontendSource {
+        module_id: ModuleId::new(7),
+        path: path("src/main.gfs"),
+        source: &initial,
+        kind: FrontendModuleKind::Standard,
+    }];
+    let mut session = FrontendSession::new();
+    let initial_report = session.check(FrontendUpdate {
+        source_revision: Revision::new(1),
+        sources: &initial_sources,
+        removed_modules: &[],
+        roots: &FrontendRoots::default(),
+    });
+    let snapshot = session.snapshot(initial_report.semantic_revision);
+
+    let updated = SourceFile::new(
+        SourceId::new(1),
+        "src/main.gfs".to_string(),
+        "fn updated(): i32 { return 1 }".to_string(),
+    );
+    let updated_sources = [FrontendSource {
+        module_id: ModuleId::new(7),
+        path: path("src/main.gfs"),
+        source: &updated,
+        kind: FrontendModuleKind::Standard,
+    }];
+    session.check(FrontendUpdate {
+        source_revision: Revision::new(2),
+        sources: &updated_sources,
+        removed_modules: &[],
+        roots: &FrontendRoots::default(),
+    });
+
+    let snapshot_module = snapshot
+        .semantic_graph()
+        .get(ModuleId::new(7))
+        .expect("snapshot module");
+    assert_eq!(snapshot_module.source().text(), initial.text());
+    assert_eq!(snapshot.modules()[0].source().text(), initial.text());
+    assert_ne!(session.modules()[0].source().text(), initial.text());
+}
