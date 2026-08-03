@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_struct_literal() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 struct User {
   id: i32,
@@ -22,7 +22,7 @@ var user: User = new(User) {
 
 #[test]
 fn check_contextual_integer_struct_field_type() {
-    let (source, graph, result, string_table) = check_source(
+    let (source, graph, result, _string_table) = check_source(
         r#"
 struct Color {
   r: u8,
@@ -178,7 +178,7 @@ var user: User = new(User) {
 
 #[test]
 fn check_accepts_missing_default_struct_field() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 struct User {
   id: i32,
@@ -196,7 +196,7 @@ var user: User = new(User) {
 
 #[test]
 fn check_accepts_assignment_to_mutable_struct_field() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 struct User {
   id: i32,
@@ -285,7 +285,7 @@ var user: User = new(User) {
 
 #[test]
 fn check_accepts_struct_literal_shorthand() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 struct User {
   id: i32,

@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_matching_assignment_type() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn main(): null {
   var age: i32 = 10
@@ -144,7 +144,7 @@ fn main(values: [i32]): null {
 
 #[test]
 fn check_accepts_nullable_assignment() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn main(): null {
   var maybe: i32 | null = null
@@ -159,7 +159,7 @@ fn main(): null {
 
 #[test]
 fn check_accepts_numeric_compound_assignment() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn main(): null {
   var age: i32 = 10
@@ -204,7 +204,7 @@ fn main(): null {
 
 #[test]
 fn check_accepts_bitwise_compound_assignment() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn main(): null {
   var flags: i32 = 1
@@ -219,7 +219,7 @@ fn main(): null {
 
 #[test]
 fn check_accepts_shift_compound_assignment() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn main(): null {
   var flags: i32 = 1
@@ -234,7 +234,7 @@ fn main(): null {
 
 #[test]
 fn check_accepts_null_fallback_assignment_for_nullable_target() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn main(): null {
   var maybe: i32 | null = null

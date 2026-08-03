@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_numeric_binary_expression() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var value: i32 = 1 + 2
 "#,
@@ -14,7 +14,7 @@ var value: i32 = 1 + 2
 
 #[test]
 fn check_promotes_integer_binary_expression_to_wider_type() {
-    let (source, graph, result, string_table) = check_source(
+    let (source, graph, result, _string_table) = check_source(
         r#"
 var left: i32 = 1
 var right: i64 = 2
@@ -71,7 +71,7 @@ var value = left + right
 
 #[test]
 fn check_accepts_mixed_numeric_comparison_expression() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var left: i32 = 1
 var right: i64 = 2
@@ -110,7 +110,7 @@ var value: i32 = 1 + true
 
 #[test]
 fn check_accepts_numeric_comparison_expression() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var value: bool = 1 < 2
 "#,
@@ -121,7 +121,7 @@ var value: bool = 1 < 2
 
 #[test]
 fn check_accepts_equality_expression() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var value: bool = 1 == 2
 "#,
@@ -158,7 +158,7 @@ var value: bool = 1 == true
 
 #[test]
 fn check_accepts_bool_binary_expression() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var value: bool = true && false
 "#,
@@ -195,7 +195,7 @@ var value: bool = true && 1
 
 #[test]
 fn check_accepts_numeric_unary_expression() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var value: i32 = -1
 "#,
@@ -206,7 +206,7 @@ var value: i32 = -1
 
 #[test]
 fn check_accepts_bool_unary_expression() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var value: bool = !true
 "#,
@@ -243,7 +243,7 @@ var value: bool = !1
 
 #[test]
 fn check_accepts_integer_bitwise_expression() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var value: i32 = 1 & 2
 "#,
@@ -254,7 +254,7 @@ var value: i32 = 1 & 2
 
 #[test]
 fn check_accepts_integer_shift_expression() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var value: i32 = 1 << 2
 "#,

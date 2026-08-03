@@ -30,10 +30,25 @@ fn get_returns_none_for_unknown_string() {
 }
 
 #[test]
+fn get_does_not_add_unknown_strings() {
+    let table = StringTable::new();
+
+    assert_eq!(table.get("missing"), None);
+    assert_eq!(table.len(), 0);
+}
+
+#[test]
 fn get_returns_some_after_intern() {
     let mut table = StringTable::new();
     let id = table.intern("present");
     assert_eq!(table.get("present"), Some(id));
+}
+
+#[test]
+fn resolve_returns_none_for_an_invalid_name_id() {
+    let table = StringTable::new();
+
+    assert_eq!(table.resolve(NameId(42)), None);
 }
 
 #[test]

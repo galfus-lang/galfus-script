@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_struct_member_access() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 struct User {
   id: i64,
@@ -20,7 +20,7 @@ fn getId(user: User): i64 {
 
 #[test]
 fn check_binds_struct_member_expression_type() {
-    let (source, graph, result, string_table) = check_source(
+    let (source, graph, result, _string_table) = check_source(
         r#"
 struct User {
   id: i64,
@@ -78,7 +78,7 @@ fn getName(user: User): i64 {
 
 #[test]
 fn check_accepts_null_safe_member_access_for_nullable_target() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 struct User {
   id: i64,
@@ -127,7 +127,7 @@ fn getId(user: User | null): i64 {
 
 #[test]
 fn check_accepts_array_index_expression() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn get(values: [i32]): i32 | null {
   return values[0]
@@ -140,7 +140,7 @@ fn get(values: [i32]): i32 | null {
 
 #[test]
 fn check_binds_array_index_expression_type_as_nullable_element() {
-    let (source, graph, result, string_table) = check_source(
+    let (source, graph, result, _string_table) = check_source(
         r#"
 fn get(values: [i32]): i32 | null {
   return values[0]

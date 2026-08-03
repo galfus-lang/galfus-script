@@ -149,7 +149,10 @@ export fn(async) add(left: i32, right: i32): i32
         (check.is_valid, format!("{:?}", check.diagnostics))
     };
     assert!(is_valid, "{diagnostics}");
-    assert_eq!(workspace.external_descriptors[&ModulePath::new("math.gfp").unwrap()].adapter, "demo");
+    assert_eq!(
+        workspace.external_descriptors[&ModulePath::new("math.gfp").unwrap()].adapter,
+        "demo"
+    );
     assert_eq!(
         workspace.external_descriptors[&ModulePath::new("math.gfp").unwrap()].exports,
         vec![galfus_contract::ExternalFunctionSignature {
@@ -184,7 +187,10 @@ export fn(async) add(left: i32, right: i32): i32
         .expect("proxy export");
     let instructions = &function.instructions;
     assert!(
-        matches!(instructions.first(), Some(galfus_bytecode::Instruction::RetNull)),
+        matches!(
+            instructions.first(),
+            Some(galfus_bytecode::Instruction::RetNull)
+        ),
         "{instructions:?}"
     );
     let proxy_metadata = function.proxy_metadata.as_ref().expect("proxy metadata");
@@ -578,9 +584,12 @@ fn compile_produces_identical_bytecode_regardless_of_module_load_order() {
         .collect();
     paths_a.sort();
     paths_b.sort();
-    assert_eq!(paths_a, paths_b, "both workspaces must compile the same set of modules");
+    assert_eq!(
+        paths_a, paths_b,
+        "both workspaces must compile the same set of modules"
+    );
 
-    // Compare each module's function and import counts.
+    // Compare complete bytecode modules after locating them by logical path.
     for path in &paths_a {
         let mod_a = graph_a
             .modules()
@@ -591,21 +600,9 @@ fn compile_produces_identical_bytecode_regardless_of_module_load_order() {
             .find(|m| m.path().as_str() == path)
             .expect("module exists in B");
         assert_eq!(
-            mod_a.module().functions.len(),
-            mod_b.module().functions.len(),
-            "module '{}' must have the same number of functions",
-            path
-        );
-        assert_eq!(
-            mod_a.module().imports.len(),
-            mod_b.module().imports.len(),
-            "module '{}' must have the same number of import slots",
-            path
-        );
-        assert_eq!(
-            mod_a.module().exports.len(),
-            mod_b.module().exports.len(),
-            "module '{}' must have the same number of export slots",
+            mod_a.module(),
+            mod_b.module(),
+            "module '{}' must have identical bytecode",
             path
         );
     }

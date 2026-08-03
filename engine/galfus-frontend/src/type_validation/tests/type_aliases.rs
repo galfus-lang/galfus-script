@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_primitive_type_alias_assignment() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 type UserId = i32
 
@@ -44,7 +44,7 @@ var id: UserId = true
 
 #[test]
 fn check_accepts_union_type_alias_assignment() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 type MaybeInt = i32 | null
 
@@ -57,7 +57,7 @@ var value: MaybeInt = null
 
 #[test]
 fn check_accepts_dynamic_array_type_alias_assignment() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 type Bytes = [u8]
 
@@ -70,7 +70,7 @@ var name: Bytes = ""
 
 #[test]
 fn check_accepts_array_type_alias_assignment() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 type Ints = [i32]
 
@@ -83,7 +83,7 @@ var values: Ints = [1, 2, 3]
 
 #[test]
 fn check_accepts_for_over_dynamic_array_type_alias() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 type Ints = [i32]
 
@@ -102,7 +102,7 @@ fn main(values: Ints): null {
 
 #[test]
 fn check_accepts_struct_field_type_alias() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 type Bytes = [u8]
 
@@ -121,7 +121,7 @@ var user: User = new(User) {
 
 #[test]
 fn check_accepts_instanceof_with_union_type_alias() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 type MaybeInt = i32 | null
 

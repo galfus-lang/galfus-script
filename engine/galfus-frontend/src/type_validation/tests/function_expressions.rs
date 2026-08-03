@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_infers_expression_function_body_type() {
-    let (source, graph, result, string_table) = check_source(
+    let (source, graph, result, _string_table) = check_source(
         r#"
         var double = fn (value: i32): i32 => value * 2
         "#,
@@ -40,7 +40,7 @@ fn check_infers_expression_function_body_type() {
 
 #[test]
 fn check_infers_expression_function_return_type_without_annotation() {
-    let (_source, graph, result, string_table) = check_source(
+    let (_source, graph, result, _string_table) = check_source(
         r#"
         var double = fn (value: i32) => value * 2
         "#,
@@ -62,7 +62,7 @@ fn check_infers_expression_function_return_type_without_annotation() {
 
 #[test]
 fn check_binds_async_function_expression_as_a_future() {
-    let (_source, graph, result, string_table) = check_source(
+    let (_source, graph, result, _string_table) = check_source(
         r#"
 struct Future<T> {
   id: i64,
@@ -85,7 +85,7 @@ var load = fn(async) (): i32 => 1
 
 #[test]
 fn check_accepts_block_function_body() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         var printer = fn (value: i32): null {
           return
@@ -132,7 +132,7 @@ fn check_reports_missing_return_for_block_function() {
 
 #[test]
 fn check_accepts_function_metadata_on_function_expression() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         var callback = fn(stamp) (): i32 => 1
         "#,
@@ -143,7 +143,7 @@ fn check_accepts_function_metadata_on_function_expression() {
 
 #[test]
 fn check_accepts_expression_function_as_call_argument() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn apply(callback: fn(i32): i32): i32 {
           return callback(1)
@@ -192,7 +192,7 @@ fn check_collects_closure_capture_ownership_metadata() {
 
 #[test]
 fn check_does_not_capture_function_expression_local_parameter() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         var double = fn (value: i32): i32 => value * 2
         "#,
@@ -203,7 +203,7 @@ fn check_does_not_capture_function_expression_local_parameter() {
 
 #[test]
 fn check_does_not_leak_block_function_return_to_outer_function() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn main(): null {
           var callback = fn (value: i32): i32 {

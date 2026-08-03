@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_enum_variant_expression() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 enum Direction {
   North,
@@ -52,7 +52,7 @@ var direction: Direction = Direction::North
 
 #[test]
 fn check_accepts_integer_enum_base_type() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 enum(u8) Mode {
   Off(0),
@@ -128,7 +128,7 @@ enum(u8) Mode {
 
 #[test]
 fn check_accepts_choice_variant_without_payload() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 choice Asset {
   None,
@@ -144,7 +144,7 @@ var asset: Asset = Asset::None
 
 #[test]
 fn check_accepts_choice_variant_with_payload() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 choice Asset {
   None,
@@ -160,7 +160,7 @@ var asset: Asset = Asset::Texture("grass.png")
 
 #[test]
 fn check_accepts_choice_variant_with_multiple_payload_items() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 choice Asset {
   Image([u8], i32, i32),
@@ -212,7 +212,7 @@ var value = Outcome::Ok(42)
 
 #[test]
 fn check_accepts_generic_choice_variant_inferred_from_expected() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 choice Outcome<T> {
   Ok(T),

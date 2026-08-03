@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_function_decorator() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn log(target: fn(): null): fn(): null {
           return target
@@ -21,7 +21,7 @@ fn check_accepts_function_decorator() {
 
 #[test]
 fn check_accepts_decorator_call_with_arguments() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn tag(target: fn(): null, name: [u8], value: i32, enabled: bool): fn(): null {
           return target
@@ -39,7 +39,7 @@ fn check_accepts_decorator_call_with_arguments() {
 
 #[test]
 fn check_accepts_struct_and_field_decorators() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn frozen(target: User): User {
           return target
@@ -62,7 +62,7 @@ fn check_accepts_struct_and_field_decorators() {
 
 #[test]
 fn check_accepts_choice_payload_item_decorator() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn path(target: [u8]): [u8] {
           return target
@@ -79,7 +79,7 @@ fn check_accepts_choice_payload_item_decorator() {
 
 #[test]
 fn check_accepts_weak_struct_field_decorator() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn nullable(target: Node | null): Node | null {
           return target
@@ -140,7 +140,7 @@ fn check_reports_omitted_decorator_argument() {
 
 #[test]
 fn check_accepts_omitted_default_decorator_argument() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn tag(target: fn(): null, name: [u8] = "stable", priority: i32): fn(): null {
           return target
@@ -184,7 +184,7 @@ fn parse_accepts_decorated_weak_struct_field() {
 
 #[test]
 fn check_accepts_parameter_and_rest_parameter_decorators() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn trim(target: [u8]): [u8] {
           return target
@@ -357,7 +357,7 @@ fn check_reports_decorator_explicit_argument_type_mismatch() {
 
 #[test]
 fn check_accepts_function_decorator_transformer() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn log(target: fn(i32): bool): fn(i32): bool {
           return target

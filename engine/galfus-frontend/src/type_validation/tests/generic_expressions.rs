@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_binds_generic_cast_type_in_anchored_function() {
-    let (_source, graph, result, string_table) = check_source(
+    let (_source, graph, result, _string_table) = check_source(
         r#"
 struct Range<T: i32 | f32> {
   value: T,
@@ -30,7 +30,7 @@ fn Range<T>::next(self): T {
 
 #[test]
 fn check_accepts_explicit_generic_function_call() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn identity<T: int>(value: T): T {
           return value
@@ -45,7 +45,7 @@ fn check_accepts_explicit_generic_function_call() {
 
 #[test]
 fn check_binds_explicit_generic_call_return_type() {
-    let (source, graph, result, string_table) = check_source(
+    let (source, graph, result, _string_table) = check_source(
         r#"
         fn identity<T: int>(value: T): T {
           return value
@@ -73,7 +73,7 @@ fn check_binds_explicit_generic_call_return_type() {
 
 #[test]
 fn check_accepts_explicit_generic_function_call_with_array_type_argument() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn identity<T: [u8]>(value: T): T {
           return value
@@ -89,7 +89,7 @@ fn check_accepts_explicit_generic_function_call_with_array_type_argument() {
 
 #[test]
 fn check_accepts_explicit_generic_function_call_with_multiple_arguments() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn first<A: int, B: bool>(left: A, right: B): A {
           return left
@@ -104,7 +104,7 @@ fn check_accepts_explicit_generic_function_call_with_multiple_arguments() {
 
 #[test]
 fn check_accepts_generic_bound_union_with_constraint_member() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         constraint Stringable {
           fn text(): [u8],

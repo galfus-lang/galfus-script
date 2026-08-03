@@ -168,5 +168,10 @@ impl CompileState {
 pub enum WorkspaceError {
     InvalidPath,
     MissingConfiguration,
-    Collision { attempted: String, existing: String },
+    Collision {
+        attempted: String,
+        existing: String,
+        identity: source_store::IdentityKind,
+        id: u32,
+    },
 }

@@ -17,7 +17,24 @@ pub enum LoadModuleError {
     Collision {
         attempted: ModulePath,
         existing: ModulePath,
+        identity: IdentityKind,
+        id: u32,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum IdentityKind {
+    Module,
+    Source,
+}
+
+impl IdentityKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Module => "ModuleId",
+            Self::Source => "SourceId",
+        }
+    }
 }
 
 pub struct SourceEntry {
@@ -59,6 +76,39 @@ impl SourceStore {
         hash
     }
 
+    fn non_reserved_id(mut hash: u32, domain: &[u8], payload: &[u8], reserved: u32) -> u32 {
+        let mut retry = 1u32;
+        while hash == reserved {
+            let mut retry_domain = Vec::with_capacity(domain.len() + 11);
+            retry_domain.extend_from_slice(domain);
+            retry_domain.extend_from_slice(b"rehash:");
+            retry_domain.extend_from_slice(&retry.to_le_bytes());
+            hash = Self::fnv1a_32(&retry_domain, payload);
+            retry = retry.wrapping_add(1);
+        }
+        hash
+    }
+
+    fn module_id_for(logical_path: &str) -> ModuleId {
+        let hash = Self::fnv1a_32(b"galfus:module:v1:", logical_path.as_bytes());
+        ModuleId::new(Self::non_reserved_id(
+            hash,
+            b"galfus:module:v1:",
+            logical_path.as_bytes(),
+            0,
+        ))
+    }
+
+    fn source_id_for(logical_path: &str) -> SourceId {
+        let hash = Self::fnv1a_32(b"galfus:source:v1:", logical_path.as_bytes());
+        SourceId::new(Self::non_reserved_id(
+            hash,
+            b"galfus:source:v1:",
+            logical_path.as_bytes(),
+            u32::MAX,
+        ))
+    }
+
     pub fn load_module(
         &mut self,
         path: ModulePath,
@@ -67,14 +117,8 @@ impl SourceStore {
         current_revision: Revision,
     ) -> Result<(ModuleId, SourceId), LoadModuleError> {
         let logical_path = path.as_str();
-
-        let hash = Self::fnv1a_32(b"galfus:module:v1:", logical_path.as_bytes());
-        let module_id_raw = if hash == 0 { 1 } else { hash };
-        let module_id = ModuleId::new(module_id_raw);
-
-        let hash = Self::fnv1a_32(b"galfus:source:v1:", logical_path.as_bytes());
-        let source_id_raw = if hash == u32::MAX { u32::MAX - 1 } else { hash };
-        let source_id = SourceId::new(source_id_raw);
+        let module_id = Self::module_id_for(logical_path);
+        let source_id = Self::source_id_for(logical_path);
 
         if let Some(entry) = self.entries_by_path.get_mut(&path) {
             entry.bytes = bytes;
@@ -82,14 +126,27 @@ impl SourceStore {
             entry.origin = origin;
             Ok((entry.module_id, entry.source_id))
         } else {
-            // Check for collision by iterating over existing values
-            for existing in self.entries_by_path.values() {
-                if existing.module_id == module_id || existing.source_id == source_id {
-                    return Err(LoadModuleError::Collision {
-                        attempted: path.clone(),
-                        existing: existing.path.clone(),
-                    });
-                }
+            let collision = self
+                .entries_by_path
+                .values()
+                .filter_map(|existing| {
+                    if existing.module_id == module_id {
+                        Some((IdentityKind::Module, module_id.raw(), existing))
+                    } else if existing.source_id == source_id {
+                        Some((IdentityKind::Source, source_id.raw(), existing))
+                    } else {
+                        None
+                    }
+                })
+                .min_by_key(|(identity, _, existing)| (existing.path.as_str(), *identity));
+
+            if let Some((identity, id, existing)) = collision {
+                return Err(LoadModuleError::Collision {
+                    attempted: path.clone(),
+                    existing: existing.path.clone(),
+                    identity,
+                    id,
+                });
             }
 
             self.entries_by_path.insert(

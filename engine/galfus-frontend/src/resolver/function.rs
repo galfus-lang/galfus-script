@@ -49,9 +49,7 @@ impl<'a> Resolver<'a> {
             .first_child_of_kind(function, SyntaxNodeKind::FunctionAnchor)?;
         let anchor_type = self.syntax.first_child(anchor)?;
         let anchor_name = self.function_anchor_base_name(anchor_type)?;
-        let symbol = self
-            .resolution
-            .lookup_symbol(parent_scope, self.string_table.intern(anchor_name.as_str()))?;
+        let symbol = self.lookup_symbol_by_name(parent_scope, anchor_name.as_str())?;
         let symbol_data = self.resolution.symbol(symbol)?;
 
         if symbol_data.kind() != SymbolKind::Struct {

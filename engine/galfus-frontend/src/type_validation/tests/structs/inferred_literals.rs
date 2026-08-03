@@ -104,7 +104,7 @@ struct Node {
 
 #[test]
 fn check_accepts_nullable_alias_weak_field_type() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 type MaybeNode = Node | null
 
@@ -119,7 +119,7 @@ struct Node {
 
 #[test]
 fn check_accepts_inferred_struct_literal_with_expected_type() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         struct User {
           id: i32,
@@ -138,7 +138,7 @@ fn check_accepts_inferred_struct_literal_with_expected_type() {
 
 #[test]
 fn check_accepts_inferred_struct_literal_with_default_field() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         struct User {
           name: [u8],

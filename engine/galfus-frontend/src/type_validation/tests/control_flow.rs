@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_if_bool_condition() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn main(): null {
   if true {
@@ -54,7 +54,7 @@ fn main(): null {
 
 #[test]
 fn check_accepts_break_inside_loop() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn main(): null {
   loop {
@@ -71,7 +71,7 @@ fn main(): null {
 
 #[test]
 fn check_accepts_continue_inside_loop() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn main(): null {
   loop {
@@ -150,7 +150,7 @@ fn main(): null {
 
 #[test]
 fn check_accepts_named_control_target() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn main(): null {
   loop(name: outer) {
@@ -168,7 +168,7 @@ fn main(): null {
 
 #[test]
 fn check_accepts_named_for_control_target() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn main(values: [i32]): null {
   for(name: values) value in values {

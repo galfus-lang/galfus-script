@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_struct_literal_spread_from_same_struct() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 struct User {
   id: i32,
@@ -94,7 +94,7 @@ struct User {
 
 #[test]
 fn check_accepts_struct_expansion_fields_in_literal() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 struct User {
   id: i32,
@@ -119,7 +119,7 @@ var admin: Admin = new(Admin) {
 
 #[test]
 fn check_accepts_member_access_to_struct_expansion_field() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 struct User {
   id: i32,
@@ -258,7 +258,7 @@ struct Child {
 
 #[test]
 fn check_ignores_weak_fields_for_ownership_cycle_metadata() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 struct Parent {
   child: Child | null,

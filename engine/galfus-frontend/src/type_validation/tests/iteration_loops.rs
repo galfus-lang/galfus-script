@@ -4,7 +4,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_for_over_dynamic_array() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn main(values: [i32]): null {
   for value in values {
@@ -55,7 +55,7 @@ fn main(): null {
 
 #[test]
 fn check_binds_for_binding_type_from_dynamic_array() {
-    let (source, graph, result, string_table) = check_source(
+    let (source, graph, result, _string_table) = check_source(
         r#"
 fn main(values: [i32]): null {
   for value in values {
@@ -142,7 +142,7 @@ fn Pattern::compare(self, value: [u8]): bool {
 
 #[test]
 fn check_accepts_ignored_for_binding() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn main(values: [i32]): null {
   for _ in values {
@@ -159,7 +159,7 @@ fn main(values: [i32]): null {
 
 #[test]
 fn check_binds_for_index_as_int32() {
-    let (source, graph, result, string_table) = check_source(
+    let (source, graph, result, _string_table) = check_source(
         r#"
 fn main(values: [i32]): null {
   for value, index in values {

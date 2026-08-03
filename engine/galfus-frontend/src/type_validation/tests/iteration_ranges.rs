@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_for_over_exclusive_range() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn main(): null {
           for value in 1..10 {
@@ -20,7 +20,7 @@ fn check_accepts_for_over_exclusive_range() {
 
 #[test]
 fn check_accepts_for_over_quantity_range_with_step() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn main(): null {
           for value in 1::10%2 {
@@ -37,7 +37,7 @@ fn check_accepts_for_over_quantity_range_with_step() {
 
 #[test]
 fn check_binds_for_binding_type_from_range() {
-    let (source, graph, result, string_table) = check_source(
+    let (source, graph, result, _string_table) = check_source(
         r#"
         fn main(): null {
           for value in 1..10 {
@@ -91,7 +91,7 @@ fn check_reports_range_assigned_to_int() {
 
 #[test]
 fn check_accepts_for_over_quantity_range() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn main(): null {
           for value in 1::10 {
@@ -108,7 +108,7 @@ fn check_accepts_for_over_quantity_range() {
 
 #[test]
 fn check_accepts_for_over_float_quantity_range() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn main(): null {
           for value in 1.0::3%0.5 {
@@ -125,7 +125,7 @@ fn check_accepts_for_over_float_quantity_range() {
 
 #[test]
 fn check_accepts_descending_exclusive_range() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn main(): null {
           for value in 10..1 {
@@ -142,7 +142,7 @@ fn check_accepts_descending_exclusive_range() {
 
 #[test]
 fn check_accepts_negative_range_step() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         fn main(): null {
           for value in 10::4%-2 {

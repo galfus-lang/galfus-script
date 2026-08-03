@@ -87,9 +87,8 @@ impl<'a> Resolver<'a> {
             SyntaxNodeKind::StructLiteralFieldShorthand => {
                 if let Some(ident) = self.syntax.first_child(node) {
                     let symbol_name = self.node_text(ident);
-                    let name_id = self.string_table.intern(&symbol_name);
 
-                    if let Some(symbol) = self.resolution.lookup_symbol(scope, name_id) {
+                    if let Some(symbol) = self.lookup_symbol_by_name(scope, &symbol_name) {
                         self.resolution.bind_reference(ident, symbol);
                     } else {
                         self.report_unresolved_name(ident, symbol_name);
@@ -150,9 +149,8 @@ impl<'a> Resolver<'a> {
         };
 
         let symbol_name = self.node_text(name);
-        let name_id = self.string_table.intern(&symbol_name);
 
-        if let Some(symbol) = self.resolution.lookup_symbol(scope, name_id) {
+        if let Some(symbol) = self.lookup_symbol_by_name(scope, &symbol_name) {
             self.resolution.bind_reference(expression, symbol);
             return;
         }
@@ -340,8 +338,7 @@ impl<'a> Resolver<'a> {
             .or_else(|| self.resolution.path_reference_symbol(reference_root))
             .or_else(|| {
                 let root_name = self.node_text(reference_root);
-                let root_name_id = self.string_table.intern(&root_name);
-                self.resolution.lookup_symbol(scope, root_name_id)
+                self.lookup_symbol_by_name(scope, &root_name)
             });
 
         let Some(root_symbol) = root_symbol else {
@@ -370,13 +367,8 @@ impl<'a> Resolver<'a> {
         };
 
         let variant_name = self.node_text(variant);
-        let variant_name_id = self.string_table.intern(&variant_name);
 
-        let Some(symbol) = self
-            .resolution
-            .scope(member_scope)
-            .and_then(|scope| scope.symbol(variant_name_id))
-        else {
+        let Some(symbol) = self.lookup_direct_symbol_by_name(member_scope, &variant_name) else {
             self.report_unresolved_path_member(variant, variant_name);
             return;
         };
@@ -427,11 +419,7 @@ impl<'a> Resolver<'a> {
     ) -> Option<SymbolId> {
         let member_scope = self.resolution.member_scope(root_symbol)?;
 
-        let member_name_id = self.string_table.intern(member_name);
-
-        self.resolution
-            .scope(member_scope)
-            .and_then(|scope| scope.symbol(member_name_id))
+        self.lookup_direct_symbol_by_name(member_scope, member_name)
     }
 
     fn resolve_anchor_function_member(
@@ -451,11 +439,7 @@ impl<'a> Resolver<'a> {
                 .resolve(root_symbol_data.name())
                 .unwrap_or("")
         );
-        let anchored_name_id = self.string_table.intern(&anchored_name);
-
-        let symbol = self
-            .resolution
-            .lookup_symbol(self.resolution.module_scope(), anchored_name_id)?;
+        let symbol = self.lookup_symbol_by_name(self.resolution.module_scope(), &anchored_name)?;
 
         let symbol_data = self.resolution.symbol(symbol)?;
 

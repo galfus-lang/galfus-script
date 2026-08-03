@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_exhaustive_typeof_over_bounded_generic() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 type Scalar = i32 | bool | null
 
@@ -22,7 +22,7 @@ fn dispatch<T: Scalar>(): i32 {
 
 #[test]
 fn check_accepts_typeof_wildcard_fallback() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 type Scalar = i32 | bool | null
 
@@ -40,7 +40,7 @@ fn dispatch<T: Scalar>(): i32 {
 
 #[test]
 fn check_typeof_propagates_generic_type_to_arm_body() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 type Scalar = i32 | bool
 

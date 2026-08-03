@@ -150,9 +150,13 @@ impl Workspace {
                 LoadModuleError::Collision {
                     attempted,
                     existing,
+                    identity,
+                    id,
                 } => WorkspaceError::Collision {
                     attempted: attempted.as_str().to_string(),
                     existing: existing.as_str().to_string(),
+                    identity,
+                    id,
                 },
             })?;
         if let Some(descriptor) = descriptor {
@@ -184,9 +188,13 @@ impl Workspace {
                 LoadModuleError::Collision {
                     attempted,
                     existing,
+                    identity,
+                    id,
                 } => WorkspaceError::Collision {
                     attempted: attempted.as_str().to_string(),
                     existing: existing.as_str().to_string(),
+                    identity,
+                    id,
                 },
             })?;
         self.source_state.dirty_sources.insert(module_path);
@@ -314,12 +322,17 @@ impl Workspace {
                         Err(WorkspaceError::Collision {
                             attempted,
                             existing,
+                            identity,
+                            id,
                         }) => {
                             report.diagnostics.push(Diagnostic::error_with_message(
                                 WorkspaceDiagnosticCode::ModuleCollision,
                                 format!(
-                                    "Cannot load builtin module '{}' because its identity collides with existing module '{}'",
-                                    attempted, existing
+                                    "Cannot load builtin module '{}' because {} {} collides with existing module '{}'",
+                                    attempted,
+                                    identity.label(),
+                                    id,
+                                    existing
                                 ),
                                 Span::empty(galfus_core::SourceId::new(0), 0),
                             ));
@@ -390,9 +403,13 @@ impl Workspace {
                     LoadModuleError::Collision {
                         attempted,
                         existing,
+                        identity,
+                        id,
                     } => WorkspaceError::Collision {
                         attempted: attempted.as_str().to_string(),
                         existing: existing.as_str().to_string(),
+                        identity,
+                        id,
                     },
                 })?;
             self.source_state.dirty_sources.insert(path.clone());

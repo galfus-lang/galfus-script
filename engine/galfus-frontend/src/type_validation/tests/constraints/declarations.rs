@@ -1,6 +1,6 @@
 #[test]
 fn check_accepts_struct_satisfies_constraint_field() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 constraint Named {
   name: [u8],
@@ -117,7 +117,7 @@ struct User satisfies Named {
 
 #[test]
 fn check_accepts_struct_satisfies_multiple_constraints() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 constraint Named {
   name: [u8],
@@ -139,7 +139,7 @@ struct User satisfies Named, Identified {
 
 #[test]
 fn check_accepts_constraint_field_type_alias() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 type Bytes = [u8]
 
@@ -158,7 +158,7 @@ struct User satisfies Named {
 
 #[test]
 fn check_accepts_struct_satisfies_constraint_function() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 constraint Named {
   fn name(): [u8],
@@ -179,7 +179,7 @@ fn User::name(): [u8] {
 
 #[test]
 fn check_accepts_constraint_function_value_anchor_call() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 constraint Stringable {
   fn stringify(): [u8],
@@ -340,7 +340,7 @@ fn User::set(value: i32): null {
 
 #[test]
 fn check_accepts_generic_constraint_function_explicit_argument() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 constraint Stringable<T> {
   fn toString(self): [u8],
@@ -361,7 +361,7 @@ fn User::toString(self): [u8] {
 
 #[test]
 fn check_accepts_anchored_function_using_struct_generic_parameter() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 constraint Unwrap<Self, Value> {
   fn unwrap(self): Self,
@@ -418,7 +418,7 @@ fn User::toString(self): i32 {
 
 #[test]
 fn check_accepts_generic_constraint_field() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 constraint HasValue<T> {
   value: T,

@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_int_array_literal() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var values: [i32] = [1, 2, 3]
 "#,
@@ -14,7 +14,7 @@ var values: [i32] = [1, 2, 3]
 
 #[test]
 fn check_contextual_integer_array_element_type() {
-    let (source, graph, result, string_table) = check_source(
+    let (source, graph, result, _string_table) = check_source(
         r#"
 var bytes: [u8] = [27, 91]
 "#,
@@ -62,7 +62,7 @@ var bytes: [u8] = [27, 300]
 
 #[test]
 fn check_binds_array_literal_type() {
-    let (source, graph, result, string_table) = check_source(
+    let (source, graph, result, _string_table) = check_source(
         r#"
 var values: [i32] = [1, 2, 3]
 "#,
@@ -114,7 +114,7 @@ var values: [i32] = [1, true]
 
 #[test]
 fn check_accepts_bool_array_literal() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var values: [bool] = [true, false]
 "#,
@@ -125,7 +125,7 @@ var values: [bool] = [true, false]
 
 #[test]
 fn check_accepts_string_literal_as_uint8_array() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var name: [u8] = "Renato"
 "#,
@@ -136,7 +136,7 @@ var name: [u8] = "Renato"
 
 #[test]
 fn check_binds_string_literal_type_as_uint8_array() {
-    let (source, graph, result, string_table) = check_source(
+    let (source, graph, result, _string_table) = check_source(
         r#"
 var name: [u8] = "Renato"
 "#,
@@ -162,7 +162,7 @@ var name: [u8] = "Renato"
 
 #[test]
 fn check_accepts_tuple_literal() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var point: (i32, bool) = (1, true)
 "#,
@@ -173,7 +173,7 @@ var point: (i32, bool) = (1, true)
 
 #[test]
 fn check_contextual_integer_tuple_element_type() {
-    let (source, graph, result, string_table) = check_source(
+    let (source, graph, result, _string_table) = check_source(
         r#"
 var pair: (u8, u16) = (27, 300)
 "#,
@@ -200,7 +200,7 @@ var pair: (u8, u16) = (27, 300)
 
 #[test]
 fn check_accepts_array_literal_spread() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var base: [i32] = [1, 2]
 var values: [i32] = [0, ...base, 3]
@@ -212,7 +212,7 @@ var values: [i32] = [0, ...base, 3]
 
 #[test]
 fn check_accepts_string_literal_spread() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var values: [u8] = [..."Hello", ..."Galfus!", ..."\n"]
 "#,
@@ -280,7 +280,7 @@ var values = []
 
 #[test]
 fn check_accepts_empty_string_literal_as_dynamic_uint8_array() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var value: [u8] = ""
 "#,
@@ -291,7 +291,7 @@ var value: [u8] = ""
 
 #[test]
 fn check_accepts_dynamic_array_literal_spread() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var base: [i32] = [1, 2]
 var values: [i32] = [0, ...base, 3]
@@ -303,7 +303,7 @@ var values: [i32] = [0, ...base, 3]
 
 #[test]
 fn check_accepts_builtin_int_and_float_union_arrays() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var ints: [int] = [1, 2, 3]
 var uints: [uint] = [<u32>1, <u32>2, <u32>3]
@@ -316,7 +316,7 @@ var floats: [float] = [1.0, 2.0, 3.0]
 
 #[test]
 fn check_accepts_union_array_literal_with_expected_type() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var values: [i32] = [1, 2, 3]
 "#,

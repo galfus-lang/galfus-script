@@ -344,7 +344,7 @@ fn Box<T>::value(self): T {
 
 #[test]
 fn check_accepts_match_on_self_field_in_anchored_function() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 struct Range {
   start: i32,
@@ -406,7 +406,7 @@ fn Point::move(self, dx: i32, dy: i32): Point {
 
 #[test]
 fn check_user_module_rejects_internal_function_declaration() {
-    let (_source, _graph, result, string_table) = check_source_named(
+    let (_source, _graph, result, _string_table) = check_source_named(
         "test.gfs",
         r#"
 fn __internal_custom(): null {
@@ -420,7 +420,7 @@ fn __internal_custom(): null {
 
 #[test]
 fn check_user_module_rejects_provider_function_declaration() {
-    let (_source, _graph, result, string_table) = check_source_named(
+    let (_source, _graph, result, _string_table) = check_source_named(
         "test.gfs",
         r#"
 fn(async) __provider_gpio_read(): [u8] {
@@ -434,7 +434,7 @@ fn(async) __provider_gpio_read(): [u8] {
 
 #[test]
 fn check_provider_function_without_async_metadata_is_rejected() {
-    let (_source, _graph, result, string_table) = check_source_named(
+    let (_source, _graph, result, _string_table) = check_source_named(
         "std/gpio",
         r#"
 fn __provider_gpio_read(): [u8] {

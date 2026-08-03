@@ -91,6 +91,20 @@ impl<'a> Resolver<'a> {
         (self.resolution, self.diagnostics)
     }
 
+    fn lookup_symbol_by_name(&self, scope: ScopeId, name: &str) -> Option<SymbolId> {
+        self.string_table
+            .get(name)
+            .and_then(|name_id| self.resolution.lookup_symbol(scope, name_id))
+    }
+
+    fn lookup_direct_symbol_by_name(&self, scope: ScopeId, name: &str) -> Option<SymbolId> {
+        self.string_table.get(name).and_then(|name_id| {
+            self.resolution
+                .scope(scope)
+                .and_then(|scope| scope.symbol(name_id))
+        })
+    }
+
     fn resolve_source_file(&mut self) {
         let Some(root) = self.syntax.root() else {
             return;

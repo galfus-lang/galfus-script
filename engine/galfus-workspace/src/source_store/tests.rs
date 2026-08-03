@@ -98,7 +98,28 @@ fn colliding_paths_return_a_deterministic_error() {
         LoadModuleError::Collision {
             attempted: path_b,
             existing: path_a,
+            identity: IdentityKind::Module,
+            id: SourceStore::module_id_for("src/f74958.gfs").raw(),
         }
+    );
+}
+
+#[test]
+fn fnv1a_uses_the_standard_offset_basis_for_empty_input() {
+    assert_eq!(SourceStore::fnv1a_32(b"", b""), 0x811c9dc5);
+}
+
+#[test]
+fn reserved_ids_are_rehashed_deterministically() {
+    let module = SourceStore::non_reserved_id(0, b"galfus:module:v1:", b"src/main.gfs", 0);
+    let source =
+        SourceStore::non_reserved_id(u32::MAX, b"galfus:source:v1:", b"src/main.gfs", u32::MAX);
+
+    assert_ne!(module, 0);
+    assert_ne!(source, u32::MAX);
+    assert_eq!(
+        module,
+        SourceStore::non_reserved_id(0, b"galfus:module:v1:", b"src/main.gfs", 0)
     );
 }
 

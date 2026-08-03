@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_for_over_array_literal() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn main(): null {
   for value in [1, 2, 3] {
@@ -20,7 +20,7 @@ fn main(): null {
 
 #[test]
 fn check_accepts_for_over_string_literal_as_uint8_array() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn main(): null {
   for byte in "Ana" {
@@ -37,7 +37,7 @@ fn main(): null {
 
 #[test]
 fn check_accepts_for_over_empty_string_literal() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn main(): null {
   for byte in "" {
@@ -54,7 +54,7 @@ fn main(): null {
 
 #[test]
 fn check_accepts_for_over_iterable_struct() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         constraint Iterator<T, Item> {
           fn next(self): Item | null
@@ -103,7 +103,7 @@ fn check_accepts_for_over_iterable_struct() {
 
 #[test]
 fn check_binds_for_binding_type_from_iterable_struct() {
-    let (source, graph, result, string_table) = check_source(
+    let (source, graph, result, _string_table) = check_source(
         r#"
         constraint Iterator<T, Item> {
           fn next(self): Item | null

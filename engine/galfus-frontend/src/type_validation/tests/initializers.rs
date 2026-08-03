@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_matching_var_initializer_type() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var age: i32 = 10
 "#,
@@ -14,7 +14,7 @@ var age: i32 = 10
 
 #[test]
 fn check_contextual_integer_initializer_type() {
-    let (source, graph, result, string_table) = check_source(
+    let (source, graph, result, _string_table) = check_source(
         r#"
 var byte: u8 = 27
 "#,
@@ -62,7 +62,7 @@ var byte: u8 = 300
 
 #[test]
 fn check_accepts_signed_integer_initializer_lower_bound() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var byte: i8 = -128
 "#,
@@ -127,7 +127,7 @@ var age: i32 = true
 
 #[test]
 fn check_accepts_matching_const_initializer_type() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 const enabled: bool = true
 "#,
@@ -138,7 +138,7 @@ const enabled: bool = true
 
 #[test]
 fn check_accepts_null_initializer_for_nullable_union() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var maybe: i32 | null = null
 "#,
@@ -231,7 +231,7 @@ fn main(): null {
 
 #[test]
 fn check_accepts_name_initializer_with_matching_symbol_type() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 var first: i32 = 10
 var second: i32 = first

@@ -46,6 +46,11 @@ impl StringTable {
         self.lookup.get(s).map(|&id| NameId(id))
     }
 
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.strings.len()
+    }
+
     pub fn resolve(&self, id: NameId) -> Option<&str> {
         self.strings.get(id.0 as usize).map(|s| &**s)
     }

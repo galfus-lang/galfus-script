@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_function_stamp_without_stamp_recursion() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn base(value: i32): i32 {
   return value
@@ -20,7 +20,7 @@ fn(stamp) doubled(value: i32): i32 {
 
 #[test]
 fn check_accepts_regular_recursive_function() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn repeat(value: i32): i32 {
   return repeat(value)

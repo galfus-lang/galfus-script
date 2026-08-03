@@ -39,7 +39,7 @@ fn User::toString(self): [u8] {
 
 #[test]
 fn check_accepts_generic_parameter_constraint_bound() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         constraint HasValue<T> {
           value: T,

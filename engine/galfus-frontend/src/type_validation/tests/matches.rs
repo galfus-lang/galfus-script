@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_match_literal_patterns() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 fn code(value: i32): i32 {
   return match value {
@@ -84,7 +84,7 @@ fn code(value: i32): i32 {
 
 #[test]
 fn check_accepts_enum_variant_patterns() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 enum Direction {
   North,
@@ -105,7 +105,7 @@ fn code(direction: Direction): i32 {
 
 #[test]
 fn check_accepts_choice_payload_pattern() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 choice Result {
   Ok(i32),
@@ -126,7 +126,7 @@ fn unwrap(result: Result): i32 {
 
 #[test]
 fn check_accepts_generic_choice_payload_pattern_from_subject() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
 choice Outcome<T> {
   Ok(T),
@@ -147,7 +147,7 @@ fn unwrap(value: Outcome<i32>): i32 {
 
 #[test]
 fn check_infers_match_literal_from_generic_choice_payload_type() {
-    let (_source, graph, result, string_table) = check_source(
+    let (_source, graph, result, _string_table) = check_source(
         r#"
 choice Outcome<T> {
   Ok(T),
@@ -243,7 +243,7 @@ fn unwrap(result: Result): i32 {
 
 #[test]
 fn check_accepts_exhaustive_choice_match() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         choice Result {
           Ok(i32),
@@ -264,7 +264,7 @@ fn check_accepts_exhaustive_choice_match() {
 
 #[test]
 fn check_accepts_choice_match_with_wildcard_default() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         choice Result {
           Ok(i32),
@@ -285,7 +285,7 @@ fn check_accepts_choice_match_with_wildcard_default() {
 
 #[test]
 fn check_accepts_choice_match_with_binding_default() {
-    let (_source, _graph, result, string_table) = check_source(
+    let (_source, _graph, result, _string_table) = check_source(
         r#"
         choice Result {
           Ok(i32),
