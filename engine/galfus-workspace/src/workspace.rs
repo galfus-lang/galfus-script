@@ -5,7 +5,7 @@ use std::str;
 
 use crate::config::{WORKSPACE_SOURCE_ID, WorkspaceConfig, parse_workspace_config};
 use crate::diagnostic::WorkspaceDiagnosticCode;
-use crate::source_store::ModuleOrigin;
+use crate::source_store::{LoadModuleError, ModuleOrigin};
 use crate::state::{
     BytecodeState, CheckState, CompileBlocked, CompileState, RunBlocked, SemanticState,
     SourceState, WorkspaceError,
@@ -138,12 +138,23 @@ impl Workspace {
         };
 
         self.source_state.revision.next();
-        self.source_state.store.load_module(
-            module_path.clone(),
-            source_bytes,
-            origin,
-            self.source_state.revision,
-        );
+        self.source_state
+            .store
+            .load_module(
+                module_path.clone(),
+                source_bytes,
+                origin,
+                self.source_state.revision,
+            )
+            .map_err(|err| match err {
+                LoadModuleError::Collision {
+                    attempted,
+                    existing,
+                } => WorkspaceError::Collision {
+                    attempted: attempted.as_str().to_string(),
+                    existing: existing.as_str().to_string(),
+                },
+            })?;
         if let Some(descriptor) = descriptor {
             self.external_descriptors
                 .insert(module_path.clone(), descriptor);
@@ -161,12 +172,23 @@ impl Workspace {
     ) -> Result<LoadResult, WorkspaceError> {
         let module_path = ModulePath::new(&bridge.name).ok_or(WorkspaceError::InvalidPath)?;
         self.source_state.revision.next();
-        self.source_state.store.load_module(
-            module_path.clone(),
-            Arc::from(bridge.source.as_bytes()),
-            ModuleOrigin::Builtin,
-            self.source_state.revision,
-        );
+        self.source_state
+            .store
+            .load_module(
+                module_path.clone(),
+                Arc::from(bridge.source.as_bytes()),
+                ModuleOrigin::Builtin,
+                self.source_state.revision,
+            )
+            .map_err(|err| match err {
+                LoadModuleError::Collision {
+                    attempted,
+                    existing,
+                } => WorkspaceError::Collision {
+                    attempted: attempted.as_str().to_string(),
+                    existing: existing.as_str().to_string(),
+                },
+            })?;
         self.source_state.dirty_sources.insert(module_path);
         self.mark_dirty();
         Ok(LoadResult::Success)
@@ -281,12 +303,28 @@ impl Workspace {
                         removed_modules: self.source_state.removed_modules.as_slice(),
                         roots: &roots,
                     };
-                    let report = self.frontend.check(update);
+                    let mut report = self.frontend.check(update);
                     self.source_state.dirty_sources.clear();
                     self.source_state.removed_modules.clear();
 
-                    if !self.load_required_builtins(&report.required_builtin_modules) {
-                        break report;
+                    match self.load_required_builtins(&report.required_builtin_modules) {
+                        Ok(false) => break report,
+                        Ok(true) => continue,
+                        Err(WorkspaceError::Collision {
+                            attempted,
+                            existing,
+                        }) => {
+                            report.diagnostics.push(Diagnostic::error_with_message(
+                                WorkspaceDiagnosticCode::ModuleCollision,
+                                format!(
+                                    "Cannot load builtin module '{}' because its identity collides with existing module '{}'",
+                                    attempted, existing
+                                ),
+                                Span::empty(galfus_core::SourceId::new(0), 0),
+                            ));
+                            break report;
+                        }
+                        Err(_) => break report,
                     }
                 };
 
@@ -322,7 +360,10 @@ impl Workspace {
         }
     }
 
-    fn load_required_builtins(&mut self, paths: &HashSet<ModulePath>) -> bool {
+    fn load_required_builtins(
+        &mut self,
+        paths: &HashSet<ModulePath>,
+    ) -> Result<bool, WorkspaceError> {
         let mut loaded = false;
         for path in paths {
             if self.source_state.store.get(path).is_some() {
@@ -336,16 +377,27 @@ impl Workspace {
                 continue;
             };
             self.source_state.revision.next();
-            self.source_state.store.load_module(
-                path.clone(),
-                Arc::from(source.as_bytes()),
-                ModuleOrigin::Builtin,
-                self.source_state.revision,
-            );
+            self.source_state
+                .store
+                .load_module(
+                    path.clone(),
+                    Arc::from(source.as_bytes()),
+                    ModuleOrigin::Builtin,
+                    self.source_state.revision,
+                )
+                .map_err(|err| match err {
+                    LoadModuleError::Collision {
+                        attempted,
+                        existing,
+                    } => WorkspaceError::Collision {
+                        attempted: attempted.as_str().to_string(),
+                        existing: existing.as_str().to_string(),
+                    },
+                })?;
             self.source_state.dirty_sources.insert(path.clone());
             loaded = true;
         }
-        loaded
+        Ok(loaded)
     }
 
     fn validate_registered_adapter_schemas(&self, diagnostics: &mut DiagnosticBag) {

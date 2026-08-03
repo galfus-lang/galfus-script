@@ -60,3 +60,38 @@ fn reloading_a_removed_path_preserves_stable_ids() {
     assert_eq!(reloaded.0, initial.0, "ModuleId must be stable across reloads");
     assert_eq!(reloaded.1, initial.1, "SourceId must be stable across reloads");
 }
+
+#[test]
+fn colliding_paths_return_a_deterministic_error() {
+    let mut store = SourceStore::new();
+
+    // These two paths produce the exact same 32-bit FNV-1a hash for ModuleId
+    let path_a = path("src/f74958.gfs");
+    let path_b = path("src/f438592.gfs");
+
+    store
+        .load_module(
+            path_a.clone(),
+            Arc::from(&b"first"[..]),
+            ModuleOrigin::User,
+            Revision::new(1),
+        )
+        .expect("load returns IDs");
+
+    let collision_error = store
+        .load_module(
+            path_b.clone(),
+            Arc::from(&b"second"[..]),
+            ModuleOrigin::User,
+            Revision::new(2),
+        )
+        .expect_err("should return collision error");
+
+    assert_eq!(
+        collision_error,
+        LoadModuleError::Collision {
+            attempted: path_b,
+            existing: path_a,
+        }
+    );
+}

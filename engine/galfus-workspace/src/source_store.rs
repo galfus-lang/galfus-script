@@ -14,7 +14,10 @@ pub enum ModuleOrigin {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum LoadModuleError {
-    Collision(ModulePath),
+    Collision {
+        attempted: ModulePath,
+        existing: ModulePath,
+    },
 }
 
 pub struct SourceEntry {
@@ -86,7 +89,10 @@ impl SourceStore {
             // Check for collision by iterating over existing values
             for existing in self.entries_by_path.values() {
                 if existing.module_id == module_id || existing.source_id == source_id {
-                    return Err(LoadModuleError::Collision(path.clone()));
+                    return Err(LoadModuleError::Collision {
+                        attempted: path.clone(),
+                        existing: existing.path.clone(),
+                    });
                 }
             }
 
