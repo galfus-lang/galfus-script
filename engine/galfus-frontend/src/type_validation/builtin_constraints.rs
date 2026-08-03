@@ -17,7 +17,8 @@ impl<'a> DeclarationTypeChecker<'a> {
         for symbol in symbols {
             match symbol.kind() {
                 SymbolKind::Constraint => {
-                    if is_builtin_constraint(symbol.name()) {
+                    if is_builtin_constraint(self.string_table.resolve(symbol.name()).unwrap_or(""))
+                    {
                         let ty = self.layer.table_mut().intern_named(symbol.id());
                         self.layer.bind_symbol_type(symbol.id(), ty);
                     }
@@ -189,7 +190,9 @@ impl<'a> DeclarationTypeChecker<'a> {
     fn builtin_constraint_symbol(&self, name: &str) -> Option<SymbolId> {
         let resolution = self.graph.resolution()?;
         let builtin_scope = resolution.builtin_scope()?;
-        let symbol = resolution.scope(builtin_scope)?.symbol(name)?;
+        let symbol = resolution
+            .scope(builtin_scope)?
+            .symbol(self.string_table.get(name)?)?;
         let symbol_data = resolution.symbol(symbol)?;
 
         if symbol_data.kind() != SymbolKind::Constraint {
@@ -211,7 +214,7 @@ impl<'a> DeclarationTypeChecker<'a> {
         names
             .iter()
             .map(|name| {
-                let symbol = scope.symbol(name)?;
+                let symbol = scope.symbol(self.string_table.get(name)?)?;
                 let symbol_data = resolution.symbol(symbol)?;
 
                 if symbol_data.kind() != SymbolKind::GenericParameter {
@@ -231,7 +234,7 @@ impl<'a> DeclarationTypeChecker<'a> {
         let resolution = self.graph.resolution()?;
         let member_scope = resolution.member_scope(constraint)?;
         let scope = resolution.scope(member_scope)?;
-        let symbol = scope.symbol(function_name)?;
+        let symbol = scope.symbol(self.string_table.get(function_name)?)?;
         let symbol_data = resolution.symbol(symbol)?;
 
         if symbol_data.kind() != SymbolKind::ConstraintFunction {

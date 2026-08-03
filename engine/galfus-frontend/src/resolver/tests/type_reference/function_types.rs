@@ -17,7 +17,8 @@ fn resolve_binds_function_parameter_named_type() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -31,7 +32,7 @@ fn resolve_binds_function_parameter_named_type() {
     let symbol = resolution.type_reference_symbol(named_type).unwrap();
     let symbol = resolution.symbol(symbol).unwrap();
 
-    assert_eq!(symbol.name(), "User");
+    assert_eq!(string_table.resolve(symbol.name()).unwrap_or(""), "User");
     assert_eq!(symbol.kind(), SymbolKind::Struct);
 }
 
@@ -52,7 +53,8 @@ fn resolve_accepts_struct_function_anchor() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -67,7 +69,7 @@ fn resolve_accepts_struct_function_anchor() {
         .symbol(resolution.type_reference_symbol(anchor_type).unwrap())
         .unwrap();
 
-    assert_eq!(symbol.name(), "User");
+    assert_eq!(string_table.resolve(symbol.name()).unwrap_or(""), "User");
     assert_eq!(symbol.kind(), SymbolKind::Struct);
 }
 
@@ -89,7 +91,8 @@ fn resolve_reports_non_struct_function_anchor() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(resolve_result.has_errors());
 
@@ -120,7 +123,8 @@ fn resolve_binds_function_return_named_type() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -134,7 +138,7 @@ fn resolve_binds_function_return_named_type() {
     let symbol = resolution.type_reference_symbol(named_type).unwrap();
     let symbol = resolution.symbol(symbol).unwrap();
 
-    assert_eq!(symbol.name(), "User");
+    assert_eq!(string_table.resolve(symbol.name()).unwrap_or(""), "User");
     assert_eq!(symbol.kind(), SymbolKind::Struct);
 }
 
@@ -156,7 +160,8 @@ fn resolve_binds_function_expression_signature_named_types() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -174,7 +179,7 @@ fn resolve_binds_function_expression_signature_named_types() {
             .symbol(resolution.type_reference_symbol(named_type).unwrap())
             .unwrap();
 
-        assert_eq!(symbol.name(), "User");
+        assert_eq!(string_table.resolve(symbol.name()).unwrap_or(""), "User");
         assert_eq!(symbol.kind(), SymbolKind::Struct);
     }
 }

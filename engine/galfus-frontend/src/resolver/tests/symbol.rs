@@ -31,7 +31,8 @@ fn resolve_declares_top_level_named_items() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -39,21 +40,25 @@ fn resolve_declares_top_level_named_items() {
     let module_scope_id = resolution.module_scope();
     let module_scope = resolution.scope(module_scope_id).unwrap();
 
-    assert!(module_scope.symbol("main").is_some());
-    assert!(module_scope.symbol("UserId").is_some());
-    assert!(module_scope.symbol("User").is_some());
-    assert!(module_scope.symbol("Status").is_some());
-    assert!(module_scope.symbol("Result").is_some());
-    assert!(module_scope.symbol("Stringable").is_some());
+    assert!(module_scope.symbol(string_table.intern("main")).is_some());
+    assert!(module_scope.symbol(string_table.intern("UserId")).is_some());
+    assert!(module_scope.symbol(string_table.intern("User")).is_some());
+    assert!(module_scope.symbol(string_table.intern("Status")).is_some());
+    assert!(module_scope.symbol(string_table.intern("Result")).is_some());
+    assert!(
+        module_scope
+            .symbol(string_table.intern("Stringable"))
+            .is_some()
+    );
 
     let main = resolution
-        .symbol(module_scope.symbol("main").unwrap())
+        .symbol(module_scope.symbol(string_table.intern("main")).unwrap())
         .unwrap();
 
     assert_eq!(main.kind(), SymbolKind::Function);
 
     let user = resolution
-        .symbol(module_scope.symbol("User").unwrap())
+        .symbol(module_scope.symbol(string_table.intern("User")).unwrap())
         .unwrap();
 
     assert_eq!(user.kind(), SymbolKind::Struct);
@@ -71,7 +76,8 @@ fn resolve_declares_top_level_var_and_const() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -79,11 +85,11 @@ fn resolve_declares_top_level_var_and_const() {
     let module_scope = resolution.scope(resolution.module_scope()).unwrap();
 
     let counter = resolution
-        .symbol(module_scope.symbol("counter").unwrap())
+        .symbol(module_scope.symbol(string_table.intern("counter")).unwrap())
         .unwrap();
 
     let version = resolution
-        .symbol(module_scope.symbol("version").unwrap())
+        .symbol(module_scope.symbol(string_table.intern("version")).unwrap())
         .unwrap();
 
     assert_eq!(counter.kind(), SymbolKind::Var);
@@ -107,23 +113,28 @@ fn resolve_declares_top_level_destructuring_bindings() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
     let resolution = graph.resolution().unwrap();
     let module_scope = resolution.scope(resolution.module_scope()).unwrap();
 
-    assert!(module_scope.symbol("id").is_some());
-    assert!(module_scope.symbol("userName").is_some());
+    assert!(module_scope.symbol(string_table.intern("id")).is_some());
+    assert!(
+        module_scope
+            .symbol(string_table.intern("userName"))
+            .is_some()
+    );
 
-    assert!(module_scope.symbol("x").is_some());
-    assert!(module_scope.symbol("y").is_some());
+    assert!(module_scope.symbol(string_table.intern("x")).is_some());
+    assert!(module_scope.symbol(string_table.intern("y")).is_some());
 
-    assert!(module_scope.symbol("first").is_some());
-    assert!(module_scope.symbol("rest").is_some());
+    assert!(module_scope.symbol(string_table.intern("first")).is_some());
+    assert!(module_scope.symbol(string_table.intern("rest")).is_some());
 
-    assert!(module_scope.symbol("name").is_none());
+    assert!(module_scope.symbol(string_table.intern("name")).is_none());
 }
 
 #[test]
@@ -139,14 +150,15 @@ fn resolve_declares_exported_item_in_module_scope() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
     let resolution = graph.resolution().unwrap();
     let module_scope = resolution.scope(resolution.module_scope()).unwrap();
 
-    assert!(module_scope.symbol("main").is_some());
+    assert!(module_scope.symbol(string_table.intern("main")).is_some());
 }
 
 #[test]
@@ -162,7 +174,8 @@ fn resolve_binds_declaration_identifier_to_symbol() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -179,7 +192,7 @@ fn resolve_binds_declaration_identifier_to_symbol() {
     let symbol = resolution.declaration_symbol(name).unwrap();
     let symbol = resolution.symbol(symbol).unwrap();
 
-    assert_eq!(symbol.name(), "main");
+    assert_eq!(string_table.resolve(symbol.name()).unwrap_or(""), "main");
     assert_eq!(symbol.kind(), SymbolKind::Function);
 }
 
@@ -200,20 +213,28 @@ fn resolve_declares_anchored_function_by_qualified_name() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
     let resolution = graph.resolution().unwrap();
     let module_scope = resolution.scope(resolution.module_scope()).unwrap();
 
-    assert!(module_scope.symbol("rename").is_none());
+    assert!(module_scope.symbol(string_table.intern("rename")).is_none());
 
     let symbol = resolution
-        .symbol(module_scope.symbol("User::rename").unwrap())
+        .symbol(
+            module_scope
+                .symbol(string_table.intern("User::rename"))
+                .unwrap(),
+        )
         .unwrap();
 
-    assert_eq!(symbol.name(), "User::rename");
+    assert_eq!(
+        string_table.resolve(symbol.name()).unwrap_or(""),
+        "User::rename"
+    );
     assert_eq!(symbol.kind(), SymbolKind::Function);
 }
 
@@ -242,15 +263,24 @@ fn resolve_allows_same_anchored_function_name_on_different_structs() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
     let resolution = graph.resolution().unwrap();
     let module_scope = resolution.scope(resolution.module_scope()).unwrap();
 
-    assert!(module_scope.symbol("User::rename").is_some());
-    assert!(module_scope.symbol("Post::rename").is_some());
+    assert!(
+        module_scope
+            .symbol(string_table.intern("User::rename"))
+            .is_some()
+    );
+    assert!(
+        module_scope
+            .symbol(string_table.intern("Post::rename"))
+            .is_some()
+    );
 }
 
 #[test]
@@ -270,7 +300,8 @@ fn resolve_reports_duplicate_top_level_symbol() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(resolve_result.has_errors());
 
@@ -278,12 +309,12 @@ fn resolve_reports_duplicate_top_level_symbol() {
     let resolution = graph.resolution().unwrap();
     let module_scope = resolution.scope(resolution.module_scope()).unwrap();
 
-    assert!(module_scope.symbol("main").is_some());
+    assert!(module_scope.symbol(string_table.intern("main")).is_some());
 
     let main_symbols = resolution
         .symbols()
         .iter()
-        .filter(|symbol| symbol.name() == "main")
+        .filter(|symbol| string_table.resolve(symbol.name()).unwrap_or("") == "main")
         .count();
 
     assert_eq!(main_symbols, 1);

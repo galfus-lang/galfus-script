@@ -483,14 +483,24 @@ impl<'a> DeclarationTypeChecker<'a> {
         let mut names = path
             .iter()
             .filter_map(|symbol| self.graph.resolution()?.symbol(*symbol))
-            .map(|symbol| symbol.name().to_string())
+            .map(|symbol| {
+                self.string_table
+                    .resolve(symbol.name())
+                    .unwrap_or("")
+                    .to_string()
+            })
             .collect::<Vec<_>>();
 
         if let Some(start_name) = self
             .graph
             .resolution()
             .and_then(|resolution| resolution.symbol(start))
-            .map(|symbol| symbol.name().to_string())
+            .map(|symbol| {
+                self.string_table
+                    .resolve(symbol.name())
+                    .unwrap_or("")
+                    .to_string()
+            })
         {
             names.push(start_name);
         }

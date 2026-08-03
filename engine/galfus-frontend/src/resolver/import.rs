@@ -161,8 +161,9 @@ impl<'a> Resolver<'a> {
 
         let local_name = self.node_text(name);
 
+        let local_name_id = self.string_table.intern(&local_name);
         let Some(symbol) =
-            self.declare_symbol(local_name.clone(), SymbolKind::ImportNamespace, name, scope)
+            self.declare_symbol(local_name_id, SymbolKind::ImportNamespace, name, scope)
         else {
             return;
         };
@@ -220,12 +221,10 @@ impl<'a> Resolver<'a> {
 
         let local_name = self.node_text(declaration);
 
-        let Some(symbol) = self.declare_symbol(
-            local_name.clone(),
-            SymbolKind::ImportBinding,
-            declaration,
-            scope,
-        ) else {
+        let local_name_id = self.string_table.intern(&local_name);
+        let Some(symbol) =
+            self.declare_symbol(local_name_id, SymbolKind::ImportBinding, declaration, scope)
+        else {
             return;
         };
 

@@ -30,7 +30,12 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
             .symbol_type(owner_symbol)
             .unwrap_or_else(|| TypeId::new(0));
 
-        let variant_name = resolution.symbol(variant_symbol)?.name().to_string();
+        let variant_name = self
+            .builder
+            .string_table
+            .resolve(resolution.symbol(variant_symbol)?.name())
+            .unwrap_or("")
+            .to_string();
 
         let payload_types = self.choice_variant_payload_types(owner_symbol, variant_symbol);
 
@@ -86,7 +91,13 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
         };
         let mut variant_node = None;
         for &child in choice_node.children() {
-            if let Some(node) = self.find_choice_variant_node_by_name(child, variant_data.name()) {
+            if let Some(node) = self.find_choice_variant_node_by_name(
+                child,
+                self.builder
+                    .string_table
+                    .resolve(variant_data.name())
+                    .unwrap_or(""),
+            ) {
                 variant_node = Some(node);
                 break;
             }

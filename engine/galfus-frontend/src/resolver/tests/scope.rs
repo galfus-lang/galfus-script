@@ -7,7 +7,8 @@ fn resolve_creates_module_scope() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -31,7 +32,8 @@ fn resolve_creates_builtin_scope() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -41,9 +43,13 @@ fn resolve_creates_builtin_scope() {
     let builtin_scope = resolution.scope(builtin_scope).unwrap();
 
     assert_eq!(builtin_scope.kind(), ScopeKind::Builtin);
-    assert!(builtin_scope.symbol("i8").is_some());
-    assert!(builtin_scope.symbol("i32").is_some());
-    assert!(builtin_scope.symbol("f16").is_some());
-    assert!(builtin_scope.symbol("String").is_none());
-    assert!(builtin_scope.symbol("char").is_none());
+    assert!(builtin_scope.symbol(string_table.intern("i8")).is_some());
+    assert!(builtin_scope.symbol(string_table.intern("i32")).is_some());
+    assert!(builtin_scope.symbol(string_table.intern("f16")).is_some());
+    assert!(
+        builtin_scope
+            .symbol(string_table.intern("String"))
+            .is_none()
+    );
+    assert!(builtin_scope.symbol(string_table.intern("char")).is_none());
 }

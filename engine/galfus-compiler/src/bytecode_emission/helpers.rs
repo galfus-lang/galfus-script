@@ -214,7 +214,10 @@ pub fn find_choice_for_variant(
             && let Some(choice_symbol) = resolution.declaration_symbol(ident)
         {
             let variants = crate::bytecode_emission::types::get_choice_variants(ctx, choice_symbol);
-            if let Some(idx) = variants.iter().position(|(name, _)| name == variant_name) {
+            if let Some(idx) = variants
+                .iter()
+                .position(|(name, _)| name == ctx.string_table.resolve(variant_name).unwrap_or(""))
+            {
                 return Some((choice_symbol, idx));
             }
         }

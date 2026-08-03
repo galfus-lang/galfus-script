@@ -43,7 +43,9 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 .graph
                 .resolution()
                 .and_then(|resolution| resolution.symbol(*symbol))
-                .is_some_and(|symbol| symbol.name() == "Future"),
+                .is_some_and(|symbol| {
+                    self.builder.string_table.resolve(symbol.name()) == Some("Future")
+                }),
             Some(TypeKind::Path { segments, .. }) => {
                 segments.last().is_some_and(|segment| segment == "Future")
             }
@@ -479,7 +481,13 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                                 if is_global {
                                     let name = resolution
                                         .and_then(|res| res.symbol(sym))
-                                        .map(|s| s.name().to_string())
+                                        .map(|s| {
+                                            self.builder
+                                                .string_table
+                                                .resolve(s.name())
+                                                .unwrap_or("")
+                                                .to_string()
+                                        })
                                         .unwrap_or_default();
                                     self.current_instructions.push((
                                         Instruction::StoreGlobal(name, casted_operand),

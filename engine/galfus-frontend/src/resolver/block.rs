@@ -214,7 +214,8 @@ impl<'a> Resolver<'a> {
             } else if child_node.kind() == SyntaxNodeKind::Identifier {
                 let symbol_name = self.node_text(*child);
                 if symbol_name != "_" {
-                    self.declare_symbol(symbol_name, SymbolKind::ForBinding, *child, scope);
+                    let name_id = self.string_table.intern(&symbol_name);
+                    self.declare_symbol(name_id, SymbolKind::ForBinding, *child, scope);
                 }
             }
         }
@@ -341,7 +342,8 @@ impl<'a> Resolver<'a> {
         let symbol_name = self.node_text(name);
 
         if symbol_name != "_" {
-            self.declare_symbol(symbol_name, SymbolKind::TypePatternBinding, name, scope);
+            let name_id = self.string_table.intern(&symbol_name);
+            self.declare_symbol(name_id, SymbolKind::TypePatternBinding, name, scope);
         }
     }
 
@@ -361,7 +363,8 @@ impl<'a> Resolver<'a> {
                 let symbol_name = self.node_text(pattern);
 
                 if symbol_name != "_" {
-                    self.declare_symbol(symbol_name, SymbolKind::PatternBinding, pattern, scope);
+                    let name_id = self.string_table.intern(&symbol_name);
+                    self.declare_symbol(name_id, SymbolKind::PatternBinding, pattern, scope);
                 }
             }
 
@@ -390,8 +393,9 @@ impl<'a> Resolver<'a> {
                             let symbol_name = self.node_text(name);
 
                             if symbol_name != "_" {
+                                let name_id = self.string_table.intern(&symbol_name);
                                 self.declare_symbol(
-                                    symbol_name,
+                                    name_id,
                                     SymbolKind::PatternBinding,
                                     name,
                                     scope,

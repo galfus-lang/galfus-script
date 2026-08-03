@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_infers_expression_function_body_type() {
-    let (source, graph, result) = check_source(
+    let (source, graph, result, string_table) = check_source(
         r#"
         var double = fn (value: i32): i32 => value * 2
         "#,
@@ -40,7 +40,7 @@ fn check_infers_expression_function_body_type() {
 
 #[test]
 fn check_infers_expression_function_return_type_without_annotation() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
         var double = fn (value: i32) => value * 2
         "#,
@@ -62,7 +62,7 @@ fn check_infers_expression_function_return_type_without_annotation() {
 
 #[test]
 fn check_binds_async_function_expression_as_a_future() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
 struct Future<T> {
   id: i64,
@@ -85,7 +85,7 @@ var load = fn(async) (): i32 => 1
 
 #[test]
 fn check_accepts_block_function_body() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
         var printer = fn (value: i32): null {
           return
@@ -113,7 +113,8 @@ fn check_reports_missing_return_for_block_function() {
         parse_result.diagnostics()
     );
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -121,8 +122,8 @@ fn check_reports_missing_return_for_block_function() {
     );
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.diagnostics().iter().any(|diagnostic| {
         diagnostic.code().as_str() == TypeDiagnosticCode::MissingReturn.as_code()
@@ -131,7 +132,7 @@ fn check_reports_missing_return_for_block_function() {
 
 #[test]
 fn check_accepts_function_metadata_on_function_expression() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
         var callback = fn(stamp) (): i32 => 1
         "#,
@@ -142,7 +143,7 @@ fn check_accepts_function_metadata_on_function_expression() {
 
 #[test]
 fn check_accepts_expression_function_as_call_argument() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
         fn apply(callback: fn(i32): i32): i32 {
           return callback(1)
@@ -157,7 +158,7 @@ fn check_accepts_expression_function_as_call_argument() {
 
 #[test]
 fn check_collects_closure_capture_ownership_metadata() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
         struct Box {
           value: i32,
@@ -169,7 +170,7 @@ fn check_collects_closure_capture_ownership_metadata() {
     );
 
     let function = find_node_by_kind(&graph, SyntaxNodeKind::ExpressionFunction).unwrap();
-    let captured = symbol_by_name_and_kind(&graph, "captured", SymbolKind::Var);
+    let captured = symbol_by_name_and_kind(&graph, "captured", SymbolKind::Var, &string_table);
 
     let captures = result.ownership_metadata().captures();
 
@@ -191,7 +192,7 @@ fn check_collects_closure_capture_ownership_metadata() {
 
 #[test]
 fn check_does_not_capture_function_expression_local_parameter() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
         var double = fn (value: i32): i32 => value * 2
         "#,
@@ -202,7 +203,7 @@ fn check_does_not_capture_function_expression_local_parameter() {
 
 #[test]
 fn check_does_not_leak_block_function_return_to_outer_function() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
         fn main(): null {
           var callback = fn (value: i32): i32 {
@@ -232,7 +233,8 @@ fn check_reports_expression_function_body_return_mismatch() {
         parse_result.diagnostics()
     );
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -240,8 +242,8 @@ fn check_reports_expression_function_body_return_mismatch() {
     );
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -265,7 +267,8 @@ fn check_reports_expression_function_assignment_mismatch() {
         parse_result.diagnostics()
     );
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -273,8 +276,8 @@ fn check_reports_expression_function_assignment_mismatch() {
     );
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {

@@ -193,7 +193,9 @@ impl<'a> DeclarationTypeChecker<'a> {
             let mut current_scope = resolution.module_scope();
             let mut resolved_symbol = None;
             for (i, segment) in segments.iter().enumerate() {
-                if let Some(symbol) = resolution.lookup_symbol(current_scope, segment) {
+                if let Some(id) = self.string_table.get(segment)
+                    && let Some(symbol) = resolution.lookup_symbol(current_scope, id)
+                {
                     if i == segments.len() - 1 {
                         resolved_symbol = Some(symbol);
                         break;

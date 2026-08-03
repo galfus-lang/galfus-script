@@ -4,7 +4,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_instanceof_type_pattern_binding() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
 fn normalize(value: i32 | null): i32 {
   return instanceof value {
@@ -20,7 +20,7 @@ fn normalize(value: i32 | null): i32 {
 
 #[test]
 fn check_binds_instanceof_type_pattern_binding_type() {
-    let (source, graph, result) = check_source(
+    let (source, graph, result, string_table) = check_source(
         r#"
 fn normalize(value: i32 | null): i32 {
   return instanceof value {
@@ -49,7 +49,7 @@ fn normalize(value: i32 | null): i32 {
 
 #[test]
 fn check_narrows_instanceof_alias_union_member_inside_larger_union() {
-    let (source, graph, result) = check_source(
+    let (source, graph, result, string_table) = check_source(
         r#"
 type Parsed = i32 | bool | null
 
@@ -88,7 +88,7 @@ fn stringify(value: Parsed | [u8] | Stringable): [u8] {
 
 #[test]
 fn check_narrows_instanceof_subject_in_type_pattern_arm() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
 fn normalize(value: i32 | null): i32 {
   return instanceof value {
@@ -104,7 +104,7 @@ fn normalize(value: i32 | null): i32 {
 
 #[test]
 fn check_accepts_instanceof_type_pattern_binding_with_adjacent_name() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
 fn normalize(value: i32 | null): i32 {
   return instanceof value {
@@ -120,7 +120,7 @@ fn normalize(value: i32 | null): i32 {
 
 #[test]
 fn check_accepts_instanceof_wildcard_pattern() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
 fn normalize(value: i32): i32 {
   return instanceof value {
@@ -149,12 +149,13 @@ fn normalize(value: i32): i32 {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -179,12 +180,13 @@ fn normalize(value: i32 | null): i32 {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -197,7 +199,7 @@ fn normalize(value: i32 | null): i32 {
 
 #[test]
 fn check_accepts_instanceof_binding_pattern() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
 fn normalize(value: i32): i32 {
   return instanceof value {
@@ -212,7 +214,7 @@ fn normalize(value: i32): i32 {
 
 #[test]
 fn check_binds_instanceof_fallback_binding_to_remaining_type() {
-    let (source, graph, result) = check_source(
+    let (source, graph, result, string_table) = check_source(
         r#"
 fn normalize(value: i32 | i16 | null): null {
   return instanceof value {
@@ -240,7 +242,7 @@ fn normalize(value: i32 | i16 | null): null {
 
 #[test]
 fn check_instanceof_wildcard_fallback_does_not_bind() {
-    let (source, graph, result) = check_source(
+    let (source, graph, result, string_table) = check_source(
         r#"
 fn normalize(value: i32 | null): i32 {
   return instanceof value {
@@ -272,7 +274,8 @@ fn normalize(): i32 {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(resolve_result.has_errors());
     assert!(resolve_result.diagnostics().iter().any(|diagnostic| {
@@ -296,12 +299,13 @@ fn normalize(value: i32 | null): i32 {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -326,12 +330,13 @@ fn normalize(value: i32): i32 {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {

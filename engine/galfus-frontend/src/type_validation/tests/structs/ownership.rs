@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_struct_literal_spread_from_same_struct() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
 struct User {
   id: i32,
@@ -44,12 +44,13 @@ var user: User = new(User) {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -74,12 +75,13 @@ struct User {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -92,7 +94,7 @@ struct User {
 
 #[test]
 fn check_accepts_struct_expansion_fields_in_literal() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
 struct User {
   id: i32,
@@ -117,7 +119,7 @@ var admin: Admin = new(Admin) {
 
 #[test]
 fn check_accepts_member_access_to_struct_expansion_field() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
 struct User {
   id: i32,
@@ -142,7 +144,7 @@ var id: i32 = admin.id
 
 #[test]
 fn check_binds_copy_expression_to_original_value_type() {
-    let (source, graph, result) = check_source(
+    let (source, graph, result, string_table) = check_source(
         r#"
 struct User {
   id: i32,
@@ -157,7 +159,7 @@ var cloned: User = copy user
         find_node_by_kind_and_text(&source, &graph, SyntaxNodeKind::CopyExpression, "copy user")
             .unwrap();
 
-    let user_symbol = symbol_by_name_and_kind(&graph, "User", SymbolKind::Struct);
+    let user_symbol = symbol_by_name_and_kind(&graph, "User", SymbolKind::Struct, &string_table);
     let ty = result.layer().node_type(copy).unwrap();
 
     assert_eq!(
@@ -170,7 +172,7 @@ var cloned: User = copy user
 
 #[test]
 fn check_collects_weak_field_ownership_metadata() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
 struct Node {
   value: i32,
@@ -184,8 +186,9 @@ struct Node {
     assert_eq!(weak_fields.len(), 1);
 
     let metadata = weak_fields[0];
-    let node_symbol = symbol_by_name_and_kind(&graph, "Node", SymbolKind::Struct);
-    let parent_symbol = symbol_by_name_and_kind(&graph, "parent", SymbolKind::StructField);
+    let node_symbol = symbol_by_name_and_kind(&graph, "Node", SymbolKind::Struct, &string_table);
+    let parent_symbol =
+        symbol_by_name_and_kind(&graph, "parent", SymbolKind::StructField, &string_table);
 
     assert_eq!(metadata.struct_symbol(), node_symbol);
     assert_eq!(metadata.field_symbol(), parent_symbol);
@@ -198,7 +201,7 @@ struct Node {
 
 #[test]
 fn check_collects_edge_and_weak_observer_ownership_metadata() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
 struct Node {
   child: Node | null,
@@ -207,9 +210,11 @@ struct Node {
 "#,
     );
 
-    let node_symbol = symbol_by_name_and_kind(&graph, "Node", SymbolKind::Struct);
-    let child_symbol = symbol_by_name_and_kind(&graph, "child", SymbolKind::StructField);
-    let parent_symbol = symbol_by_name_and_kind(&graph, "parent", SymbolKind::StructField);
+    let node_symbol = symbol_by_name_and_kind(&graph, "Node", SymbolKind::Struct, &string_table);
+    let child_symbol =
+        symbol_by_name_and_kind(&graph, "child", SymbolKind::StructField, &string_table);
+    let parent_symbol =
+        symbol_by_name_and_kind(&graph, "parent", SymbolKind::StructField, &string_table);
 
     assert!(
         result.ownership_metadata().edges().iter().any(|edge| {
@@ -230,7 +235,7 @@ struct Node {
 
 #[test]
 fn check_collects_strong_ownership_cycle_metadata() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
 struct Parent {
   child: Child | null,
@@ -242,8 +247,9 @@ struct Child {
 "#,
     );
 
-    let parent_symbol = symbol_by_name_and_kind(&graph, "Parent", SymbolKind::Struct);
-    let child_symbol = symbol_by_name_and_kind(&graph, "Child", SymbolKind::Struct);
+    let parent_symbol =
+        symbol_by_name_and_kind(&graph, "Parent", SymbolKind::Struct, &string_table);
+    let child_symbol = symbol_by_name_and_kind(&graph, "Child", SymbolKind::Struct, &string_table);
 
     assert!(result.ownership_metadata().cycles().iter().any(|cycle| {
         cycle.structs().contains(&parent_symbol) && cycle.structs().contains(&child_symbol)
@@ -252,7 +258,7 @@ struct Child {
 
 #[test]
 fn check_ignores_weak_fields_for_ownership_cycle_metadata() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
 struct Parent {
   child: Child | null,
@@ -281,12 +287,13 @@ var cloned: RuntimeToken = copy token
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {

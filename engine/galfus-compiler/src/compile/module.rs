@@ -34,9 +34,10 @@ use std::collections::{HashMap, HashSet};
 pub fn compile_modules(
     modules: &mut [CompiledModule],
     state: &mut CompilerState,
+    string_table: &galfus_frontend::StringTable,
 ) -> Result<Vec<BytecodeNode>> {
     let module_ids = modules.iter().map(CompiledModule::id).collect();
-    compile_changed_modules(modules, state, &module_ids)
+    compile_changed_modules(modules, state, &module_ids, string_table)
 }
 
 /// Compile only modules identified by `changed_modules`.
@@ -48,6 +49,7 @@ pub fn compile_changed_modules(
     modules: &mut [CompiledModule],
     state: &mut CompilerState,
     changed_modules: &HashSet<galfus_core::ModuleId>,
+    string_table: &galfus_frontend::StringTable,
 ) -> Result<Vec<BytecodeNode>> {
     if changed_modules.is_empty() {
         return Ok(Vec::new());
@@ -55,7 +57,7 @@ pub fn compile_changed_modules(
 
     // Phase 1: Build MIR only for changed modules. Generic specializations can
     // add functions to an imported module, which then becomes affected too.
-    let mut ws_ctx = MyWorkspaceContext::new(modules, state);
+    let mut ws_ctx = MyWorkspaceContext::new(modules, state, string_table);
     let mut affected_modules = modules
         .iter()
         .enumerate()
@@ -78,6 +80,7 @@ pub fn compile_changed_modules(
             module.graph(),
             type_res,
             module.source().text(),
+            string_table,
         )
         .with_workspace_module_id(module.id())
         .with_workspace_ctx(&mut ws_ctx)
@@ -122,8 +125,13 @@ pub fn compile_changed_modules(
         }
         let path = modules[mod_idx].path().clone();
         let semantic_revision = modules[mod_idx].semantic_revision();
-        let (image, metadata) =
-            compile_single_module(modules, &mir_modules, &specialized_targets, mod_idx)?;
+        let (image, metadata) = compile_single_module(
+            modules,
+            &mir_modules,
+            &specialized_targets,
+            mod_idx,
+            string_table,
+        )?;
         if let Err(errors) = galfus_bytecode::validation::validate_bytecode_module(&image) {
             return Err(anyhow::anyhow!(
                 "BytecodeModule validation failed for `{}`: {:?}",
@@ -148,12 +156,13 @@ pub fn compile_transaction(
     modules: &mut [CompiledModule],
     state: &mut CompilerState,
     changed_modules: &HashSet<galfus_core::ModuleId>,
+    string_table: &galfus_frontend::StringTable,
     base_version: u64,
     semantic_revision: galfus_core::SemanticRevision,
     removed_modules: Vec<galfus_core::ModuleId>,
     edges: Vec<ImportEdge>,
 ) -> Result<BytecodeGraphTransaction> {
-    let upserted_modules = compile_changed_modules(modules, state, changed_modules)?;
+    let upserted_modules = compile_changed_modules(modules, state, changed_modules, string_table)?;
     Ok(BytecodeGraphTransaction {
         base_version,
         semantic_revision,
@@ -171,6 +180,7 @@ fn compile_single_module(
         (galfus_core::ModuleId, galfus_core::FunctionId),
     >,
     mod_idx: usize,
+    string_table: &galfus_frontend::StringTable,
 ) -> Result<(BytecodeModule, galfus_bytecode::graph::ExecutionMetadata)> {
     use crate::compile::resolve::{
         collect_call_targets, resolve_import_target, resolve_local_call_target,
@@ -309,6 +319,7 @@ fn compile_single_module(
         module.graph(),
         module.source().text(),
         &mir_mod.constant_pool,
+        string_table,
     );
 
     // Register local functions in ctx.
@@ -373,16 +384,14 @@ fn compile_single_module(
                 proxy_module: module.path().as_str().to_string(),
                 symbol: mir_func.name.clone(),
             });
-            instructions = vec![
-                galfus_bytecode::Instruction::RetNull,
-            ];
+            instructions = vec![galfus_bytecode::Instruction::RetNull];
             temp_count = temp_count.max(1);
         }
         execution_metadata
             .spans
             .insert(local_func_idx, function_spans);
 
-        rewrite_global_indices(&mut instructions, modules, mod_idx)?;
+        rewrite_global_indices(&mut instructions, modules, mod_idx, string_table)?;
 
         functions.push(BytecodeFunction {
             name: mir_func.name.clone(),

@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn check_binds_function_symbol_type() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
 fn main(value: i32): null {
   return
@@ -11,7 +11,7 @@ fn main(value: i32): null {
 "#,
     );
 
-    let main = symbol_by_name_and_kind(&graph, "main", SymbolKind::Function);
+    let main = symbol_by_name_and_kind(&graph, "main", SymbolKind::Function, &string_table);
     let ty = result.layer().symbol_type(main).unwrap();
 
     match result.layer().table().kind(ty) {
@@ -35,10 +35,10 @@ fn main(value: i32): null {
 
 #[test]
 fn check_binds_async_function_as_a_future_of_its_payload() {
-    let (_source, graph, result) =
+    let (_source, graph, result, string_table) =
         check_source("struct Future<T> { id: i64 }\nfn(async) load(): i32 { return 1 }\n");
 
-    let load = symbol_by_name_and_kind(&graph, "load", SymbolKind::Function);
+    let load = symbol_by_name_and_kind(&graph, "load", SymbolKind::Function, &string_table);
     let ty = result.layer().symbol_type(load).unwrap();
     let TypeKind::Function(function) = result.layer().table().kind(ty).unwrap() else {
         panic!("expected function type");
@@ -57,7 +57,7 @@ fn check_binds_async_function_as_a_future_of_its_payload() {
 
 #[test]
 fn check_binds_parameter_symbol_type() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
 fn main(value: i32): null {
   return
@@ -65,7 +65,7 @@ fn main(value: i32): null {
 "#,
     );
 
-    let value = symbol_by_name_and_kind(&graph, "value", SymbolKind::Parameter);
+    let value = symbol_by_name_and_kind(&graph, "value", SymbolKind::Parameter, &string_table);
     let ty = result.layer().symbol_type(value).unwrap();
 
     assert_eq!(
@@ -76,7 +76,7 @@ fn main(value: i32): null {
 
 #[test]
 fn check_binds_rest_parameter_symbol_type() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
 fn main(...values: [i32]): null {
   return
@@ -84,7 +84,8 @@ fn main(...values: [i32]): null {
 "#,
     );
 
-    let values = symbol_by_name_and_kind(&graph, "values", SymbolKind::RestParameter);
+    let values =
+        symbol_by_name_and_kind(&graph, "values", SymbolKind::RestParameter, &string_table);
     let ty = result.layer().symbol_type(values).unwrap();
 
     assert!(matches!(
@@ -95,7 +96,7 @@ fn main(...values: [i32]): null {
 
 #[test]
 fn check_binds_struct_field_symbol_type() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
 struct User {
   id: i64,
@@ -103,7 +104,7 @@ struct User {
 "#,
     );
 
-    let id = symbol_by_name_and_kind(&graph, "id", SymbolKind::StructField);
+    let id = symbol_by_name_and_kind(&graph, "id", SymbolKind::StructField, &string_table);
     let ty = result.layer().symbol_type(id).unwrap();
 
     assert_eq!(
@@ -114,13 +115,13 @@ struct User {
 
 #[test]
 fn check_binds_var_annotation_symbol_type() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
 var age: i32 = 10
 "#,
     );
 
-    let age = symbol_by_name_and_kind(&graph, "age", SymbolKind::Var);
+    let age = symbol_by_name_and_kind(&graph, "age", SymbolKind::Var, &string_table);
     let ty = result.layer().symbol_type(age).unwrap();
 
     assert_eq!(
@@ -131,13 +132,13 @@ var age: i32 = 10
 
 #[test]
 fn check_binds_const_annotation_symbol_type() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
 const enabled: bool = true
 "#,
     );
 
-    let enabled = symbol_by_name_and_kind(&graph, "enabled", SymbolKind::Const);
+    let enabled = symbol_by_name_and_kind(&graph, "enabled", SymbolKind::Const, &string_table);
     let ty = result.layer().symbol_type(enabled).unwrap();
 
     assert_eq!(
@@ -148,13 +149,13 @@ const enabled: bool = true
 
 #[test]
 fn check_binds_type_alias_symbol_type() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
 type MaybeInt = i32 | null
 "#,
     );
 
-    let alias = symbol_by_name_and_kind(&graph, "MaybeInt", SymbolKind::TypeAlias);
+    let alias = symbol_by_name_and_kind(&graph, "MaybeInt", SymbolKind::TypeAlias, &string_table);
     let ty = result.layer().symbol_type(alias).unwrap();
 
     assert!(matches!(
@@ -165,7 +166,7 @@ type MaybeInt = i32 | null
 
 #[test]
 fn check_binds_named_type_definition_symbol_type() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
 struct User {
   id: i64,
@@ -173,7 +174,7 @@ struct User {
 "#,
     );
 
-    let user = symbol_by_name_and_kind(&graph, "User", SymbolKind::Struct);
+    let user = symbol_by_name_and_kind(&graph, "User", SymbolKind::Struct, &string_table);
     let ty = result.layer().symbol_type(user).unwrap();
 
     assert_eq!(
@@ -184,7 +185,7 @@ struct User {
 
 #[test]
 fn check_binds_generic_parameter_symbol_type() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
 fn identity<T: int>(value: T): T {
   return value
@@ -192,7 +193,7 @@ fn identity<T: int>(value: T): T {
 "#,
     );
 
-    let generic = symbol_by_name_and_kind(&graph, "T", SymbolKind::GenericParameter);
+    let generic = symbol_by_name_and_kind(&graph, "T", SymbolKind::GenericParameter, &string_table);
     let ty = result.layer().symbol_type(generic).unwrap();
 
     assert_eq!(
@@ -203,7 +204,7 @@ fn identity<T: int>(value: T): T {
 
 #[test]
 fn check_binds_struct_destructuring_field_types() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
 struct Point {
   x: i32,
@@ -214,8 +215,8 @@ var { x, y } = new(Point) { x: 1, y: true }
 "#,
     );
 
-    let x = symbol_by_name_and_kind(&graph, "x", SymbolKind::Var);
-    let y = symbol_by_name_and_kind(&graph, "y", SymbolKind::Var);
+    let x = symbol_by_name_and_kind(&graph, "x", SymbolKind::Var, &string_table);
+    let y = symbol_by_name_and_kind(&graph, "y", SymbolKind::Var, &string_table);
 
     assert_eq!(
         result
@@ -235,14 +236,14 @@ var { x, y } = new(Point) { x: 1, y: true }
 
 #[test]
 fn check_binds_tuple_destructuring_element_types() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
 var (count, enabled) = (1, true)
 "#,
     );
 
-    let count = symbol_by_name_and_kind(&graph, "count", SymbolKind::Var);
-    let enabled = symbol_by_name_and_kind(&graph, "enabled", SymbolKind::Var);
+    let count = symbol_by_name_and_kind(&graph, "count", SymbolKind::Var, &string_table);
+    let enabled = symbol_by_name_and_kind(&graph, "enabled", SymbolKind::Var, &string_table);
 
     assert_eq!(
         result
@@ -262,14 +263,14 @@ var (count, enabled) = (1, true)
 
 #[test]
 fn check_binds_array_destructuring_rest_type() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
 var [head, ...tail] = [1, 2, 3]
 "#,
     );
 
-    let head = symbol_by_name_and_kind(&graph, "head", SymbolKind::Var);
-    let tail = symbol_by_name_and_kind(&graph, "tail", SymbolKind::Var);
+    let head = symbol_by_name_and_kind(&graph, "head", SymbolKind::Var, &string_table);
+    let tail = symbol_by_name_and_kind(&graph, "tail", SymbolKind::Var, &string_table);
 
     assert_eq!(
         result
@@ -289,7 +290,7 @@ var [head, ...tail] = [1, 2, 3]
 
 #[test]
 fn check_binds_self_symbol_type_in_simple_anchored_function() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
 struct Point {
   x: i32,
@@ -302,8 +303,8 @@ fn Point::x(self): i32 {
 "#,
     );
 
-    let self_symbol = symbol_by_name_and_kind(&graph, "self", SymbolKind::Parameter);
-    let point_symbol = symbol_by_name_and_kind(&graph, "Point", SymbolKind::Struct);
+    let self_symbol = symbol_by_name_and_kind(&graph, "self", SymbolKind::Parameter, &string_table);
+    let point_symbol = symbol_by_name_and_kind(&graph, "Point", SymbolKind::Struct, &string_table);
     let ty = result.layer().symbol_type(self_symbol).unwrap();
 
     assert_eq!(
@@ -316,7 +317,7 @@ fn Point::x(self): i32 {
 
 #[test]
 fn check_binds_self_symbol_type_in_generic_anchored_function() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
 struct Box<T: i32 | bool> {
   value: T,
@@ -328,7 +329,7 @@ fn Box<T>::value(self): T {
 "#,
     );
 
-    let self_symbol = symbol_by_name_and_kind(&graph, "self", SymbolKind::Parameter);
+    let self_symbol = symbol_by_name_and_kind(&graph, "self", SymbolKind::Parameter, &string_table);
     let ty = result.layer().symbol_type(self_symbol).unwrap();
 
     assert!(
@@ -343,7 +344,7 @@ fn Box<T>::value(self): T {
 
 #[test]
 fn check_accepts_match_on_self_field_in_anchored_function() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
 struct Range {
   start: i32,
@@ -373,7 +374,7 @@ fn Range::next(self): i32 | null {
 
 #[test]
 fn check_binds_self_and_annotated_params_in_multi_param_anchored_function() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
 struct Point {
   x: i32,
@@ -389,8 +390,8 @@ fn Point::move(self, dx: i32, dy: i32): Point {
 "#,
     );
 
-    let self_symbol = symbol_by_name_and_kind(&graph, "self", SymbolKind::Parameter);
-    let point_symbol = symbol_by_name_and_kind(&graph, "Point", SymbolKind::Struct);
+    let self_symbol = symbol_by_name_and_kind(&graph, "self", SymbolKind::Parameter, &string_table);
+    let point_symbol = symbol_by_name_and_kind(&graph, "Point", SymbolKind::Struct, &string_table);
     let self_ty = result.layer().symbol_type(self_symbol).unwrap();
 
     assert_eq!(
@@ -405,7 +406,7 @@ fn Point::move(self, dx: i32, dy: i32): Point {
 
 #[test]
 fn check_user_module_rejects_internal_function_declaration() {
-    let (_source, _graph, result) = check_source_named(
+    let (_source, _graph, result, string_table) = check_source_named(
         "test.gfs",
         r#"
 fn __internal_custom(): null {
@@ -419,7 +420,7 @@ fn __internal_custom(): null {
 
 #[test]
 fn check_user_module_rejects_provider_function_declaration() {
-    let (_source, _graph, result) = check_source_named(
+    let (_source, _graph, result, string_table) = check_source_named(
         "test.gfs",
         r#"
 fn(async) __provider_gpio_read(): [u8] {
@@ -433,7 +434,7 @@ fn(async) __provider_gpio_read(): [u8] {
 
 #[test]
 fn check_provider_function_without_async_metadata_is_rejected() {
-    let (_source, _graph, result) = check_source_named(
+    let (_source, _graph, result, string_table) = check_source_named(
         "std/gpio",
         r#"
 fn __provider_gpio_read(): [u8] {

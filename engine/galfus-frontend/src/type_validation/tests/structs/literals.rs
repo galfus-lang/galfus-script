@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_struct_literal() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
 struct User {
   id: i32,
@@ -22,7 +22,7 @@ var user: User = new(User) {
 
 #[test]
 fn check_contextual_integer_struct_field_type() {
-    let (source, graph, result) = check_source(
+    let (source, graph, result, string_table) = check_source(
         r#"
 struct Color {
   r: u8,
@@ -48,7 +48,7 @@ var color: Color = new(Color) {
 
 #[test]
 fn check_binds_struct_literal_type() {
-    let (_, graph, result) = check_source(
+    let (_, graph, result, string_table) = check_source(
         r#"
 struct User {
   id: i32,
@@ -64,7 +64,7 @@ var user: User = new(User) {
 
     let literal = find_node_by_kind(&graph, SyntaxNodeKind::StructLiteral).unwrap();
 
-    let user_symbol = symbol_by_name_and_kind(&graph, "User", SymbolKind::Struct);
+    let user_symbol = symbol_by_name_and_kind(&graph, "User", SymbolKind::Struct, &string_table);
     let ty = result.layer().node_type(literal).unwrap();
 
     assert_eq!(
@@ -93,12 +93,13 @@ var user: User = new(User) {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -125,12 +126,13 @@ var user: User = new(User) {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -157,12 +159,13 @@ var user: User = new(User) {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -175,7 +178,7 @@ var user: User = new(User) {
 
 #[test]
 fn check_accepts_missing_default_struct_field() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
 struct User {
   id: i32,
@@ -193,7 +196,7 @@ var user: User = new(User) {
 
 #[test]
 fn check_accepts_assignment_to_mutable_struct_field() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
 struct User {
   id: i32,
@@ -231,12 +234,13 @@ fn update(): null {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -264,12 +268,13 @@ var user: User = new(User) {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -280,7 +285,7 @@ var user: User = new(User) {
 
 #[test]
 fn check_accepts_struct_literal_shorthand() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
 struct User {
   id: i32,

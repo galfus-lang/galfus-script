@@ -19,6 +19,7 @@ pub struct LowerCtx<'a> {
     pub type_result: &'a TypeCheckResult,
     pub graph: &'a ModuleGraph,
     pub source_text: &'a str,
+    pub string_table: &'a galfus_frontend::StringTable,
     pub types: Vec<BytecodeType>,
     pub struct_layouts: Vec<StructLayout>,
     pub choice_layouts: Vec<ChoiceLayout>,
@@ -41,11 +42,13 @@ impl<'a> LowerCtx<'a> {
         graph: &'a ModuleGraph,
         source_text: &'a str,
         mir_constants: &'a [MirConstant],
+        string_table: &'a galfus_frontend::StringTable,
     ) -> Self {
         Self {
             type_result,
             graph,
             source_text,
+            string_table,
             types: Vec::new(),
             struct_layouts: Vec::new(),
             choice_layouts: Vec::new(),

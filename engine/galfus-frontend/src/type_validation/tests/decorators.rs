@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_function_decorator() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
         fn log(target: fn(): null): fn(): null {
           return target
@@ -21,7 +21,7 @@ fn check_accepts_function_decorator() {
 
 #[test]
 fn check_accepts_decorator_call_with_arguments() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
         fn tag(target: fn(): null, name: [u8], value: i32, enabled: bool): fn(): null {
           return target
@@ -39,7 +39,7 @@ fn check_accepts_decorator_call_with_arguments() {
 
 #[test]
 fn check_accepts_struct_and_field_decorators() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
         fn frozen(target: User): User {
           return target
@@ -62,7 +62,7 @@ fn check_accepts_struct_and_field_decorators() {
 
 #[test]
 fn check_accepts_choice_payload_item_decorator() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
         fn path(target: [u8]): [u8] {
           return target
@@ -79,7 +79,7 @@ fn check_accepts_choice_payload_item_decorator() {
 
 #[test]
 fn check_accepts_weak_struct_field_decorator() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
         fn nullable(target: Node | null): Node | null {
           return target
@@ -117,7 +117,8 @@ fn check_reports_omitted_decorator_argument() {
         parse_result.diagnostics()
     );
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -125,8 +126,8 @@ fn check_reports_omitted_decorator_argument() {
     );
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -139,7 +140,7 @@ fn check_reports_omitted_decorator_argument() {
 
 #[test]
 fn check_accepts_omitted_default_decorator_argument() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
         fn tag(target: fn(): null, name: [u8] = "stable", priority: i32): fn(): null {
           return target
@@ -183,7 +184,7 @@ fn parse_accepts_decorated_weak_struct_field() {
 
 #[test]
 fn check_accepts_parameter_and_rest_parameter_decorators() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
         fn trim(target: [u8]): [u8] {
           return target
@@ -219,7 +220,8 @@ fn check_reports_unresolved_decorator_function() {
         parse_result.diagnostics()
     );
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(resolve_result.has_errors());
     assert!(
@@ -251,7 +253,8 @@ fn check_reports_decorator_target_type_mismatch() {
         parse_result.diagnostics()
     );
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -259,8 +262,8 @@ fn check_reports_decorator_target_type_mismatch() {
     );
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -290,7 +293,8 @@ fn check_reports_decorator_return_type_mismatch() {
         parse_result.diagnostics()
     );
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -298,8 +302,8 @@ fn check_reports_decorator_return_type_mismatch() {
     );
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -332,7 +336,8 @@ fn check_reports_decorator_explicit_argument_type_mismatch() {
         parse_result.diagnostics()
     );
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -340,8 +345,8 @@ fn check_reports_decorator_explicit_argument_type_mismatch() {
     );
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -352,7 +357,7 @@ fn check_reports_decorator_explicit_argument_type_mismatch() {
 
 #[test]
 fn check_accepts_function_decorator_transformer() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
         fn log(target: fn(i32): bool): fn(i32): bool {
           return target

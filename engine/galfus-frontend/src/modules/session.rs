@@ -89,6 +89,7 @@ pub struct FrontendSession {
     module_by_path: HashMap<ModulePath, usize>,
     semantic_graph: SemanticModuleGraph,
     pub diagnostics: DiagnosticBag,
+    pub string_table: crate::StringTable,
     /// Global counter. Incremented each time any module's semantic result changes.
     next_semantic_revision: u64,
 }
@@ -202,7 +203,11 @@ impl FrontendSession {
         source_revision: Revision,
     ) -> SemanticModule {
         let parse_result = parse(input.source);
-        let resolve_result = resolve(input.source, parse_result.into_graph());
+        let resolve_result = resolve(
+            input.source,
+            parse_result.into_graph(),
+            &mut self.string_table,
+        );
         let graph = resolve_result.into_graph();
         self.next_semantic_revision += 1;
 
@@ -462,7 +467,9 @@ impl FrontendSession {
         let baseline_results = self
             .modules
             .iter()
-            .map(|module| check_declaration_types(module.source(), module.graph()))
+            .map(|module| {
+                check_declaration_types(module.source(), module.graph(), &self.string_table)
+            })
             .collect::<Vec<_>>();
 
         let surfaces = self
@@ -492,6 +499,7 @@ impl FrontendSession {
                 self.modules[module_index].graph(),
                 previous_result,
                 imported_type,
+                &self.string_table,
             );
 
             self.modules[module_index].type_result = Some(result);

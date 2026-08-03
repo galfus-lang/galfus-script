@@ -3,7 +3,7 @@ use crate::type_validation::check_definition_types;
 
 #[test]
 fn check_accepts_call_with_matching_arguments() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
 fn add(a: i32, b: i32): i32 {
   return a
@@ -18,7 +18,7 @@ var value: i32 = add(1, 2)
 
 #[test]
 fn check_contextual_integer_call_argument_type() {
-    let (source, graph, result) = check_source(
+    let (source, graph, result, string_table) = check_source(
         r#"
 fn push(byte: u8): null {
   return
@@ -42,7 +42,7 @@ var value = push(27)
 
 #[test]
 fn check_binds_call_expression_return_type() {
-    let (_source, graph, result) = check_source(
+    let (_source, graph, result, string_table) = check_source(
         r#"
 fn one(): i32 {
   return 1
@@ -78,7 +78,7 @@ var value: i32 = one()
 
 #[test]
 fn check_reports_await_of_non_future() {
-    let (_source, _graph, result) = check_source_named(
+    let (_source, _graph, result, string_table) = check_source_named(
         "await-non-future.gfs",
         "fn main(): i32 {\n  const value = await 1\n  return value\n}\n",
     );
@@ -104,12 +104,13 @@ var value: i32 = add(true, 2)
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -133,12 +134,13 @@ var value: i32 = add(1)
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -162,12 +164,13 @@ var value: i32 = add(1, 2, 3)
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -188,12 +191,13 @@ var result: i32 = age()
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -204,7 +208,7 @@ var result: i32 = age()
 
 #[test]
 fn check_accepts_default_parameter_argument_count() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
 fn add(a: i32, b: i32 = 1): i32 {
   return a
@@ -219,7 +223,7 @@ var value: i32 = add(1)
 
 #[test]
 fn check_accepts_rest_parameter_argument_count() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
 fn sum(...values: [i32]): i32 {
   return 1
@@ -234,7 +238,7 @@ var value: i32 = sum(1, 2, 3)
 
 #[test]
 fn check_accepts_omitted_default_argument() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
         fn call(a: i32, b: i32 = 2, c: i32 = 3): i32 {
           return a + b + c
@@ -266,7 +270,8 @@ fn check_reports_omitted_required_argument() {
         parse_result.diagnostics()
     );
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(
         !resolve_result.has_errors(),
         "{:?}",
@@ -274,8 +279,8 @@ fn check_reports_omitted_required_argument() {
     );
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -286,7 +291,7 @@ fn check_reports_omitted_required_argument() {
 
 #[test]
 fn check_accepts_individual_arguments_for_rest_parameter() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
         fn sum(...values: [i32]): i32 {
           return 0
@@ -313,7 +318,7 @@ fn check_accepts_individual_arguments_for_rest_parameter() {
 
 #[test]
 fn check_accepts_anchor_function_path_call() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
 struct User {
   name: [u8],
@@ -333,7 +338,7 @@ var renamed: User = User::rename(user, "Lia")
 
 #[test]
 fn check_accepts_await_of_anchored_async_call() {
-    let (_source, _graph, result) = check_source(
+    let (_source, _graph, result, string_table) = check_source(
         r#"
 struct Future<T> { id: i64 }
 struct User { id: i32 }
@@ -354,7 +359,7 @@ fn main(user: User): i32 {
 
 #[test]
 fn check_binds_anchor_function_path_type() {
-    let (source, graph, result) = check_source(
+    let (source, graph, result, string_table) = check_source(
         r#"
 struct User {
   name: [u8],
@@ -401,12 +406,13 @@ fn main(): null {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -427,12 +433,13 @@ fn __provider_write(text: [u8]): null {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -453,12 +460,13 @@ fn __internal_thread_create(text: [u8]): null {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -483,12 +491,13 @@ fn main(): null {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph);
-    let result = check_definition_types(&source, &graph, result);
+    let result = check_declaration_types(&source, &graph, &string_table);
+    let result = check_definition_types(&source, &graph, result, &string_table);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {

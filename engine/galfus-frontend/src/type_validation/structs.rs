@@ -142,6 +142,8 @@ impl<'a> DeclarationTypeChecker<'a> {
         let (symbol, struct_name) = {
             let resolution = self.graph.resolution()?;
 
+            let target_name_id = self.string_table.get(target_name.as_str());
+
             let symbol = resolution
                 .type_reference_symbol(target)
                 .or_else(|| resolution.reference_symbol(target))
@@ -150,7 +152,9 @@ impl<'a> DeclarationTypeChecker<'a> {
                         .symbols()
                         .iter()
                         .find(|symbol| {
-                            symbol.name() == target_name && symbol.kind() == SymbolKind::Struct
+                            target_name_id.is_some()
+                                && symbol.name() == target_name_id.unwrap()
+                                && symbol.kind() == SymbolKind::Struct
                         })
                         .map(|symbol| symbol.id())
                 })?;
@@ -161,7 +165,13 @@ impl<'a> DeclarationTypeChecker<'a> {
                 return None;
             }
 
-            (symbol, symbol_data.name().to_string())
+            (
+                symbol,
+                self.string_table
+                    .resolve(symbol_data.name())
+                    .unwrap_or("")
+                    .to_string(),
+            )
         };
 
         let ty = self
@@ -263,7 +273,11 @@ impl<'a> DeclarationTypeChecker<'a> {
             return Vec::new();
         };
 
-        let struct_name = struct_symbol_data.name().to_string();
+        let struct_name = self
+            .string_table
+            .resolve(struct_symbol_data.name())
+            .unwrap_or("")
+            .to_string();
 
         let Some(member_scope) = resolution.member_scope(struct_symbol) else {
             return Vec::new();
@@ -286,11 +300,11 @@ impl<'a> DeclarationTypeChecker<'a> {
                 let ty = self.layer.symbol_type(*symbol)?;
 
                 Some(StructFieldInfo {
-                    name: name.to_string(),
+                    name: self.string_table.resolve(*name).unwrap_or("").to_string(),
                     ty,
                     has_default: self.struct_field_has_default(
                         struct_name.as_str(),
-                        name.as_str(),
+                        self.string_table.resolve(*name).unwrap_or(""),
                         symbol_data.declaration(),
                     ),
                 })
@@ -316,7 +330,9 @@ impl<'a> DeclarationTypeChecker<'a> {
                 .syntax()
                 .root()
                 .unwrap_or(struct_symbol_data.declaration()),
-            struct_symbol_data.name(),
+            self.string_table
+                .resolve(struct_symbol_data.name())
+                .unwrap_or(""),
         ) else {
             return Vec::new();
         };

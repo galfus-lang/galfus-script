@@ -565,7 +565,11 @@ impl VirtualMachine {
     pub fn step(&self, thread: &mut thread::VmThreadState) -> Result<VmStep, VmError> {
         if let Some((proxy_module, kind, id)) = thread.pending_external_handle_drops.pop() {
             return Ok(VmStep::Suspend {
-                effect: VmEffect::ExternalHandleDropped { proxy_module, kind, id },
+                effect: VmEffect::ExternalHandleDropped {
+                    proxy_module,
+                    kind,
+                    id,
+                },
                 continuation: Continuation::new(None),
             });
         }

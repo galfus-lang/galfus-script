@@ -148,9 +148,8 @@ impl ResolutionLayer {
         self.symbol_exports.get(&symbol).copied()
     }
 
-    pub fn lookup_symbol<N: AsNameId>(&self, scope: ScopeId, name: N) -> Option<SymbolId> {
+    pub fn lookup_symbol(&self, scope: ScopeId, name_id: NameId) -> Option<SymbolId> {
         let mut current = Some(scope);
-        let name_id = name.to_name_id();
 
         while let Some(scope_id) = current {
             let scope = self.scope(scope_id)?;
@@ -177,11 +176,11 @@ impl ResolutionLayer {
         self.member_scopes.get(&symbol).copied()
     }
 
-    pub fn builtin_type_symbol<N: AsNameId>(&self, name: N) -> Option<SymbolId> {
+    pub fn builtin_type_symbol(&self, name_id: NameId) -> Option<SymbolId> {
         let builtin_scope = self.builtin_scope?;
         let scope = self.scope(builtin_scope)?;
 
-        scope.symbol(name.to_name_id())
+        scope.symbol(name_id)
     }
 
     pub(crate) fn add_scope(
@@ -209,15 +208,14 @@ impl ResolutionLayer {
         id
     }
 
-    pub(crate) fn add_symbol<N: AsNameId>(
+    pub(crate) fn add_symbol(
         &mut self,
         kind: SymbolKind,
-        name: N,
+        name_id: NameId,
         declaration: NodeId,
         scope: ScopeId,
     ) -> SymbolId {
         let id = SymbolId::new(self.symbols.len() as u32);
-        let name_id = name.to_name_id();
 
         self.symbols
             .push(Symbol::new(id, kind, name_id, declaration, scope));

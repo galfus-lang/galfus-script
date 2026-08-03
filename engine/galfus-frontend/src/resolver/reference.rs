@@ -87,7 +87,7 @@ impl<'a> Resolver<'a> {
             SyntaxNodeKind::StructLiteralFieldShorthand => {
                 if let Some(ident) = self.syntax.first_child(node) {
                     let symbol_name = self.node_text(ident);
-                    let name_id = NameId::intern(&symbol_name);
+                    let name_id = self.string_table.intern(&symbol_name);
 
                     if let Some(symbol) = self.resolution.lookup_symbol(scope, name_id) {
                         self.resolution.bind_reference(ident, symbol);
@@ -150,7 +150,7 @@ impl<'a> Resolver<'a> {
         };
 
         let symbol_name = self.node_text(name);
-        let name_id = NameId::intern(&symbol_name);
+        let name_id = self.string_table.intern(&symbol_name);
 
         if let Some(symbol) = self.resolution.lookup_symbol(scope, name_id) {
             self.resolution.bind_reference(expression, symbol);
@@ -340,7 +340,7 @@ impl<'a> Resolver<'a> {
             .or_else(|| self.resolution.path_reference_symbol(reference_root))
             .or_else(|| {
                 let root_name = self.node_text(reference_root);
-                let root_name_id = NameId::intern(&root_name);
+                let root_name_id = self.string_table.intern(&root_name);
                 self.resolution.lookup_symbol(scope, root_name_id)
             });
 
@@ -370,7 +370,7 @@ impl<'a> Resolver<'a> {
         };
 
         let variant_name = self.node_text(variant);
-        let variant_name_id = NameId::intern(&variant_name);
+        let variant_name_id = self.string_table.intern(&variant_name);
 
         let Some(symbol) = self
             .resolution
@@ -421,13 +421,13 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_local_path_member(
-        &self,
+        &mut self,
         root_symbol: SymbolId,
         member_name: &str,
     ) -> Option<SymbolId> {
         let member_scope = self.resolution.member_scope(root_symbol)?;
 
-        let member_name_id = NameId::intern(member_name);
+        let member_name_id = self.string_table.intern(member_name);
 
         self.resolution
             .scope(member_scope)
@@ -435,7 +435,7 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_anchor_function_member(
-        &self,
+        &mut self,
         root_symbol: SymbolId,
         member_name: &str,
     ) -> Option<SymbolId> {
@@ -445,8 +445,13 @@ impl<'a> Resolver<'a> {
             return None;
         }
 
-        let anchored_name = format!("{}::{member_name}", root_symbol_data.name());
-        let anchored_name_id = NameId::intern(&anchored_name);
+        let anchored_name = format!(
+            "{}::{member_name}",
+            self.string_table
+                .resolve(root_symbol_data.name())
+                .unwrap_or("")
+        );
+        let anchored_name_id = self.string_table.intern(&anchored_name);
 
         let symbol = self
             .resolution

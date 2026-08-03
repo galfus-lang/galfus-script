@@ -14,7 +14,8 @@ fn resolve_binds_choice_generic_parameter_type_references() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -35,10 +36,10 @@ fn resolve_binds_choice_generic_parameter_type_references() {
         .unwrap();
 
     assert_eq!(v_symbol.kind(), SymbolKind::GenericParameter);
-    assert_eq!(v_symbol.name(), "V");
+    assert_eq!(string_table.resolve(v_symbol.name()).unwrap_or(""), "V");
 
     assert_eq!(f_symbol.kind(), SymbolKind::GenericParameter);
-    assert_eq!(f_symbol.name(), "F");
+    assert_eq!(string_table.resolve(f_symbol.name()).unwrap_or(""), "F");
 }
 
 #[test]
@@ -54,7 +55,8 @@ fn resolve_binds_constraint_generic_parameter_type_references() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -70,5 +72,5 @@ fn resolve_binds_constraint_generic_parameter_type_references() {
         .unwrap();
 
     assert_eq!(t_symbol.kind(), SymbolKind::GenericParameter);
-    assert_eq!(t_symbol.name(), "T");
+    assert_eq!(string_table.resolve(t_symbol.name()).unwrap_or(""), "T");
 }

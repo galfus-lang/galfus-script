@@ -120,7 +120,12 @@ impl VmThreadState {
     pub fn extract_all_external_handles(&mut self) -> Vec<(String, String, u64)> {
         let mut extracted = std::mem::take(&mut self.pending_external_handle_drops);
         for obj in self.heap.objects.iter_mut() {
-            if let Some(crate::runtime::HeapObject::ExternalHandle { proxy_module, kind, id }) = obj {
+            if let Some(crate::runtime::HeapObject::ExternalHandle {
+                proxy_module,
+                kind,
+                id,
+            }) = obj
+            {
                 extracted.push((proxy_module.clone(), kind.clone(), *id));
                 *obj = None;
             }

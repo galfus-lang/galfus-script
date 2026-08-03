@@ -64,6 +64,12 @@ impl<'a> DeclarationTypeChecker<'a> {
             return None;
         }
 
-        Some((symbol, symbol_data.name().to_string()))
+        Some((
+            symbol,
+            self.string_table
+                .resolve(symbol_data.name())
+                .unwrap_or("")
+                .to_string(),
+        ))
     }
 }

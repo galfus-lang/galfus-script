@@ -13,7 +13,8 @@ fn resolve_creates_function_scope() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -43,7 +44,8 @@ fn resolve_declares_function_parameters() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -57,16 +59,16 @@ fn resolve_declares_function_parameters() {
     let function_scope = resolution.scope(function_scope_id).unwrap();
 
     let a = resolution
-        .symbol(function_scope.symbol("a").unwrap())
+        .symbol(function_scope.symbol(string_table.intern("a")).unwrap())
         .unwrap();
     let b = resolution
-        .symbol(function_scope.symbol("b").unwrap())
+        .symbol(function_scope.symbol(string_table.intern("b")).unwrap())
         .unwrap();
 
     assert_eq!(a.kind(), SymbolKind::Parameter);
     assert_eq!(b.kind(), SymbolKind::Parameter);
-    assert_eq!(a.name(), "a");
-    assert_eq!(b.name(), "b");
+    assert_eq!(string_table.resolve(a.name()).unwrap_or(""), "a");
+    assert_eq!(string_table.resolve(b.name()).unwrap_or(""), "b");
 }
 
 #[test]
@@ -82,7 +84,8 @@ fn resolve_declares_rest_parameter() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -96,11 +99,18 @@ fn resolve_declares_rest_parameter() {
     let function_scope = resolution.scope(function_scope_id).unwrap();
 
     let messages = resolution
-        .symbol(function_scope.symbol("messages").unwrap())
+        .symbol(
+            function_scope
+                .symbol(string_table.intern("messages"))
+                .unwrap(),
+        )
         .unwrap();
 
     assert_eq!(messages.kind(), SymbolKind::RestParameter);
-    assert_eq!(messages.name(), "messages");
+    assert_eq!(
+        string_table.resolve(messages.name()).unwrap_or(""),
+        "messages"
+    );
 }
 
 #[test]
@@ -116,7 +126,8 @@ fn resolve_binds_parameter_declaration_to_symbol() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -141,7 +152,7 @@ fn resolve_binds_parameter_declaration_to_symbol() {
     let symbol = resolution.declaration_symbol(name).unwrap();
     let symbol = resolution.symbol(symbol).unwrap();
 
-    assert_eq!(symbol.name(), "value");
+    assert_eq!(string_table.resolve(symbol.name()).unwrap_or(""), "value");
     assert_eq!(symbol.kind(), SymbolKind::Parameter);
 }
 
@@ -158,7 +169,8 @@ fn resolve_reports_duplicate_parameter() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(resolve_result.has_errors());
 
@@ -173,7 +185,7 @@ fn resolve_reports_duplicate_parameter() {
     let function_scope = resolution.scope(function_scope_id).unwrap();
 
     let value = resolution
-        .symbol(function_scope.symbol("value").unwrap())
+        .symbol(function_scope.symbol(string_table.intern("value")).unwrap())
         .unwrap();
 
     assert_eq!(value.kind(), SymbolKind::Parameter);
@@ -181,7 +193,7 @@ fn resolve_reports_duplicate_parameter() {
     let value_count = resolution
         .symbols()
         .iter()
-        .filter(|symbol| symbol.name() == "value")
+        .filter(|symbol| string_table.resolve(symbol.name()).unwrap_or("") == "value")
         .count();
 
     assert_eq!(value_count, 1);
@@ -200,7 +212,8 @@ fn resolve_creates_function_scope_for_exported_function() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -217,7 +230,7 @@ fn resolve_creates_function_scope_for_exported_function() {
     assert_eq!(function_scope.kind(), ScopeKind::Function);
 
     let value = resolution
-        .symbol(function_scope.symbol("value").unwrap())
+        .symbol(function_scope.symbol(string_table.intern("value")).unwrap())
         .unwrap();
 
     assert_eq!(value.kind(), SymbolKind::Parameter);

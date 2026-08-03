@@ -220,7 +220,13 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                             if is_global {
                                 let name = res
                                     .symbol(sym)
-                                    .map(|s| s.name().to_string())
+                                    .map(|s| {
+                                        self.builder
+                                            .string_table
+                                            .resolve(s.name())
+                                            .unwrap_or("")
+                                            .to_string()
+                                    })
                                     .unwrap_or_default();
                                 let ty = self
                                     .builder
@@ -1132,7 +1138,13 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
             .symbols()
             .iter()
             .find(|symbol| {
-                symbol.kind() == SymbolKind::Function && symbol.name() == function_name.as_str()
+                symbol.kind() == SymbolKind::Function
+                    && self
+                        .builder
+                        .string_table
+                        .resolve(symbol.name())
+                        .unwrap_or("")
+                        == function_name.as_str()
             })
             .map(|symbol| symbol.id())
     }

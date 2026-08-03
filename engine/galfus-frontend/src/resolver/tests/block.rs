@@ -13,7 +13,8 @@ fn resolve_creates_function_body_block_scope() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -51,7 +52,8 @@ fn resolve_declares_var_and_const_in_block_scope() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -69,11 +71,11 @@ fn resolve_declares_var_and_const_in_block_scope() {
     let block_scope = resolution.scope(block_scope_id).unwrap();
 
     let total = resolution
-        .symbol(block_scope.symbol("total").unwrap())
+        .symbol(block_scope.symbol(string_table.intern("total")).unwrap())
         .unwrap();
 
     let label = resolution
-        .symbol(block_scope.symbol("label").unwrap())
+        .symbol(block_scope.symbol(string_table.intern("label")).unwrap())
         .unwrap();
 
     assert_eq!(total.kind(), SymbolKind::Var);
@@ -101,7 +103,8 @@ fn resolve_declares_destructuring_bindings_in_block_scope() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -119,14 +122,18 @@ fn resolve_declares_destructuring_bindings_in_block_scope() {
         .scope(resolution.node_scope(block).unwrap())
         .unwrap();
 
-    assert!(block_scope.symbol("id").is_some());
-    assert!(block_scope.symbol("userName").is_some());
-    assert!(block_scope.symbol("x").is_some());
-    assert!(block_scope.symbol("y").is_some());
-    assert!(block_scope.symbol("first").is_some());
-    assert!(block_scope.symbol("rest").is_some());
+    assert!(block_scope.symbol(string_table.intern("id")).is_some());
+    assert!(
+        block_scope
+            .symbol(string_table.intern("userName"))
+            .is_some()
+    );
+    assert!(block_scope.symbol(string_table.intern("x")).is_some());
+    assert!(block_scope.symbol(string_table.intern("y")).is_some());
+    assert!(block_scope.symbol(string_table.intern("first")).is_some());
+    assert!(block_scope.symbol(string_table.intern("rest")).is_some());
 
-    assert!(block_scope.symbol("name").is_none());
+    assert!(block_scope.symbol(string_table.intern("name")).is_none());
 }
 
 #[test]
@@ -146,7 +153,8 @@ fn resolve_creates_nested_block_scope() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -175,7 +183,11 @@ fn resolve_creates_nested_block_scope() {
     assert_eq!(inner_block_scope.parent(), Some(outer_block_scope));
 
     let inside = resolution
-        .symbol(inner_block_scope.symbol("inside").unwrap())
+        .symbol(
+            inner_block_scope
+                .symbol(string_table.intern("inside"))
+                .unwrap(),
+        )
         .unwrap();
 
     assert_eq!(inside.kind(), SymbolKind::Var);
@@ -196,7 +208,8 @@ fn resolve_reports_duplicate_block_binding() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(resolve_result.has_errors());
 
@@ -216,7 +229,7 @@ fn resolve_reports_duplicate_block_binding() {
         .unwrap();
 
     let value = resolution
-        .symbol(block_scope.symbol("value").unwrap())
+        .symbol(block_scope.symbol(string_table.intern("value")).unwrap())
         .unwrap();
 
     assert_eq!(value.kind(), SymbolKind::Var);
@@ -224,7 +237,7 @@ fn resolve_reports_duplicate_block_binding() {
     let count = resolution
         .symbols()
         .iter()
-        .filter(|symbol| symbol.name() == "value")
+        .filter(|symbol| string_table.resolve(symbol.name()).unwrap_or("") == "value")
         .count();
 
     assert_eq!(count, 1);

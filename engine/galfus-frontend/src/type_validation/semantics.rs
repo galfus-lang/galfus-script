@@ -249,7 +249,12 @@ impl<'a> DeclarationTypeChecker<'a> {
             .graph
             .resolution()
             .and_then(|resolution| resolution.symbol(symbol))
-            .map(|symbol| symbol.name().to_string())
+            .map(|symbol| {
+                self.string_table
+                    .resolve(symbol.name())
+                    .unwrap_or("")
+                    .to_string()
+            })
             .unwrap_or_else(|| "<unknown>".to_string());
 
         self.report_initialization_cycle(binding.node, name.as_str());
@@ -504,7 +509,7 @@ impl<'a> DeclarationTypeChecker<'a> {
             return false;
         }
 
-        if !is_builtin_constraint(symbol_data.name()) {
+        if !is_builtin_constraint(self.string_table.resolve(symbol_data.name()).unwrap_or("")) {
             return false;
         }
 

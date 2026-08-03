@@ -3,9 +3,11 @@ mod export;
 mod tests;
 
 use crate::{
-    AsNameId, ImportedChoiceSurface, ImportedConstraintSurface, ImportedFunctionParameterType,
-    ImportedMemberKey, ImportedSurfaceTypes, ImportedType, ModuleAst, NameId, ResolutionLayer,
-    SymbolKind, SyntaxNodeKind, TypeCheckResult, TypeKind,
+    ImportedMemberKey, ImportedSurfaceTypes, ImportedType, ModuleAst, ResolutionLayer, SymbolKind,
+    SyntaxNodeKind, TypeCheckResult, TypeKind,
+    type_validation::{
+        ImportedChoiceSurface, ImportedConstraintSurface, ImportedFunctionParameterType,
+    },
 };
 pub use export::*;
 use galfus_core::{NodeId, SymbolId, TypeId};
@@ -14,7 +16,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModuleSurface {
     exports: Vec<ModuleSurfaceExport>,
-    exports_by_name: HashMap<NameId, usize>,
+    exports_by_name: HashMap<String, usize>,
 }
 
 impl ModuleSurface {
@@ -22,7 +24,7 @@ impl ModuleSurface {
         let exports_by_name = exports
             .iter()
             .enumerate()
-            .map(|(index, export)| (NameId::intern(export.name()), index))
+            .map(|(index, export)| (export.name().to_string(), index))
             .collect();
 
         Self {
@@ -35,19 +37,18 @@ impl ModuleSurface {
         self.exports.as_slice()
     }
 
-    pub fn export<N: AsNameId>(&self, name: N) -> Option<&ModuleSurfaceExport> {
+    pub fn export(&self, name: &str) -> Option<&ModuleSurfaceExport> {
         self.exports_by_name
-            .get(&name.to_name_id())
+            .get(name)
             .and_then(|index| self.exports.get(*index))
     }
 
-    pub fn imported_type_for_export<N: AsNameId>(
+    pub fn imported_type_for_export(
         &self,
         local_symbol: SymbolId,
-        name: N,
+        name: &str,
     ) -> Option<ImportedType> {
-        let name_id = name.to_name_id();
-        let export = self.export(name_id)?;
+        let export = self.export(name)?;
 
         if export.kind().is_nominal_surface_type() {
             return Some(ImportedType::NamedLocal {
@@ -58,25 +59,23 @@ impl ModuleSurface {
         export.ty().map(|ty| ty.relocate(local_symbol))
     }
 
-    pub fn imported_path_type_for_export<N: AsNameId>(
+    pub fn imported_path_type_for_export(
         &self,
         namespace: SymbolId,
-        name: N,
+        name: &str,
     ) -> Option<ImportedType> {
-        let name_id = name.to_name_id();
-        if let Some(export) = self.export(name_id) {
+        if let Some(export) = self.export(name) {
             if export.kind().is_nominal_surface_type() {
                 return Some(ImportedType::SurfacePath {
                     namespace,
-                    name: name_id.to_string(),
+                    name: name.to_string(),
                 });
             }
 
             return export.ty().map(|ty| ty.relocate(namespace));
         }
 
-        let name_str = name_id.as_str();
-        let (owner_name, member_name) = name_str.rsplit_once("::")?;
+        let (owner_name, member_name) = name.rsplit_once("::")?;
         let owner = self.export(owner_name)?;
         let member = owner
             .members()
@@ -115,18 +114,17 @@ impl ModuleSurface {
         }
     }
 
-    pub fn imported_member_path_type_for_named_export<N1: AsNameId, N2: AsNameId>(
+    pub fn imported_member_path_type_for_named_export(
         &self,
         local_symbol: SymbolId,
-        owner_name: N1,
-        member_name: N2,
+        owner_name: &str,
+        member_name: &str,
     ) -> Option<ImportedType> {
         let owner = self.export(owner_name)?;
-        let member_name_id = member_name.to_name_id();
         let member = owner
             .members()
             .iter()
-            .find(|member| member.name() == member_name_id.as_str())?;
+            .find(|member| member.name() == member_name)?;
 
         match member.kind() {
             SymbolKind::EnumVariant => Some(ImportedType::NamedLocal {
@@ -158,12 +156,8 @@ impl ModuleSurface {
         }
     }
 
-    pub fn imported_constraint_for_export<N: AsNameId>(
-        &self,
-        name: N,
-    ) -> Option<ImportedConstraintSurface> {
-        let name_id = name.to_name_id();
-        let export = self.export(name_id)?;
+    pub fn imported_constraint_for_export(&self, name: &str) -> Option<ImportedConstraintSurface> {
+        let export = self.export(name)?;
 
         if export.kind() != SymbolKind::Constraint {
             return None;
@@ -172,12 +166,8 @@ impl ModuleSurface {
         Some(export.imported_constraint_surface())
     }
 
-    pub fn imported_choice_for_export<N: AsNameId>(
-        &self,
-        name: N,
-    ) -> Option<ImportedChoiceSurface> {
-        let name_id = name.to_name_id();
-        let export = self.export(name_id)?;
+    pub fn imported_choice_for_export(&self, name: &str) -> Option<ImportedChoiceSurface> {
+        let export = self.export(name)?;
 
         if export.kind() != SymbolKind::Choice {
             return None;

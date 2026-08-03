@@ -145,9 +145,11 @@ impl<'a> DeclarationTypeChecker<'a> {
         }
 
         if let Some(member_scope) = resolution.member_scope(symbol)
-            && let Some(member_symbol) = resolution
-                .scope(member_scope)
-                .and_then(|scope| scope.symbol(member_name))
+            && let Some(member_symbol) = resolution.scope(member_scope).and_then(|scope| {
+                self.string_table
+                    .get(member_name)
+                    .and_then(|id| scope.symbol(id))
+            })
         {
             let member_symbol_data = resolution.symbol(member_symbol)?;
 
@@ -200,9 +202,11 @@ impl<'a> DeclarationTypeChecker<'a> {
 
         let member_scope = resolution.member_scope(symbol)?;
 
-        let member_symbol = resolution
-            .scope(member_scope)
-            .and_then(|scope| scope.symbol(member_name))?;
+        let member_symbol = resolution.scope(member_scope).and_then(|scope| {
+            self.string_table
+                .get(member_name)
+                .and_then(|id| scope.symbol(id))
+        })?;
 
         let member_symbol_data = resolution.symbol(member_symbol)?;
 

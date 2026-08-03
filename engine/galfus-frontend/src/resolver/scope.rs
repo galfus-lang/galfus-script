@@ -1,4 +1,4 @@
-use crate::{AsNameId, NameId};
+use crate::NameId;
 use galfus_core::{NodeId, ScopeId, SymbolId};
 use std::collections::HashMap;
 
@@ -63,15 +63,11 @@ impl Scope {
         &self.symbols
     }
 
-    pub fn symbol<N: AsNameId>(&self, name: N) -> Option<SymbolId> {
-        self.symbols.get(&name.to_name_id()).copied()
+    pub fn symbol(&self, name_id: NameId) -> Option<SymbolId> {
+        self.symbols.get(&name_id).copied()
     }
 
-    pub(crate) fn insert_symbol<N: AsNameId>(
-        &mut self,
-        name: N,
-        symbol: SymbolId,
-    ) -> Option<SymbolId> {
-        self.symbols.insert(name.to_name_id(), symbol)
+    pub(crate) fn insert_symbol(&mut self, name_id: NameId, symbol: SymbolId) {
+        self.symbols.insert(name_id, symbol);
     }
 }

@@ -77,7 +77,7 @@ impl<'a> Resolver<'a> {
         };
 
         let type_name = self.node_text(name);
-        let type_name_id = NameId::intern(&type_name);
+        let type_name_id = self.string_table.intern(&type_name);
 
         if let Some(symbol) = self.resolution.lookup_symbol(scope, type_name_id) {
             let Some(symbol_data) = self.resolution.symbol(symbol) else {
@@ -110,7 +110,7 @@ impl<'a> Resolver<'a> {
         };
 
         let root_name = self.node_text(root);
-        let root_name_id = NameId::intern(&root_name);
+        let root_name_id = self.string_table.intern(&root_name);
 
         let Some(symbol) = self.resolution.lookup_symbol(scope, root_name_id) else {
             self.report_unresolved_type(root, root_name);
@@ -195,7 +195,7 @@ impl<'a> Resolver<'a> {
 
         for member in path_node.children().iter().skip(1) {
             let member_name = self.node_text(*member);
-            let member_name_id = NameId::intern(&member_name);
+            let member_name_id = self.string_table.intern(&member_name);
 
             let Some(member_scope) = self.resolution.member_scope(current_symbol) else {
                 return;

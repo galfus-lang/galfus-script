@@ -674,6 +674,7 @@ impl Workspace {
             &mut compiled_modules,
             &mut self.bytecode_state.compiler_state,
             &compilation_targets,
+            &self.frontend.string_table,
             base_graph.version(),
             semantic_revision,
             removed_modules,

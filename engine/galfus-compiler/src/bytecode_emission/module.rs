@@ -12,12 +12,14 @@ pub fn lower_module(
     type_result: &TypeCheckResult,
     module_graph: &ModuleGraph,
     source_text: &str,
+    string_table: &galfus_frontend::StringTable,
 ) -> (BytecodeModule, galfus_bytecode::graph::ExecutionMetadata) {
     let mut ctx = LowerCtx::new(
         type_result,
         module_graph,
         source_text,
         &mir_module.constant_pool,
+        string_table,
     );
 
     for (i, func) in mir_module.functions.iter().enumerate() {

@@ -179,6 +179,7 @@ impl<'a> Resolver<'a> {
 
         let symbol_name = self.node_text(name);
 
-        self.declare_symbol(symbol_name, kind, name, scope);
+        let name_id = self.string_table.intern(&symbol_name);
+        self.declare_symbol(name_id, kind, name, scope);
     }
 }

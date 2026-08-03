@@ -27,7 +27,7 @@ impl<'a> Resolver<'a> {
             return;
         };
 
-        let name_id = NameId::intern(name);
+        let name_id = self.string_table.intern(name);
 
         if self
             .resolution
@@ -52,7 +52,7 @@ impl<'a> Resolver<'a> {
             return;
         };
 
-        let constraint_name_id = NameId::intern(constraint.name);
+        let constraint_name_id = self.string_table.intern(constraint.name);
 
         if self
             .resolution
@@ -82,7 +82,7 @@ impl<'a> Resolver<'a> {
             .bind_member_scope(constraint_symbol, member_scope);
 
         for parameter in constraint.generic_parameters {
-            let param_name_id = NameId::intern(parameter);
+            let param_name_id = self.string_table.intern(parameter);
             let symbol = self.resolution.add_symbol(
                 SymbolKind::GenericParameter,
                 param_name_id,
@@ -96,7 +96,7 @@ impl<'a> Resolver<'a> {
         }
 
         for function in constraint.functions {
-            let func_name_id = NameId::intern(function.name);
+            let func_name_id = self.string_table.intern(function.name);
             let symbol = self.resolution.add_symbol(
                 SymbolKind::ConstraintFunction,
                 func_name_id,

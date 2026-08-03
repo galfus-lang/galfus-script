@@ -72,8 +72,8 @@ pub enum BoundaryValue {
     },
     Handle {
         proxy_module: Option<String>, // Set by Orchestrator upon future completion
-        kind: String, // ExternalHandleKind
-        id: u64,      // ExternalHandleId
+        kind: String,                 // ExternalHandleKind
+        id: u64,                      // ExternalHandleId
     },
 }
 
@@ -300,7 +300,10 @@ impl ExternalBindings {
         }
         let mut batch = std::collections::HashSet::new();
         if handles.iter().any(|(kind, id)| {
-            !batch.insert((kind.clone(), *id)) || self.handles.contains(&(proxy_module.to_string(), kind.clone(), *id))
+            !batch.insert((kind.clone(), *id))
+                || self
+                    .handles
+                    .contains(&(proxy_module.to_string(), kind.clone(), *id))
         }) {
             if let Some(module) = self.modules.get_mut(proxy_module) {
                 for (kind, id) in handles {
@@ -317,11 +320,15 @@ impl ExternalBindings {
     }
 
     pub fn contains_handle(&self, proxy_module: &str, kind: &str, id: u64) -> bool {
-        self.handles.contains(&(proxy_module.to_string(), kind.to_string(), id))
+        self.handles
+            .contains(&(proxy_module.to_string(), kind.to_string(), id))
     }
 
     pub fn release_handle(&mut self, proxy_module: &str, kind: &str, id: u64) -> bool {
-        if !self.handles.remove(&(proxy_module.to_string(), kind.to_string(), id)) {
+        if !self
+            .handles
+            .remove(&(proxy_module.to_string(), kind.to_string(), id))
+        {
             return false;
         }
         if let Some(module) = self.get_mut(proxy_module) {

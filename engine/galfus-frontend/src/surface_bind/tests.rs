@@ -31,11 +31,12 @@ fn module_surface_records_exported_type_definitions() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
-    let type_result = check_declaration_types(&source, graph);
+    let type_result = check_declaration_types(&source, graph, &string_table);
     assert!(!type_result.has_errors());
 
     let surface = build_module_surface(graph, &type_result);
@@ -64,11 +65,12 @@ fn module_surface_imports_exported_type_as_local_binding() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
-    let type_result = check_declaration_types(&source, graph);
+    let type_result = check_declaration_types(&source, graph, &string_table);
     assert!(!type_result.has_errors());
 
     let surface = build_module_surface(graph, &type_result);
@@ -95,11 +97,12 @@ fn module_surface_imports_exported_type_as_namespace_path() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
-    let type_result = check_declaration_types(&source, graph);
+    let type_result = check_declaration_types(&source, graph, &string_table);
     assert!(!type_result.has_errors());
 
     let surface = build_module_surface(graph, &type_result);
@@ -131,11 +134,12 @@ fn module_surface_records_exported_function_signature() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
-    let type_result = check_declaration_types(&source, graph);
+    let type_result = check_declaration_types(&source, graph, &string_table);
     assert!(!type_result.has_errors());
 
     let surface = build_module_surface(graph, &type_result);

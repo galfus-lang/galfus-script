@@ -17,6 +17,7 @@ pub struct MirBuilder<'a> {
     pub(super) graph: &'a ModuleGraph,
     pub(super) type_result: &'a TypeCheckResult,
     pub(super) source_text: &'a str,
+    pub(super) string_table: &'a galfus_frontend::StringTable,
     pub(super) next_local_id: u32,
     pub(super) next_block_id: u32,
     pub(super) next_specialized_function_id: u32,
@@ -32,11 +33,13 @@ impl<'a> MirBuilder<'a> {
         graph: &'a ModuleGraph,
         type_result: &'a TypeCheckResult,
         source_text: &'a str,
+        string_table: &'a galfus_frontend::StringTable,
     ) -> Self {
         Self {
             graph,
             type_result,
             source_text,
+            string_table,
             next_local_id: 0,
             next_block_id: 0,
             next_specialized_function_id: 0x7FFF_FFFF,
@@ -133,7 +136,12 @@ impl<'a> MirBuilder<'a> {
                         .graph
                         .resolution()
                         .and_then(|res| res.symbol(symbol))
-                        .map(|sym| sym.name().to_string())
+                        .map(|sym| {
+                            self.string_table
+                                .resolve(sym.name())
+                                .unwrap_or("")
+                                .to_string()
+                        })
                         .unwrap_or_default();
                     globals.push(GlobalDecl { name, ty });
                 }
@@ -215,7 +223,14 @@ impl<'a> MirBuilder<'a> {
                             .graph
                             .resolution()
                             .and_then(|res| res.symbol(symbol))
-                            .map(|sym| sym.name().to_string())
+                            .map(|sym| {
+                                builder_ctx
+                                    .builder
+                                    .string_table
+                                    .resolve(sym.name())
+                                    .unwrap_or("")
+                                    .to_string()
+                            })
                             .unwrap_or_default();
 
                         builder_ctx
@@ -309,6 +324,7 @@ impl<'a> MirBuilder<'a> {
 }
 
 pub trait WorkspaceContext {
+    fn string_table(&self) -> &galfus_frontend::StringTable;
     fn resolve_import(
         &self,
         caller_module_id: ModuleId,

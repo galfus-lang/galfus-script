@@ -16,18 +16,19 @@ fn resolve_declares_namespace_import_binding() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
     let resolution = graph.resolution().unwrap();
     let module_scope = resolution.scope(resolution.module_scope()).unwrap();
 
-    let symbol = module_scope.symbol("user").unwrap();
+    let symbol = module_scope.symbol(string_table.intern("user")).unwrap();
     let symbol = resolution.symbol(symbol).unwrap();
 
     assert_eq!(symbol.kind(), SymbolKind::ImportNamespace);
-    assert_eq!(symbol.name(), "user");
+    assert_eq!(string_table.resolve(symbol.name()).unwrap_or(""), "user");
 }
 
 #[test]
@@ -45,7 +46,8 @@ fn resolve_declares_named_import_bindings() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -53,11 +55,11 @@ fn resolve_declares_named_import_bindings() {
     let module_scope = resolution.scope(resolution.module_scope()).unwrap();
 
     let user = resolution
-        .symbol(module_scope.symbol("User").unwrap())
+        .symbol(module_scope.symbol(string_table.intern("User")).unwrap())
         .unwrap();
 
     let create = resolution
-        .symbol(module_scope.symbol("create").unwrap())
+        .symbol(module_scope.symbol(string_table.intern("create")).unwrap())
         .unwrap();
 
     assert_eq!(user.kind(), SymbolKind::ImportBinding);
@@ -79,21 +81,29 @@ fn resolve_declares_named_import_alias_binding() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
     let resolution = graph.resolution().unwrap();
     let module_scope = resolution.scope(resolution.module_scope()).unwrap();
 
-    assert!(module_scope.symbol("User").is_none());
+    assert!(module_scope.symbol(string_table.intern("User")).is_none());
 
     let local_user = resolution
-        .symbol(module_scope.symbol("LocalUser").unwrap())
+        .symbol(
+            module_scope
+                .symbol(string_table.intern("LocalUser"))
+                .unwrap(),
+        )
         .unwrap();
 
     assert_eq!(local_user.kind(), SymbolKind::ImportBinding);
-    assert_eq!(local_user.name(), "LocalUser");
+    assert_eq!(
+        string_table.resolve(local_user.name()).unwrap_or(""),
+        "LocalUser"
+    );
 }
 
 #[test]
@@ -111,7 +121,8 @@ fn resolve_reports_duplicate_import_and_local_symbol() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(resolve_result.has_errors());
 
@@ -120,7 +131,7 @@ fn resolve_reports_duplicate_import_and_local_symbol() {
     let module_scope = resolution.scope(resolution.module_scope()).unwrap();
 
     let symbol = resolution
-        .symbol(module_scope.symbol("user").unwrap())
+        .symbol(module_scope.symbol(string_table.intern("user")).unwrap())
         .unwrap();
 
     assert_eq!(symbol.kind(), SymbolKind::Function);
@@ -141,7 +152,8 @@ fn resolve_records_namespace_import() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -159,7 +171,7 @@ fn resolve_records_namespace_import() {
     let symbol = resolution.symbol(import.local_symbol()).unwrap();
 
     assert_eq!(symbol.kind(), SymbolKind::ImportNamespace);
-    assert_eq!(symbol.name(), "user");
+    assert_eq!(string_table.resolve(symbol.name()).unwrap_or(""), "user");
 
     assert_eq!(resolution.import_for_symbol(symbol.id()), Some(import.id()));
 }
@@ -179,7 +191,8 @@ fn resolve_records_named_imports() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -216,7 +229,8 @@ fn resolve_records_named_import_alias() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
@@ -234,7 +248,10 @@ fn resolve_records_named_import_alias() {
     let symbol = resolution.symbol(import.local_symbol()).unwrap();
 
     assert_eq!(symbol.kind(), SymbolKind::ImportBinding);
-    assert_eq!(symbol.name(), "LocalUser");
+    assert_eq!(
+        string_table.resolve(symbol.name()).unwrap_or(""),
+        "LocalUser"
+    );
 }
 
 #[test]
@@ -252,7 +269,8 @@ fn resolve_does_not_record_import_when_local_symbol_is_duplicate() {
     let parse_result = parse(&source);
     assert!(!parse_result.has_errors());
 
-    let resolve_result = resolve(&source, parse_result.into_graph());
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
 
     assert!(resolve_result.has_errors());
 
@@ -262,7 +280,7 @@ fn resolve_does_not_record_import_when_local_symbol_is_duplicate() {
     assert_eq!(resolution.imports().len(), 0);
 
     let module_scope = resolution.scope(resolution.module_scope()).unwrap();
-    let user_symbol = module_scope.symbol("user").unwrap();
+    let user_symbol = module_scope.symbol(string_table.intern("user")).unwrap();
     let user_symbol = resolution.symbol(user_symbol).unwrap();
 
     assert_eq!(user_symbol.kind(), SymbolKind::Function);

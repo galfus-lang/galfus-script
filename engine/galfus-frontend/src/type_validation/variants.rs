@@ -176,9 +176,11 @@ impl<'a> DeclarationTypeChecker<'a> {
         }
 
         let member_scope = resolution.member_scope(*symbol)?;
-        let member_symbol = resolution
-            .scope(member_scope)
-            .and_then(|scope| scope.symbol(member_name))?;
+        let member_symbol = resolution.scope(member_scope).and_then(|scope| {
+            self.string_table
+                .get(member_name)
+                .and_then(|id| scope.symbol(id))
+        })?;
         let member_symbol_data = resolution.symbol(member_symbol)?;
 
         if member_symbol_data.kind() != SymbolKind::ConstraintFunction {
@@ -203,7 +205,11 @@ impl<'a> DeclarationTypeChecker<'a> {
             .symbol_type(owner_symbol)
             .unwrap_or_else(|| self.layer.table_mut().intern_named(owner_symbol));
 
-        let variant_name = resolution.symbol(variant_symbol)?.name().to_string();
+        let variant_name = self
+            .string_table
+            .resolve(resolution.symbol(variant_symbol)?.name())
+            .unwrap_or("")
+            .to_string();
 
         let mut payload_types = self.choice_variant_payload_types(owner_symbol, variant_symbol);
 
@@ -378,9 +384,10 @@ impl<'a> DeclarationTypeChecker<'a> {
             return Vec::new();
         };
 
-        let Some(variant_node) =
-            self.choice_variant_node_by_name(owner_data.name(), variant_data.name())
-        else {
+        let Some(variant_node) = self.choice_variant_node_by_name(
+            self.string_table.resolve(owner_data.name()).unwrap_or(""),
+            self.string_table.resolve(variant_data.name()).unwrap_or(""),
+        ) else {
             return Vec::new();
         };
 
