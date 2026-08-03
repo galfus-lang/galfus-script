@@ -1,4 +1,7 @@
 //! Host integration contracts for Galfus execution.
+//!
+//! See the Runtime Ownership Matrix in the Architecture Reference (`docs/Galfus_Architecture_Reference.md`)
+//! for authoritative details on the lifecycle and ownership of boundary values and external handles.
 
 pub mod builtins;
 #[cfg(test)]

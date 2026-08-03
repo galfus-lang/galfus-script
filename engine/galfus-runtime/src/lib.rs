@@ -1,3 +1,8 @@
+//! Galfus Runtime
+//!
+//! See the Runtime Ownership Matrix in the Architecture Reference (`docs/Galfus_Architecture_Reference.md`)
+//! for authoritative details on the lifecycle and ownership of runtime entities.
+
 pub mod driver;
 pub mod event;
 pub mod execution;
