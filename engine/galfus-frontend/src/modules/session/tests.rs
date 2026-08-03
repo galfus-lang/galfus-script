@@ -424,3 +424,61 @@ fn check_reports_required_builtins_in_canonical_path_order() {
         ["format.gfs", "format/ansi.gfs", "std/io.gfs", "text.gfs"]
     );
 }
+
+#[test]
+fn check_exposes_semantic_modules_in_canonical_module_id_order() {
+    let main = SourceFile::new(
+        SourceId::new(1),
+        "src/main.gfs".to_string(),
+        "fn main(): i32 { return 0 }".to_string(),
+    );
+    let utility = SourceFile::new(
+        SourceId::new(2),
+        "src/utility.gfs".to_string(),
+        "fn utility(): i32 { return 0 }".to_string(),
+    );
+    let helper = SourceFile::new(
+        SourceId::new(3),
+        "src/helper.gfs".to_string(),
+        "fn helper(): i32 { return 0 }".to_string(),
+    );
+    let sources = [
+        FrontendSource {
+            module_id: ModuleId::new(41),
+            path: path("src/main.gfs"),
+            source: &main,
+            kind: FrontendModuleKind::Standard,
+        },
+        FrontendSource {
+            module_id: ModuleId::new(7),
+            path: path("src/utility.gfs"),
+            source: &utility,
+            kind: FrontendModuleKind::Standard,
+        },
+        FrontendSource {
+            module_id: ModuleId::new(13),
+            path: path("src/helper.gfs"),
+            source: &helper,
+            kind: FrontendModuleKind::Standard,
+        },
+    ];
+    let mut session = FrontendSession::new();
+
+    let report = session.check(FrontendUpdate {
+        source_revision: Revision::new(1),
+        sources: &sources,
+        removed_modules: &[],
+        roots: &FrontendRoots::default(),
+    });
+
+    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+    let module_ids = session
+        .semantic_graph()
+        .modules()
+        .map(SemanticModule::id)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        module_ids,
+        [ModuleId::new(7), ModuleId::new(13), ModuleId::new(41)]
+    );
+}
