@@ -434,7 +434,7 @@ impl Workspace {
     }
 
     fn refresh_external_proxy_descriptors(&mut self, diagnostics: &mut DiagnosticBag) {
-        for module in &self.frontend.modules {
+        for module in self.frontend.modules() {
             if module.kind() != FrontendModuleKind::ExternalProxy {
                 continue;
             }
@@ -640,7 +640,7 @@ impl Workspace {
         // every semantic module even if the last frontend delta was narrower.
         let compilation_targets = if let Some(cached_graph) = cached_graph {
             self.frontend
-                .modules
+                .modules()
                 .iter()
                 .filter(|module| changed_modules.contains(&module.id()))
                 .filter(|module| {
@@ -652,7 +652,7 @@ impl Workspace {
                 .collect::<HashSet<_>>()
         } else {
             self.frontend
-                .modules
+                .modules()
                 .iter()
                 .map(|module| module.id())
                 .collect::<HashSet<_>>()
@@ -662,7 +662,7 @@ impl Workspace {
         let mut reachable_modules = HashSet::new();
 
         // Build CompiledModule list from the frontend's semantic modules.
-        let semantic_modules = &self.frontend.modules;
+        let semantic_modules = self.frontend.modules();
 
         let mut path_to_id = HashMap::new();
         for module in semantic_modules {
@@ -744,7 +744,7 @@ impl Workspace {
             &mut compiled_modules,
             &mut self.bytecode_state.compiler_state,
             &compilation_targets,
-            &self.frontend.string_table,
+            self.frontend.string_table(),
             base_graph.version(),
             semantic_revision,
             removed_modules,

@@ -46,8 +46,7 @@ fn test_mir_builder_phase3() {
 
     let parse_result = parse(&source);
     let mut string_table = galfus_frontend::StringTable::new();
-    let mut string_table = galfus_frontend::StringTable::new();
-        let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     let graph = resolve_result.into_graph();
     assert!(
         !graph.has_errors(),
@@ -55,8 +54,12 @@ fn test_mir_builder_phase3() {
         graph.diagnostics()
     );
 
-    let type_result =
-        check_definition_types(&source, &graph, check_declaration_types(&source, &graph, &string_table), &string_table);
+    let type_result = check_definition_types(
+        &source,
+        &graph,
+        check_declaration_types(&source, &graph, &string_table),
+        &string_table,
+    );
     assert!(
         !type_result.has_errors(),
         "Typecheck errors occurred: {:?}",

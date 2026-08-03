@@ -85,12 +85,12 @@ pub struct FrontendReport {
 
 #[derive(Default)]
 pub struct FrontendSession {
-    pub modules: Vec<SemanticModule>,
+    pub(super) modules: Vec<SemanticModule>,
     module_by_path: HashMap<ModulePath, usize>,
     semantic_graph: SemanticModuleGraph,
     pub diagnostics: DiagnosticBag,
-    pub string_table: crate::StringTable,
-    /// Global counter. Incremented each time any module's semantic result changes.
+    string_table: crate::StringTable,
+    /// Incremented each time a module's semantic result changes in this session.
     next_semantic_revision: u64,
 }
 
@@ -168,6 +168,14 @@ impl FrontendSession {
 
     pub fn semantic_graph(&self) -> &SemanticModuleGraph {
         &self.semantic_graph
+    }
+
+    pub fn modules(&self) -> &[SemanticModule] {
+        &self.modules
+    }
+
+    pub fn string_table(&self) -> &crate::StringTable {
+        &self.string_table
     }
 
     fn required_builtin_modules(&self) -> HashSet<ModulePath> {

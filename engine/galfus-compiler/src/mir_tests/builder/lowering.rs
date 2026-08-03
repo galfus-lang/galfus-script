@@ -10,7 +10,6 @@ fn test_mir_builder_basic() {
 
     let parse_result = parse(&source);
     let mut string_table = galfus_frontend::StringTable::new();
-    let mut string_table = galfus_frontend::StringTable::new();
     let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     let graph = resolve_result.into_graph();
 
@@ -80,7 +79,6 @@ fn test_mir_builder_lowers_named_function_as_a_function_constant() {
 
     let parse_result = parse(&source);
     let mut string_table = galfus_frontend::StringTable::new();
-    let mut string_table = galfus_frontend::StringTable::new();
     let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     let graph = resolve_result.into_graph();
     let type_result = check_declaration_types(&source, &graph, &string_table);
@@ -121,7 +119,6 @@ fn test_mir_builder_lowers_named_expression_function_body() {
     let source = SourceFile::new(source_id, "test.gfs".to_string(), code.to_string());
 
     let parse_result = parse(&source);
-    let mut string_table = galfus_frontend::StringTable::new();
     let mut string_table = galfus_frontend::StringTable::new();
     let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     let graph = resolve_result.into_graph();
@@ -177,7 +174,6 @@ fn test_mir_builder_lowers_expression_and_block_function_expressions() {
     let source = SourceFile::new(source_id, "test.gfs".to_string(), code.to_string());
 
     let parse_result = parse(&source);
-    let mut string_table = galfus_frontend::StringTable::new();
     let mut string_table = galfus_frontend::StringTable::new();
     let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     let graph = resolve_result.into_graph();
@@ -239,7 +235,6 @@ fn test_mir_builder_lowers_copy_expression() {
 
     let parse_result = parse(&source);
     let mut string_table = galfus_frontend::StringTable::new();
-    let mut string_table = galfus_frontend::StringTable::new();
     let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     let graph = resolve_result.into_graph();
 
@@ -279,7 +274,6 @@ fn test_mir_builder_applies_default_parameter_when_argument_is_null() {
     let source = SourceFile::new(source_id, "test.gfs".to_string(), code.to_string());
 
     let parse_result = parse(&source);
-    let mut string_table = galfus_frontend::StringTable::new();
     let mut string_table = galfus_frontend::StringTable::new();
     let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     let graph = resolve_result.into_graph();
@@ -328,7 +322,6 @@ fn test_mir_builder_lowers_concrete_typeof_branch() {
 
     let parse_result = parse(&source);
     let mut string_table = galfus_frontend::StringTable::new();
-    let mut string_table = galfus_frontend::StringTable::new();
     let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     let graph = resolve_result.into_graph();
 
@@ -363,7 +356,6 @@ fn test_mir_builder_specializes_generic_typeof_call() {
     let source = SourceFile::new(source_id, "test.gfs".to_string(), code.to_string());
 
     let parse_result = parse(&source);
-    let mut string_table = galfus_frontend::StringTable::new();
     let mut string_table = galfus_frontend::StringTable::new();
     let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     let graph = resolve_result.into_graph();
@@ -416,7 +408,6 @@ fn test_mir_builder_specializes_typeof_generic_parameter() {
     let source = SourceFile::new(source_id, "test.gfs".to_string(), code.to_string());
 
     let parse_result = parse(&source);
-    let mut string_table = galfus_frontend::StringTable::new();
     let mut string_table = galfus_frontend::StringTable::new();
     let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     let graph = resolve_result.into_graph();
@@ -497,7 +488,6 @@ fn test_mir_builder_phase1() {
 
     let parse_result = parse(&source);
     let mut string_table = galfus_frontend::StringTable::new();
-    let mut string_table = galfus_frontend::StringTable::new();
     let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     let graph = resolve_result.into_graph();
     assert!(!graph.has_errors(), "Parse or resolve errors occurred");
@@ -576,7 +566,6 @@ fn test_mir_builder_phase2() {
     let source = SourceFile::new(source_id, "test.gfs".to_string(), code.to_string());
 
     let parse_result = parse(&source);
-    let mut string_table = galfus_frontend::StringTable::new();
     let mut string_table = galfus_frontend::StringTable::new();
     let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     let graph = resolve_result.into_graph();
