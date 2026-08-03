@@ -57,8 +57,14 @@ fn reloading_a_removed_path_preserves_stable_ids() {
         )
         .expect("load returns IDs");
 
-    assert_eq!(reloaded.0, initial.0, "ModuleId must be stable across reloads");
-    assert_eq!(reloaded.1, initial.1, "SourceId must be stable across reloads");
+    assert_eq!(
+        reloaded.0, initial.0,
+        "ModuleId must be stable across reloads"
+    );
+    assert_eq!(
+        reloaded.1, initial.1,
+        "SourceId must be stable across reloads"
+    );
 }
 
 #[test]

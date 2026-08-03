@@ -73,11 +73,7 @@ impl SourceStore {
         let module_id = ModuleId::new(module_id_raw);
 
         let hash = Self::fnv1a_32(b"galfus:source:v1:", logical_path.as_bytes());
-        let source_id_raw = if hash == u32::MAX {
-            u32::MAX - 1
-        } else {
-            hash
-        };
+        let source_id_raw = if hash == u32::MAX { u32::MAX - 1 } else { hash };
         let source_id = SourceId::new(source_id_raw);
 
         if let Some(entry) = self.entries_by_path.get_mut(&path) {
@@ -121,6 +117,8 @@ impl SourceStore {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &SourceEntry> {
-        self.entries_by_path.values()
+        let mut entries: Vec<_> = self.entries_by_path.values().collect();
+        entries.sort_by_key(|e| e.module_id.raw());
+        entries.into_iter()
     }
 }

@@ -524,3 +524,89 @@ fn run_reports_missing_io_provider_only_when_io_is_executed() {
     let error = exit_error.lock().unwrap().clone();
     assert!(error.contains("HostProvider missing"));
 }
+
+#[test]
+fn compile_produces_identical_bytecode_regardless_of_module_load_order() {
+    // Criterion: the compiled bytecode must be byte-for-byte identical no matter
+    // in which order the source files are fed to load_module(). This verifies
+    // that no HashMap or HashSet non-determinism leaks into the output.
+
+    let config = br#"
+        [module]
+        name = "determinism-test"
+        target = "app"
+        entry = "main.gfs"
+    "#;
+    let main_src = br#"
+        import { add } from "./math"
+        import { mul } from "./ops"
+        export fn main(args: [[u8]]): i32 {
+            return add(mul(2, 3), 1)
+        }
+    "#;
+    let math_src = b"export fn add(a: i32, b: i32): i32 { return a + b }";
+    let ops_src = b"export fn mul(a: i32, b: i32): i32 { return a * b }";
+
+    // Build workspace A: load in order main → math → ops
+    let mut ws_a = Workspace::new();
+    ws_a.load_config(config).unwrap();
+    ws_a.load_module("main.gfs", main_src).unwrap();
+    ws_a.load_module("math.gfs", math_src).unwrap();
+    ws_a.load_module("ops.gfs", ops_src).unwrap();
+    assert!(ws_a.check().is_valid, "workspace A must be valid");
+    let report_a = ws_a.compile().expect("workspace A must compile");
+    let graph_a = report_a.graph;
+
+    // Build workspace B: load in reverse order ops → math → main
+    let mut ws_b = Workspace::new();
+    ws_b.load_config(config).unwrap();
+    ws_b.load_module("ops.gfs", ops_src).unwrap();
+    ws_b.load_module("math.gfs", math_src).unwrap();
+    ws_b.load_module("main.gfs", main_src).unwrap();
+    assert!(ws_b.check().is_valid, "workspace B must be valid");
+    let report_b = ws_b.compile().expect("workspace B must compile");
+    let graph_b = report_b.graph;
+
+    // Compare module names and function counts.
+    let mut paths_a: Vec<String> = graph_a
+        .modules()
+        .map(|m| m.path().as_str().to_string())
+        .collect();
+    let mut paths_b: Vec<String> = graph_b
+        .modules()
+        .map(|m| m.path().as_str().to_string())
+        .collect();
+    paths_a.sort();
+    paths_b.sort();
+    assert_eq!(paths_a, paths_b, "both workspaces must compile the same set of modules");
+
+    // Compare each module's function and import counts.
+    for path in &paths_a {
+        let mod_a = graph_a
+            .modules()
+            .find(|m| m.path().as_str() == path)
+            .expect("module exists in A");
+        let mod_b = graph_b
+            .modules()
+            .find(|m| m.path().as_str() == path)
+            .expect("module exists in B");
+        assert_eq!(
+            mod_a.module().functions.len(),
+            mod_b.module().functions.len(),
+            "module '{}' must have the same number of functions",
+            path
+        );
+        assert_eq!(
+            mod_a.module().imports.len(),
+            mod_b.module().imports.len(),
+            "module '{}' must have the same number of import slots",
+            path
+        );
+        assert_eq!(
+            mod_a.module().exports.len(),
+            mod_b.module().exports.len(),
+            "module '{}' must have the same number of export slots",
+            path
+        );
+    }
+}

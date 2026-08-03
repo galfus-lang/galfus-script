@@ -264,30 +264,31 @@ impl Workspace {
             } else {
                 let roots = self.frontend_roots();
                 let mut report = loop {
-                    let source_files = self
-                        .source_state
-                        .dirty_sources
-                        .iter()
-                        .filter_map(|path| self.source_state.store.get(path))
-                        .map(|entry| {
-                            (
-                                entry.module_id,
-                                entry.path.clone(),
-                                match entry.origin {
-                                    ModuleOrigin::User => FrontendModuleKind::Standard,
-                                    ModuleOrigin::Builtin => FrontendModuleKind::Builtin,
-                                    ModuleOrigin::ExternalProxy => {
-                                        FrontendModuleKind::ExternalProxy
-                                    }
-                                },
-                                SourceFile::new(
-                                    entry.source_id,
-                                    entry.path.to_string(),
-                                    str::from_utf8(&entry.bytes).unwrap_or("").to_string(),
-                                ),
-                            )
-                        })
-                        .collect::<Vec<_>>();
+                    let source_files = {
+                        let mut sorted_dirty: Vec<_> =
+                            self.source_state.dirty_sources.iter().collect();
+                        sorted_dirty.sort();
+                        sorted_dirty
+                    }
+                    .into_iter()
+                    .filter_map(|path| self.source_state.store.get(path))
+                    .map(|entry| {
+                        (
+                            entry.module_id,
+                            entry.path.clone(),
+                            match entry.origin {
+                                ModuleOrigin::User => FrontendModuleKind::Standard,
+                                ModuleOrigin::Builtin => FrontendModuleKind::Builtin,
+                                ModuleOrigin::ExternalProxy => FrontendModuleKind::ExternalProxy,
+                            },
+                            SourceFile::new(
+                                entry.source_id,
+                                entry.path.to_string(),
+                                str::from_utf8(&entry.bytes).unwrap_or("").to_string(),
+                            ),
+                        )
+                    })
+                    .collect::<Vec<_>>();
                     let sources = source_files
                         .iter()
                         .map(|(module_id, path, kind, source)| FrontendSource {

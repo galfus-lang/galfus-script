@@ -222,8 +222,15 @@ fn compile_single_module(
     let mut import_func_map: HashMap<(galfus_core::ModuleId, galfus_core::FunctionId), FuncIdx> =
         HashMap::new();
 
-    for (&local_id, &(target_module_id, target_func_id)) in &cross_module_calls {
-        let entry = import_func_map
+    // Iterate in deterministic order: sort by (target_module_id, target_func_id) so the
+    // import_slots vec is always built in the same order regardless of HashMap iteration order.
+    let mut cross_module_call_entries: Vec<_> = cross_module_calls.iter().collect();
+    cross_module_call_entries
+        .sort_by_key(|entry| (entry.1.0.raw(), entry.1.1.raw(), entry.0.raw()));
+    for entry in &cross_module_call_entries {
+        let local_id = *entry.0;
+        let (target_module_id, target_func_id) = *entry.1;
+        let slot = import_func_map
             .entry((target_module_id, target_func_id))
             .or_insert_with(|| {
                 let slot_idx = own_func_count + import_slots.len() as u16;
@@ -258,7 +265,7 @@ fn compile_single_module(
 
                 FuncIdx(slot_idx)
             });
-        let _ = (local_id, entry);
+        let _ = (local_id, slot);
     }
 
     // Build local func map: local func_id → local FuncIdx (0-based within this module).
@@ -289,11 +296,19 @@ fn compile_single_module(
             }
         }
     }
-    for &(target_module_id, target_func_id) in specialized_targets.values() {
-        if target_module_id != modules[mod_idx].id() {
+    // Iterate in deterministic order: sort by (target_module_id, target_func_id) to ensure
+    // export slots for specialized functions are always appended in the same order.
+    let mut specialized_target_entries: Vec<_> =
+        specialized_targets.iter().map(|(k, v)| (*k, *v)).collect();
+    specialized_target_entries
+        .sort_by_key(|&(specialised_id, (target_mod_id, target_func_id))| {
+            (target_mod_id.raw(), target_func_id.raw(), specialised_id.raw())
+        });
+    for (_specialised_id, (target_module_id, target_func_id)) in &specialized_target_entries {
+        if *target_module_id != modules[mod_idx].id() {
             continue;
         }
-        let Some(&local_idx) = local_func_map.get(&target_func_id) else {
+        let Some(&local_idx) = local_func_map.get(target_func_id) else {
             continue;
         };
         if export_slots

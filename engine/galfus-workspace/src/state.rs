@@ -168,8 +168,5 @@ impl CompileState {
 pub enum WorkspaceError {
     InvalidPath,
     MissingConfiguration,
-    Collision {
-        attempted: String,
-        existing: String,
-    },
+    Collision { attempted: String, existing: String },
 }
