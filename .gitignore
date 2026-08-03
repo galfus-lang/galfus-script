@@ -9,6 +9,7 @@ dist/
 /.old
 .tmp/
 .temp/
+.codegraph
 
 # code coverage
 coverage/
