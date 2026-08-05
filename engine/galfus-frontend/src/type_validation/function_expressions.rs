@@ -33,7 +33,7 @@ impl<'a> DeclarationTypeChecker<'a> {
         Some(
             self.layer
                 .table_mut()
-                .intern_function(parameters, return_type),
+                .intern_function(parameters, return_type, false),
         )
     }
 

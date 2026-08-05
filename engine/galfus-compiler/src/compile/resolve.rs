@@ -104,7 +104,11 @@ fn collect_rvalue_function_targets(value: &galfus_ir::mir::RValue, targets: &mut
                 collect_operand_function_target(operand, targets);
             }
         }
-        RValue::CreateFuture { func, args } => {
+        RValue::CreateFuture {
+            func,
+            args,
+            is_external: _,
+        } => {
             targets.push(*func);
             collect_operand_function_targets(args, targets);
         }

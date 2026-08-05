@@ -278,7 +278,7 @@ impl<'a> DeclarationTypeChecker<'a> {
 
                 self.layer
                     .table_mut()
-                    .intern_function(parameters, return_type)
+                    .intern_function(parameters, return_type, false)
             }
             Some(TypeKind::GenericInstance { base, arguments }) => {
                 let base = self.substitute_generic_expression_type(base, substitution);

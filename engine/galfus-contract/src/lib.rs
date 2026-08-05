@@ -3,6 +3,8 @@
 //! See the Runtime Ownership Matrix in the Architecture Reference (`docs/Galfus_Architecture_Reference.md`)
 //! for authoritative details on the lifecycle and ownership of boundary values and external handles.
 
+pub mod catalog;
+pub use catalog::*;
 pub mod builtins;
 #[cfg(test)]
 mod tests;
@@ -431,6 +433,10 @@ pub trait ExternalModuleBinder: Send + Sync {
 }
 
 /// Compatibility composition for hosts that provide both development contracts.
+#[deprecated(
+    note = "Adapter schema and concrete binders are now strictly separated. Use `CapabilityCatalog` for schema validation during `Workspace::compile` and provide `ExternalModuleBinder` during bootstrap/preflight."
+)]
 pub trait ModuleAdapter: ExternalAdapterSchema + ExternalModuleBinder {}
 
+#[allow(deprecated)]
 impl<T> ModuleAdapter for T where T: ExternalAdapterSchema + ExternalModuleBinder {}

@@ -55,10 +55,9 @@ fn test_mir_builder_phase3() {
     );
 
     let type_result = check_definition_types(
-        &source,
-        &graph,
-        check_declaration_types(&source, &graph, &string_table),
+        &source, &graph, check_declaration_types(&source, &graph, &string_table, false),
         &string_table,
+        false,
     );
     assert!(
         !type_result.has_errors(),

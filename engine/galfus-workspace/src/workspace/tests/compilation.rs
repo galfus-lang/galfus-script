@@ -99,7 +99,16 @@ fn compile_emits_one_module_per_source_module_with_import_slots() {
 
 #[test]
 fn check_accepts_imported_external_proxy_declarations() {
+    struct DemoSchema;
+    impl galfus_contract::ExternalAdapterSchema for DemoSchema {
+        fn name(&self) -> &str { "demo" }
+        fn validate_schema(&self, _descriptor: &galfus_contract::ExternalModuleDescriptor) -> Result<(), galfus_contract::AdapterValidationError> {
+            Ok(())
+        }
+    }
     let mut workspace = Workspace::new();
+    let catalog = galfus_contract::CapabilityCatalog::new(Vec::new(), vec![std::sync::Arc::new(DemoSchema)]);
+    workspace.set_catalog(std::sync::Arc::new(catalog));
     workspace
         .load_config(
             br#"

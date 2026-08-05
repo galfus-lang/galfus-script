@@ -135,6 +135,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                         func: function,
                         args: arguments,
                         destination,
+                        is_external: false,
                     },
                     None,
                 ));
@@ -706,12 +707,25 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                         func_id = specialized;
                     }
 
+                    let is_external = target_symbol
+                        .and_then(|sym| self.builder.type_result.layer().symbol_type(sym))
+                        .and_then(
+                            |ty| match self.builder.type_result.layer().table().kind(ty) {
+                                Some(galfus_frontend::TypeKind::Function(f)) => {
+                                    Some(f.is_external())
+                                }
+                                _ => None,
+                            },
+                        )
+                        .unwrap_or(false);
+
                     let instruction = if self.is_future_type(ty) {
                         Instruction::Assign(
                             temp_id,
                             RValue::CreateFuture {
                                 func: func_id,
                                 args,
+                                is_external,
                             },
                         )
                     } else {
@@ -719,6 +733,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                             func: func_id,
                             args,
                             destination: temp_id,
+                            is_external,
                         }
                     };
                     self.current_instructions.push((instruction, None));

@@ -683,7 +683,8 @@ impl<'a> DeclarationTypeChecker<'a> {
         let is_internal_module = galfus_contract::is_internal_module(name);
         let is_bridge_module = is_internal_module
             || galfus_contract::is_builtin_module(name)
-            || path.starts_with("std/");
+            || path.starts_with("std/")
+            || self.is_provider_module;
 
         self.check_node_bridge_and_internal_rules(root, is_internal_module, is_bridge_module);
     }

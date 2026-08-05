@@ -233,10 +233,17 @@ impl<'a> DeclarationTypeChecker<'a> {
             payload_type
         };
 
+        let name_node = self
+            .graph
+            .syntax()
+            .first_child_of_kind(node, crate::SyntaxNodeKind::Identifier);
+        let name = name_node.map(|n| self.node_text(n)).unwrap_or_default();
+        let is_external = name.starts_with("__provider_");
+
         Some(
             self.layer
                 .table_mut()
-                .intern_function(parameters, return_type),
+                .intern_function(parameters, return_type, is_external),
         )
     }
 

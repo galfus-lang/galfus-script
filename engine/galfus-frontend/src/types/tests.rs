@@ -89,8 +89,8 @@ fn type_table_reuses_function_types() {
         FunctionParameterType::with_default(i32),
     ];
 
-    let first = table.intern_function(parameters.clone(), null);
-    let second = table.intern_function(parameters, null);
+    let first = table.intern_function(parameters.clone(), null, false);
+    let second = table.intern_function(parameters, null, false);
 
     assert_eq!(first, second);
 }

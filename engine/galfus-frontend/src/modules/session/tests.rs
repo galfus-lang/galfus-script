@@ -1,6 +1,8 @@
 use super::*;
 use crate::modules::{SemanticImportKind, SemanticRoot, SemanticRootKind};
+use galfus_contract::CapabilityCatalog;
 use galfus_core::SourceId;
+use std::sync::Arc;
 
 fn path(value: &str) -> ModulePath {
     ModulePath::new(value).expect("valid module path")
@@ -36,6 +38,7 @@ fn check_uses_the_module_ids_provided_by_the_host() {
     let mut session = FrontendSession::new();
 
     let report = session.check(FrontendUpdate {
+        catalog: Arc::new(CapabilityCatalog::default()),
         source_revision: Revision::new(1),
         sources: &sources,
         removed_modules: &[],
@@ -94,6 +97,7 @@ fn check_preserves_async_future_payloads_across_imported_generic_calls() {
     let mut session = FrontendSession::new();
 
     let report = session.check(FrontendUpdate {
+        catalog: Arc::new(CapabilityCatalog::default()),
         source_revision: Revision::new(1),
         sources: &sources,
         removed_modules: &[],
@@ -134,6 +138,7 @@ fn check_preserves_async_future_payloads_across_namespace_calls() {
     let mut session = FrontendSession::new();
 
     let report = session.check(FrontendUpdate {
+        catalog: Arc::new(CapabilityCatalog::default()),
         source_revision: Revision::new(1),
         sources: &sources,
         removed_modules: &[],
@@ -183,6 +188,7 @@ fn check_reprocesses_changed_modules_and_transitive_dependents_only() {
     let roots = FrontendRoots::default();
     let mut session = FrontendSession::new();
     session.check(FrontendUpdate {
+        catalog: Arc::new(CapabilityCatalog::default()),
         source_revision: Revision::new(1),
         sources: &initial_sources,
         removed_modules: &[],
@@ -209,6 +215,7 @@ fn check_reprocesses_changed_modules_and_transitive_dependents_only() {
         kind: FrontendModuleKind::Standard,
     }];
     let report = session.check(FrontendUpdate {
+        catalog: Arc::new(CapabilityCatalog::default()),
         source_revision: Revision::new(2),
         sources: &update_sources,
         removed_modules: &[],
@@ -268,6 +275,7 @@ fn check_records_resolved_implicit_range_dependency() {
     let mut session = FrontendSession::new();
 
     session.check(FrontendUpdate {
+        catalog: Arc::new(CapabilityCatalog::default()),
         source_revision: Revision::new(1),
         sources: &sources,
         removed_modules: &[],
@@ -316,6 +324,7 @@ fn check_records_iterable_dependency_for_array_iteration() {
     let mut session = FrontendSession::new();
 
     session.check(FrontendUpdate {
+        catalog: Arc::new(CapabilityCatalog::default()),
         source_revision: Revision::new(1),
         sources: &sources,
         removed_modules: &[],
@@ -364,12 +373,14 @@ fn check_removes_modules_and_refreshes_dependent_edges() {
     let mut session = FrontendSession::new();
 
     session.check(FrontendUpdate {
+        catalog: Arc::new(CapabilityCatalog::default()),
         source_revision: Revision::new(1),
         sources: &initial_sources,
         removed_modules: &[],
         roots: &roots,
     });
     session.check(FrontendUpdate {
+        catalog: Arc::new(CapabilityCatalog::default()),
         source_revision: Revision::new(2),
         sources: &[],
         removed_modules: &[ModuleId::new(2)],
@@ -408,6 +419,7 @@ fn check_reports_required_builtins_in_canonical_path_order() {
     let mut session = FrontendSession::new();
 
     let report = session.check(FrontendUpdate {
+        catalog: Arc::new(CapabilityCatalog::default()),
         source_revision: Revision::new(1),
         sources: &sources,
         removed_modules: &[],
@@ -465,6 +477,7 @@ fn check_exposes_semantic_modules_in_canonical_module_id_order() {
     let mut session = FrontendSession::new();
 
     let report = session.check(FrontendUpdate {
+        catalog: Arc::new(CapabilityCatalog::default()),
         source_revision: Revision::new(1),
         sources: &sources,
         removed_modules: &[],
@@ -498,6 +511,7 @@ fn snapshot_preserves_the_checked_frontend_state() {
     }];
     let mut session = FrontendSession::new();
     let initial_report = session.check(FrontendUpdate {
+        catalog: Arc::new(CapabilityCatalog::default()),
         source_revision: Revision::new(1),
         sources: &initial_sources,
         removed_modules: &[],
@@ -517,6 +531,7 @@ fn snapshot_preserves_the_checked_frontend_state() {
         kind: FrontendModuleKind::Standard,
     }];
     session.check(FrontendUpdate {
+        catalog: Arc::new(CapabilityCatalog::default()),
         source_revision: Revision::new(2),
         sources: &updated_sources,
         removed_modules: &[],

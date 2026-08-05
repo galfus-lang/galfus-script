@@ -33,7 +33,7 @@ pub struct Workspace {
     pub bytecode_state: BytecodeState,
     pub frontend: FrontendSession,
     frontend_snapshot: Option<FrontendSnapshot>,
-    pub adapters: HashMap<String, Arc<dyn galfus_contract::ModuleAdapter>>,
+    pub catalog: Arc<galfus_contract::CapabilityCatalog>,
     pub external_descriptors: HashMap<ModulePath, ExternalModuleDescriptor>,
 }
 
@@ -75,13 +75,16 @@ impl Workspace {
             bytecode_state: BytecodeState::new(),
             frontend: FrontendSession::new(),
             frontend_snapshot: None,
-            adapters: HashMap::new(),
+            catalog: Arc::new(galfus_contract::CapabilityCatalog::default()),
             external_descriptors: HashMap::new(),
         }
     }
 
-    pub fn register_adapter(&mut self, adapter: Arc<dyn galfus_contract::ModuleAdapter>) {
-        self.adapters.insert(adapter.name().to_string(), adapter);
+    pub fn set_catalog(&mut self, catalog: Arc<galfus_contract::CapabilityCatalog>) {
+        if self.catalog.fingerprint() != catalog.fingerprint() {
+            self.catalog = catalog;
+            self.mark_dirty();
+        }
     }
 
     pub fn load_config(&mut self, config_toml: &[u8]) -> Result<LoadResult, WorkspaceError> {
@@ -315,6 +318,7 @@ impl Workspace {
                         sources: &sources,
                         removed_modules: self.source_state.removed_modules.as_slice(),
                         roots: &roots,
+                        catalog: Arc::clone(&self.catalog),
                     };
                     let mut report = self.frontend.check(update);
                     self.source_state.dirty_sources.clear();
@@ -423,7 +427,12 @@ impl Workspace {
 
     fn validate_registered_adapter_schemas(&self, diagnostics: &mut DiagnosticBag) {
         for descriptor in self.external_descriptors.values() {
-            let Some(adapter) = self.adapters.get(&descriptor.adapter) else {
+            let Some(adapter) = self.catalog.adapter_schema(&descriptor.adapter) else {
+                diagnostics.push(Diagnostic::error_with_message(
+                    WorkspaceDiagnosticCode::InvalidExternalProxy,
+                    format!("unresolved external adapter '{}'", descriptor.adapter),
+                    Span::empty(WORKSPACE_SOURCE_ID, 0),
+                ));
                 continue;
             };
             if let Err(error) = adapter.validate_schema(descriptor) {

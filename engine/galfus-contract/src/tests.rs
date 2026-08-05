@@ -204,7 +204,8 @@ fn assert_builtin_checks(name: &str, source: &str) {
     );
 
     let graph = resolve_result.into_graph();
-    let type_result = galfus_frontend::check_declaration_types(&source_file, &graph, &string_table);
+    let type_result =
+        galfus_frontend::check_declaration_types(&source_file, &graph, &string_table, false);
     assert!(
         !type_result.has_errors(),
         "{name} type errors: {:?}",

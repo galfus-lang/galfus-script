@@ -603,7 +603,11 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
 
                 self.free_temp_if_operand(length);
             }
-            RValue::CreateFuture { func, args } => {
+            RValue::CreateFuture {
+                func,
+                args,
+                is_external: _,
+            } => {
                 let func_idx = *self.ctx.function_map.get(func).unwrap_or_else(|| {
                     panic!(
                         "missing lowered function mapping for {:?} while emitting {} ({:?})",

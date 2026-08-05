@@ -304,7 +304,7 @@ impl<'a> TypeBinder<'a> {
 
         self.layer
             .table_mut()
-            .intern_function(parameters, return_type)
+            .intern_function(parameters, return_type, false)
     }
 
     fn lower_function_type_parameter(

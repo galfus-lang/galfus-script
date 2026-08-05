@@ -21,6 +21,7 @@ use galfus_core::{
     Diagnostic, DiagnosticBag, ModuleId, ModulePath, NodeId, Revision, SourceFile, SymbolId,
 };
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ImportCheckRecord {
@@ -72,6 +73,7 @@ pub struct FrontendUpdate<'a> {
     /// Stable IDs of sources removed since the previous check.
     pub removed_modules: &'a [ModuleId],
     pub roots: &'a FrontendRoots,
+    pub catalog: Arc<galfus_contract::CapabilityCatalog>,
 }
 
 pub struct FrontendReport {
@@ -140,7 +142,7 @@ impl FrontendSession {
             changed_modules.extend(self.transitive_dependents([input.module_id]));
         }
 
-        self.type_check_modules(&changed_modules);
+        self.type_check_modules(&changed_modules, &update.catalog);
         self.rebuild_diagnostics();
         self.semantic_graph.apply_delta(
             update.roots.roots(),
@@ -484,12 +486,21 @@ impl FrontendSession {
             .collect()
     }
 
-    fn type_check_modules(&mut self, changed_modules: &HashSet<ModuleId>) {
+    fn type_check_modules(
+        &mut self,
+        changed_modules: &HashSet<ModuleId>,
+        catalog: &galfus_contract::CapabilityCatalog,
+    ) {
         let baseline_results = self
             .modules
             .iter()
             .map(|module| {
-                check_declaration_types(module.source(), module.graph(), &self.string_table)
+                check_declaration_types(
+                    module.source(),
+                    module.graph(),
+                    &self.string_table,
+                    catalog.is_provider_module(module.path().as_str()),
+                )
             })
             .collect::<Vec<_>>();
 
@@ -523,6 +534,7 @@ impl FrontendSession {
                 previous_result,
                 imported_type,
                 &self.string_table,
+                catalog.is_provider_module(self.modules[module_index].path().as_str()),
             );
 
             self.modules[module_index].type_result = Some(result);
