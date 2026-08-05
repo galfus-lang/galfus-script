@@ -12,12 +12,14 @@ impl FrontendSession {
         module_index: usize,
         surfaces: &[ModuleSurface],
         imported_types: &mut ImportedSurfaceTypes,
+        catalog: &galfus_contract::CapabilityCatalog,
     ) {
         let imports = self.module_imports(module_index);
         let named_imports = imports
             .iter()
             .filter(|import| {
-                import.kind == ImportKind::Named && is_resolvable_import(import.source.as_str())
+                import.kind == ImportKind::Named
+                    && is_resolvable_import(import.source.as_str(), Some(catalog))
             })
             .collect::<Vec<_>>();
 
@@ -41,7 +43,8 @@ impl FrontendSession {
                 continue;
             };
 
-            let Some(target_index) = self.import_target_index(module_index, import.source.as_str())
+            let Some(target_index) =
+                self.import_target_index(module_index, import.source.as_str(), catalog)
             else {
                 continue;
             };
@@ -71,12 +74,14 @@ impl FrontendSession {
         module_index: usize,
         surfaces: &[ModuleSurface],
         imported_types: &mut ImportedSurfaceTypes,
+        catalog: &galfus_contract::CapabilityCatalog,
     ) {
         let imports = self.module_imports(module_index);
         let namespace_imports = imports
             .iter()
             .filter(|import| {
-                import.kind == ImportKind::Namespace && is_resolvable_import(import.source.as_str())
+                import.kind == ImportKind::Namespace
+                    && is_resolvable_import(import.source.as_str(), Some(catalog))
             })
             .collect::<Vec<_>>();
 
@@ -96,7 +101,8 @@ impl FrontendSession {
                 continue;
             };
 
-            let Some(target_index) = self.import_target_index(module_index, import.source.as_str())
+            let Some(target_index) =
+                self.import_target_index(module_index, import.source.as_str(), catalog)
             else {
                 continue;
             };

@@ -1,7 +1,13 @@
 use galfus_core::ModulePath;
 
-pub fn is_resolvable_import(source: &str) -> bool {
-    source.starts_with("./") || source.starts_with("../") || is_builtin_module(source)
+pub fn is_resolvable_import(
+    source: &str,
+    catalog: Option<&galfus_contract::CapabilityCatalog>,
+) -> bool {
+    source.starts_with("./")
+        || source.starts_with("../")
+        || is_builtin_module(source)
+        || catalog.map_or(false, |c| c.is_provider_module(source))
 }
 
 pub fn is_relative_import(source: &str) -> bool {
@@ -9,22 +15,17 @@ pub fn is_relative_import(source: &str) -> bool {
 }
 
 pub fn is_builtin_module(source: &str) -> bool {
-    matches!(
-        source,
-        "std/io"
-            | "std/constraints"
-            | "std/iterable"
-            | "std/thread"
-            | "text"
-            | "format"
-            | "format/ansi"
-    )
+    galfus_contract::is_builtin_module(source)
 }
 
 // In the new architecture, the module path resolution logic belongs in the frontend,
 // because it affects semantic module identity.
-pub fn resolve_relative_import(base_module: &ModulePath, source: &str) -> Option<ModulePath> {
-    if is_builtin_module(source) {
+pub fn resolve_relative_import(
+    base_module: &ModulePath,
+    source: &str,
+    catalog: Option<&galfus_contract::CapabilityCatalog>,
+) -> Option<ModulePath> {
+    if is_builtin_module(source) || catalog.map_or(false, |c| c.is_provider_module(source)) {
         return ModulePath::new(format!("{source}.gfs").as_str());
     }
 

@@ -40,8 +40,18 @@ impl Default for Playground {
 
 impl Playground {
     pub fn new() -> Self {
+        let mut workspace = Workspace::new();
+        let catalog = galfus_contract::CapabilityCatalog::new(
+            vec![galfus_contract::builtins::BridgeModule::new(
+                "std/io",
+                galfus_contract::builtins::STD_IO_SOURCE,
+            )],
+            vec![],
+        )
+        .expect("the built-in std/io provider catalog is valid");
+        workspace.set_catalog(std::sync::Arc::new(catalog));
         Self {
-            workspace: Workspace::new(),
+            workspace,
             io: BufferIoProvider::default(),
             execution: None,
         }

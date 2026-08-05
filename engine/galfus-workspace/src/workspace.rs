@@ -82,6 +82,15 @@ impl Workspace {
 
     pub fn set_catalog(&mut self, catalog: Arc<galfus_contract::CapabilityCatalog>) {
         if self.catalog.fingerprint() != catalog.fingerprint() {
+            self.source_state.revision.next();
+            let removed = self
+                .source_state
+                .store
+                .remove_by_origin(ModuleOrigin::ProviderCatalog);
+            for entry in removed {
+                self.source_state.dirty_sources.remove(&entry.path);
+                self.source_state.removed_modules.push(entry.module_id);
+            }
             self.catalog = catalog;
             self.mark_dirty();
         }
@@ -109,6 +118,14 @@ impl Workspace {
         module_bytes: &[u8],
     ) -> Result<LoadResult, WorkspaceError> {
         let module_path = ModulePath::new(path).ok_or(WorkspaceError::InvalidPath)?;
+        if self.catalog.is_provider_module(
+            module_path
+                .as_str()
+                .strip_suffix(".gfs")
+                .unwrap_or(module_path.as_str()),
+        ) {
+            return Err(WorkspaceError::ReservedProviderModule(path.to_string()));
+        }
         if !path.ends_with(".gfp")
             && self
                 .source_state
@@ -295,6 +312,7 @@ impl Workspace {
                                 ModuleOrigin::User => FrontendModuleKind::Standard,
                                 ModuleOrigin::Builtin => FrontendModuleKind::Builtin,
                                 ModuleOrigin::ExternalProxy => FrontendModuleKind::ExternalProxy,
+                                ModuleOrigin::ProviderCatalog => FrontendModuleKind::Builtin,
                             },
                             SourceFile::new(
                                 entry.source_id,
@@ -324,7 +342,7 @@ impl Workspace {
                     self.source_state.dirty_sources.clear();
                     self.source_state.removed_modules.clear();
 
-                    match self.load_required_builtins(&report.required_builtin_modules) {
+                    match self.load_required_dependencies(&report.required_dependencies) {
                         Ok(false) => break report,
                         Ok(true) => continue,
                         Err(WorkspaceError::Collision {
@@ -384,17 +402,21 @@ impl Workspace {
         }
     }
 
-    fn load_required_builtins(&mut self, paths: &[ModulePath]) -> Result<bool, WorkspaceError> {
+    fn load_required_dependencies(&mut self, paths: &[ModulePath]) -> Result<bool, WorkspaceError> {
         let mut loaded = false;
         for path in paths {
             if self.source_state.store.get(path).is_some() {
                 continue;
             }
             let builtin_name = path.as_str().strip_suffix(".gfs").unwrap_or(path.as_str());
-            let Some((_, source)) = galfus_contract::BUILTIN_MODULES
+            let (source, origin) = if let Some((_, source)) = galfus_contract::BUILTIN_MODULES
                 .iter()
                 .find(|(name, _)| *name == builtin_name)
-            else {
+            {
+                (*source, ModuleOrigin::Builtin)
+            } else if let Some(source) = self.catalog.provider_source(builtin_name) {
+                (source, ModuleOrigin::ProviderCatalog)
+            } else {
                 continue;
             };
             self.source_state.revision.next();
@@ -403,7 +425,7 @@ impl Workspace {
                 .load_module(
                     path.clone(),
                     Arc::from(source.as_bytes()),
-                    ModuleOrigin::Builtin,
+                    origin,
                     self.source_state.revision,
                 )
                 .map_err(|err| match err {

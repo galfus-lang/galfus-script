@@ -418,6 +418,11 @@ pub enum AdapterLoadError {
 /// Development-time validation for an external proxy descriptor.
 pub trait ExternalAdapterSchema: Send + Sync {
     fn name(&self) -> &str;
+    /// Complete declarative adapter schema used for catalog identity.
+    ///
+    /// This must change whenever adapter functions, parameter or return types,
+    /// modifiers, targets, or other validation-relevant semantics change.
+    fn catalog_schema(&self) -> String;
     fn validate_schema(
         &self,
         descriptor: &ExternalModuleDescriptor,

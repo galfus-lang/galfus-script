@@ -121,10 +121,14 @@ pub struct SemanticModuleGraph {
 }
 
 impl SemanticModuleGraph {
-    pub fn build(roots: &[SemanticRoot], modules: &[SemanticModule]) -> Self {
+    pub fn build(
+        roots: &[SemanticRoot],
+        modules: &[SemanticModule],
+        catalog: &galfus_contract::CapabilityCatalog,
+    ) -> Self {
         let mut graph = Self::default();
         let changed_modules = modules.iter().map(SemanticModule::id).collect();
-        graph.apply_delta(roots, modules, &changed_modules, &[]);
+        graph.apply_delta(roots, modules, &changed_modules, &[], catalog);
 
         graph
     }
@@ -135,6 +139,7 @@ impl SemanticModuleGraph {
         modules: &[SemanticModule],
         changed_modules: &HashSet<ModuleId>,
         removed_modules: &[ModuleId],
+        catalog: &galfus_contract::CapabilityCatalog,
     ) {
         self.roots = roots.to_vec();
 
@@ -172,7 +177,7 @@ impl SemanticModuleGraph {
             if !changed_modules.contains(&module.id()) {
                 continue;
             }
-            self.add_import_edges_for(module, modules);
+            self.add_import_edges_for(module, modules, catalog);
             self.add_implicit_import_edges_for(module);
         }
     }
@@ -203,7 +208,12 @@ impl SemanticModuleGraph {
         self.get(id).map(SemanticModule::semantic_revision)
     }
 
-    fn add_import_edges_for(&mut self, module: &SemanticModule, modules: &[SemanticModule]) {
+    fn add_import_edges_for(
+        &mut self,
+        module: &SemanticModule,
+        modules: &[SemanticModule],
+        catalog: &galfus_contract::CapabilityCatalog,
+    ) {
         let from = module.id();
 
         let Some(resolution) = module.graph().resolution() else {
@@ -213,7 +223,8 @@ impl SemanticModuleGraph {
         for import in resolution.imports() {
             let source = import.source();
 
-            let Some(target_path) = resolve_relative_import(module.path(), source) else {
+            let Some(target_path) = resolve_relative_import(module.path(), source, Some(catalog))
+            else {
                 continue;
             };
 

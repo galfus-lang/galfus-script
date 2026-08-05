@@ -317,6 +317,7 @@ pub(super) fn import_target_index(
     let target = galfus_frontend::modules::resolution::resolve_relative_import(
         modules[mod_idx].path(),
         source,
+        None,
     )?;
     modules.iter().position(|m| m.path() == &target)
 }

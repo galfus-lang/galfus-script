@@ -101,13 +101,23 @@ fn compile_emits_one_module_per_source_module_with_import_slots() {
 fn check_accepts_imported_external_proxy_declarations() {
     struct DemoSchema;
     impl galfus_contract::ExternalAdapterSchema for DemoSchema {
-        fn name(&self) -> &str { "demo" }
-        fn validate_schema(&self, _descriptor: &galfus_contract::ExternalModuleDescriptor) -> Result<(), galfus_contract::AdapterValidationError> {
+        fn name(&self) -> &str {
+            "demo"
+        }
+        fn catalog_schema(&self) -> String {
+            "adapter demo { fn add(i32, i32): i32 }".to_string()
+        }
+        fn validate_schema(
+            &self,
+            _descriptor: &galfus_contract::ExternalModuleDescriptor,
+        ) -> Result<(), galfus_contract::AdapterValidationError> {
             Ok(())
         }
     }
     let mut workspace = Workspace::new();
-    let catalog = galfus_contract::CapabilityCatalog::new(Vec::new(), vec![std::sync::Arc::new(DemoSchema)]);
+    let catalog =
+        galfus_contract::CapabilityCatalog::new(Vec::new(), vec![std::sync::Arc::new(DemoSchema)])
+            .expect("demo catalog is valid");
     workspace.set_catalog(std::sync::Arc::new(catalog));
     workspace
         .load_config(
@@ -149,6 +159,7 @@ export fn(async) add(left: i32, right: i32): i32
         galfus_frontend::modules::resolve_relative_import(
             &ModulePath::new("main.gfs").unwrap(),
             "./math.gfp",
+            None,
         ),
         Some(ModulePath::new("math.gfp").unwrap()),
     );
@@ -443,7 +454,9 @@ fn compile_removes_unreachable_modules() {
     assert!(graph1.modules().any(|m| m.path().as_str() == "a.gfs"));
 
     // Remove import
-    workspace.load_module("main.gfs", b"const x = 2;").unwrap();
+    workspace
+        .load_module("main.gfs", b"const x = 2;")
+        .expect("valid replacement module");
     let report = workspace.check();
     assert!(report.is_valid, "{:?}", report.diagnostics);
     let graph2 = workspace.compile().unwrap().graph;
@@ -500,6 +513,7 @@ fn run_requires_compile_and_executes_the_configured_entry() {
 #[test]
 fn run_reports_missing_io_provider_only_when_io_is_executed() {
     let mut workspace = Workspace::new();
+    workspace.set_catalog(io_catalog(galfus_contract::STD_IO_SOURCE));
     workspace
         .load_config(
             br#"
@@ -535,7 +549,7 @@ fn run_reports_missing_io_provider_only_when_io_is_executed() {
             *ee.lock().unwrap() = e.to_string();
         }
     }));
-    workspace.run(&[], None, executor).unwrap();
+    let _ = workspace.run(&[], None, executor);
     let error = exit_error.lock().unwrap().clone();
     assert!(error.contains("HostProvider missing"));
 }
@@ -564,20 +578,26 @@ fn compile_produces_identical_bytecode_regardless_of_module_load_order() {
 
     // Build workspace A: load in order main → math → ops
     let mut ws_a = Workspace::new();
-    ws_a.load_config(config).unwrap();
-    ws_a.load_module("main.gfs", main_src).unwrap();
-    ws_a.load_module("math.gfs", math_src).unwrap();
-    ws_a.load_module("ops.gfs", ops_src).unwrap();
+    ws_a.load_config(config).expect("valid configuration");
+    ws_a.load_module("main.gfs", main_src)
+        .expect("valid main module");
+    ws_a.load_module("math.gfs", math_src)
+        .expect("valid math module");
+    ws_a.load_module("ops.gfs", ops_src)
+        .expect("valid ops module");
     assert!(ws_a.check().is_valid, "workspace A must be valid");
     let report_a = ws_a.compile().expect("workspace A must compile");
     let graph_a = report_a.graph;
 
     // Build workspace B: load in reverse order ops → math → main
     let mut ws_b = Workspace::new();
-    ws_b.load_config(config).unwrap();
-    ws_b.load_module("ops.gfs", ops_src).unwrap();
-    ws_b.load_module("math.gfs", math_src).unwrap();
-    ws_b.load_module("main.gfs", main_src).unwrap();
+    ws_b.load_config(config).expect("valid configuration");
+    ws_b.load_module("ops.gfs", ops_src)
+        .expect("valid ops module");
+    ws_b.load_module("math.gfs", math_src)
+        .expect("valid math module");
+    ws_b.load_module("main.gfs", main_src)
+        .expect("valid main module");
     assert!(ws_b.check().is_valid, "workspace B must be valid");
     let report_b = ws_b.compile().expect("workspace B must compile");
     let graph_b = report_b.graph;
@@ -615,4 +635,93 @@ fn compile_produces_identical_bytecode_regardless_of_module_load_order() {
             path
         );
     }
+}
+
+fn io_catalog(source: &str) -> std::sync::Arc<galfus_contract::CapabilityCatalog> {
+    std::sync::Arc::new(
+        galfus_contract::CapabilityCatalog::new(
+            vec![galfus_contract::BridgeModule::new("std/io", source)],
+            Vec::new(),
+        )
+        .expect("the std/io provider catalog is valid"),
+    )
+}
+
+fn workspace_importing_io() -> Workspace {
+    let mut workspace = Workspace::new();
+    workspace
+        .load_config(
+            br#"
+            [module]
+            name = "provider-catalog"
+            target = "app"
+            entry = "main.gfs"
+            "#,
+        )
+        .expect("valid configuration");
+    workspace
+        .load_module(
+            "main.gfs",
+            b"import { println } from \"std/io\"\nexport fn main(args: [[u8]]): i32 { return 0 }",
+        )
+        .expect("valid main module");
+    workspace
+}
+
+#[test]
+fn catalog_change_replaces_loaded_provider_source() {
+    let mut workspace = workspace_importing_io();
+    workspace.set_catalog(io_catalog(galfus_contract::STD_IO_SOURCE));
+    assert!(workspace.check().is_valid);
+    workspace
+        .compile()
+        .expect("a declarative provider does not require a concrete binder to compile");
+
+    let updated = format!("{}\n", galfus_contract::STD_IO_SOURCE);
+    workspace.set_catalog(io_catalog(&updated));
+    assert!(workspace.is_dirty());
+    assert!(workspace.check().is_valid);
+
+    let provider_path = ModulePath::new("std/io.gfs").expect("valid provider path");
+    let entry = workspace
+        .source_state
+        .store
+        .get(&provider_path)
+        .expect("provider is reloaded");
+    assert_eq!(&*entry.bytes, updated.as_bytes());
+    assert_eq!(
+        entry.origin,
+        crate::source_store::ModuleOrigin::ProviderCatalog
+    );
+}
+
+#[test]
+fn catalog_removal_unloads_provider_and_invalidates_import() {
+    let mut workspace = workspace_importing_io();
+    workspace.set_catalog(io_catalog(galfus_contract::STD_IO_SOURCE));
+    assert!(workspace.check().is_valid);
+
+    workspace.set_catalog(std::sync::Arc::new(
+        galfus_contract::CapabilityCatalog::default(),
+    ));
+    assert!(workspace.is_dirty());
+    assert!(!workspace.check().is_valid);
+    assert!(
+        workspace
+            .source_state
+            .store
+            .get(&ModulePath::new("std/io.gfs").expect("valid provider path"))
+            .is_none()
+    );
+}
+
+#[test]
+fn user_module_cannot_overwrite_a_catalog_provider() {
+    let mut workspace = Workspace::new();
+    workspace.set_catalog(io_catalog(galfus_contract::STD_IO_SOURCE));
+
+    assert!(matches!(
+        workspace.load_module("std/io.gfs", b"export fn fake(): null { return null }"),
+        Err(crate::state::WorkspaceError::ReservedProviderModule(path)) if path == "std/io.gfs"
+    ));
 }

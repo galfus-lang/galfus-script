@@ -83,7 +83,7 @@ pub struct FrontendReport {
     pub changed_modules: HashSet<ModuleId>,
     /// Builtin modules required by explicit imports or compiler desugaring,
     /// ordered by their canonical module path.
-    pub required_builtin_modules: Vec<ModulePath>,
+    pub required_dependencies: Vec<ModulePath>,
     pub diagnostics: DiagnosticBag,
 }
 
@@ -105,7 +105,7 @@ impl FrontendSession {
 
     pub fn check(&mut self, update: FrontendUpdate<'_>) -> FrontendReport {
         let mut changed_modules =
-            self.transitive_dependents(update.removed_modules.iter().copied());
+            self.transitive_dependents(update.removed_modules.iter().copied(), &update.catalog);
         for id in update.removed_modules {
             changed_modules.insert(*id);
         }
@@ -131,7 +131,9 @@ impl FrontendSession {
 
             if let Some(index) = existing_index {
                 changed_modules.insert(self.modules[index].id());
-                changed_modules.extend(self.transitive_dependents([self.modules[index].id()]));
+                changed_modules.extend(
+                    self.transitive_dependents([self.modules[index].id()], &update.catalog),
+                );
                 self.modules[index] = self.parse_module(input, update.source_revision);
             } else {
                 changed_modules.insert(input.module_id);
@@ -139,16 +141,17 @@ impl FrontendSession {
                 self.modules.push(module);
             }
             self.rebuild_module_index();
-            changed_modules.extend(self.transitive_dependents([input.module_id]));
+            changed_modules.extend(self.transitive_dependents([input.module_id], &update.catalog));
         }
 
         self.type_check_modules(&changed_modules, &update.catalog);
-        self.rebuild_diagnostics();
+        self.rebuild_diagnostics(&update.catalog);
         self.semantic_graph.apply_delta(
             update.roots.roots(),
             &self.modules,
             &changed_modules,
             update.removed_modules,
+            &update.catalog,
         );
 
         // Report the highest semantic revision produced in this check cycle.
@@ -165,7 +168,7 @@ impl FrontendSession {
             source_revision: update.source_revision,
             semantic_revision,
             changed_modules,
-            required_builtin_modules: self.required_builtin_modules(),
+            required_dependencies: self.required_dependencies(&update.catalog),
             diagnostics: self.diagnostics.clone(),
         }
     }
@@ -191,11 +194,16 @@ impl FrontendSession {
         )
     }
 
-    fn required_builtin_modules(&self) -> Vec<ModulePath> {
+    fn required_dependencies(
+        &self,
+        catalog: &galfus_contract::CapabilityCatalog,
+    ) -> Vec<ModulePath> {
         let mut required = HashSet::new();
         for (module_index, module) in self.modules.iter().enumerate() {
             for import in self.module_imports(module_index) {
-                if is_builtin_module(import.source.as_str()) {
+                if is_builtin_module(import.source.as_str())
+                    || catalog.is_provider_module(import.source.as_str())
+                {
                     required.insert(
                         ModulePath::new(format!("{}.gfs", import.source).as_str())
                             .expect("builtin module path is valid"),
@@ -259,6 +267,7 @@ impl FrontendSession {
     fn transitive_dependents(
         &self,
         roots: impl IntoIterator<Item = ModuleId>,
+        catalog: &galfus_contract::CapabilityCatalog,
     ) -> HashSet<ModuleId> {
         let mut changed = roots.into_iter().collect::<HashSet<_>>();
         let mut pending = changed.iter().copied().collect::<Vec<_>>();
@@ -268,7 +277,7 @@ impl FrontendSession {
                     continue;
                 }
                 if self.module_imports(index).iter().any(|import| {
-                    self.import_target_index(index, import.source.as_str())
+                    self.import_target_index(index, import.source.as_str(), catalog)
                         .is_some_and(|target_index| self.modules[target_index].id() == target)
                 }) {
                     changed.insert(module.id());
@@ -279,13 +288,13 @@ impl FrontendSession {
         changed
     }
 
-    fn rebuild_diagnostics(&mut self) {
+    fn rebuild_diagnostics(&mut self, catalog: &galfus_contract::CapabilityCatalog) {
         self.diagnostics = DiagnosticBag::new();
         for module in &self.modules {
             self.diagnostics
                 .extend(module.graph().diagnostics().iter().cloned());
         }
-        self.validate_imports();
+        self.validate_imports(catalog);
         self.validate_external_proxy_declarations();
         for module in &self.modules {
             if let Some(result) = module.type_result() {
@@ -295,12 +304,12 @@ impl FrontendSession {
         }
     }
 
-    fn validate_imports(&mut self) {
+    fn validate_imports(&mut self, catalog: &galfus_contract::CapabilityCatalog) {
         for module_index in 0..self.modules.len() {
             let imports = self.module_imports(module_index);
 
             for import in imports {
-                if !is_resolvable_import(import.source.as_str()) {
+                if !is_resolvable_import(import.source.as_str(), Some(catalog)) {
                     let span = self.modules[module_index]
                         .graph()
                         .syntax()
@@ -323,6 +332,7 @@ impl FrontendSession {
                 let Some(target_path) = resolve_relative_import(
                     self.modules[module_index].path(),
                     import.source.as_str(),
+                    Some(catalog),
                 ) else {
                     continue;
                 };
@@ -499,7 +509,13 @@ impl FrontendSession {
                     module.source(),
                     module.graph(),
                     &self.string_table,
-                    catalog.is_provider_module(module.path().as_str()),
+                    catalog.is_provider_module(
+                        module
+                            .path()
+                            .as_str()
+                            .strip_suffix(".gfs")
+                            .unwrap_or(module.path().as_str()),
+                    ),
                 )
             })
             .collect::<Vec<_>>();
@@ -514,7 +530,9 @@ impl FrontendSession {
             .collect::<Vec<_>>();
 
         let imported_types = (0..self.modules.len())
-            .map(|module_index| self.imported_surface_types_for_module(module_index, &surfaces))
+            .map(|module_index| {
+                self.imported_surface_types_for_module(module_index, &surfaces, catalog)
+            })
             .collect::<Vec<_>>();
 
         for ((module_index, imported_type), previous_result) in
@@ -534,7 +552,13 @@ impl FrontendSession {
                 previous_result,
                 imported_type,
                 &self.string_table,
-                catalog.is_provider_module(self.modules[module_index].path().as_str()),
+                catalog.is_provider_module(
+                    self.modules[module_index]
+                        .path()
+                        .as_str()
+                        .strip_suffix(".gfs")
+                        .unwrap_or(self.modules[module_index].path().as_str()),
+                ),
             );
 
             self.modules[module_index].type_result = Some(result);
@@ -545,15 +569,19 @@ impl FrontendSession {
         &self,
         module_index: usize,
         surfaces: &[ModuleSurface],
+        catalog: &galfus_contract::CapabilityCatalog,
     ) -> ImportedSurfaceTypes {
         let mut imported_types = ImportedSurfaceTypes::new();
 
         for import in self.module_imports(module_index) {
-            if import.kind != ImportKind::Named || !is_resolvable_import(import.source.as_str()) {
+            if import.kind != ImportKind::Named
+                || !is_resolvable_import(import.source.as_str(), Some(catalog))
+            {
                 continue;
             }
 
-            let Some(target_index) = self.import_target_index(module_index, import.source.as_str())
+            let Some(target_index) =
+                self.import_target_index(module_index, import.source.as_str(), catalog)
             else {
                 continue;
             };
@@ -595,15 +623,30 @@ impl FrontendSession {
             ));
         }
 
-        self.collect_named_imported_path_types(module_index, surfaces, &mut imported_types);
-        self.collect_namespace_imported_path_types(module_index, surfaces, &mut imported_types);
+        self.collect_named_imported_path_types(
+            module_index,
+            surfaces,
+            &mut imported_types,
+            catalog,
+        );
+        self.collect_namespace_imported_path_types(
+            module_index,
+            surfaces,
+            &mut imported_types,
+            catalog,
+        );
 
         imported_types
     }
 
-    pub(super) fn import_target_index(&self, module_index: usize, source: &str) -> Option<usize> {
+    pub(super) fn import_target_index(
+        &self,
+        module_index: usize,
+        source: &str,
+        catalog: &galfus_contract::CapabilityCatalog,
+    ) -> Option<usize> {
         let module_path = self.modules[module_index].path();
-        let target_path = resolve_relative_import(module_path, source)?;
+        let target_path = resolve_relative_import(module_path, source, Some(catalog))?;
         self.module_by_path.get(&target_path).copied()
     }
 }

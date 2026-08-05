@@ -1,6 +1,7 @@
 #[test]
 fn run_passes_read_terminator_to_the_io_provider() {
     let mut workspace = Workspace::new();
+    workspace.set_catalog(io_catalog(galfus_contract::STD_IO_SOURCE));
     workspace
         .load_config(
             br#"

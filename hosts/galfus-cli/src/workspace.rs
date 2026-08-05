@@ -71,7 +71,7 @@ fn load_workspace(root: &Path) -> Result<Workspace> {
         .context("workspace root does not exist")?;
     let config = fs::read(root.join("galfus.toml"))?;
 
-    let mut workspace = Workspace::new();
+    let mut workspace = workspace_with_native_io_catalog();
     if let LoadResult::Diagnostics(diagnostics) = workspace
         .load_config(config.as_slice())
         .map_err(|error| anyhow::anyhow!("workspace configuration error: {error:?}"))?
@@ -95,7 +95,7 @@ fn load_source_file(file: &Path) -> Result<Workspace> {
         .context("source file name is not valid UTF-8")?;
     let source = fs::read(file.as_path())?;
 
-    let mut workspace = Workspace::new();
+    let mut workspace = workspace_with_native_io_catalog();
     let config =
         format!("[module]\nname = \"single-file\"\ntarget = \"app\"\nentry = \"{module_path}\"\n");
     if let LoadResult::Diagnostics(diagnostics) = workspace
@@ -109,6 +109,20 @@ fn load_source_file(file: &Path) -> Result<Workspace> {
         .load_module(module_path, source.as_slice())
         .map_err(|error| anyhow::anyhow!("workspace source error: {error:?}"))?;
     Ok(workspace)
+}
+
+fn workspace_with_native_io_catalog() -> Workspace {
+    let mut workspace = Workspace::new();
+    let catalog = galfus_contract::CapabilityCatalog::new(
+        vec![galfus_contract::BridgeModule::new(
+            "std/io",
+            galfus_contract::STD_IO_SOURCE,
+        )],
+        Vec::new(),
+    )
+    .expect("the built-in std/io provider catalog is valid");
+    workspace.set_catalog(sync::Arc::new(catalog));
+    workspace
 }
 
 fn load_sources(workspace: &mut Workspace, workspace_root: &Path, directory: &Path) -> Result<()> {
