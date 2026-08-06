@@ -60,6 +60,7 @@ pub enum TypeDiagnosticCode {
 
     OpaqueHandleNotInstantiable,
     OpaqueHandleNotExportableAsValue,
+    ProxyModuleInvalidItem,
 }
 
 impl DiagnosticCodeKind for TypeDiagnosticCode {
@@ -123,6 +124,7 @@ impl DiagnosticCodeKind for TypeDiagnosticCode {
 
             Self::OpaqueHandleNotInstantiable => "T0057",
             Self::OpaqueHandleNotExportableAsValue => "T0058",
+            Self::ProxyModuleInvalidItem => "T0059",
         }
     }
 
@@ -188,6 +190,9 @@ impl DiagnosticCodeKind for TypeDiagnosticCode {
 
             Self::OpaqueHandleNotInstantiable => "opaque handles cannot be instantiated",
             Self::OpaqueHandleNotExportableAsValue => "opaque handles cannot be exported as values",
+            Self::ProxyModuleInvalidItem => {
+                "proxy modules (.gfp) can only contain struct, type, or function signatures (without bodies)"
+            }
         }
     }
 }

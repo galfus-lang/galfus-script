@@ -496,12 +496,21 @@ impl Workspace {
                 else {
                     continue;
                 };
-                let proxy_name = module.path().as_str().strip_suffix(".gfp").unwrap_or(module.path().as_str());
+                let proxy_name = module
+                    .path()
+                    .as_str()
+                    .strip_suffix(".gfp")
+                    .unwrap_or(module.path().as_str());
                 let parameter_types = function_type
                     .parameters()
                     .iter()
                     .map(|parameter| {
-                        Self::boundary_type(type_result.layer().table(), resolution, proxy_name, parameter.ty())
+                        Self::boundary_type(
+                            type_result.layer().table(),
+                            resolution,
+                            proxy_name,
+                            parameter.ty(),
+                        )
                     })
                     .collect::<Result<Vec<_>, _>>();
                 let return_type = Self::boundary_type(

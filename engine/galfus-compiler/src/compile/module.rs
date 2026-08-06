@@ -333,7 +333,14 @@ fn compile_single_module(
         .ok_or_else(|| anyhow::anyhow!("Missing type result for {}", module.path().as_str()))?;
 
     let proxy_name = if module.is_adapter_proxy() {
-        Some(module.path().as_str().strip_suffix(".gfp").unwrap_or(module.path().as_str()).to_string())
+        Some(
+            module
+                .path()
+                .as_str()
+                .strip_suffix(".gfp")
+                .unwrap_or(module.path().as_str())
+                .to_string(),
+        )
     } else {
         None
     };

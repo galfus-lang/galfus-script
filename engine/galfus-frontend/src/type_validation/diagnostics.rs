@@ -467,6 +467,36 @@ impl<'a> DeclarationTypeChecker<'a> {
         ));
     }
 
+    pub(super) fn report_opaque_handle_not_exportable_as_value(&mut self, target: NodeId) {
+        let span = self
+            .graph
+            .syntax()
+            .node(target)
+            .map(|node| node.span())
+            .unwrap_or_else(|| self.source.span());
+
+        self.diagnostics.push(Diagnostic::error_with_message(
+            TypeDiagnosticCode::OpaqueHandleNotExportableAsValue,
+            "opaque handles cannot be exported as values".to_string(),
+            span,
+        ));
+    }
+
+    pub(super) fn report_proxy_module_invalid_item(&mut self, target: NodeId) {
+        let span = self
+            .graph
+            .syntax()
+            .node(target)
+            .map(|node| node.span())
+            .unwrap_or_else(|| self.source.span());
+
+        self.diagnostics.push(Diagnostic::error_with_message(
+            TypeDiagnosticCode::ProxyModuleInvalidItem,
+            "proxy modules (.gfp) can only contain struct, type, or function signatures (without bodies)".to_string(),
+            span,
+        ));
+    }
+
     pub(super) fn report_choice_payload_required(&mut self, target: NodeId, variant_name: &str) {
         let span = self
             .graph

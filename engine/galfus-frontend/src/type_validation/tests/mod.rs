@@ -64,6 +64,35 @@ fn check_source(text: &str) -> (SourceFile, ModuleAst, TypeCheckResult, crate::S
     (source, graph, result, string_table)
 }
 
+fn proxy_source(text: &str) -> SourceFile {
+    SourceFile::new(SourceId::new(0), "test.gfp".to_string(), text.to_string())
+}
+
+fn check_proxy_source(text: &str) -> (SourceFile, ModuleAst, TypeCheckResult, crate::StringTable) {
+    let source = proxy_source(text);
+
+    let parse_result = parse(&source);
+    assert!(
+        !parse_result.has_errors(),
+        "{:?}",
+        parse_result.diagnostics()
+    );
+
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_ast(), &mut string_table);
+    assert!(
+        !resolve_result.has_errors(),
+        "{:?}",
+        resolve_result.diagnostics()
+    );
+
+    let graph = resolve_result.into_ast();
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
+
+    (source, graph, result, string_table)
+}
+
 fn check_source_named(
     name: &str,
     text: &str,
@@ -151,3 +180,4 @@ fn find_node_by_kind_from(graph: &ModuleAst, node: NodeId, kind: SyntaxNodeKind)
 
     None
 }
+mod proxy_modules;
