@@ -57,6 +57,22 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
     properties.insert("os".to_string(), std::env::consts::OS.to_string());
     properties.insert("arch".to_string(), std::env::consts::ARCH.to_string());
     properties.insert("family".to_string(), std::env::consts::FAMILY.to_string());
+    // Construct a fallback target triple since env!("TARGET") isn't available
+    let target_env = if cfg!(target_env = "msvc") {
+        "msvc"
+    } else if cfg!(target_env = "musl") {
+        "musl"
+    } else {
+        "gnu"
+    };
+    let target_triple = format!(
+        "{}-unknown-{}-{}",
+        std::env::consts::ARCH,
+        std::env::consts::OS,
+        target_env
+    );
+    properties.insert("target_triple".to_string(), target_triple);
+
     let context = galfus_contract::ExternalLoadContext { properties };
 
     let bindings = preflight

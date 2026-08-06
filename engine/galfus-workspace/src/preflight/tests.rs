@@ -13,7 +13,7 @@ struct MockLoader {
 impl ExternalModuleLoader for MockLoader {
     fn load_module(
         &self,
-        _requirement: &ExternalModuleRequirement,
+        requirement: &ExternalModuleRequirement,
         context: &ExternalLoadContext,
     ) -> Result<Box<dyn BoundExternalModule>, AdapterLoadError> {
         if self.should_fail {
@@ -24,6 +24,9 @@ impl ExternalModuleLoader for MockLoader {
         } else {
             // loader asserts that the context is passed
             assert!(context.properties.contains_key("os"));
+
+            // assert that config was passed completely
+            assert!(requirement.descriptor.config.contains_key("test_key"));
             Ok(Box::new(MockBoundModule))
         }
     }
@@ -118,7 +121,11 @@ fn multiple_modules_using_same_loader() {
     let req1 = create_requirement("proxy1", "test_adapter");
     let req2 = create_requirement("proxy2", "test_adapter");
 
-    let _bindings = preflight.run(&[req1, req2], &create_context()).unwrap();
+    let mut bindings = preflight.run(&[req1, req2], &create_context()).unwrap();
+
+    // confirm bindings are correctly populated
+    assert!(bindings.get_mut("proxy1").is_some());
+    assert!(bindings.get_mut("proxy2").is_some());
 }
 
 #[test]
@@ -133,4 +140,46 @@ fn duplicate_loader_registration_fails() {
         .unwrap_err();
 
     assert!(matches!(err, PreflightError::DuplicateLoader(_)));
+}
+
+#[test]
+fn two_loaders_with_structurally_different_configurations() {
+    let mut preflight = ExternalBindingPreflight::new();
+    preflight
+        .register_loader("loader1", Box::new(MockLoader { should_fail: false }))
+        .unwrap();
+    preflight
+        .register_loader("loader2", Box::new(MockLoader { should_fail: false }))
+        .unwrap();
+
+    let mut config1 = BTreeMap::new();
+    config1.insert(
+        "test_key".to_string(),
+        AdapterConfigValue::String("val1".to_string()),
+    );
+    let req1 = ExternalModuleRequirement {
+        proxy_module: "proxy1".to_string(),
+        descriptor: ExternalModuleDescriptor {
+            adapter: "loader1".to_string(),
+            config: config1,
+            exports: vec![],
+        },
+    };
+
+    let mut config2 = BTreeMap::new();
+    let mut nested = BTreeMap::new();
+    nested.insert("inner_key".to_string(), AdapterConfigValue::Integer(42));
+    config2.insert("test_key".to_string(), AdapterConfigValue::Table(nested));
+    let req2 = ExternalModuleRequirement {
+        proxy_module: "proxy2".to_string(),
+        descriptor: ExternalModuleDescriptor {
+            adapter: "loader2".to_string(),
+            config: config2,
+            exports: vec![],
+        },
+    };
+
+    let mut bindings = preflight.run(&[req1, req2], &create_context()).unwrap();
+    assert!(bindings.get_mut("proxy1").is_some());
+    assert!(bindings.get_mut("proxy2").is_some());
 }

@@ -401,9 +401,6 @@ pub enum AdapterValidationError {
     #[error("unsupported adapter: {0}")]
     UnsupportedAdapter(String),
 
-    #[error("missing configuration target for platform '{platform}': {reason}")]
-    MissingPlatformTarget { platform: String, reason: String },
-
     #[error("invalid schema: {0}")]
     InvalidSchema(String),
 }
@@ -421,7 +418,7 @@ pub trait ExternalAdapterSchema: Send + Sync {
     /// Complete declarative adapter schema used for catalog identity.
     ///
     /// This must change whenever adapter functions, parameter or return types,
-    /// modifiers, targets, or other validation-relevant semantics change.
+    /// modifiers, or other validation-relevant semantics change.
     fn catalog_schema(&self) -> String;
     fn validate_schema(
         &self,
