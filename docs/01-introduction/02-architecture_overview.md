@@ -4,18 +4,13 @@
 
 Galfus Script is a typed, VM-first scripting language with a straightforward pipeline. The primary pipeline is:
 
-```text
-.gfs Source
-    ↓
-Frontend (SemanticModuleGraph)
-    ↓
-Compiler (BytecodeModule values)
-    ↓
-Workspace (BytecodeGraph)
-    ↓
-Runtime (Execution State)
-    ↓
-VM (Instruction Execution)
+```mermaid
+flowchart TD
+    A[".gfs Source"] --> B["Frontend (SemanticModuleGraph)"]
+    B --> C["Compiler (BytecodeModule values)"]
+    C --> D["Workspace (BytecodeGraph)"]
+    D --> E["Runtime (Execution State)"]
+    E --> F["VM (Instruction Execution)"]
 ```
 
 **What is implemented:**
@@ -27,7 +22,6 @@ VM (Instruction Execution)
 
 **What is NOT part of the current architecture:**
 
-- **GFB (Galfus Bytecode File):** Removed. The graph exists only in memory.
 - **Bundler:** Not implemented.
 - **Optimizer:** Not implemented.
 - **Debugger:** Not implemented.
@@ -90,7 +84,10 @@ Virtual threads provide cooperative concurrent execution. Each thread has an
 isolated heap and mailbox; the runtime registry retains its identity, lifecycle
 state, key, and mailbox while it is created, running, blocked, or exited.
 
-### Cooperative Scheduler
+### Cooperative Scheduler (Optional)
+
+> [!NOTE]
+> The `CooperativeDriver` provided by the Galfus engine is entirely **optional**. It serves merely as a quick, ready-to-use scheduler to embed Galfus in simple applications or tests. For advanced use cases, you are encouraged to write your own custom executor by implementing the `KernelDriver` trait.
 
 The scheduler is implemented as a **FIFO queue** (`CooperativeDriver` backed by
 a `VecDeque`). Threads are dispatched in arrival order — no thread can skip

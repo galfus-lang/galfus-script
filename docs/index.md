@@ -1,8 +1,14 @@
-# Índice - Ecossistema Galfus
+# Index - Galfus Ecosystem
 
-Bem-vindo à documentação oficial. Escolha um tópico abaixo para começar.
+Welcome to the official documentation. Choose a topic below to get started.
 
-- [Glossário de Arquitetura](./glossary.md)
+- [Architecture Glossary](./glossary.md)
+
+## 00-Getting Started
+
+- [Conceptual Hello World](./00-getting_started/01-hello_world.md)
+
+
 
 ## 01-Introduction
 
@@ -75,5 +81,25 @@ Bem-vindo à documentação oficial. Escolha um tópico abaixo para começar.
 ## 06-Embedding Guide
 
 - [Embedding Galfus in a Rust Application](./06-embedding_guide/01-embedding_in_rust.md)
+
+- [Creating and Registering Providers](./06-embedding_guide/02-creating_providers.md)
+
+- [Creating and Registering Adapters](./06-embedding_guide/03-creating_adapters.md)
+
+- [Creating a Custom Kernel Driver](./06-embedding_guide/04-custom_kernel_driver.md)
+
+
+
+## 07-Core Strengths
+
+- [Ownership Graph](./07-core_strengths/01-ownership_graph.md)
+
+- [Provider System](./07-core_strengths/02-provider_system.md)
+
+- [Adapter System](./07-core_strengths/03-adapter_system.md)
+
+- [Virtual Thread](./07-core_strengths/04-virtual_thread.md)
+
+- [Virtual Kernel](./07-core_strengths/05-virtual_kernel.md)
 
 

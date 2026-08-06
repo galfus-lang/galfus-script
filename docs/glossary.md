@@ -36,16 +36,16 @@ This glossary standardizes the names used by the Galfus architecture. It is a na
 
 The canonical frontend and compilation order is:
 
-```text
-Lexer
-→ Token Tree
-→ Parser
-→ Surface Linking
-→ Type Linking
-→ Type Inference
-→ Type Validation
-→ IR Lowering
-→ Bytecode Emission
+```mermaid
+flowchart TD
+    A["Lexer"] --> B["Token Tree"]
+    B --> C["Parser"]
+    C --> D["Surface Linking"]
+    D --> E["Type Linking"]
+    E --> F["Type Inference"]
+    F --> G["Type Validation"]
+    G --> H["IR Lowering"]
+    H --> I["Bytecode Emission"]
 ```
 
 | Term                                              | Status  | Definition                                                                                                                                           |
@@ -108,12 +108,12 @@ pub struct CompileReport {
 
 The canonical adapter-loading flow is:
 
-```text
-AdapterModuleRequirement
-→ AdapterBindingPreflight
-→ AdapterModuleLoader
-→ AdapterModuleBinding
-→ AdapterBindings
+```mermaid
+flowchart TD
+    A["AdapterModuleRequirement"] --> B["AdapterBindingPreflight"]
+    B --> C["AdapterModuleLoader"]
+    C --> D["AdapterModuleBinding"]
+    D --> E["AdapterBindings"]
 ```
 
 ### Provider versus adapter
@@ -138,8 +138,11 @@ AdapterModuleRequirement
 
 Canonical boundary:
 
-```text
-CompileReport → Execution → VirtualKernel + VirtualMachine → running application
+```mermaid
+flowchart LR
+    A["CompileReport"] --> B["Execution"]
+    B --> C["VirtualKernel + VirtualMachine"]
+    C --> D["running application"]
 ```
 
 An `Execution` is not synonymous with `VirtualKernel`: the kernel is one host-agnostic component inside it.
@@ -156,13 +159,12 @@ An `Execution` is not synonymous with `VirtualKernel`: the kernel is one host-ag
 
 The planned distribution flow is:
 
-```text
-Workspace::compile
-Workspace::compile
-→ CompileReport
-→ Bundle
-→ Bundle + ExecutionHostPackage
-→ FinalArtifact
+```mermaid
+flowchart TD
+    A["Workspace::compile"] --> B["CompileReport"]
+    B --> C["Bundle"]
+    C --> D["Bundle + ExecutionHostPackage"]
+    D --> E["FinalArtifact"]
 ```
 
 The `CompileReport` provides the semantic compiled payload; the `Bundle` is its portable serialized envelope; the `ExecutionHostPackage` contributes target-specific execution machinery.
