@@ -341,7 +341,9 @@ pub(crate) fn boundary_type(
         Some(BytecodeType::Array(element)) => Ok(BoundaryType::Array(Box::new(boundary_type(
             module, *element,
         )?))),
-        Some(BytecodeType::Nullable(inner)) => boundary_type(module, *inner),
+        Some(BytecodeType::Nullable(inner)) => Ok(BoundaryType::Nullable(Box::new(boundary_type(
+            module, *inner,
+        )?))),
         Some(BytecodeType::Tuple(elements)) => elements
             .iter()
             .copied()

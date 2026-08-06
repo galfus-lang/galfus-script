@@ -572,7 +572,10 @@ impl Workspace {
                     .copied()
                     .collect::<Vec<_>>();
                 if non_null.len() == 1 && non_null.len() + 1 == members.len() {
-                    Self::boundary_type(table, non_null[0])
+                    Ok(BoundaryType::Nullable(Box::new(Self::boundary_type(
+                        table,
+                        non_null[0],
+                    )?)))
                 } else {
                     Err("only nullable unions are supported by the boundary ABI".to_string())
                 }

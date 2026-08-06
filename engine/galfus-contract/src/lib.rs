@@ -34,6 +34,7 @@ pub enum BoundaryType {
     Bytes,
     Function,
     Array(Box<BoundaryType>),
+    Nullable(Box<BoundaryType>),
     Tuple(Vec<BoundaryType>),
     Choice {
         variant: usize,

@@ -725,3 +725,79 @@ fn user_module_cannot_overwrite_a_catalog_provider() {
         Err(crate::state::WorkspaceError::ReservedProviderModule(path)) if path == "std/io.gfs"
     ));
 }
+
+#[test]
+fn compile_nullable_exports_with_nullable_boundary_type() {
+    struct NullableSchema;
+    impl galfus_contract::AdapterSchema for NullableSchema {
+        fn name(&self) -> &str {
+            "demo"
+        }
+        fn catalog_schema(&self) -> String {
+            "adapter demo { fn add(i32 | null, i32): i32 | null }".to_string()
+        }
+        fn validate_schema(
+            &self,
+            _descriptor: &galfus_contract::AdapterModuleDescriptor,
+        ) -> Result<(), galfus_contract::AdapterValidationError> {
+            Ok(())
+        }
+    }
+
+    let mut workspace = Workspace::new();
+    let catalog =
+        galfus_contract::CapabilityCatalog::new(Vec::new(), vec![std::sync::Arc::new(NullableSchema)])
+            .expect("demo catalog is valid");
+    workspace.set_catalog(std::sync::Arc::new(catalog));
+    workspace
+        .load_config(
+            br#"
+            [module]
+            name = "nullable-test"
+            target = "app"
+            entry = "main.gfs"
+            "#,
+        )
+        .expect("valid configuration");
+    workspace
+        .load_module(
+            "main.gfs",
+            br#"
+            import { add } from "./math.gfp"
+            export fn main(args: [[u8]]): i32 {
+                return 0
+            }
+            "#,
+        )
+        .expect("valid main module");
+    workspace
+        .load_module(
+            "math.gfp",
+            br#"---
+adapter = "demo"
+[config]
+test = "memory"
+---
+
+export fn(async) add(left: i32 | null, right: i32): i32 | null
+"#,
+        )
+        .expect("valid proxy source");
+
+    let check = workspace.check();
+    assert!(check.is_valid, "{:?}", check.diagnostics);
+
+    let exports = &workspace.adapter_descriptors[&ModulePath::new("math.gfp").unwrap()].exports;
+    assert_eq!(
+        *exports,
+        vec![galfus_contract::AdapterFunctionSignature {
+            name: "add".to_string(),
+            is_async: true,
+            parameter_types: vec![
+                galfus_contract::BoundaryType::Nullable(Box::new(galfus_contract::BoundaryType::I32)),
+                galfus_contract::BoundaryType::I32,
+            ],
+            return_type: galfus_contract::BoundaryType::Nullable(Box::new(galfus_contract::BoundaryType::I32)),
+        }]
+    );
+}
