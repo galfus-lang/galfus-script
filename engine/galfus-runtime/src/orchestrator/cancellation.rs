@@ -39,7 +39,7 @@ impl Orchestrator {
                 symbol,
                 ..
             } => {
-                if let Some(bindings) = &self.external_bindings {
+                if let Some(bindings) = &self.adapter_bindings {
                     let _outcome = bindings.lock().unwrap().cancel(
                         &proxy_module,
                         &symbol,
@@ -91,7 +91,7 @@ impl Orchestrator {
                     }
                 }
                 PendingOperation::Adapter { module, symbol } => {
-                    if let Some(bindings) = &self.external_bindings {
+                    if let Some(bindings) = &self.adapter_bindings {
                         let _outcome = bindings.lock().unwrap().cancel(
                             &module,
                             &symbol,

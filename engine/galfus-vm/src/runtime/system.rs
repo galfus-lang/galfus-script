@@ -15,9 +15,7 @@ impl VirtualMachine {
                 thread.write_reg(reg, Value::Null)?;
                 if let Value::Future(future_id) = value {
                     let released_handles = self.release_unreachable(thread);
-                    thread
-                        .pending_external_handle_drops
-                        .extend(released_handles);
+                    thread.pending_adapter_handle_drops.extend(released_handles);
                     if !thread.contains_future_handle(future_id) {
                         return Ok(VmStep::Suspend {
                             effect: VmEffect::FutureDropped { future_id },

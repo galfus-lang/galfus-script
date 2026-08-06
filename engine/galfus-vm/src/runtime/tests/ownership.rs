@@ -16,7 +16,7 @@ fn test_ownership_deterministic_release() {
             local_count: 8,
             temp_count: 8,
             return_ty: TypeIdx(3),
-            proxy_metadata: None,
+            adapter_proxy_metadata: None,
             instructions: vec![
                 Instruction::AllocLocal {
                     dest: Reg(1),
@@ -99,7 +99,7 @@ fn test_ownership_deterministic_release() {
     assert!(thread.heap.objects[node1_ref.raw()].is_some());
     assert!(thread.heap.objects[node2_ref.raw()].is_some());
 
-    let handle_ref = thread.heap.alloc(HeapObject::ExternalHandle {
+    let handle_ref = thread.heap.alloc(HeapObject::AdapterHandle {
         proxy_module: "".to_string(),
         kind: "texture".to_string(),
         id: 42,
@@ -125,7 +125,7 @@ fn test_ownership_cycle_release() {
             local_count: 8,
             temp_count: 8,
             return_ty: TypeIdx(4),
-            proxy_metadata: None,
+            adapter_proxy_metadata: None,
             instructions: vec![
                 Instruction::AllocLocal {
                     dest: Reg(1),
@@ -235,7 +235,7 @@ fn test_ownership_weak_invalidation() {
             local_count: 8,
             temp_count: 8,
             return_ty: TypeIdx(3),
-            proxy_metadata: None,
+            adapter_proxy_metadata: None,
             instructions: vec![
                 Instruction::AllocLocal {
                     dest: Reg(1),

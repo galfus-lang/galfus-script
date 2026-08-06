@@ -34,7 +34,7 @@ fn create_test_module(instructions: Vec<Instruction>, constants: Vec<Constant>) 
             local_count: 8,
             temp_count: 8,
             return_ty: TypeIdx(0),
-            proxy_metadata: None,
+            adapter_proxy_metadata: None,
             instructions,
         }],
         types: vec![

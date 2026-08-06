@@ -4,18 +4,13 @@
 
 Galfus Script is a typed, VM-first scripting language with a straightforward pipeline. The primary pipeline is:
 
-```text
-.gfs Source
-    ↓
-Frontend (SemanticGraph)
-    ↓
-Compiler (BytecodeModule values)
-    ↓
-Workspace (BytecodeGraph)
-    ↓
-Runtime (Execution State)
-    ↓
-VM (Instruction Execution)
+```mermaid
+flowchart TD
+    A[".gfs Source"] --> B["Frontend (SemanticModuleGraph)"]
+    B --> C["Compiler (BytecodeModule values)"]
+    C --> D["Workspace (BytecodeGraph)"]
+    D --> E["Runtime (Execution State)"]
+    E --> F["VM (Instruction Execution)"]
 ```
 
 **What is implemented:**
@@ -27,7 +22,6 @@ VM (Instruction Execution)
 
 **What is NOT part of the current architecture:**
 
-- **GFB (Galfus Bytecode File):** Removed. The graph exists only in memory.
 - **Bundler:** Not implemented.
 - **Optimizer:** Not implemented.
 - **Debugger:** Not implemented.
@@ -37,7 +31,7 @@ VM (Instruction Execution)
 
 ## 2. The Semantic Graph
 
-The `SemanticGraph` represents the source-level meaning of the workspace.
+The `SemanticModuleGraph` represents the source-level meaning of the workspace.
 It contains modules, symbols, typed references, and diagnostics.
 The frontend processes source text and updates this graph.
 
@@ -69,7 +63,7 @@ leave the prior snapshot unchanged.
 The `Workspace` owns the current architectural snapshots:
 
 - Source state
-- `SemanticGraph` snapshot
+- `SemanticModuleGraph` snapshot
 - `BytecodeGraph` snapshot
 
 It manages the orchestration of the frontend, compiler, and provides an API for embedding.
@@ -90,7 +84,10 @@ Virtual threads provide cooperative concurrent execution. Each thread has an
 isolated heap and mailbox; the runtime registry retains its identity, lifecycle
 state, key, and mailbox while it is created, running, blocked, or exited.
 
-### Cooperative Scheduler
+### Cooperative Scheduler (Optional)
+
+> [!NOTE]
+> The `CooperativeDriver` provided by the Galfus engine is entirely **optional**. It serves merely as a quick, ready-to-use scheduler to embed Galfus in simple applications or tests. For advanced use cases, you are encouraged to write your own custom executor by implementing the `KernelDriver` trait.
 
 The scheduler is implemented as a **FIFO queue** (`CooperativeDriver` backed by
 a `VecDeque`). Threads are dispatched in arrival order — no thread can skip
@@ -152,7 +149,7 @@ Function-symbol and source-path mappings are planned metadata extensions.
 
 Principles exist as objective contracts per layer. Each invariant must have at least one corresponding test or check.
 
-- **Frontend**: Must produce a canonical, deterministic `SemanticGraph`. No state leakage between compilations.
+- **Frontend**: Must produce a canonical, deterministic `SemanticModuleGraph`. No state leakage between compilations.
 - **Package/Workspace**: Must maintain isolated module namespaces without implicit global dependencies.
 - **VM**: Given the same initial state and the same ordered sequence of external completions, the VM must produce the same state transitions and effects.
 - **Kernel**: The Kernel must apply a canonical scheduling policy with stable ordering and explicit tie-break rules.

@@ -1,4 +1,4 @@
-Previous: [Bindings, Literals and Primitive Types](./03-bindings-literals-and-primitive-types.md) | Index: [Galfus Core System](./00-index.md) | Next: [Generics](./05-generics.md)
+Previous: [Bindings, Literals and Primitive Types](./03-bindings-literals-and-primitive-types.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Generics](./05-generics.md)
 
 ---
 
@@ -297,4 +297,4 @@ The checker MUST:
 
 ---
 
-Previous: [Bindings, Literals and Primitive Types](./03-bindings-literals-and-primitive-types.md) | Index: [Galfus Core System](./00-index.md) | Next: [Generics](./05-generics.md)
+Previous: [Bindings, Literals and Primitive Types](./03-bindings-literals-and-primitive-types.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Generics](./05-generics.md)

@@ -1,6 +1,6 @@
 use galfus_contract::{
-    AdapterLoadError, ExternalBindings, ExternalLoadContext, ExternalModuleLoader,
-    ExternalModuleRequirement,
+    AdapterBindings, AdapterLoadContext, AdapterLoadError, AdapterModuleLoader,
+    AdapterModuleRequirement,
 };
 use std::collections::HashMap;
 
@@ -39,17 +39,17 @@ impl std::fmt::Display for PreflightError {
 
 impl std::error::Error for PreflightError {}
 
-pub struct ExternalBindingPreflight {
-    loaders: HashMap<String, Box<dyn ExternalModuleLoader>>,
+pub struct AdapterBindingPreflight {
+    loaders: HashMap<String, Box<dyn AdapterModuleLoader>>,
 }
 
-impl Default for ExternalBindingPreflight {
+impl Default for AdapterBindingPreflight {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ExternalBindingPreflight {
+impl AdapterBindingPreflight {
     pub fn new() -> Self {
         Self {
             loaders: HashMap::new(),
@@ -59,7 +59,7 @@ impl ExternalBindingPreflight {
     pub fn register_loader(
         &mut self,
         adapter_name: impl Into<String>,
-        loader: Box<dyn ExternalModuleLoader>,
+        loader: Box<dyn AdapterModuleLoader>,
     ) -> Result<(), PreflightError> {
         let name = adapter_name.into();
         if self.loaders.contains_key(&name) {
@@ -71,10 +71,10 @@ impl ExternalBindingPreflight {
 
     pub fn run(
         &self,
-        requirements: &[ExternalModuleRequirement],
-        context: &ExternalLoadContext,
-    ) -> Result<ExternalBindings, PreflightError> {
-        let mut bindings = ExternalBindings::default();
+        requirements: &[AdapterModuleRequirement],
+        context: &AdapterLoadContext,
+    ) -> Result<AdapterBindings, PreflightError> {
+        let mut bindings = AdapterBindings::default();
 
         if requirements.is_empty() {
             return Ok(bindings);

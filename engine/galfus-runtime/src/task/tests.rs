@@ -227,8 +227,8 @@ fn codec_encodes_a_choice_with_its_declared_variant_payload() {
 }
 
 #[test]
-fn codec_round_trips_nominal_external_handles() {
-    let module = module(vec![BytecodeType::ExternalHandle("file".to_string())]);
+fn codec_round_trips_nominal_adapter_handles() {
+    let module = module(vec![BytecodeType::AdapterHandle("file".to_string())]);
     let mut heap = galfus_vm::thread::PrivateHeap::new();
     let value = BoundaryValue::Handle {
         proxy_module: Some("".to_string()),
@@ -277,8 +277,8 @@ fn codec_round_trips_function_references() {
 }
 
 #[test]
-fn codec_rejects_external_handles_with_the_wrong_kind() {
-    let module = module(vec![BytecodeType::ExternalHandle("file".to_string())]);
+fn codec_rejects_adapter_handles_with_the_wrong_kind() {
+    let module = module(vec![BytecodeType::AdapterHandle("file".to_string())]);
     let mut heap = galfus_vm::thread::PrivateHeap::new();
     assert!(
         encode_into_thread_heap(

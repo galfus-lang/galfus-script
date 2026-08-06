@@ -1,5 +1,5 @@
 use crate::builtins::BridgeModule;
-use crate::{ExternalAdapterSchema, is_builtin_module};
+use crate::{AdapterSchema, is_builtin_module};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -25,7 +25,7 @@ pub enum CapabilityCatalogError {
 #[derive(Clone)]
 pub struct CapabilityCatalog {
     provider_modules: HashMap<String, String>,
-    adapter_schemas: HashMap<String, Arc<dyn ExternalAdapterSchema>>,
+    adapter_schemas: HashMap<String, Arc<dyn AdapterSchema>>,
     fingerprint: u64,
 }
 
@@ -38,7 +38,7 @@ impl Default for CapabilityCatalog {
 impl CapabilityCatalog {
     pub fn new(
         provider_modules: Vec<BridgeModule>,
-        adapters: Vec<Arc<dyn ExternalAdapterSchema>>,
+        adapters: Vec<Arc<dyn AdapterSchema>>,
     ) -> Result<Self, CapabilityCatalogError> {
         let mut provider_modules_by_path = HashMap::new();
         for provider in provider_modules {
@@ -90,7 +90,7 @@ impl CapabilityCatalog {
 
     fn fingerprint_for(
         provider_modules: &HashMap<String, String>,
-        adapter_schemas: &HashMap<String, Arc<dyn ExternalAdapterSchema>>,
+        adapter_schemas: &HashMap<String, Arc<dyn AdapterSchema>>,
     ) -> u64 {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         FINGERPRINT_FORMAT_VERSION.hash(&mut hasher);
@@ -127,7 +127,7 @@ impl CapabilityCatalog {
     }
 
     /// Retrieves the declarative schema for an adapter, if registered.
-    pub fn adapter_schema(&self, name: &str) -> Option<Arc<dyn ExternalAdapterSchema>> {
+    pub fn adapter_schema(&self, name: &str) -> Option<Arc<dyn AdapterSchema>> {
         self.adapter_schemas.get(name).cloned()
     }
 

@@ -80,9 +80,9 @@ pub struct VmThreadState {
     pub module_states: HashMap<ModuleId, RuntimeModuleState>,
     pub entry_func: Option<runtime::Value>,
     pub initializing_module: Option<ModuleId>,
-    /// External handles detached by graph release. The runtime owns dispatching
+    /// Adapter handles detached by graph release. The runtime owns dispatching
     /// their adapter release notifications on the main thread.
-    pub pending_external_handle_drops: Vec<(String, String, u64)>,
+    pub pending_adapter_handle_drops: Vec<(String, String, u64)>,
 }
 
 impl Default for VmThreadState {
@@ -100,7 +100,7 @@ impl VmThreadState {
             module_states: HashMap::new(),
             entry_func: None,
             initializing_module: None,
-            pending_external_handle_drops: Vec::new(),
+            pending_adapter_handle_drops: Vec::new(),
         }
     }
 
@@ -117,10 +117,10 @@ impl VmThreadState {
         self.module_states.entry(module_id).or_default().initialized = true;
     }
 
-    pub fn extract_all_external_handles(&mut self) -> Vec<(String, String, u64)> {
-        let mut extracted = std::mem::take(&mut self.pending_external_handle_drops);
+    pub fn extract_all_adapter_handles(&mut self) -> Vec<(String, String, u64)> {
+        let mut extracted = std::mem::take(&mut self.pending_adapter_handle_drops);
         for obj in self.heap.objects.iter_mut() {
-            if let Some(crate::runtime::HeapObject::ExternalHandle {
+            if let Some(crate::runtime::HeapObject::AdapterHandle {
                 proxy_module,
                 kind,
                 id,
@@ -192,7 +192,7 @@ impl VmThreadState {
                 HeapObject::Choice { payload, .. } => {
                     matches!(payload, Value::Future(id) if *id == future_id)
                 }
-                HeapObject::ExternalHandle { .. } => false,
+                HeapObject::AdapterHandle { .. } => false,
             })
     }
 }

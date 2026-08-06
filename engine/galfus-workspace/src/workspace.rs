@@ -13,7 +13,7 @@ use crate::state::{
 use galfus_bytecode::{BytecodeGraph, ImportEdge};
 use galfus_compiler::{CompiledModule, gfp::parse_gfp_frontmatter};
 use galfus_contract::{
-    BoundaryType, ExternalFunctionSignature, ExternalModuleDescriptor, ExternalModuleRequirement,
+    AdapterFunctionSignature, AdapterModuleDescriptor, AdapterModuleRequirement, BoundaryType,
     Providers,
 };
 use galfus_core::{Diagnostic, DiagnosticBag, ModulePath, SourceFile, Span, TypeId};
@@ -34,7 +34,7 @@ pub struct Workspace {
     pub frontend: FrontendSession,
     frontend_snapshot: Option<FrontendSnapshot>,
     pub catalog: Arc<galfus_contract::CapabilityCatalog>,
-    pub external_descriptors: HashMap<ModulePath, ExternalModuleDescriptor>,
+    pub adapter_descriptors: HashMap<ModulePath, AdapterModuleDescriptor>,
 }
 
 pub enum LoadResult {
@@ -57,7 +57,7 @@ pub struct CompileReport {
     /// The compiled module graph, ready to be passed to the runtime.
     pub graph: Arc<BytecodeGraph>,
     /// Declarative external dependencies required to bind the graph at package time.
-    pub external_requirements: Vec<ExternalModuleRequirement>,
+    pub adapter_requirements: Vec<AdapterModuleRequirement>,
 }
 
 impl Default for Workspace {
@@ -76,7 +76,7 @@ impl Workspace {
             frontend: FrontendSession::new(),
             frontend_snapshot: None,
             catalog: Arc::new(galfus_contract::CapabilityCatalog::default()),
-            external_descriptors: HashMap::new(),
+            adapter_descriptors: HashMap::new(),
         }
     }
 
@@ -139,16 +139,16 @@ impl Workspace {
         let (source_bytes, origin, descriptor) = if path.ends_with(".gfp") {
             let source = match str::from_utf8(module_bytes) {
                 Ok(source) => source,
-                Err(_) => return Ok(Self::invalid_external_proxy(".gfp source must be UTF-8")),
+                Err(_) => return Ok(Self::invalid_adapter_proxy(".gfp source must be UTF-8")),
             };
             let (frontmatter, body) = match parse_gfp_frontmatter(source) {
                 Ok(parsed) => parsed,
-                Err(error) => return Ok(Self::invalid_external_proxy(error)),
+                Err(error) => return Ok(Self::invalid_adapter_proxy(error)),
             };
             (
                 Arc::from(body.as_bytes()),
-                ModuleOrigin::ExternalProxy,
-                Some(ExternalModuleDescriptor {
+                ModuleOrigin::AdapterProxy,
+                Some(AdapterModuleDescriptor {
                     adapter: frontmatter.adapter,
                     config: frontmatter.config,
                     exports: Vec::new(),
@@ -181,10 +181,10 @@ impl Workspace {
                 },
             })?;
         if let Some(descriptor) = descriptor {
-            self.external_descriptors
+            self.adapter_descriptors
                 .insert(module_path.clone(), descriptor);
         } else {
-            self.external_descriptors.remove(&module_path);
+            self.adapter_descriptors.remove(&module_path);
         }
         self.source_state.dirty_sources.insert(module_path);
         self.mark_dirty();
@@ -227,7 +227,7 @@ impl Workspace {
         let module_path = ModulePath::new(path).ok_or(WorkspaceError::InvalidPath)?;
 
         if let Some(entry) = self.source_state.store.remove_module(&module_path) {
-            self.external_descriptors.remove(&module_path);
+            self.adapter_descriptors.remove(&module_path);
             self.source_state.revision.next();
             self.source_state.dirty_sources.remove(&module_path);
             self.source_state.removed_modules.push(entry.module_id);
@@ -238,10 +238,10 @@ impl Workspace {
         }
     }
 
-    fn invalid_external_proxy(message: impl Into<String>) -> LoadResult {
+    fn invalid_adapter_proxy(message: impl Into<String>) -> LoadResult {
         let mut diagnostics = DiagnosticBag::new();
         diagnostics.push(Diagnostic::error_with_message(
-            WorkspaceDiagnosticCode::InvalidExternalProxy,
+            WorkspaceDiagnosticCode::InvalidAdapterProxy,
             message,
             Span::empty(WORKSPACE_SOURCE_ID, 0),
         ));
@@ -310,7 +310,7 @@ impl Workspace {
                             match entry.origin {
                                 ModuleOrigin::User => FrontendModuleKind::Standard,
                                 ModuleOrigin::Builtin => FrontendModuleKind::Builtin,
-                                ModuleOrigin::ExternalProxy => FrontendModuleKind::ExternalProxy,
+                                ModuleOrigin::AdapterProxy => FrontendModuleKind::AdapterProxy,
                                 ModuleOrigin::ProviderCatalog => FrontendModuleKind::Builtin,
                             },
                             SourceFile::new(
@@ -367,7 +367,7 @@ impl Workspace {
                     }
                 };
 
-                self.refresh_external_proxy_descriptors(&mut report.diagnostics);
+                self.refresh_adapter_proxy_descriptors(&mut report.diagnostics);
                 self.validate_registered_adapter_schemas(&mut report.diagnostics);
 
                 if report.diagnostics.has_errors() {
@@ -447,10 +447,10 @@ impl Workspace {
     }
 
     fn validate_registered_adapter_schemas(&self, diagnostics: &mut DiagnosticBag) {
-        for descriptor in self.external_descriptors.values() {
+        for descriptor in self.adapter_descriptors.values() {
             let Some(adapter) = self.catalog.adapter_schema(&descriptor.adapter) else {
                 diagnostics.push(Diagnostic::error_with_message(
-                    WorkspaceDiagnosticCode::InvalidExternalProxy,
+                    WorkspaceDiagnosticCode::InvalidAdapterProxy,
                     format!("unresolved external adapter '{}'", descriptor.adapter),
                     Span::empty(WORKSPACE_SOURCE_ID, 0),
                 ));
@@ -458,7 +458,7 @@ impl Workspace {
             };
             if let Err(error) = adapter.validate_schema(descriptor) {
                 diagnostics.push(Diagnostic::error_with_message(
-                    WorkspaceDiagnosticCode::InvalidExternalProxy,
+                    WorkspaceDiagnosticCode::InvalidAdapterProxy,
                     error.to_string(),
                     Span::empty(WORKSPACE_SOURCE_ID, 0),
                 ));
@@ -466,12 +466,12 @@ impl Workspace {
         }
     }
 
-    fn refresh_external_proxy_descriptors(&mut self, diagnostics: &mut DiagnosticBag) {
+    fn refresh_adapter_proxy_descriptors(&mut self, diagnostics: &mut DiagnosticBag) {
         for module in self.frontend.modules() {
-            if module.kind() != FrontendModuleKind::ExternalProxy {
+            if module.kind() != FrontendModuleKind::AdapterProxy {
                 continue;
             }
-            let Some(descriptor) = self.external_descriptors.get_mut(module.path()) else {
+            let Some(descriptor) = self.adapter_descriptors.get_mut(module.path()) else {
                 continue;
             };
             descriptor.exports.clear();
@@ -509,7 +509,7 @@ impl Workspace {
                     .and_then(|parameters| return_type.map(|return_type| (parameters, return_type)))
                 {
                     Ok((parameter_types, return_type)) => {
-                        descriptor.exports.push(ExternalFunctionSignature {
+                        descriptor.exports.push(AdapterFunctionSignature {
                             name: export.name().to_string(),
                             is_async: true,
                             parameter_types,
@@ -517,7 +517,7 @@ impl Workspace {
                         })
                     }
                     Err(error) => diagnostics.push(Diagnostic::error_with_message(
-                        WorkspaceDiagnosticCode::InvalidExternalProxy,
+                        WorkspaceDiagnosticCode::InvalidAdapterProxy,
                         format!(
                             "proxy export '{}' is not boundary-representable: {error}",
                             export.name()
@@ -661,7 +661,7 @@ impl Workspace {
         {
             return Ok(CompileReport {
                 graph: Arc::clone(graph),
-                external_requirements: self.external_requirements_for(graph),
+                adapter_requirements: self.adapter_requirements_for(graph),
             });
         }
 
@@ -800,21 +800,21 @@ impl Workspace {
             graph: Arc::clone(&graph),
         };
 
-        let external_requirements = self.external_requirements_for(&graph);
+        let adapter_requirements = self.adapter_requirements_for(&graph);
         Ok(CompileReport {
             graph,
-            external_requirements,
+            adapter_requirements,
         })
     }
 
-    fn external_requirements_for(&self, graph: &BytecodeGraph) -> Vec<ExternalModuleRequirement> {
+    fn adapter_requirements_for(&self, graph: &BytecodeGraph) -> Vec<AdapterModuleRequirement> {
         let mut requirements = graph
             .modules()
             .filter_map(|module| {
-                self.external_descriptors
+                self.adapter_descriptors
                     .get(module.path())
                     .cloned()
-                    .map(|descriptor| ExternalModuleRequirement {
+                    .map(|descriptor| AdapterModuleRequirement {
                         proxy_module: module.path().as_str().to_string(),
                         descriptor,
                     })
@@ -866,7 +866,7 @@ impl Workspace {
         &mut self,
         args: &[Vec<u8>],
         providers: Option<Providers>,
-        bindings: galfus_contract::ExternalBindings,
+        bindings: galfus_contract::AdapterBindings,
         driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
     ) -> Result<Execution, RunBlocked> {
         let graph = match &self.bytecode_state.compile_state {
@@ -890,7 +890,7 @@ impl Workspace {
             .run_entry
             .clone();
         Runtime::new(graph.clone(), providers)
-            .with_external_bindings(bindings)
+            .with_adapter_bindings(bindings)
             .start(entry_id, entry_name.as_str(), args, driver.clone())
             .map_err(|error| {
                 if let RuntimeError::VmPanic(panic) = &error {
@@ -917,7 +917,7 @@ impl Workspace {
         &mut self,
         args: &[Vec<u8>],
         providers: Option<Providers>,
-        bindings: galfus_contract::ExternalBindings,
+        bindings: galfus_contract::AdapterBindings,
         driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
     ) -> Result<(), RunBlocked> {
         let mut execution =

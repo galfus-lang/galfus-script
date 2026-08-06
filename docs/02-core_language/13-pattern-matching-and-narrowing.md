@@ -1,4 +1,4 @@
-Previous: [Iteration and Ranges](./12-iteration-and-ranges.md) | Index: [Galfus Core System](./00-index.md) | Next: [Decorators and Keyword Metadata](./14-decorators-and-keyword-metadata.md)
+Previous: [Iteration and Ranges](./12-iteration-and-ranges.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Decorators and Keyword Metadata](./14-decorators-and-keyword-metadata.md)
 
 ---
 
@@ -414,4 +414,4 @@ The checker MUST:
 
 ---
 
-Previous: [Iteration and Ranges](./12-iteration-and-ranges.md) | Index: [Galfus Core System](./00-index.md) | Next: [Decorators and Keyword Metadata](./14-decorators-and-keyword-metadata.md)
+Previous: [Iteration and Ranges](./12-iteration-and-ranges.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Decorators and Keyword Metadata](./14-decorators-and-keyword-metadata.md)

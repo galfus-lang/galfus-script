@@ -70,7 +70,7 @@ pub fn lower_module(
             local_count,
             temp_count: emitter.temp_count_max,
             return_ty,
-            proxy_metadata: None,
+            adapter_proxy_metadata: None,
             instructions,
         });
     }

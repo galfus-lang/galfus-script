@@ -1,4 +1,4 @@
-Previous: [Reserved Words and Lexical Rules](./01-reserved-words-and-lexical-rules.md) | Index: [Galfus Core System](./00-index.md) | Next: [Bindings, Literals and Primitive Types](./03-bindings-literals-and-primitive-types.md)
+Previous: [Reserved Words and Lexical Rules](./01-reserved-words-and-lexical-rules.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Bindings, Literals and Primitive Types](./03-bindings-literals-and-primitive-types.md)
 
 ---
 
@@ -234,4 +234,4 @@ The resolver MUST:
 
 ---
 
-Previous: [Reserved Words and Lexical Rules](./01-reserved-words-and-lexical-rules.md) | Index: [Galfus Core System](./00-index.md) | Next: [Bindings, Literals and Primitive Types](./03-bindings-literals-and-primitive-types.md)
+Previous: [Reserved Words and Lexical Rules](./01-reserved-words-and-lexical-rules.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Bindings, Literals and Primitive Types](./03-bindings-literals-and-primitive-types.md)

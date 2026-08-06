@@ -14,7 +14,7 @@ fn create_dummy_module(instructions: Vec<Instruction>) -> BytecodeModule {
             local_count: 2,
             temp_count: 2,
             return_ty: TypeIdx(0),
-            proxy_metadata: None,
+            adapter_proxy_metadata: None,
             instructions,
         }],
         types: vec![

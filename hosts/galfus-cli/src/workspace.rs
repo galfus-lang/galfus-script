@@ -50,7 +50,7 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
         *ec.lock().unwrap() = res.unwrap();
     }));
 
-    let preflight = galfus_workspace::ExternalBindingPreflight::new();
+    let preflight = galfus_workspace::AdapterBindingPreflight::new();
     // Note: CLI doesn't currently register external loaders, but it should run the preflight
     // to catch any unmet requirements.
     let mut properties = std::collections::BTreeMap::new();
@@ -73,10 +73,10 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
     );
     properties.insert("target_triple".to_string(), target_triple);
 
-    let context = galfus_contract::ExternalLoadContext { properties };
+    let context = galfus_contract::AdapterLoadContext { properties };
 
     let bindings = preflight
-        .run(&compile_report.external_requirements, &context)
+        .run(&compile_report.adapter_requirements, &context)
         .map_err(|error| anyhow::anyhow!("package preflight failed: {error:?}"))?;
 
     workspace

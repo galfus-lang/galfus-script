@@ -74,8 +74,8 @@ pub enum BoundaryValue {
     },
     Handle {
         proxy_module: Option<String>, // Set by Orchestrator upon future completion
-        kind: String,                 // ExternalHandleKind
-        id: u64,                      // ExternalHandleId
+        kind: String,                 // AdapterHandleKind
+        id: u64,                      // AdapterHandleId
     },
 }
 
@@ -101,7 +101,7 @@ pub enum ExecutionFailureKind {
     ProviderFailure,
     MissingAdapter,
     AdapterLoadFailure,
-    ExternalSymbolFailure,
+    AdapterCallFailure,
     BoundaryCodecFailure,
     InitializationFailure,
     Timeout,
@@ -225,7 +225,7 @@ pub trait HostProvider: Send {
 ///
 /// Implementations may create and coordinate arbitrary internal workers. Those workers must
 /// report completion exclusively through the supplied `MessageInjector`.
-pub trait BoundExternalModule: Send {
+pub trait AdapterModuleBinding: Send {
     fn dispatch(
         &mut self,
         symbol: &str,
@@ -248,23 +248,23 @@ pub trait BoundExternalModule: Send {
     fn release_handle(&mut self, _kind: &str, _id: u64) {}
 }
 
-/// External bindings are explicit and keyed by nominal proxy module.
+/// Adapter bindings are explicit and keyed by nominal proxy module.
 #[derive(Default)]
-pub struct ExternalBindings {
-    modules: HashMap<String, Box<dyn BoundExternalModule>>,
+pub struct AdapterBindings {
+    modules: HashMap<String, Box<dyn AdapterModuleBinding>>,
     handles: std::collections::HashSet<(String, String, u64)>, // (proxy_module, kind, id)
 }
 
-impl ExternalBindings {
+impl AdapterBindings {
     pub fn register_module(
         &mut self,
         proxy_module: impl Into<String>,
-        module: Box<dyn BoundExternalModule>,
+        module: Box<dyn AdapterModuleBinding>,
     ) {
         self.modules.insert(proxy_module.into(), module);
     }
 
-    pub fn get_mut(&mut self, proxy_module: &str) -> Option<&mut (dyn BoundExternalModule + '_)> {
+    pub fn get_mut(&mut self, proxy_module: &str) -> Option<&mut (dyn AdapterModuleBinding + '_)> {
         let module = self.modules.get_mut(proxy_module)?;
         Some(&mut **module)
     }
@@ -373,23 +373,23 @@ pub enum AdapterConfigValue {
     Table(AdapterConfig),
 }
 
-/// Description of an external proxy module compiled from a .gfp file.
+/// Description of an adapter proxy module compiled from a .gfp file.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct ExternalModuleDescriptor {
+pub struct AdapterModuleDescriptor {
     pub adapter: String,
     pub config: AdapterConfig,
-    pub exports: Vec<ExternalFunctionSignature>,
+    pub exports: Vec<AdapterFunctionSignature>,
 }
 
 /// A declarative external-module dependency produced during compilation.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct ExternalModuleRequirement {
+pub struct AdapterModuleRequirement {
     pub proxy_module: String,
-    pub descriptor: ExternalModuleDescriptor,
+    pub descriptor: AdapterModuleDescriptor,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ExternalFunctionSignature {
+pub struct AdapterFunctionSignature {
     pub name: String,
     pub is_async: bool,
     pub parameter_types: Vec<BoundaryType>,
@@ -413,7 +413,7 @@ pub struct AdapterLoadError {
 }
 
 /// Development-time validation for an external proxy descriptor.
-pub trait ExternalAdapterSchema: Send + Sync {
+pub trait AdapterSchema: Send + Sync {
     fn name(&self) -> &str;
     /// Complete declarative adapter schema used for catalog identity.
     ///
@@ -422,30 +422,19 @@ pub trait ExternalAdapterSchema: Send + Sync {
     fn catalog_schema(&self) -> String;
     fn validate_schema(
         &self,
-        descriptor: &ExternalModuleDescriptor,
+        descriptor: &AdapterModuleDescriptor,
     ) -> Result<(), AdapterValidationError>;
 }
 
-pub struct ExternalLoadContext {
+pub struct AdapterLoadContext {
     pub properties: std::collections::BTreeMap<String, String>,
 }
 
-/// Optional package-time loader. Runtime receives only [`ExternalBindings`].
-pub trait ExternalModuleLoader: Send + Sync {
+/// Optional package-time loader. Runtime receives only [`AdapterBindings`].
+pub trait AdapterModuleLoader: Send + Sync {
     fn load_module(
         &self,
-        requirement: &ExternalModuleRequirement,
-        context: &ExternalLoadContext,
-    ) -> Result<Box<dyn BoundExternalModule>, AdapterLoadError>;
+        requirement: &AdapterModuleRequirement,
+        context: &AdapterLoadContext,
+    ) -> Result<Box<dyn AdapterModuleBinding>, AdapterLoadError>;
 }
-
-/// Compatibility composition for hosts that provide both development contracts.
-#[deprecated(
-    note = "Adapter schema and concrete loaders are now strictly separated. Use
-`CapabilityCatalog` for schema validation during `Workspace::compile` and provide
-`ExternalModuleLoader` during bootstrap/preflight."
-)]
-pub trait ModuleAdapter: ExternalAdapterSchema + ExternalModuleLoader {}
-
-#[allow(deprecated)]
-impl<T> ModuleAdapter for T where T: ExternalAdapterSchema + ExternalModuleLoader {}

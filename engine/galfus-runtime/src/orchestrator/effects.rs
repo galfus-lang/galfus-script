@@ -1,7 +1,7 @@
 use super::Orchestrator;
 use crate::event::RuntimeEvent;
 use crate::execution::FutureCompletionInjector;
-use crate::orchestrator::external::{AdapterDispatchTask, ProviderDispatchTask};
+use crate::orchestrator::adapter::{AdapterDispatchTask, ProviderDispatchTask};
 use crate::orchestrator::pending::{PendingContinuation, PendingKey, PendingOperation};
 use crate::task::execution_stack;
 use galfus_bytecode::instruction::{FuncIdx, TypeIdx};
@@ -190,7 +190,7 @@ impl Orchestrator {
                 return_type,
             } => {
                 let stack = execution_stack(&thread);
-                let Some(bindings) = self.external_bindings.clone() else {
+                let Some(bindings) = self.adapter_bindings.clone() else {
                     self.failure = Some(
                         ExecutionFailure::new(
                             ExecutionFailureKind::MissingAdapter,
@@ -303,13 +303,13 @@ impl Orchestrator {
                     galfus_vm::VmValue::Null,
                 );
             }
-            galfus_vm::VmEffect::ExternalHandleDropped {
+            galfus_vm::VmEffect::AdapterHandleDropped {
                 proxy_module,
                 kind,
                 id,
             } => {
-                if let Some(bindings) = &self.external_bindings {
-                    // `ExternalBindings` removes the ownership entry before
+                if let Some(bindings) = &self.adapter_bindings {
+                    // `AdapterBindings` removes the ownership entry before
                     // notifying the adapter, making repeated graph-release
                     // notifications harmless.
                     bindings
@@ -544,7 +544,7 @@ impl Orchestrator {
                             symbol,
                             args,
                         } => {
-                            let Some(bindings) = self.external_bindings.clone() else {
+                            let Some(bindings) = self.adapter_bindings.clone() else {
                                 self.failure = Some(
                                     ExecutionFailure::new(
                                         ExecutionFailureKind::MissingAdapter,
@@ -1397,7 +1397,7 @@ impl Orchestrator {
             .module;
         let function_name = target.functions[func_idx.raw() as usize].name.clone();
         let adapter_identity = target.functions[func_idx.raw() as usize]
-            .proxy_metadata
+            .adapter_proxy_metadata
             .as_ref()
             .map(|meta| (meta.proxy_module.clone(), meta.symbol.clone()));
 

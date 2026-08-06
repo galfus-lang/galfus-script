@@ -6,7 +6,7 @@ pub enum CheckDiagnosticCode {
     MissingExport,
     UnsupportedImportTarget,
     BodylessFunction,
-    InvalidExternalProxyDeclaration,
+    InvalidAdapterProxyDeclaration,
 }
 
 impl DiagnosticCodeKind for CheckDiagnosticCode {
@@ -16,7 +16,7 @@ impl DiagnosticCodeKind for CheckDiagnosticCode {
             Self::MissingExport => "C0002",
             Self::UnsupportedImportTarget => "C0003",
             Self::BodylessFunction => "C0004",
-            Self::InvalidExternalProxyDeclaration => "C0005",
+            Self::InvalidAdapterProxyDeclaration => "C0005",
         }
     }
 
@@ -26,7 +26,7 @@ impl DiagnosticCodeKind for CheckDiagnosticCode {
             Self::MissingExport => "missing export",
             Self::UnsupportedImportTarget => "unsupported import target",
             Self::BodylessFunction => "body-less function outside external proxy",
-            Self::InvalidExternalProxyDeclaration => "invalid external proxy declaration",
+            Self::InvalidAdapterProxyDeclaration => "invalid external proxy declaration",
         }
     }
 }

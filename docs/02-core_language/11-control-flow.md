@@ -1,4 +1,4 @@
-Previous: [Functions and Calls](./10-functions-and-calls.md) | Index: [Galfus Core System](./00-index.md) | Next: [Iteration and Ranges](./12-iteration-and-ranges.md)
+Previous: [Functions and Calls](./10-functions-and-calls.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Iteration and Ranges](./12-iteration-and-ranges.md)
 
 ---
 
@@ -194,4 +194,4 @@ The checker MUST:
 
 ---
 
-Previous: [Functions and Calls](./10-functions-and-calls.md) | Index: [Galfus Core System](./00-index.md) | Next: [Iteration and Ranges](./12-iteration-and-ranges.md)
+Previous: [Functions and Calls](./10-functions-and-calls.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Iteration and Ranges](./12-iteration-and-ranges.md)

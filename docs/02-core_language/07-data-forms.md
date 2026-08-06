@@ -1,4 +1,4 @@
-Previous: [Constraints as Traits](./06-constraints-as-traits.md) | Index: [Galfus Core System](./00-index.md) | Next: [Expressions and Operators](./08-expressions-and-operators.md)
+Previous: [Constraints as Traits](./06-constraints-as-traits.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Expressions and Operators](./08-expressions-and-operators.md)
 
 ---
 
@@ -368,4 +368,4 @@ The checker MUST:
 
 ---
 
-Previous: [Constraints as Traits](./06-constraints-as-traits.md) | Index: [Galfus Core System](./00-index.md) | Next: [Expressions and Operators](./08-expressions-and-operators.md)
+Previous: [Constraints as Traits](./06-constraints-as-traits.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Expressions and Operators](./08-expressions-and-operators.md)

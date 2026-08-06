@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod tests;
 
+pub(crate) mod adapter;
 pub(crate) mod cancellation;
 pub(crate) mod effects;
-pub(crate) mod external;
 pub(crate) mod future_registry;
 pub(crate) mod pending;
 pub(crate) mod startup;
@@ -31,33 +31,33 @@ use pending::{
 };
 pub(crate) use startup::StartupPlan;
 
-fn collect_external_handles(value: &BoundaryValue, handles: &mut Vec<(String, u64)>) {
+fn collect_adapter_handles(value: &BoundaryValue, handles: &mut Vec<(String, u64)>) {
     match value {
         BoundaryValue::Array { values, .. } | BoundaryValue::Tuple(values) => {
             for value in values {
-                collect_external_handles(value, handles);
+                collect_adapter_handles(value, handles);
             }
         }
         BoundaryValue::Choice {
             payload: Some(payload),
             ..
-        } => collect_external_handles(payload, handles),
+        } => collect_adapter_handles(payload, handles),
         BoundaryValue::Handle { kind, id, .. } => handles.push((kind.clone(), *id)),
         _ => {}
     }
 }
 
-fn stamp_external_handles(value: &mut BoundaryValue, proxy_module: Option<&str>) {
+fn stamp_adapter_handles(value: &mut BoundaryValue, proxy_module: Option<&str>) {
     match value {
         BoundaryValue::Array { values, .. } | BoundaryValue::Tuple(values) => {
             for value in values {
-                stamp_external_handles(value, proxy_module);
+                stamp_adapter_handles(value, proxy_module);
             }
         }
         BoundaryValue::Choice {
             payload: Some(payload),
             ..
-        } => stamp_external_handles(payload, proxy_module),
+        } => stamp_adapter_handles(payload, proxy_module),
         BoundaryValue::Handle {
             proxy_module: pm, ..
         } => {
@@ -107,7 +107,7 @@ pub(crate) struct Orchestrator {
     pending_continuations: HashMap<PendingKey, PendingContinuation>,
     startup_plans: HashMap<crate::registry::ThreadId, StartupPlan>,
     next_request_id: u64,
-    external_bindings: Option<Arc<std::sync::Mutex<galfus_contract::ExternalBindings>>>,
+    adapter_bindings: Option<Arc<std::sync::Mutex<galfus_contract::AdapterBindings>>>,
     initialization_complete: Arc<AtomicBool>,
     shutting_down: bool,
     late_completions: VecDeque<LateCompletion>,
@@ -159,7 +159,7 @@ impl Orchestrator {
             pending_continuations: HashMap::new(),
             startup_plans: HashMap::new(),
             next_request_id: 1,
-            external_bindings: None,
+            adapter_bindings: None,
             initialization_complete: Arc::new(AtomicBool::new(true)),
             shutting_down: false,
             late_completions: VecDeque::new(),
@@ -202,12 +202,12 @@ impl Orchestrator {
         self.vm = Some(vm);
     }
 
-    pub(crate) fn set_external_bindings(
+    pub(crate) fn set_adapter_bindings(
         &mut self,
-        bindings: Option<Arc<std::sync::Mutex<galfus_contract::ExternalBindings>>>,
+        bindings: Option<Arc<std::sync::Mutex<galfus_contract::AdapterBindings>>>,
     ) {
         self.assert_main_thread();
-        self.external_bindings = bindings;
+        self.adapter_bindings = bindings;
     }
 
     pub(crate) fn kernel_mut(&mut self, token: MainThreadToken) -> &mut VirtualKernel {
@@ -469,7 +469,7 @@ impl Orchestrator {
             .adapter_proxy_module(thread_id, future_id);
 
         if let Ok(value) = &mut result {
-            stamp_external_handles(value, adapter_proxy_module.as_deref());
+            stamp_adapter_handles(value, adapter_proxy_module.as_deref());
         }
 
         if let (Some((payload_module_id, payload_type)), Ok(value)) = (
@@ -521,7 +521,7 @@ impl Orchestrator {
             }
         };
         if let (Some(proxy_module), Ok(value)) = (adapter_proxy_module, &result)
-            && !self.register_external_handles(&proxy_module, value)
+            && !self.register_adapter_handles(&proxy_module, value)
         {
             self.failure = Some(
                 ExecutionFailure::new(
@@ -545,13 +545,13 @@ impl Orchestrator {
         }
     }
 
-    fn register_external_handles(&mut self, proxy_module: &str, value: &BoundaryValue) -> bool {
+    fn register_adapter_handles(&mut self, proxy_module: &str, value: &BoundaryValue) -> bool {
         let mut handles = Vec::new();
-        collect_external_handles(value, &mut handles);
+        collect_adapter_handles(value, &mut handles);
         if handles.is_empty() {
             return true;
         }
-        let Some(bindings) = &self.external_bindings else {
+        let Some(bindings) = &self.adapter_bindings else {
             return false;
         };
         let mut bindings = bindings.lock().unwrap();
@@ -882,11 +882,11 @@ impl Orchestrator {
     }
 
     fn flush_thread_handle_drops(&mut self, thread: &mut galfus_vm::thread::VmThreadState) {
-        let handles = std::mem::take(&mut thread.pending_external_handle_drops);
+        let handles = std::mem::take(&mut thread.pending_adapter_handle_drops);
         if handles.is_empty() {
             return;
         }
-        if let Some(bindings) = &self.external_bindings {
+        if let Some(bindings) = &self.adapter_bindings {
             let mut bindings = bindings.lock().unwrap();
             for (proxy_module, kind, id) in handles {
                 bindings.release_handle(&proxy_module, &kind, id);
@@ -895,11 +895,11 @@ impl Orchestrator {
     }
 
     fn teardown_thread_handles(&mut self, thread: &mut galfus_vm::thread::VmThreadState) {
-        let handles = thread.extract_all_external_handles();
+        let handles = thread.extract_all_adapter_handles();
         if handles.is_empty() {
             return;
         }
-        if let Some(bindings) = &self.external_bindings {
+        if let Some(bindings) = &self.adapter_bindings {
             let mut bindings = bindings.lock().unwrap();
             for (proxy_module, kind, id) in handles {
                 bindings.release_handle(&proxy_module, &kind, id);

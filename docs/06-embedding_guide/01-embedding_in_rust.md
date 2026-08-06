@@ -82,7 +82,8 @@ For simple executions that do not require explicit handle management during exec
 workspace.run(&[], None, driver)?;
 ```
 
-`CooperativeDriver` is a minimal native driver suitable for simple host integrations. For applications with an existing event loop, implement `KernelDriver` to schedule main-thread vs worker-thread kernel tasks.
+> [!NOTE]
+> `CooperativeDriver` is a minimal, **optional** native driver provided for quick setups and simple integrations. It is just one way to embed Galfus. For applications with an existing event loop or custom threading needs, you should create your own executor by implementing `KernelDriver` to schedule main-thread vs worker-thread kernel tasks yourself.
 
 ## Add host capabilities
 

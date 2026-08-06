@@ -18,7 +18,7 @@ pub(crate) struct ProviderDispatchTask {
 }
 
 pub(crate) struct AdapterDispatchTask {
-    pub(crate) bindings: Arc<std::sync::Mutex<galfus_contract::ExternalBindings>>,
+    pub(crate) bindings: Arc<std::sync::Mutex<galfus_contract::AdapterBindings>>,
     pub(crate) thread_id: usize,
     pub(crate) request_id: u64,
     pub(crate) module: String,

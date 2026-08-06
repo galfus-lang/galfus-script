@@ -20,7 +20,7 @@ The adapter model is based on typed module surfaces, `.gfp` proxy descriptors, o
 2. [Core Principle](#2-core-principle)
 3. [Adapter Surface](#3-adapter-surface)
 4. [Galfus Proxy Files](#4-galfus-proxy-files)
-5. [External Payloads](#5-external-payloads)
+5. [Adapter Payloads](#5-external-payloads)
 6. [Opaque Resource Types](#6-opaque-resource-types)
 7. [Non-Constructible Opaque Structs](#7-non-constructible-opaque-structs)
 8. [No Generic Opaque Pointer](#8-no-generic-opaque-pointer)
@@ -175,7 +175,7 @@ Normal `.gfs` source does not define adapter-owned opaque resources. It imports 
 
 ---
 
-## 5. External Payloads
+## 5. Adapter Payloads
 
 External payloads may include:
 
