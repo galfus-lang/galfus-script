@@ -350,6 +350,7 @@ fn validate_basic_block(
                 func: _,
                 args,
                 destination,
+                is_external: _,
             } => {
                 for arg in args {
                     validate_operand(arg, func, initialized, errors);

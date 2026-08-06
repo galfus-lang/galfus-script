@@ -121,13 +121,19 @@ impl FunctionParameterType {
 pub struct FunctionType {
     parameters: Vec<FunctionParameterType>,
     return_type: TypeId,
+    is_external: bool,
 }
 
 impl FunctionType {
-    pub fn new(parameters: Vec<FunctionParameterType>, return_type: TypeId) -> Self {
+    pub fn new(
+        parameters: Vec<FunctionParameterType>,
+        return_type: TypeId,
+        is_external: bool,
+    ) -> Self {
         Self {
             parameters,
             return_type,
+            is_external,
         }
     }
 
@@ -137,6 +143,10 @@ impl FunctionType {
 
     pub fn return_type(&self) -> TypeId {
         self.return_type
+    }
+
+    pub fn is_external(&self) -> bool {
+        self.is_external
     }
 }
 
@@ -285,10 +295,12 @@ impl TypeTable {
         &mut self,
         parameters: Vec<FunctionParameterType>,
         return_type: TypeId,
+        is_external: bool,
     ) -> TypeId {
         self.intern(TypeKind::Function(FunctionType::new(
             parameters,
             return_type,
+            is_external,
         )))
     }
 

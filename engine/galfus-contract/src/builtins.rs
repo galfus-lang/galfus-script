@@ -34,7 +34,6 @@ pub static BUILTIN_MODULES: &[(&str, &str)] = &[
     ("text", TEXT_SOURCE),
     ("format", FORMAT_SOURCE),
     ("format/ansi", FORMAT_ANSI_SOURCE),
-    ("std/io", STD_IO_SOURCE),
 ];
 
 pub fn is_internal_module(source: &str) -> bool {

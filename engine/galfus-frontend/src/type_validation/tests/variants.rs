@@ -85,8 +85,8 @@ enum(bool) Mode {
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph, &string_table);
-    let result = check_definition_types(&source, &graph, result, &string_table);
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -116,8 +116,8 @@ enum(u8) Mode {
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph, &string_table);
-    let result = check_definition_types(&source, &graph, result, &string_table);
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -248,8 +248,8 @@ var asset: Asset = Asset::Texture
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph, &string_table);
-    let result = check_definition_types(&source, &graph, result, &string_table);
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -278,8 +278,8 @@ var asset: Asset = Asset::None(1)
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph, &string_table);
-    let result = check_definition_types(&source, &graph, result, &string_table);
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -308,8 +308,8 @@ var asset: Asset = Asset::Image("grass.png", 64)
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph, &string_table);
-    let result = check_definition_types(&source, &graph, result, &string_table);
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -338,8 +338,8 @@ var asset: Asset = Asset::Image("grass.png", true, 64)
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph, &string_table);
-    let result = check_definition_types(&source, &graph, result, &string_table);
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {

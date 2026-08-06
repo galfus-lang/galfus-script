@@ -167,6 +167,7 @@ impl CompileState {
 #[derive(Debug)]
 pub enum WorkspaceError {
     InvalidPath,
+    ReservedProviderModule(String),
     MissingConfiguration,
     Collision {
         attempted: String,

@@ -36,7 +36,7 @@ fn module_surface_records_exported_type_definitions() {
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
-    let type_result = check_declaration_types(&source, graph, &string_table);
+    let type_result = check_declaration_types(&source, graph, &string_table, false);
     assert!(!type_result.has_errors());
 
     let surface = build_module_surface(graph, &type_result, &string_table);
@@ -70,7 +70,7 @@ fn module_surface_imports_exported_type_as_local_binding() {
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
-    let type_result = check_declaration_types(&source, graph, &string_table);
+    let type_result = check_declaration_types(&source, graph, &string_table, false);
     assert!(!type_result.has_errors());
 
     let surface = build_module_surface(graph, &type_result, &string_table);
@@ -102,7 +102,7 @@ fn module_surface_imports_exported_type_as_namespace_path() {
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
-    let type_result = check_declaration_types(&source, graph, &string_table);
+    let type_result = check_declaration_types(&source, graph, &string_table, false);
     assert!(!type_result.has_errors());
 
     let surface = build_module_surface(graph, &type_result, &string_table);
@@ -139,7 +139,7 @@ fn module_surface_records_exported_function_signature() {
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.graph();
-    let type_result = check_declaration_types(&source, graph, &string_table);
+    let type_result = check_declaration_types(&source, graph, &string_table, false);
     assert!(!type_result.has_errors());
 
     let surface = build_module_surface(graph, &type_result, &string_table);

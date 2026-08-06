@@ -3,6 +3,8 @@
 //! See the Runtime Ownership Matrix in the Architecture Reference (`docs/Galfus_Architecture_Reference.md`)
 //! for authoritative details on the lifecycle and ownership of boundary values and external handles.
 
+pub mod catalog;
+pub use catalog::*;
 pub mod builtins;
 #[cfg(test)]
 mod tests;
@@ -358,27 +360,32 @@ impl Providers {
     }
 }
 
+pub type AdapterConfig = std::collections::BTreeMap<String, AdapterConfigValue>;
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum AdapterConfigValue {
+    String(String),
+    Integer(i64),
+    Float(f64),
+    Boolean(bool),
+    Array(Vec<AdapterConfigValue>),
+    Table(AdapterConfig),
+}
+
 /// Description of an external proxy module compiled from a .gfp file.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ExternalModuleDescriptor {
     pub adapter: String,
-    pub targets: HashMap<String, String>,
-    pub metadata: HashMap<String, String>,
+    pub config: AdapterConfig,
     pub exports: Vec<ExternalFunctionSignature>,
 }
 
 /// A declarative external-module dependency produced during compilation.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ExternalModuleRequirement {
     pub proxy_module: String,
     pub descriptor: ExternalModuleDescriptor,
-}
-
-/// Package-ready external-module metadata. `artifact` is an opaque loader-defined reference.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ExternalModuleImage {
-    pub requirement: ExternalModuleRequirement,
-    pub artifact: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -394,43 +401,51 @@ pub enum AdapterValidationError {
     #[error("unsupported adapter: {0}")]
     UnsupportedAdapter(String),
 
-    #[error("missing target for platform '{platform}': {reason}")]
-    MissingPlatformTarget { platform: String, reason: String },
-
     #[error("invalid schema: {0}")]
     InvalidSchema(String),
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum AdapterLoadError {
-    #[error("failed to load dynamic library at '{path}': {message}")]
-    LibraryLoadFailed { path: String, message: String },
-
-    #[error("missing symbol '{symbol}' in library '{path}'")]
-    SymbolNotFound { symbol: String, path: String },
-
-    #[error("adapter load error: {0}")]
-    Other(String),
+#[error("adapter load error [{code}]: {message}")]
+pub struct AdapterLoadError {
+    pub code: String,
+    pub message: String,
 }
 
 /// Development-time validation for an external proxy descriptor.
 pub trait ExternalAdapterSchema: Send + Sync {
     fn name(&self) -> &str;
+    /// Complete declarative adapter schema used for catalog identity.
+    ///
+    /// This must change whenever adapter functions, parameter or return types,
+    /// modifiers, or other validation-relevant semantics change.
+    fn catalog_schema(&self) -> String;
     fn validate_schema(
         &self,
         descriptor: &ExternalModuleDescriptor,
     ) -> Result<(), AdapterValidationError>;
 }
 
-/// Optional package-time binder. Runtime receives only [`ExternalBindings`].
-pub trait ExternalModuleBinder: Send + Sync {
-    fn bind_module(
+pub struct ExternalLoadContext {
+    pub properties: std::collections::BTreeMap<String, String>,
+}
+
+/// Optional package-time loader. Runtime receives only [`ExternalBindings`].
+pub trait ExternalModuleLoader: Send + Sync {
+    fn load_module(
         &self,
-        image: &ExternalModuleImage,
+        requirement: &ExternalModuleRequirement,
+        context: &ExternalLoadContext,
     ) -> Result<Box<dyn BoundExternalModule>, AdapterLoadError>;
 }
 
 /// Compatibility composition for hosts that provide both development contracts.
-pub trait ModuleAdapter: ExternalAdapterSchema + ExternalModuleBinder {}
+#[deprecated(
+    note = "Adapter schema and concrete loaders are now strictly separated. Use
+`CapabilityCatalog` for schema validation during `Workspace::compile` and provide
+`ExternalModuleLoader` during bootstrap/preflight."
+)]
+pub trait ModuleAdapter: ExternalAdapterSchema + ExternalModuleLoader {}
 
-impl<T> ModuleAdapter for T where T: ExternalAdapterSchema + ExternalModuleBinder {}
+#[allow(deprecated)]
+impl<T> ModuleAdapter for T where T: ExternalAdapterSchema + ExternalModuleLoader {}

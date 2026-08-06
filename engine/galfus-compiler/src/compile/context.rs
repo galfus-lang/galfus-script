@@ -200,7 +200,11 @@ impl<'a> MyWorkspaceContext<'a> {
                         }
                     })
                     .collect::<Vec<_>>();
-                TypeKind::Function(FunctionType::new(target_parameters, target_return_type))
+                TypeKind::Function(FunctionType::new(
+                    target_parameters,
+                    target_return_type,
+                    func.is_external(),
+                ))
             }
             TypeKind::GenericInstance { base, arguments } => {
                 let target_base = self.translate_type_helper(

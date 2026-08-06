@@ -16,7 +16,7 @@ fn test_mir_builder_basic() {
     assert!(!graph.has_errors(), "Parse or resolve errors occurred");
 
     // Typecheck
-    let type_result = check_declaration_types(&source, &graph, &string_table);
+    let type_result = check_declaration_types(&source, &graph, &string_table, false);
     assert!(!type_result.has_errors(), "Typecheck errors occurred");
 
     // Build MIR
@@ -81,7 +81,7 @@ fn test_mir_builder_lowers_named_function_as_a_function_constant() {
     let mut string_table = galfus_frontend::StringTable::new();
     let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     let graph = resolve_result.into_graph();
-    let type_result = check_declaration_types(&source, &graph, &string_table);
+    let type_result = check_declaration_types(&source, &graph, &string_table, false);
     assert!(
         !type_result.has_errors(),
         "Typecheck errors occurred: {:?}",
@@ -125,10 +125,9 @@ fn test_mir_builder_lowers_named_expression_function_body() {
     assert!(!graph.has_errors(), "Parse or resolve errors occurred");
 
     let type_result = check_definition_types(
-        &source,
-        &graph,
-        check_declaration_types(&source, &graph, &string_table),
+        &source, &graph, check_declaration_types(&source, &graph, &string_table, false),
         &string_table,
+        false,
     );
     assert!(
         !type_result.has_errors(),
@@ -180,10 +179,9 @@ fn test_mir_builder_lowers_expression_and_block_function_expressions() {
     assert!(!graph.has_errors(), "Parse or resolve errors occurred");
 
     let type_result = check_definition_types(
-        &source,
-        &graph,
-        check_declaration_types(&source, &graph, &string_table),
+        &source, &graph, check_declaration_types(&source, &graph, &string_table, false),
         &string_table,
+        false,
     );
     assert!(
         !type_result.has_errors(),
@@ -240,7 +238,7 @@ fn test_mir_builder_lowers_copy_expression() {
 
     assert!(!graph.has_errors(), "Parse or resolve errors occurred");
 
-    let type_result = check_declaration_types(&source, &graph, &string_table);
+    let type_result = check_declaration_types(&source, &graph, &string_table, false);
     assert!(
         !type_result.has_errors(),
         "Typecheck errors occurred: {:?}",
@@ -277,7 +275,7 @@ fn test_mir_builder_applies_default_parameter_when_argument_is_null() {
     let mut string_table = galfus_frontend::StringTable::new();
     let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
     let graph = resolve_result.into_graph();
-    let type_result = check_declaration_types(&source, &graph, &string_table);
+    let type_result = check_declaration_types(&source, &graph, &string_table, false);
 
     assert!(!type_result.has_errors(), "Typecheck errors occurred");
 
@@ -327,7 +325,7 @@ fn test_mir_builder_lowers_concrete_typeof_branch() {
 
     assert!(!graph.has_errors(), "Parse or resolve errors occurred");
 
-    let type_result = check_declaration_types(&source, &graph, &string_table);
+    let type_result = check_declaration_types(&source, &graph, &string_table, false);
     assert!(!type_result.has_errors(), "Typecheck errors occurred");
 
     let builder = MirBuilder::new(&graph, &type_result, code, &string_table);
@@ -362,7 +360,7 @@ fn test_mir_builder_specializes_generic_typeof_call() {
 
     assert!(!graph.has_errors(), "Parse or resolve errors occurred");
 
-    let type_result = check_declaration_types(&source, &graph, &string_table);
+    let type_result = check_declaration_types(&source, &graph, &string_table, false);
     assert!(
         !type_result.has_errors(),
         "Typecheck errors occurred: {:?}",
@@ -413,7 +411,7 @@ fn test_mir_builder_specializes_typeof_generic_parameter() {
     let graph = resolve_result.into_graph();
     assert!(!graph.has_errors(), "Parse or resolve errors occurred");
 
-    let type_result = check_declaration_types(&source, &graph, &string_table);
+    let type_result = check_declaration_types(&source, &graph, &string_table, false);
     assert!(
         !type_result.has_errors(),
         "Typecheck errors occurred: {:?}",
@@ -492,7 +490,7 @@ fn test_mir_builder_phase1() {
     let graph = resolve_result.into_graph();
     assert!(!graph.has_errors(), "Parse or resolve errors occurred");
 
-    let type_result = check_declaration_types(&source, &graph, &string_table);
+    let type_result = check_declaration_types(&source, &graph, &string_table, false);
     assert!(!type_result.has_errors(), "Typecheck errors occurred");
 
     let builder = MirBuilder::new(&graph, &type_result, code, &string_table);
@@ -575,7 +573,7 @@ fn test_mir_builder_phase2() {
         graph.diagnostics()
     );
 
-    let type_result = check_declaration_types(&source, &graph, &string_table);
+    let type_result = check_declaration_types(&source, &graph, &string_table, false);
     assert!(
         !type_result.has_errors(),
         "Typecheck errors occurred: {:?}",

@@ -58,6 +58,7 @@ struct DeclarationTypeChecker<'a> {
 
     range_desugars: HashMap<NodeId, RangeDesugarTarget>,
     string_table: &'a crate::StringTable,
+    is_provider_module: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +81,7 @@ impl<'a> DeclarationTypeChecker<'a> {
         graph: &'a ModuleAst,
         layer: TypeLayer,
         string_table: &'a crate::StringTable,
+        is_provider_module: bool,
     ) -> Self {
         Self {
             source,
@@ -98,6 +100,7 @@ impl<'a> DeclarationTypeChecker<'a> {
 
             range_desugars: HashMap::new(),
             string_table,
+            is_provider_module,
         }
     }
 
@@ -106,6 +109,7 @@ impl<'a> DeclarationTypeChecker<'a> {
         graph: &'a ModuleAst,
         previous_result: TypeCheckResult,
         string_table: &'a crate::StringTable,
+        is_provider_module: bool,
     ) -> Self {
         Self {
             source,
@@ -124,6 +128,7 @@ impl<'a> DeclarationTypeChecker<'a> {
 
             range_desugars: previous_result.range_desugars,
             string_table,
+            is_provider_module,
         }
     }
 
@@ -424,7 +429,7 @@ impl<'a> DeclarationTypeChecker<'a> {
 
                 self.layer
                     .table_mut()
-                    .intern_function(parameters, return_type)
+                    .intern_function(parameters, return_type, false)
             }
 
             ImportedType::LocalPath { name } => self.layer.table_mut().intern_path(
@@ -477,11 +482,17 @@ pub fn check_declaration_types(
     source: &SourceFile,
     graph: &ModuleAst,
     string_table: &crate::StringTable,
+    is_provider_module: bool,
 ) -> TypeCheckResult {
     let lowering = bind_types(source, graph, string_table);
 
-    let mut checker =
-        DeclarationTypeChecker::new(source, graph, lowering.into_layer(), string_table);
+    let mut checker = DeclarationTypeChecker::new(
+        source,
+        graph,
+        lowering.into_layer(),
+        string_table,
+        is_provider_module,
+    );
     checker.check_declarations();
     checker.into_result()
 }
@@ -491,8 +502,15 @@ pub fn check_definition_types(
     graph: &ModuleAst,
     previous_result: TypeCheckResult,
     string_table: &crate::StringTable,
+    is_provider_module: bool,
 ) -> TypeCheckResult {
-    let mut checker = DeclarationTypeChecker::resume(source, graph, previous_result, string_table);
+    let mut checker = DeclarationTypeChecker::resume(
+        source,
+        graph,
+        previous_result,
+        string_table,
+        is_provider_module,
+    );
     checker.check_definitions();
     checker.into_result()
 }
@@ -503,8 +521,15 @@ pub fn check_definition_types_with_surfaces(
     previous_result: TypeCheckResult,
     imported_types: &ImportedSurfaceTypes,
     string_table: &crate::StringTable,
+    is_provider_module: bool,
 ) -> TypeCheckResult {
-    let mut checker = DeclarationTypeChecker::resume(source, graph, previous_result, string_table);
+    let mut checker = DeclarationTypeChecker::resume(
+        source,
+        graph,
+        previous_result,
+        string_table,
+        is_provider_module,
+    );
     checker.bind_imported_symbol_types(imported_types.symbol_types());
     checker.bind_imported_path_types(imported_types.path_types());
     checker.bind_imported_member_types(imported_types.member_types());

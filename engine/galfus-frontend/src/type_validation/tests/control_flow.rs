@@ -40,8 +40,8 @@ fn main(): null {
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph, &string_table);
-    let result = check_definition_types(&source, &graph, result, &string_table);
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -105,8 +105,8 @@ fn main(): null {
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph, &string_table);
-    let result = check_definition_types(&source, &graph, result, &string_table);
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -136,8 +136,8 @@ fn main(): null {
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph, &string_table);
-    let result = check_definition_types(&source, &graph, result, &string_table);
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -204,8 +204,8 @@ fn main(): null {
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph, &string_table);
-    let result = check_definition_types(&source, &graph, result, &string_table);
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
         diagnostic.code().as_str() == TypeDiagnosticCode::DuplicateControlTarget.as_code()
@@ -235,8 +235,8 @@ fn main(): null {
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph, &string_table);
-    let result = check_definition_types(&source, &graph, result, &string_table);
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
         diagnostic.code().as_str() == TypeDiagnosticCode::UnresolvedControlTarget.as_code()
@@ -266,8 +266,8 @@ fn main(): null {
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph, &string_table);
-    let result = check_definition_types(&source, &graph, result, &string_table);
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
         diagnostic.code().as_str() == TypeDiagnosticCode::InvalidKeywordMetadata.as_code()
@@ -299,8 +299,8 @@ fn(stamp) stamped_fn(): null {
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph, &string_table);
-    let result = check_definition_types(&source, &graph, result, &string_table);
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
         diagnostic.code().as_str() == TypeDiagnosticCode::InvalidDecoratorUsage.as_code()

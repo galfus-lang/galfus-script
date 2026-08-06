@@ -10,6 +10,7 @@ pub enum ModuleOrigin {
     User,
     Builtin,
     ExternalProxy,
+    ProviderCatalog,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -167,6 +168,18 @@ impl SourceStore {
 
     pub fn remove_module(&mut self, path: &ModulePath) -> Option<SourceEntry> {
         self.entries_by_path.remove(path)
+    }
+
+    pub fn remove_by_origin(&mut self, origin: ModuleOrigin) -> Vec<SourceEntry> {
+        let paths = self
+            .entries_by_path
+            .iter()
+            .filter_map(|(path, entry)| (entry.origin == origin).then_some(path.clone()))
+            .collect::<Vec<_>>();
+        paths
+            .into_iter()
+            .filter_map(|path| self.entries_by_path.remove(&path))
+            .collect()
     }
 
     pub fn get(&self, path: &ModulePath) -> Option<&SourceEntry> {

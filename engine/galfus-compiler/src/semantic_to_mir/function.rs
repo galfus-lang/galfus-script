@@ -731,6 +731,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                             func: iter_func,
                             args: vec![iterable_operand],
                             destination: iter_obj_local,
+                            is_external: false,
                         },
                         None,
                     ));

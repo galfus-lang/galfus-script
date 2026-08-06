@@ -45,8 +45,8 @@ fn main(): i32 {
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph, &string_table);
-    let result = check_definition_types(&source, &graph, result, &string_table);
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -73,8 +73,8 @@ fn main(): i32 {
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph, &string_table);
-    let result = check_definition_types(&source, &graph, result, &string_table);
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -165,8 +165,8 @@ fn one(): i32 {
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph, &string_table);
-    let result = check_definition_types(&source, &graph, result, &string_table);
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -214,8 +214,8 @@ fn one(flag: bool): i32 {
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph, &string_table);
-    let result = check_definition_types(&source, &graph, result, &string_table);
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
 
     assert!(result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {
@@ -242,8 +242,8 @@ fn main(): null {
     assert!(!resolve_result.has_errors());
 
     let graph = resolve_result.into_graph();
-    let result = check_declaration_types(&source, &graph, &string_table);
-    let result = check_definition_types(&source, &graph, result, &string_table);
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
 
     assert!(!result.has_errors());
     assert!(result.diagnostics().iter().any(|diagnostic| {

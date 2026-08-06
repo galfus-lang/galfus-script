@@ -314,7 +314,7 @@ impl<'a> DeclarationTypeChecker<'a> {
 
                 self.layer
                     .table_mut()
-                    .intern_function(parameters, return_type)
+                    .intern_function(parameters, return_type, false)
             }
 
             Some(TypeKind::Error) => ty,

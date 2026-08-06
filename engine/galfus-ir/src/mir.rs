@@ -92,6 +92,7 @@ pub enum Instruction {
         func: FunctionId,
         args: Vec<Operand>,
         destination: LocalId,
+        is_external: bool,
     },
     IndirectCall {
         func: Operand,
@@ -188,6 +189,7 @@ pub enum RValue {
     CreateFuture {
         func: FunctionId,
         args: Vec<Operand>,
+        is_external: bool,
     },
     CreateIndirectFuture {
         func: Operand,

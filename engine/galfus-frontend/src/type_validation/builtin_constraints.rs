@@ -147,20 +147,20 @@ impl<'a> DeclarationTypeChecker<'a> {
                 let item_type = parameter_type(1)?;
                 let null_type = self.layer.table().primitive(PrimitiveType::Null);
                 let return_type = self.layer.table_mut().intern_union([item_type, null_type]);
-                Some(
-                    self.layer
-                        .table_mut()
-                        .intern_function(vec![FunctionParameterType::new(self_type)], return_type),
-                )
+                Some(self.layer.table_mut().intern_function(
+                    vec![FunctionParameterType::new(self_type)],
+                    return_type,
+                    false,
+                ))
             }
             BuiltinConstraintFunctionSignature::IterableIter => {
                 let self_type = parameter_type(0)?;
                 let iter_type = parameter_type(2)?;
-                Some(
-                    self.layer
-                        .table_mut()
-                        .intern_function(vec![FunctionParameterType::new(self_type)], iter_type),
-                )
+                Some(self.layer.table_mut().intern_function(
+                    vec![FunctionParameterType::new(self_type)],
+                    iter_type,
+                    false,
+                ))
             }
             BuiltinConstraintFunctionSignature::ComparableCompare => {
                 let pattern_type = parameter_type(0)?;
@@ -172,6 +172,7 @@ impl<'a> DeclarationTypeChecker<'a> {
                         FunctionParameterType::new(value_type),
                     ],
                     bool_type,
+                    false,
                 ))
             }
         }

@@ -56,8 +56,8 @@ fn check_source(text: &str) -> (SourceFile, ModuleAst, TypeCheckResult, crate::S
     );
 
     let graph = resolve_result.into_ast();
-    let result = check_declaration_types(&source, &graph, &string_table);
-    let result = check_definition_types(&source, &graph, result, &string_table);
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
 
     assert!(!result.has_errors(), "{:?}", result.diagnostics());
 
@@ -75,8 +75,8 @@ fn check_source_named(
     let resolve_result = resolve(&source, parse_result.into_ast(), &mut string_table);
 
     let graph = resolve_result.into_ast();
-    let result = check_declaration_types(&source, &graph, &string_table);
-    let result = check_definition_types(&source, &graph, result, &string_table);
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
 
     (source, graph, result, string_table)
 }

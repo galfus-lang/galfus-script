@@ -681,9 +681,7 @@ impl<'a> DeclarationTypeChecker<'a> {
         let path = self.source.name();
         let name = path.strip_suffix(".gfs").unwrap_or(path);
         let is_internal_module = galfus_contract::is_internal_module(name);
-        let is_bridge_module = is_internal_module
-            || galfus_contract::is_builtin_module(name)
-            || path.starts_with("std/");
+        let is_bridge_module = is_internal_module || self.is_provider_module;
 
         self.check_node_bridge_and_internal_rules(root, is_internal_module, is_bridge_module);
     }

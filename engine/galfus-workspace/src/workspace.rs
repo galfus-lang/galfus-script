@@ -33,7 +33,7 @@ pub struct Workspace {
     pub bytecode_state: BytecodeState,
     pub frontend: FrontendSession,
     frontend_snapshot: Option<FrontendSnapshot>,
-    pub adapters: HashMap<String, Arc<dyn galfus_contract::ModuleAdapter>>,
+    pub catalog: Arc<galfus_contract::CapabilityCatalog>,
     pub external_descriptors: HashMap<ModulePath, ExternalModuleDescriptor>,
 }
 
@@ -75,13 +75,25 @@ impl Workspace {
             bytecode_state: BytecodeState::new(),
             frontend: FrontendSession::new(),
             frontend_snapshot: None,
-            adapters: HashMap::new(),
+            catalog: Arc::new(galfus_contract::CapabilityCatalog::default()),
             external_descriptors: HashMap::new(),
         }
     }
 
-    pub fn register_adapter(&mut self, adapter: Arc<dyn galfus_contract::ModuleAdapter>) {
-        self.adapters.insert(adapter.name().to_string(), adapter);
+    pub fn set_catalog(&mut self, catalog: Arc<galfus_contract::CapabilityCatalog>) {
+        if self.catalog.fingerprint() != catalog.fingerprint() {
+            self.source_state.revision.next();
+            let removed = self
+                .source_state
+                .store
+                .remove_by_origin(ModuleOrigin::ProviderCatalog);
+            for entry in removed {
+                self.source_state.dirty_sources.remove(&entry.path);
+                self.source_state.removed_modules.push(entry.module_id);
+            }
+            self.catalog = catalog;
+            self.mark_dirty();
+        }
     }
 
     pub fn load_config(&mut self, config_toml: &[u8]) -> Result<LoadResult, WorkspaceError> {
@@ -106,6 +118,14 @@ impl Workspace {
         module_bytes: &[u8],
     ) -> Result<LoadResult, WorkspaceError> {
         let module_path = ModulePath::new(path).ok_or(WorkspaceError::InvalidPath)?;
+        if self.catalog.is_provider_module(
+            module_path
+                .as_str()
+                .strip_suffix(".gfs")
+                .unwrap_or(module_path.as_str()),
+        ) {
+            return Err(WorkspaceError::ReservedProviderModule(path.to_string()));
+        }
         if !path.ends_with(".gfp")
             && self
                 .source_state
@@ -130,8 +150,7 @@ impl Workspace {
                 ModuleOrigin::ExternalProxy,
                 Some(ExternalModuleDescriptor {
                     adapter: frontmatter.adapter,
-                    targets: frontmatter.targets,
-                    metadata: frontmatter.metadata,
+                    config: frontmatter.config,
                     exports: Vec::new(),
                 }),
             )
@@ -292,6 +311,7 @@ impl Workspace {
                                 ModuleOrigin::User => FrontendModuleKind::Standard,
                                 ModuleOrigin::Builtin => FrontendModuleKind::Builtin,
                                 ModuleOrigin::ExternalProxy => FrontendModuleKind::ExternalProxy,
+                                ModuleOrigin::ProviderCatalog => FrontendModuleKind::Builtin,
                             },
                             SourceFile::new(
                                 entry.source_id,
@@ -315,12 +335,13 @@ impl Workspace {
                         sources: &sources,
                         removed_modules: self.source_state.removed_modules.as_slice(),
                         roots: &roots,
+                        catalog: Arc::clone(&self.catalog),
                     };
                     let mut report = self.frontend.check(update);
                     self.source_state.dirty_sources.clear();
                     self.source_state.removed_modules.clear();
 
-                    match self.load_required_builtins(&report.required_builtin_modules) {
+                    match self.load_required_dependencies(&report.required_dependencies) {
                         Ok(false) => break report,
                         Ok(true) => continue,
                         Err(WorkspaceError::Collision {
@@ -380,17 +401,21 @@ impl Workspace {
         }
     }
 
-    fn load_required_builtins(&mut self, paths: &[ModulePath]) -> Result<bool, WorkspaceError> {
+    fn load_required_dependencies(&mut self, paths: &[ModulePath]) -> Result<bool, WorkspaceError> {
         let mut loaded = false;
         for path in paths {
             if self.source_state.store.get(path).is_some() {
                 continue;
             }
             let builtin_name = path.as_str().strip_suffix(".gfs").unwrap_or(path.as_str());
-            let Some((_, source)) = galfus_contract::BUILTIN_MODULES
+            let (source, origin) = if let Some((_, source)) = galfus_contract::BUILTIN_MODULES
                 .iter()
                 .find(|(name, _)| *name == builtin_name)
-            else {
+            {
+                (*source, ModuleOrigin::Builtin)
+            } else if let Some(source) = self.catalog.provider_source(builtin_name) {
+                (source, ModuleOrigin::ProviderCatalog)
+            } else {
                 continue;
             };
             self.source_state.revision.next();
@@ -399,7 +424,7 @@ impl Workspace {
                 .load_module(
                     path.clone(),
                     Arc::from(source.as_bytes()),
-                    ModuleOrigin::Builtin,
+                    origin,
                     self.source_state.revision,
                 )
                 .map_err(|err| match err {
@@ -423,7 +448,12 @@ impl Workspace {
 
     fn validate_registered_adapter_schemas(&self, diagnostics: &mut DiagnosticBag) {
         for descriptor in self.external_descriptors.values() {
-            let Some(adapter) = self.adapters.get(&descriptor.adapter) else {
+            let Some(adapter) = self.catalog.adapter_schema(&descriptor.adapter) else {
+                diagnostics.push(Diagnostic::error_with_message(
+                    WorkspaceDiagnosticCode::InvalidExternalProxy,
+                    format!("unresolved external adapter '{}'", descriptor.adapter),
+                    Span::empty(WORKSPACE_SOURCE_ID, 0),
+                ));
                 continue;
             };
             if let Err(error) = adapter.validate_schema(descriptor) {
@@ -832,6 +862,45 @@ impl Workspace {
             })
     }
 
+    pub fn start_execution_with_bindings(
+        &mut self,
+        args: &[Vec<u8>],
+        providers: Option<Providers>,
+        bindings: galfus_contract::ExternalBindings,
+        driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
+    ) -> Result<Execution, RunBlocked> {
+        let graph = match &self.bytecode_state.compile_state {
+            CompileState::Ready { graph, .. } => Arc::clone(graph),
+            _ => return Err(RunBlocked::CompileRequired),
+        };
+        let entry_path = self
+            .config
+            .as_ref()
+            .and_then(|config| config.entry.as_ref())
+            .ok_or(RunBlocked::EntryModuleMissing)?;
+        let entry_id = graph
+            .modules()
+            .find(|image| image.path() == entry_path)
+            .map(|image| image.id())
+            .ok_or(RunBlocked::EntryModuleMissing)?;
+        let entry_name = self
+            .config
+            .as_ref()
+            .expect("a successful compile requires configuration")
+            .run_entry
+            .clone();
+        Runtime::new(graph.clone(), providers)
+            .with_external_bindings(bindings)
+            .start(entry_id, entry_name.as_str(), args, driver.clone())
+            .map_err(|error| {
+                if let RuntimeError::VmPanic(panic) = &error {
+                    RunBlocked::RuntimeError(format_panic(&graph, panic))
+                } else {
+                    RunBlocked::RuntimeError(error.to_string())
+                }
+            })
+    }
+
     /// Compatibility helper that drives the returned execution through the supplied driver.
     pub fn run(
         &mut self,
@@ -840,6 +909,19 @@ impl Workspace {
         driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
     ) -> Result<(), RunBlocked> {
         let mut execution = self.start_execution(args, providers, driver)?;
+        let _result = execution.run_to_completion();
+        Ok(())
+    }
+
+    pub fn run_with_bindings(
+        &mut self,
+        args: &[Vec<u8>],
+        providers: Option<Providers>,
+        bindings: galfus_contract::ExternalBindings,
+        driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
+    ) -> Result<(), RunBlocked> {
+        let mut execution =
+            self.start_execution_with_bindings(args, providers, bindings, driver)?;
         let _result = execution.run_to_completion();
         Ok(())
     }

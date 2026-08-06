@@ -243,12 +243,14 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                         func,
                         args,
                         destination,
+                        is_external,
                     } => {
                         let builtin_name = self.ctx.function_names.get(func).map(|s| s.to_string());
                         if let Some(_name) = builtin_name {
-                            let native_async_name = _name.rsplit("::").next().filter(|name| {
-                                name.starts_with("__provider_") || name.starts_with("__internal_")
-                            });
+                            let native_async_name = _name
+                                .rsplit("::")
+                                .next()
+                                .filter(|name| *is_external || name.starts_with("__internal_"));
 
                             if native_async_name.is_some() {
                                 let start_reg = if args.is_empty() {

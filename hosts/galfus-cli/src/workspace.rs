@@ -35,7 +35,7 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
     if !report.is_valid {
         bail!("workspace validation failed: {:?}", report.diagnostics);
     }
-    workspace
+    let compile_report = workspace
         .compile()
         .map_err(|error| anyhow::anyhow!("workspace compilation failed: {error:?}"))?;
     let args = cli_args
@@ -49,10 +49,41 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
     executor.on_exit(Box::new(move |res| {
         *ec.lock().unwrap() = res.unwrap();
     }));
+
+    let preflight = galfus_workspace::ExternalBindingPreflight::new();
+    // Note: CLI doesn't currently register external loaders, but it should run the preflight
+    // to catch any unmet requirements.
+    let mut properties = std::collections::BTreeMap::new();
+    properties.insert("os".to_string(), std::env::consts::OS.to_string());
+    properties.insert("arch".to_string(), std::env::consts::ARCH.to_string());
+    properties.insert("family".to_string(), std::env::consts::FAMILY.to_string());
+    // Construct a fallback target triple since env!("TARGET") isn't available
+    let target_env = if cfg!(target_env = "msvc") {
+        "msvc"
+    } else if cfg!(target_env = "musl") {
+        "musl"
+    } else {
+        "gnu"
+    };
+    let target_triple = format!(
+        "{}-unknown-{}-{}",
+        std::env::consts::ARCH,
+        std::env::consts::OS,
+        target_env
+    );
+    properties.insert("target_triple".to_string(), target_triple);
+
+    let context = galfus_contract::ExternalLoadContext { properties };
+
+    let bindings = preflight
+        .run(&compile_report.external_requirements, &context)
+        .map_err(|error| anyhow::anyhow!("package preflight failed: {error:?}"))?;
+
     workspace
-        .run(
+        .run_with_bindings(
             args.as_slice(),
             Some(Providers::with_host(Box::new(NativeIoProvider))),
+            bindings,
             executor.clone(),
         )
         .map_err(|error| anyhow::anyhow!("workspace execution failed: {error:?}"))?;
@@ -71,7 +102,7 @@ fn load_workspace(root: &Path) -> Result<Workspace> {
         .context("workspace root does not exist")?;
     let config = fs::read(root.join("galfus.toml"))?;
 
-    let mut workspace = Workspace::new();
+    let mut workspace = workspace_with_native_io_catalog();
     if let LoadResult::Diagnostics(diagnostics) = workspace
         .load_config(config.as_slice())
         .map_err(|error| anyhow::anyhow!("workspace configuration error: {error:?}"))?
@@ -95,7 +126,7 @@ fn load_source_file(file: &Path) -> Result<Workspace> {
         .context("source file name is not valid UTF-8")?;
     let source = fs::read(file.as_path())?;
 
-    let mut workspace = Workspace::new();
+    let mut workspace = workspace_with_native_io_catalog();
     let config =
         format!("[module]\nname = \"single-file\"\ntarget = \"app\"\nentry = \"{module_path}\"\n");
     if let LoadResult::Diagnostics(diagnostics) = workspace
@@ -109,6 +140,20 @@ fn load_source_file(file: &Path) -> Result<Workspace> {
         .load_module(module_path, source.as_slice())
         .map_err(|error| anyhow::anyhow!("workspace source error: {error:?}"))?;
     Ok(workspace)
+}
+
+fn workspace_with_native_io_catalog() -> Workspace {
+    let mut workspace = Workspace::new();
+    let catalog = galfus_contract::CapabilityCatalog::new(
+        vec![galfus_contract::BridgeModule::new(
+            "std/io",
+            galfus_contract::STD_IO_SOURCE,
+        )],
+        Vec::new(),
+    )
+    .expect("the built-in std/io provider catalog is valid");
+    workspace.set_catalog(sync::Arc::new(catalog));
+    workspace
 }
 
 fn load_sources(workspace: &mut Workspace, workspace_root: &Path, directory: &Path) -> Result<()> {
