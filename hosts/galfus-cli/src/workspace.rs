@@ -35,7 +35,7 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
     if !report.is_valid {
         bail!("workspace validation failed: {:?}", report.diagnostics);
     }
-    workspace
+    let compile_report = workspace
         .compile()
         .map_err(|error| anyhow::anyhow!("workspace compilation failed: {error:?}"))?;
     let args = cli_args
@@ -49,10 +49,20 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
     executor.on_exit(Box::new(move |res| {
         *ec.lock().unwrap() = res.unwrap();
     }));
+
+    let preflight = galfus_workspace::ExternalBindingPreflight::new();
+    // Note: CLI doesn't currently register external binders, but it should run the preflight
+    // to catch any unmet requirements.
+    let target = format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS);
+    let bindings = preflight
+        .run(&compile_report.external_requirements, &target)
+        .map_err(|error| anyhow::anyhow!("package preflight failed: {error:?}"))?;
+
     workspace
-        .run(
+        .run_with_bindings(
             args.as_slice(),
             Some(Providers::with_host(Box::new(NativeIoProvider))),
+            bindings,
             executor.clone(),
         )
         .map_err(|error| anyhow::anyhow!("workspace execution failed: {error:?}"))?;

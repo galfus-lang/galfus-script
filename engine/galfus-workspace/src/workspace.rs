@@ -863,6 +863,45 @@ impl Workspace {
             })
     }
 
+    pub fn start_execution_with_bindings(
+        &mut self,
+        args: &[Vec<u8>],
+        providers: Option<Providers>,
+        bindings: galfus_contract::ExternalBindings,
+        driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
+    ) -> Result<Execution, RunBlocked> {
+        let graph = match &self.bytecode_state.compile_state {
+            CompileState::Ready { graph, .. } => Arc::clone(graph),
+            _ => return Err(RunBlocked::CompileRequired),
+        };
+        let entry_path = self
+            .config
+            .as_ref()
+            .and_then(|config| config.entry.as_ref())
+            .ok_or(RunBlocked::EntryModuleMissing)?;
+        let entry_id = graph
+            .modules()
+            .find(|image| image.path() == entry_path)
+            .map(|image| image.id())
+            .ok_or(RunBlocked::EntryModuleMissing)?;
+        let entry_name = self
+            .config
+            .as_ref()
+            .expect("a successful compile requires configuration")
+            .run_entry
+            .clone();
+        Runtime::new(graph.clone(), providers)
+            .with_external_bindings(bindings)
+            .start(entry_id, entry_name.as_str(), args, driver.clone())
+            .map_err(|error| {
+                if let RuntimeError::VmPanic(panic) = &error {
+                    RunBlocked::RuntimeError(format_panic(&graph, panic))
+                } else {
+                    RunBlocked::RuntimeError(error.to_string())
+                }
+            })
+    }
+
     /// Compatibility helper that drives the returned execution through the supplied driver.
     pub fn run(
         &mut self,
@@ -871,6 +910,19 @@ impl Workspace {
         driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
     ) -> Result<(), RunBlocked> {
         let mut execution = self.start_execution(args, providers, driver)?;
+        let _result = execution.run_to_completion();
+        Ok(())
+    }
+
+    pub fn run_with_bindings(
+        &mut self,
+        args: &[Vec<u8>],
+        providers: Option<Providers>,
+        bindings: galfus_contract::ExternalBindings,
+        driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
+    ) -> Result<(), RunBlocked> {
+        let mut execution =
+            self.start_execution_with_bindings(args, providers, bindings, driver)?;
         let _result = execution.run_to_completion();
         Ok(())
     }
