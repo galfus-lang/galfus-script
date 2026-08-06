@@ -7,7 +7,7 @@ Galfus Script is a typed, VM-first scripting language with a straightforward pip
 ```text
 .gfs Source
     ↓
-Frontend (SemanticGraph)
+Frontend (SemanticModuleGraph)
     ↓
 Compiler (BytecodeModule values)
     ↓
@@ -37,7 +37,7 @@ VM (Instruction Execution)
 
 ## 2. The Semantic Graph
 
-The `SemanticGraph` represents the source-level meaning of the workspace.
+The `SemanticModuleGraph` represents the source-level meaning of the workspace.
 It contains modules, symbols, typed references, and diagnostics.
 The frontend processes source text and updates this graph.
 
@@ -69,7 +69,7 @@ leave the prior snapshot unchanged.
 The `Workspace` owns the current architectural snapshots:
 
 - Source state
-- `SemanticGraph` snapshot
+- `SemanticModuleGraph` snapshot
 - `BytecodeGraph` snapshot
 
 It manages the orchestration of the frontend, compiler, and provides an API for embedding.
@@ -152,7 +152,7 @@ Function-symbol and source-path mappings are planned metadata extensions.
 
 Principles exist as objective contracts per layer. Each invariant must have at least one corresponding test or check.
 
-- **Frontend**: Must produce a canonical, deterministic `SemanticGraph`. No state leakage between compilations.
+- **Frontend**: Must produce a canonical, deterministic `SemanticModuleGraph`. No state leakage between compilations.
 - **Package/Workspace**: Must maintain isolated module namespaces without implicit global dependencies.
 - **VM**: Given the same initial state and the same ordered sequence of external completions, the VM must produce the same state transitions and effects.
 - **Kernel**: The Kernel must apply a canonical scheduling policy with stable ordering and explicit tie-break rules.

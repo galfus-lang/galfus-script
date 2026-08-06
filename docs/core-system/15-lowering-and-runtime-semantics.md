@@ -65,7 +65,7 @@ Conceptual pipeline:
 
 ```txt
 .gfs
-  -> SemanticGraph
+  -> SemanticModuleGraph
   -> BytecodeModule
   -> BytecodeGraph
 ```
