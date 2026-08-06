@@ -146,7 +146,7 @@ fn check_accepts_imported_external_proxy_declarations() {
             "math.gfp",
             br#"---
 adapter = "demo"
-[targets]
+[config]
 test = "memory"
 ---
 

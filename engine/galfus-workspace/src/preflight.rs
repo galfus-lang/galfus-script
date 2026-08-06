@@ -1,51 +1,37 @@
 use galfus_contract::{
-    AdapterLoadError, ExternalBindings, ExternalModuleBinder, ExternalModuleImage,
+    AdapterLoadError, ExternalBindings, ExternalLoadContext, ExternalModuleLoader,
     ExternalModuleRequirement,
 };
 use std::collections::HashMap;
 
 #[derive(Debug)]
 pub enum PreflightError {
-    MissingBinder(String),
-    MissingTarget {
-        proxy_module: String,
-        adapter: String,
-        target: String,
-    },
-    BindFailed {
+    MissingLoader(String),
+    LoadFailed {
         proxy_module: String,
         adapter: String,
         error: AdapterLoadError,
     },
-    DuplicateBinder(String),
+    DuplicateLoader(String),
 }
 
 impl std::fmt::Display for PreflightError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::MissingBinder(adapter) => {
-                write!(f, "Missing required binder for adapter: {}", adapter)
+            Self::MissingLoader(adapter) => {
+                write!(f, "Missing required loader for adapter: {}", adapter)
             }
-            Self::MissingTarget {
-                proxy_module,
-                adapter,
-                target,
-            } => write!(
-                f,
-                "Missing target platform '{}' for module {} with adapter {}",
-                target, proxy_module, adapter
-            ),
-            Self::BindFailed {
+            Self::LoadFailed {
                 proxy_module,
                 adapter,
                 error,
             } => write!(
                 f,
-                "Failed to bind module {} using adapter {}: {}",
+                "Failed to load module {} using adapter {}: {}",
                 proxy_module, adapter, error
             ),
-            Self::DuplicateBinder(adapter) => {
-                write!(f, "Duplicate binder registered for adapter: {}", adapter)
+            Self::DuplicateLoader(adapter) => {
+                write!(f, "Duplicate loader registered for adapter: {}", adapter)
             }
         }
     }
@@ -54,7 +40,7 @@ impl std::fmt::Display for PreflightError {
 impl std::error::Error for PreflightError {}
 
 pub struct ExternalBindingPreflight {
-    binders: HashMap<String, Box<dyn ExternalModuleBinder>>,
+    loaders: HashMap<String, Box<dyn ExternalModuleLoader>>,
 }
 
 impl Default for ExternalBindingPreflight {
@@ -66,27 +52,27 @@ impl Default for ExternalBindingPreflight {
 impl ExternalBindingPreflight {
     pub fn new() -> Self {
         Self {
-            binders: HashMap::new(),
+            loaders: HashMap::new(),
         }
     }
 
-    pub fn register_binder(
+    pub fn register_loader(
         &mut self,
         adapter_name: impl Into<String>,
-        binder: Box<dyn ExternalModuleBinder>,
+        loader: Box<dyn ExternalModuleLoader>,
     ) -> Result<(), PreflightError> {
         let name = adapter_name.into();
-        if self.binders.contains_key(&name) {
-            return Err(PreflightError::DuplicateBinder(name));
+        if self.loaders.contains_key(&name) {
+            return Err(PreflightError::DuplicateLoader(name));
         }
-        self.binders.insert(name, binder);
+        self.loaders.insert(name, loader);
         Ok(())
     }
 
     pub fn run(
         &self,
         requirements: &[ExternalModuleRequirement],
-        platform_target: &str,
+        context: &ExternalLoadContext,
     ) -> Result<ExternalBindings, PreflightError> {
         let mut bindings = ExternalBindings::default();
 
@@ -96,34 +82,18 @@ impl ExternalBindingPreflight {
 
         for requirement in requirements {
             let adapter_name = &requirement.descriptor.adapter;
-            let binder = self
-                .binders
+            let loader = self
+                .loaders
                 .get(adapter_name)
-                .ok_or_else(|| PreflightError::MissingBinder(adapter_name.clone()))?;
+                .ok_or_else(|| PreflightError::MissingLoader(adapter_name.clone()))?;
 
-            let artifact = requirement
-                .descriptor
-                .targets
-                .get(platform_target)
-                .ok_or_else(|| PreflightError::MissingTarget {
+            let bound_module = loader.load_module(requirement, context).map_err(|error| {
+                PreflightError::LoadFailed {
                     proxy_module: requirement.proxy_module.clone(),
                     adapter: adapter_name.clone(),
-                    target: platform_target.to_string(),
-                })?;
-
-            let image = ExternalModuleImage {
-                requirement: requirement.clone(),
-                artifact: artifact.clone(),
-            };
-
-            let bound_module =
-                binder
-                    .bind_module(&image)
-                    .map_err(|error| PreflightError::BindFailed {
-                        proxy_module: requirement.proxy_module.clone(),
-                        adapter: adapter_name.clone(),
-                        error,
-                    })?;
+                    error,
+                }
+            })?;
 
             bindings.register_module(requirement.proxy_module.clone(), bound_module);
         }

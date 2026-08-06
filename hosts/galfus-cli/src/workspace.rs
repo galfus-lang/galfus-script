@@ -51,11 +51,16 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
     }));
 
     let preflight = galfus_workspace::ExternalBindingPreflight::new();
-    // Note: CLI doesn't currently register external binders, but it should run the preflight
+    // Note: CLI doesn't currently register external loaders, but it should run the preflight
     // to catch any unmet requirements.
-    let target = format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS);
+    let mut properties = std::collections::BTreeMap::new();
+    properties.insert("os".to_string(), std::env::consts::OS.to_string());
+    properties.insert("arch".to_string(), std::env::consts::ARCH.to_string());
+    properties.insert("family".to_string(), std::env::consts::FAMILY.to_string());
+    let context = galfus_contract::ExternalLoadContext { properties };
+
     let bindings = preflight
-        .run(&compile_report.external_requirements, &target)
+        .run(&compile_report.external_requirements, &context)
         .map_err(|error| anyhow::anyhow!("package preflight failed: {error:?}"))?;
 
     workspace

@@ -1,26 +1,29 @@
 use super::*;
 use galfus_contract::{
-    AdapterLoadError, BoundExternalModule, BoundaryValue, CancellationOutcome,
-    ExternalModuleBinder, ExternalModuleDescriptor, ExternalModuleImage, ExternalModuleRequirement,
+    AdapterConfigValue, AdapterLoadError, BoundExternalModule, BoundaryValue, CancellationOutcome,
+    ExternalLoadContext, ExternalModuleDescriptor, ExternalModuleLoader, ExternalModuleRequirement,
     MessageInjector,
 };
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
-struct MockBinder {
+struct MockLoader {
     should_fail: bool,
 }
 
-impl ExternalModuleBinder for MockBinder {
-    fn bind_module(
+impl ExternalModuleLoader for MockLoader {
+    fn load_module(
         &self,
-        _image: &ExternalModuleImage,
+        _requirement: &ExternalModuleRequirement,
+        context: &ExternalLoadContext,
     ) -> Result<Box<dyn BoundExternalModule>, AdapterLoadError> {
         if self.should_fail {
-            Err(AdapterLoadError::LibraryLoadFailed {
-                path: "mock_path".into(),
+            Err(AdapterLoadError {
+                code: "unsupported_platform".into(),
                 message: "mock failure".into(),
             })
         } else {
+            // loader asserts that the context is passed
+            assert!(context.properties.contains_key("os"));
             Ok(Box::new(MockBoundModule))
         }
     }
@@ -48,65 +51,57 @@ impl BoundExternalModule for MockBoundModule {
     }
 }
 
-fn create_requirement(
-    proxy_module: &str,
-    adapter: &str,
-    target_key: &str,
-    target_val: &str,
-) -> ExternalModuleRequirement {
-    let mut targets = HashMap::new();
-    targets.insert(target_key.to_string(), target_val.to_string());
+fn create_requirement(proxy_module: &str, adapter: &str) -> ExternalModuleRequirement {
+    let mut config = BTreeMap::new();
+    config.insert(
+        "test_key".to_string(),
+        AdapterConfigValue::String("test_val".to_string()),
+    );
 
     ExternalModuleRequirement {
         proxy_module: proxy_module.to_string(),
         descriptor: ExternalModuleDescriptor {
             adapter: adapter.to_string(),
-            targets,
-            metadata: HashMap::new(),
+            config,
             exports: vec![],
         },
     }
 }
 
+fn create_context() -> ExternalLoadContext {
+    let mut properties = BTreeMap::new();
+    properties.insert("os".to_string(), "linux".to_string());
+    ExternalLoadContext { properties }
+}
+
 #[test]
 fn no_requirements_produces_empty_bindings() {
     let preflight = ExternalBindingPreflight::new();
-    let _bindings = preflight.run(&[], "linux").unwrap();
-    // bindings should be empty (no way to easily assert this publicly on ExternalBindings right now except it works)
+    let _bindings = preflight.run(&[], &create_context()).unwrap();
 }
 
 #[test]
-fn missing_target_returns_error() {
-    let mut preflight = ExternalBindingPreflight::new();
-    preflight
-        .register_binder("test_adapter", Box::new(MockBinder { should_fail: false }))
-        .unwrap();
+fn missing_loader_returns_error() {
+    let preflight = ExternalBindingPreflight::new();
+    let req = create_requirement("my_proxy", "missing_adapter");
+    let err = preflight.run(&[req], &create_context()).err().unwrap();
 
-    let req = create_requirement("my_proxy", "test_adapter", "windows", "lib.dll");
-    let err = preflight.run(&[req], "linux").err().unwrap();
-
-    assert!(matches!(
-        err,
-        PreflightError::MissingTarget {
-            target,
-            ..
-        } if target == "linux"
-    ));
+    assert!(matches!(err, PreflightError::MissingLoader(_)));
 }
 
 #[test]
-fn bind_failure_returns_adapter_load_error() {
+fn load_failure_returns_adapter_load_error() {
     let mut preflight = ExternalBindingPreflight::new();
     preflight
-        .register_binder("test_adapter", Box::new(MockBinder { should_fail: true }))
+        .register_loader("test_adapter", Box::new(MockLoader { should_fail: true }))
         .unwrap();
 
-    let req = create_requirement("my_proxy", "test_adapter", "linux", "lib.so");
-    let err = preflight.run(&[req], "linux").err().unwrap();
+    let req = create_requirement("my_proxy", "test_adapter");
+    let err = preflight.run(&[req], &create_context()).err().unwrap();
 
     assert!(matches!(
         err,
-        PreflightError::BindFailed {
+        PreflightError::LoadFailed {
             adapter,
             ..
         } if adapter == "test_adapter"
@@ -114,38 +109,28 @@ fn bind_failure_returns_adapter_load_error() {
 }
 
 #[test]
-fn multiple_modules_using_same_binder() {
+fn multiple_modules_using_same_loader() {
     let mut preflight = ExternalBindingPreflight::new();
     preflight
-        .register_binder("test_adapter", Box::new(MockBinder { should_fail: false }))
+        .register_loader("test_adapter", Box::new(MockLoader { should_fail: false }))
         .unwrap();
 
-    let req1 = create_requirement("proxy1", "test_adapter", "linux", "lib1.so");
-    let req2 = create_requirement("proxy2", "test_adapter", "linux", "lib2.so");
+    let req1 = create_requirement("proxy1", "test_adapter");
+    let req2 = create_requirement("proxy2", "test_adapter");
 
-    let _bindings = preflight.run(&[req1, req2], "linux").unwrap();
-    // Both are loaded successfully without consuming the binder
+    let _bindings = preflight.run(&[req1, req2], &create_context()).unwrap();
 }
 
 #[test]
-fn duplicate_binder_registration_fails() {
+fn duplicate_loader_registration_fails() {
     let mut preflight = ExternalBindingPreflight::new();
     preflight
-        .register_binder("test_adapter", Box::new(MockBinder { should_fail: false }))
+        .register_loader("test_adapter", Box::new(MockLoader { should_fail: false }))
         .unwrap();
 
     let err = preflight
-        .register_binder("test_adapter", Box::new(MockBinder { should_fail: false }))
+        .register_loader("test_adapter", Box::new(MockLoader { should_fail: false }))
         .unwrap_err();
 
-    assert!(matches!(err, PreflightError::DuplicateBinder(_)));
-}
-
-#[test]
-fn missing_binder_returns_error() {
-    let preflight = ExternalBindingPreflight::new();
-    let req = create_requirement("my_proxy", "missing_adapter", "linux", "lib.so");
-    let err = preflight.run(&[req], "linux").err().unwrap();
-
-    assert!(matches!(err, PreflightError::MissingBinder(_)));
+    assert!(matches!(err, PreflightError::DuplicateLoader(_)));
 }

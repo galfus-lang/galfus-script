@@ -150,8 +150,7 @@ impl Workspace {
                 ModuleOrigin::ExternalProxy,
                 Some(ExternalModuleDescriptor {
                     adapter: frontmatter.adapter,
-                    targets: frontmatter.targets,
-                    metadata: frontmatter.metadata,
+                    config: frontmatter.config,
                     exports: Vec::new(),
                 }),
             )

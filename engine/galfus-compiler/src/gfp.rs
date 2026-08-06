@@ -1,12 +1,10 @@
-use std::collections::HashMap;
+use galfus_contract::AdapterConfig;
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct GfpFrontmatter {
     pub adapter: String,
     #[serde(default)]
-    pub targets: HashMap<String, String>,
-    #[serde(default)]
-    pub metadata: HashMap<String, String>,
+    pub config: AdapterConfig,
 }
 
 /// Splits a `.gfp` source text into its TOML frontmatter string and Galfus declarations string.
@@ -24,6 +22,13 @@ pub fn parse_gfp_frontmatter(source: &str) -> Result<(GfpFrontmatter, &str), Str
     let toml_str = &after_first_delimiter[..end_index];
     let galfus_code = after_first_delimiter[end_index + 4..].trim_start();
 
+    let table: toml::Table = toml::from_str(toml_str)
+        .map_err(|err| format!("invalid TOML frontmatter in .gfp: {err}"))?;
+
+    if table.contains_key("targets") || table.contains_key("metadata") {
+        return Err("The .gfp frontmatter format has changed. [targets] and [metadata] are no longer supported. Please move your settings into [config].".to_string());
+    }
+
     let frontmatter: GfpFrontmatter = toml::from_str(toml_str)
         .map_err(|err| format!("invalid TOML frontmatter in .gfp: {err}"))?;
 
@@ -33,19 +38,19 @@ pub fn parse_gfp_frontmatter(source: &str) -> Result<(GfpFrontmatter, &str), Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use galfus_contract::AdapterConfigValue;
 
     #[test]
-    fn test_parse_gfp_frontmatter() {
+    fn test_parse_gfp_frontmatter_with_config() {
         let source = r#"---
 adapter = "c_abi"
 
-[targets]
-windows = "./bin/SDL2.dll"
-linux = "./bin/libSDL2.so"
-macos = "./bin/libSDL2.dylib"
-
-[metadata]
+[config]
 thread_affinity = "main"
+
+[config.libraries]
+linux = "./bin/libSDL2.so"
+windows = "./bin/SDL2.dll"
 ---
 
 export fn(async) SDL_Init(flags: u32): i32
@@ -53,11 +58,31 @@ export fn(async) SDL_Init(flags: u32): i32
 
         let (frontmatter, galfus_code) = parse_gfp_frontmatter(source).unwrap();
         assert_eq!(frontmatter.adapter, "c_abi");
-        assert_eq!(
-            frontmatter.targets.get("linux").unwrap(),
-            "./bin/libSDL2.so"
+
+        let thread_affinity = frontmatter.config.get("thread_affinity").unwrap();
+        assert!(matches!(thread_affinity, AdapterConfigValue::String(s) if s == "main"));
+
+        let libraries = match frontmatter.config.get("libraries").unwrap() {
+            AdapterConfigValue::Table(t) => t,
+            _ => panic!("Expected table"),
+        };
+
+        assert!(
+            matches!(libraries.get("linux").unwrap(), AdapterConfigValue::String(s) if s == "./bin/libSDL2.so")
         );
-        assert_eq!(frontmatter.metadata.get("thread_affinity").unwrap(), "main");
         assert!(galfus_code.starts_with("export fn(async) SDL_Init"));
+    }
+
+    #[test]
+    fn test_reject_legacy_format() {
+        let source = r#"---
+adapter = "c_abi"
+
+[targets]
+windows = "./bin/SDL2.dll"
+---
+"#;
+        let err = parse_gfp_frontmatter(source).unwrap_err();
+        assert!(err.contains("[targets] and [metadata] are no longer supported"));
     }
 }
