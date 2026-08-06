@@ -6,7 +6,7 @@ struct DummyHost;
 
 struct DummyAdapter(Arc<std::sync::atomic::AtomicUsize>);
 
-impl BoundExternalModule for DummyAdapter {
+impl AdapterModuleBinding for DummyAdapter {
     fn dispatch(
         &mut self,
         _symbol: &str,
@@ -52,8 +52,8 @@ fn providers_default_to_main_thread_affinity() {
 }
 
 #[test]
-fn external_bindings_are_registered_by_nominal_proxy_module() {
-    let mut bindings = ExternalBindings::default();
+fn adapter_bindings_are_registered_by_nominal_proxy_module() {
+    let mut bindings = AdapterBindings::default();
     bindings.register_module(
         "graphics",
         Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
@@ -65,9 +65,9 @@ fn external_bindings_are_registered_by_nominal_proxy_module() {
 }
 
 #[test]
-fn external_bindings_own_and_release_nominal_handles() {
+fn adapter_bindings_own_and_release_nominal_handles() {
     let releases = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let mut bindings = ExternalBindings::default();
+    let mut bindings = AdapterBindings::default();
     bindings.register_module("graphics", Box::new(DummyAdapter(releases.clone())));
     assert!(bindings.register_handle("graphics", "texture", 7));
     assert!(bindings.contains_handle("graphics", "texture", 7));
@@ -78,8 +78,8 @@ fn external_bindings_own_and_release_nominal_handles() {
 }
 
 #[test]
-fn external_handle_batches_are_registered_atomically() {
-    let mut bindings = ExternalBindings::default();
+fn adapter_handle_batches_are_registered_atomically() {
+    let mut bindings = AdapterBindings::default();
     bindings.register_module(
         "graphics",
         Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
@@ -120,7 +120,7 @@ fn execution_failures_preserve_asynchronous_frames() {
 
 struct CancellationRecordingAdapter(std::sync::Arc<std::sync::atomic::AtomicU64>);
 
-impl BoundExternalModule for CancellationRecordingAdapter {
+impl AdapterModuleBinding for CancellationRecordingAdapter {
     fn dispatch(
         &mut self,
         _symbol: &str,
@@ -141,9 +141,9 @@ impl BoundExternalModule for CancellationRecordingAdapter {
 }
 
 #[test]
-fn external_bindings_route_cancellation_to_the_owning_symbol() {
+fn adapter_bindings_route_cancellation_to_the_owning_symbol() {
     let cancellation = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
-    let mut bindings = ExternalBindings::default();
+    let mut bindings = AdapterBindings::default();
     bindings.register_module(
         "io",
         Box::new(CancellationRecordingAdapter(cancellation.clone())),

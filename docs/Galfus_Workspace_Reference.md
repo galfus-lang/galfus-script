@@ -33,7 +33,7 @@ This document covers workspace structure only. Syntax, semantic rules, and runti
 15. [Valid Module Descriptors](#15-valid-module-descriptors)
 16. [Artifact Roles](#16-artifact-roles)
 17. [Galfus Proxy Files](#17-galfus-proxy-files)
-18. [External Payloads](#18-external-payloads)
+18. [Adapter Payloads](#18-external-payloads)
 19. [Galfus Map Files](#19-internal-debug-mapping)
 20. [Workspace / Monorepo Layout](#20-workspace--monorepo-layout)
 21. [Workspace Members](#21-workspace-members)
@@ -587,7 +587,7 @@ A `.gfp` is isolated. It does not depend on `.gfs` source at runtime. It allows 
 
 ---
 
-## 18. External Payloads
+## 18. Adapter Payloads
 
 External payloads include files such as:
 

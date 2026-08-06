@@ -1,9 +1,9 @@
 use super::*;
-use crate::{AdapterValidationError, ExternalModuleDescriptor};
+use crate::{AdapterModuleDescriptor, AdapterValidationError};
 
 struct TestAdapter(&'static str);
 
-impl ExternalAdapterSchema for TestAdapter {
+impl AdapterSchema for TestAdapter {
     fn name(&self) -> &str {
         "test"
     }
@@ -14,7 +14,7 @@ impl ExternalAdapterSchema for TestAdapter {
 
     fn validate_schema(
         &self,
-        _descriptor: &ExternalModuleDescriptor,
+        _descriptor: &AdapterModuleDescriptor,
     ) -> Result<(), AdapterValidationError> {
         Ok(())
     }

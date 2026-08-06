@@ -89,7 +89,7 @@ impl VirtualMachine {
                             }
                         }
                     }
-                    HeapObject::ExternalHandle { .. } => {}
+                    HeapObject::AdapterHandle { .. } => {}
                 }
             }
         }
@@ -108,7 +108,7 @@ impl VirtualMachine {
         let released_handles: Vec<(String, String, u64)> = dead_objects
             .iter()
             .filter_map(|&idx| match thread.heap.objects[idx].as_ref() {
-                Some(HeapObject::ExternalHandle {
+                Some(HeapObject::AdapterHandle {
                     proxy_module,
                     kind,
                     id,

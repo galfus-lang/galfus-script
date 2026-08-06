@@ -5,7 +5,7 @@ use galfus_core::{ModuleId, ModulePath, Revision, SemanticRevision, SourceFile, 
 pub enum FrontendModuleKind {
     Standard,
     Builtin,
-    ExternalProxy,
+    AdapterProxy,
 }
 
 #[derive(Debug, Clone)]

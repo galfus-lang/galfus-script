@@ -54,9 +54,9 @@ pub(crate) fn decode_from_thread_heap(
             module_id: module_id.raw(),
             func_idx: func_idx.raw(),
         }),
-        (BytecodeType::ExternalHandle(kind), galfus_vm::VmValue::Object(reference)) => {
+        (BytecodeType::AdapterHandle(kind), galfus_vm::VmValue::Object(reference)) => {
             match heap.get_object(reference) {
-                Ok(galfus_vm::HeapObject::ExternalHandle {
+                Ok(galfus_vm::HeapObject::AdapterHandle {
                     proxy_module,
                     kind: actual,
                     id,
@@ -227,14 +227,14 @@ pub(crate) fn encode_into_thread_heap(
             func_idx: galfus_bytecode::instruction::FuncIdx(func_idx),
         }),
         (
-            BytecodeType::ExternalHandle(kind),
+            BytecodeType::AdapterHandle(kind),
             BoundaryValue::Handle {
                 proxy_module,
                 kind: actual,
                 id,
             },
         ) if kind == &actual => Ok(galfus_vm::VmValue::Object(heap.alloc(
-            galfus_vm::HeapObject::ExternalHandle {
+            galfus_vm::HeapObject::AdapterHandle {
                 proxy_module: proxy_module.clone().unwrap_or_default(),
                 kind: actual,
                 id,
@@ -337,7 +337,7 @@ pub(crate) fn boundary_type(
         Some(BytecodeType::Float32) => Ok(BoundaryType::F32),
         Some(BytecodeType::Float64) => Ok(BoundaryType::F64),
         Some(BytecodeType::Function { .. }) => Ok(BoundaryType::Function),
-        Some(BytecodeType::ExternalHandle(kind)) => Ok(BoundaryType::Handle { kind: kind.clone() }),
+        Some(BytecodeType::AdapterHandle(kind)) => Ok(BoundaryType::Handle { kind: kind.clone() }),
         Some(BytecodeType::Array(element)) => Ok(BoundaryType::Array(Box::new(boundary_type(
             module, *element,
         )?))),

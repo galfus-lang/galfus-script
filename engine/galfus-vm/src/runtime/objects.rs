@@ -395,7 +395,7 @@ impl VirtualMachine {
                 HeapObject::Choice { payload, .. } => {
                     self.enqueue_copy_target(thread, payload, &mut closure, &mut pending)?;
                 }
-                HeapObject::ExternalHandle { .. } => {}
+                HeapObject::AdapterHandle { .. } => {}
             }
         }
 
@@ -480,11 +480,11 @@ impl VirtualMachine {
                     variant_idx,
                     payload: Value::Null,
                 },
-                HeapObject::ExternalHandle {
+                HeapObject::AdapterHandle {
                     proxy_module,
                     kind,
                     id,
-                } => HeapObject::ExternalHandle {
+                } => HeapObject::AdapterHandle {
                     proxy_module,
                     kind,
                     id,
@@ -611,7 +611,7 @@ impl VirtualMachine {
                         }
                     }
                 }
-                HeapObject::ExternalHandle { .. } => {}
+                HeapObject::AdapterHandle { .. } => {}
             }
         }
 

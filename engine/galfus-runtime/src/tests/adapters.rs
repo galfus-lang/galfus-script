@@ -5,7 +5,7 @@ use galfus_bytecode::{
     ConstantPool, ExportKind, ExportSlot,
 };
 use galfus_contract::{
-    BoundExternalModule, BoundaryValue, CancellationOutcome, ExternalBindings, MessageInjector,
+    AdapterBindings, AdapterModuleBinding, BoundaryValue, CancellationOutcome, MessageInjector,
 };
 use galfus_core::{ModuleId, ModulePath, SemanticRevision};
 use std::rc::Rc;
@@ -25,7 +25,7 @@ struct DemoAdapter {
     complete: bool,
 }
 
-impl BoundExternalModule for DemoAdapter {
+impl AdapterModuleBinding for DemoAdapter {
     fn dispatch(
         &mut self,
         symbol: &str,
@@ -99,7 +99,7 @@ fn adapter_graph() -> (Arc<BytecodeGraph>, ModuleId) {
                 local_count: 0,
                 temp_count: 2,
                 return_ty: TypeIdx(1),
-                proxy_metadata: None,
+                adapter_proxy_metadata: None,
                 instructions: vec![
                     Instruction::CreateFuture {
                         dest: Reg(1),
@@ -128,7 +128,7 @@ fn adapter_graph() -> (Arc<BytecodeGraph>, ModuleId) {
                 local_count: 0,
                 temp_count: 1,
                 return_ty: TypeIdx(0),
-                proxy_metadata: Some(galfus_bytecode::ExternalProxyMetadata {
+                adapter_proxy_metadata: Some(galfus_bytecode::AdapterProxyMetadata {
                     proxy_module: "graphics.gfp".to_string(),
                     symbol: "acquire".to_string(),
                 }),
@@ -136,7 +136,7 @@ fn adapter_graph() -> (Arc<BytecodeGraph>, ModuleId) {
             },
         ],
         types: vec![
-            BytecodeType::ExternalHandle("texture".to_string()),
+            BytecodeType::AdapterHandle("texture".to_string()),
             BytecodeType::Int32,
             BytecodeType::Uint8,
             BytecodeType::Array(TypeIdx(2)),
@@ -169,7 +169,7 @@ fn adapter_graph() -> (Arc<BytecodeGraph>, ModuleId) {
 fn execution_with_demo_adapter(complete: bool) -> (Execution, Arc<Mutex<DemoAdapterState>>) {
     let (graph, module_id) = adapter_graph();
     let state = Arc::new(Mutex::new(DemoAdapterState::default()));
-    let mut bindings = ExternalBindings::default();
+    let mut bindings = AdapterBindings::default();
     bindings.register_module(
         "graphics.gfp",
         Box::new(DemoAdapter {
@@ -178,7 +178,7 @@ fn execution_with_demo_adapter(complete: bool) -> (Execution, Arc<Mutex<DemoAdap
         }),
     );
     let execution = Runtime::new(graph, None)
-        .with_external_bindings(bindings)
+        .with_adapter_bindings(bindings)
         .start(module_id, "main", &[], Rc::new(CooperativeDriver::new()))
         .unwrap();
     (execution, state)

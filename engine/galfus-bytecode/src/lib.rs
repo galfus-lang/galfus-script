@@ -56,7 +56,7 @@ pub enum BytecodeType {
     Uint64,
     Float32,
     Float64,
-    ExternalHandle(String),
+    AdapterHandle(String),
     Struct(StructLayoutIdx),
     Array(TypeIdx),
     Nullable(TypeIdx),
@@ -136,7 +136,7 @@ pub struct ExportSlot {
 // =========================================================================
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct ExternalProxyMetadata {
+pub struct AdapterProxyMetadata {
     pub proxy_module: String,
     pub symbol: String,
 }
@@ -148,7 +148,7 @@ pub struct BytecodeFunction {
     pub local_count: u16,
     pub temp_count: u16,
     pub return_ty: TypeIdx,
-    pub proxy_metadata: Option<ExternalProxyMetadata>,
+    pub adapter_proxy_metadata: Option<AdapterProxyMetadata>,
     pub instructions: Vec<Instruction>,
 }
 

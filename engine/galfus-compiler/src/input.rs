@@ -15,7 +15,7 @@ pub struct CompiledModule {
     pub(crate) source: SourceFile,
     pub(crate) graph: ModuleGraph,
     pub(crate) type_result: Option<TypeCheckResult>,
-    pub(crate) is_external_proxy: bool,
+    pub(crate) is_adapter_proxy: bool,
 }
 
 impl CompiledModule {
@@ -26,7 +26,7 @@ impl CompiledModule {
         source: SourceFile,
         graph: ModuleGraph,
         type_result: Option<TypeCheckResult>,
-        is_external_proxy: bool,
+        is_adapter_proxy: bool,
     ) -> Self {
         Self {
             id,
@@ -35,7 +35,7 @@ impl CompiledModule {
             source,
             graph,
             type_result,
-            is_external_proxy,
+            is_adapter_proxy,
         }
     }
 
@@ -67,7 +67,7 @@ impl CompiledModule {
         self.type_result.as_mut()
     }
 
-    pub fn is_external_proxy(&self) -> bool {
-        self.is_external_proxy
+    pub fn is_adapter_proxy(&self) -> bool {
+        self.is_adapter_proxy
     }
 }

@@ -391,14 +391,14 @@ fn compile_single_module(
         let (mut instructions, function_spans) = emitter.emit();
         let mut temp_count = emitter.temp_count_max;
         drop(emitter);
-        let mut proxy_metadata = None;
-        if module.is_external_proxy()
+        let mut adapter_proxy_metadata = None;
+        if module.is_adapter_proxy()
             && mir_func.name != "__init_module"
             && instructions
                 .iter()
                 .all(|instruction| matches!(instruction, galfus_bytecode::Instruction::RetNull))
         {
-            proxy_metadata = Some(galfus_bytecode::ExternalProxyMetadata {
+            adapter_proxy_metadata = Some(galfus_bytecode::AdapterProxyMetadata {
                 proxy_module: module.path().as_str().to_string(),
                 symbol: mir_func.name.clone(),
             });
@@ -417,7 +417,7 @@ fn compile_single_module(
             local_count,
             temp_count,
             return_ty,
-            proxy_metadata,
+            adapter_proxy_metadata,
             instructions,
         });
     }

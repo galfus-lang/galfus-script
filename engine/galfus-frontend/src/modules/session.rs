@@ -295,7 +295,7 @@ impl FrontendSession {
                 .extend(module.graph().diagnostics().iter().cloned());
         }
         self.validate_imports(catalog);
-        self.validate_external_proxy_declarations();
+        self.validate_adapter_proxy_declarations();
         for module in &self.modules {
             if let Some(result) = module.type_result() {
                 self.diagnostics
@@ -388,7 +388,7 @@ impl FrontendSession {
         }
     }
 
-    fn validate_external_proxy_declarations(&mut self) {
+    fn validate_adapter_proxy_declarations(&mut self) {
         for module in &self.modules {
             let Some(root) = module.graph().syntax().root() else {
                 continue;
@@ -423,9 +423,9 @@ impl FrontendSession {
                         })
                     });
                 if has_body {
-                    if module.kind() == FrontendModuleKind::ExternalProxy {
+                    if module.kind() == FrontendModuleKind::AdapterProxy {
                         self.diagnostics.push(Diagnostic::error_with_message(
-                            CheckDiagnosticCode::InvalidExternalProxyDeclaration,
+                            CheckDiagnosticCode::InvalidAdapterProxyDeclaration,
                             "external proxy functions must not have a body",
                             syntax
                                 .node(function)
@@ -445,7 +445,7 @@ impl FrontendSession {
                             .unwrap_or_else(|| module.source().span()),
                     )),
                     FrontendModuleKind::Builtin => {}
-                    FrontendModuleKind::ExternalProxy => {
+                    FrontendModuleKind::AdapterProxy => {
                         let is_async = syntax
                             .first_child_of_kind(function, SyntaxNodeKind::KeywordMetadataList)
                             .and_then(|metadata| {
@@ -463,7 +463,7 @@ impl FrontendSession {
                             });
                         if !exported || !is_async {
                             self.diagnostics.push(Diagnostic::error_with_message(
-                                CheckDiagnosticCode::InvalidExternalProxyDeclaration,
+                                CheckDiagnosticCode::InvalidAdapterProxyDeclaration,
                                 "external proxy functions must be declared as `export fn(async)`",
                                 syntax
                                     .node(function)

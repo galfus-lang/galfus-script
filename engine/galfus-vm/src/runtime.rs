@@ -137,7 +137,7 @@ pub enum VmEffect {
     FutureDropped {
         future_id: u64,
     },
-    ExternalHandleDropped {
+    AdapterHandleDropped {
         proxy_module: String,
         kind: String,
         id: u64,
@@ -225,7 +225,7 @@ pub enum HeapObject {
         variant_idx: u16,
         payload: Value,
     },
-    ExternalHandle {
+    AdapterHandle {
         proxy_module: String,
         kind: String,
         id: u64,
@@ -389,9 +389,9 @@ impl VirtualMachine {
                     None => matches!(payload, Value::Null),
                 }
             }
-            (BytecodeType::ExternalHandle(kind), Value::Object(reference)) => matches!(
+            (BytecodeType::AdapterHandle(kind), Value::Object(reference)) => matches!(
                 thread.heap.get_object(reference),
-                Ok(HeapObject::ExternalHandle { kind: actual, .. }) if actual == kind
+                Ok(HeapObject::AdapterHandle { kind: actual, .. }) if actual == kind
             ),
             _ => false,
         }
@@ -563,9 +563,9 @@ impl VirtualMachine {
     }
 
     pub fn step(&self, thread: &mut thread::VmThreadState) -> Result<VmStep, VmError> {
-        if let Some((proxy_module, kind, id)) = thread.pending_external_handle_drops.pop() {
+        if let Some((proxy_module, kind, id)) = thread.pending_adapter_handle_drops.pop() {
             return Ok(VmStep::Suspend {
-                effect: VmEffect::ExternalHandleDropped {
+                effect: VmEffect::AdapterHandleDropped {
                     proxy_module,
                     kind,
                     id,
@@ -712,9 +712,7 @@ impl VirtualMachine {
             || thread.heap.allocations_since_release >= RELEASE_ALLOCATION_THRESHOLD
         {
             let released_handles = self.release_unreachable(thread);
-            thread
-                .pending_external_handle_drops
-                .extend(released_handles);
+            thread.pending_adapter_handle_drops.extend(released_handles);
         }
     }
 }

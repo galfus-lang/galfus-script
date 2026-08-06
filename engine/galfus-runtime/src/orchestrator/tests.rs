@@ -1,5 +1,5 @@
 use super::*;
-use crate::orchestrator::external::ProviderDispatchTask;
+use crate::orchestrator::adapter::ProviderDispatchTask;
 use galfus_contract::{
     BoundaryValue, HostProvider, MessageInjector, Providers, RunnableTask, TaskAffinity,
     ThreadResult,
@@ -69,7 +69,7 @@ fn provider_dispatch_tasks_use_the_declared_driver_lane() {
 }
 
 #[test]
-fn cancelled_provider_dispatch_tasks_do_not_start_external_work() {
+fn cancelled_provider_dispatch_tasks_do_not_start_adapter_work() {
     let called = Arc::new(AtomicBool::new(false));
     let task = provider_dispatch_task(called.clone());
     task.active.store(false, Ordering::Release);

@@ -477,7 +477,7 @@ fn test_nested_calls_return_to_explicit_destinations() {
                 local_count: 4,
                 temp_count: 4,
                 return_ty: TypeIdx(0),
-                proxy_metadata: None,
+                adapter_proxy_metadata: None,
                 instructions: main_instrs,
             },
             BytecodeFunction {
@@ -486,7 +486,7 @@ fn test_nested_calls_return_to_explicit_destinations() {
                 local_count: 1,
                 temp_count: 1,
                 return_ty: TypeIdx(0),
-                proxy_metadata: None,
+                adapter_proxy_metadata: None,
                 instructions: one_instrs,
             },
             BytecodeFunction {
@@ -495,7 +495,7 @@ fn test_nested_calls_return_to_explicit_destinations() {
                 local_count: 1,
                 temp_count: 1,
                 return_ty: TypeIdx(0),
-                proxy_metadata: None,
+                adapter_proxy_metadata: None,
                 instructions: two_instrs,
             },
         ],

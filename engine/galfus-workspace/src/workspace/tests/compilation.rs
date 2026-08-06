@@ -98,9 +98,9 @@ fn compile_emits_one_module_per_source_module_with_import_slots() {
 }
 
 #[test]
-fn check_accepts_imported_external_proxy_declarations() {
+fn check_accepts_imported_adapter_proxy_declarations() {
     struct DemoSchema;
-    impl galfus_contract::ExternalAdapterSchema for DemoSchema {
+    impl galfus_contract::AdapterSchema for DemoSchema {
         fn name(&self) -> &str {
             "demo"
         }
@@ -109,7 +109,7 @@ fn check_accepts_imported_external_proxy_declarations() {
         }
         fn validate_schema(
             &self,
-            _descriptor: &galfus_contract::ExternalModuleDescriptor,
+            _descriptor: &galfus_contract::AdapterModuleDescriptor,
         ) -> Result<(), galfus_contract::AdapterValidationError> {
             Ok(())
         }
@@ -170,12 +170,12 @@ export fn(async) add(left: i32, right: i32): i32
     };
     assert!(is_valid, "{diagnostics}");
     assert_eq!(
-        workspace.external_descriptors[&ModulePath::new("math.gfp").unwrap()].adapter,
+        workspace.adapter_descriptors[&ModulePath::new("math.gfp").unwrap()].adapter,
         "demo"
     );
     assert_eq!(
-        workspace.external_descriptors[&ModulePath::new("math.gfp").unwrap()].exports,
-        vec![galfus_contract::ExternalFunctionSignature {
+        workspace.adapter_descriptors[&ModulePath::new("math.gfp").unwrap()].exports,
+        vec![galfus_contract::AdapterFunctionSignature {
             name: "add".to_string(),
             is_async: true,
             parameter_types: vec![
@@ -187,10 +187,10 @@ export fn(async) add(left: i32, right: i32): i32
     );
     let report = workspace.compile().expect("proxy compilation succeeds");
     assert_eq!(
-        report.external_requirements,
-        vec![galfus_contract::ExternalModuleRequirement {
+        report.adapter_requirements,
+        vec![galfus_contract::AdapterModuleRequirement {
             proxy_module: "math.gfp".to_string(),
-            descriptor: workspace.external_descriptors[&ModulePath::new("math.gfp").unwrap()]
+            descriptor: workspace.adapter_descriptors[&ModulePath::new("math.gfp").unwrap()]
                 .clone(),
         }]
     );
@@ -213,9 +213,9 @@ export fn(async) add(left: i32, right: i32): i32
         ),
         "{instructions:?}"
     );
-    let proxy_metadata = function.proxy_metadata.as_ref().expect("proxy metadata");
-    assert_eq!(proxy_metadata.proxy_module, "math.gfp");
-    assert_eq!(proxy_metadata.symbol, "add");
+    let adapter_proxy_metadata = function.adapter_proxy_metadata.as_ref().expect("proxy metadata");
+    assert_eq!(adapter_proxy_metadata.proxy_module, "math.gfp");
+    assert_eq!(adapter_proxy_metadata.symbol, "add");
 }
 
 #[test]

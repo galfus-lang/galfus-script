@@ -1,8 +1,8 @@
 use super::*;
 use galfus_contract::{
-    AdapterConfigValue, AdapterLoadError, BoundExternalModule, BoundaryValue, CancellationOutcome,
-    ExternalLoadContext, ExternalModuleDescriptor, ExternalModuleLoader, ExternalModuleRequirement,
-    MessageInjector,
+    AdapterConfigValue, AdapterLoadContext, AdapterLoadError, AdapterModuleBinding,
+    AdapterModuleDescriptor, AdapterModuleLoader, AdapterModuleRequirement, BoundaryValue,
+    CancellationOutcome, MessageInjector,
 };
 use std::collections::BTreeMap;
 
@@ -10,12 +10,12 @@ struct MockLoader {
     should_fail: bool,
 }
 
-impl ExternalModuleLoader for MockLoader {
+impl AdapterModuleLoader for MockLoader {
     fn load_module(
         &self,
-        requirement: &ExternalModuleRequirement,
-        context: &ExternalLoadContext,
-    ) -> Result<Box<dyn BoundExternalModule>, AdapterLoadError> {
+        requirement: &AdapterModuleRequirement,
+        context: &AdapterLoadContext,
+    ) -> Result<Box<dyn AdapterModuleBinding>, AdapterLoadError> {
         if self.should_fail {
             Err(AdapterLoadError {
                 code: "unsupported_platform".into(),
@@ -33,7 +33,7 @@ impl ExternalModuleLoader for MockLoader {
 }
 
 struct MockBoundModule;
-impl BoundExternalModule for MockBoundModule {
+impl AdapterModuleBinding for MockBoundModule {
     fn dispatch(
         &mut self,
         _symbol: &str,
@@ -54,16 +54,16 @@ impl BoundExternalModule for MockBoundModule {
     }
 }
 
-fn create_requirement(proxy_module: &str, adapter: &str) -> ExternalModuleRequirement {
+fn create_requirement(proxy_module: &str, adapter: &str) -> AdapterModuleRequirement {
     let mut config = BTreeMap::new();
     config.insert(
         "test_key".to_string(),
         AdapterConfigValue::String("test_val".to_string()),
     );
 
-    ExternalModuleRequirement {
+    AdapterModuleRequirement {
         proxy_module: proxy_module.to_string(),
-        descriptor: ExternalModuleDescriptor {
+        descriptor: AdapterModuleDescriptor {
             adapter: adapter.to_string(),
             config,
             exports: vec![],
@@ -71,21 +71,21 @@ fn create_requirement(proxy_module: &str, adapter: &str) -> ExternalModuleRequir
     }
 }
 
-fn create_context() -> ExternalLoadContext {
+fn create_context() -> AdapterLoadContext {
     let mut properties = BTreeMap::new();
     properties.insert("os".to_string(), "linux".to_string());
-    ExternalLoadContext { properties }
+    AdapterLoadContext { properties }
 }
 
 #[test]
 fn no_requirements_produces_empty_bindings() {
-    let preflight = ExternalBindingPreflight::new();
+    let preflight = AdapterBindingPreflight::new();
     let _bindings = preflight.run(&[], &create_context()).unwrap();
 }
 
 #[test]
 fn missing_loader_returns_error() {
-    let preflight = ExternalBindingPreflight::new();
+    let preflight = AdapterBindingPreflight::new();
     let req = create_requirement("my_proxy", "missing_adapter");
     let err = preflight.run(&[req], &create_context()).err().unwrap();
 
@@ -94,7 +94,7 @@ fn missing_loader_returns_error() {
 
 #[test]
 fn load_failure_returns_adapter_load_error() {
-    let mut preflight = ExternalBindingPreflight::new();
+    let mut preflight = AdapterBindingPreflight::new();
     preflight
         .register_loader("test_adapter", Box::new(MockLoader { should_fail: true }))
         .unwrap();
@@ -113,7 +113,7 @@ fn load_failure_returns_adapter_load_error() {
 
 #[test]
 fn multiple_modules_using_same_loader() {
-    let mut preflight = ExternalBindingPreflight::new();
+    let mut preflight = AdapterBindingPreflight::new();
     preflight
         .register_loader("test_adapter", Box::new(MockLoader { should_fail: false }))
         .unwrap();
@@ -130,7 +130,7 @@ fn multiple_modules_using_same_loader() {
 
 #[test]
 fn duplicate_loader_registration_fails() {
-    let mut preflight = ExternalBindingPreflight::new();
+    let mut preflight = AdapterBindingPreflight::new();
     preflight
         .register_loader("test_adapter", Box::new(MockLoader { should_fail: false }))
         .unwrap();
@@ -144,7 +144,7 @@ fn duplicate_loader_registration_fails() {
 
 #[test]
 fn two_loaders_with_structurally_different_configurations() {
-    let mut preflight = ExternalBindingPreflight::new();
+    let mut preflight = AdapterBindingPreflight::new();
     preflight
         .register_loader("loader1", Box::new(MockLoader { should_fail: false }))
         .unwrap();
@@ -157,9 +157,9 @@ fn two_loaders_with_structurally_different_configurations() {
         "test_key".to_string(),
         AdapterConfigValue::String("val1".to_string()),
     );
-    let req1 = ExternalModuleRequirement {
+    let req1 = AdapterModuleRequirement {
         proxy_module: "proxy1".to_string(),
-        descriptor: ExternalModuleDescriptor {
+        descriptor: AdapterModuleDescriptor {
             adapter: "loader1".to_string(),
             config: config1,
             exports: vec![],
@@ -170,9 +170,9 @@ fn two_loaders_with_structurally_different_configurations() {
     let mut nested = BTreeMap::new();
     nested.insert("inner_key".to_string(), AdapterConfigValue::Integer(42));
     config2.insert("test_key".to_string(), AdapterConfigValue::Table(nested));
-    let req2 = ExternalModuleRequirement {
+    let req2 = AdapterModuleRequirement {
         proxy_module: "proxy2".to_string(),
-        descriptor: ExternalModuleDescriptor {
+        descriptor: AdapterModuleDescriptor {
             adapter: "loader2".to_string(),
             config: config2,
             exports: vec![],

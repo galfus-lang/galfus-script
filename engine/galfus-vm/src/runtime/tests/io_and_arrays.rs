@@ -107,7 +107,7 @@ fn test_len_and_copy_array() {
             local_count: 10,
             temp_count: 10,
             return_ty: TypeIdx(1),
-            proxy_metadata: None,
+            adapter_proxy_metadata: None,
             instructions: instrs,
         }],
         types: vec![BytecodeType::Int64, BytecodeType::Array(TypeIdx(0))],
