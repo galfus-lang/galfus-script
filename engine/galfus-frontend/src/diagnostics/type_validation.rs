@@ -57,6 +57,10 @@ pub enum TypeDiagnosticCode {
     UnreachableCode,
     InvalidBufferElement,
     AwaitRequiresFuture,
+
+    OpaqueHandleNotInstantiable,
+    OpaqueHandleNotExportableAsValue,
+    ProxyModuleInvalidItem,
 }
 
 impl DiagnosticCodeKind for TypeDiagnosticCode {
@@ -117,6 +121,10 @@ impl DiagnosticCodeKind for TypeDiagnosticCode {
             Self::InvalidPatternOrder => "T0053",
             Self::UnreachablePattern => "T0054",
             Self::UnreachableCode => "T0055",
+
+            Self::OpaqueHandleNotInstantiable => "T0057",
+            Self::OpaqueHandleNotExportableAsValue => "T0058",
+            Self::ProxyModuleInvalidItem => "T0059",
         }
     }
 
@@ -179,6 +187,12 @@ impl DiagnosticCodeKind for TypeDiagnosticCode {
             Self::UnreachableCode => "unreachable code",
             Self::InvalidBufferElement => "invalid buffer element type",
             Self::AwaitRequiresFuture => "await requires a Future value",
+
+            Self::OpaqueHandleNotInstantiable => "opaque handles cannot be instantiated",
+            Self::OpaqueHandleNotExportableAsValue => "opaque handles cannot be exported as values",
+            Self::ProxyModuleInvalidItem => {
+                "proxy modules (.gfp) can only contain struct, type, or function signatures (without bodies)"
+            }
         }
     }
 }

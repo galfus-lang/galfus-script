@@ -295,3 +295,19 @@ fn codec_rejects_adapter_handles_with_the_wrong_kind() {
         .is_err()
     );
 }
+
+#[test]
+fn boundary_type_preserves_nullable_wrapper() {
+    let module = module(vec![
+        BytecodeType::Int32,
+        BytecodeType::Nullable(TypeIdx(0)),
+    ]);
+
+    let result = super::boundary_type(&module, TypeIdx(1));
+    assert_eq!(
+        result,
+        Ok(galfus_contract::BoundaryType::Nullable(Box::new(
+            galfus_contract::BoundaryType::I32
+        )))
+    );
+}

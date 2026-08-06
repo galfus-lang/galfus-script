@@ -16,6 +16,7 @@ impl<'a> DeclarationTypeChecker<'a> {
         self.check_builtin_constraint_imports(root);
         self.check_builtin_symbol_visibility(root);
         self.check_bridge_and_internal_symbols(root);
+        self.check_proxy_module_items(root);
     }
 
     fn check_return_context(&mut self, node: NodeId, inside_function: bool) {
@@ -757,6 +758,57 @@ impl<'a> DeclarationTypeChecker<'a> {
         let children = syntax_node.children().to_vec();
         for child in children {
             self.check_node_bridge_and_internal_rules(child, is_internal_module, is_bridge_module);
+        }
+    }
+
+    fn check_proxy_module_items(&mut self, root: NodeId) {
+        if !self.source.name().ends_with(".gfp") {
+            return;
+        }
+
+        let Some(syntax_node) = self.graph.syntax().node(root) else {
+            return;
+        };
+
+        for child in syntax_node.children() {
+            let mut current_item = *child;
+
+            if let Some(node) = self.graph.syntax().node(current_item) {
+                if node.kind() == SyntaxNodeKind::ExportItem {
+                    if let Some(inner) = node.first_child() {
+                        current_item = inner;
+                    }
+                }
+            }
+
+            let Some(item_node) = self.graph.syntax().node(current_item) else {
+                continue;
+            };
+
+            match item_node.kind() {
+                SyntaxNodeKind::StructItem
+                | SyntaxNodeKind::TypeAliasItem
+                | SyntaxNodeKind::ImportItem => {
+                    // Allowed
+                }
+                SyntaxNodeKind::FunctionItem => {
+                    // Allowed only if it does not have a Block body
+                    if self
+                        .graph
+                        .syntax()
+                        .first_child_of_kind(current_item, SyntaxNodeKind::Block)
+                        .is_some()
+                    {
+                        self.report_proxy_module_invalid_item(current_item);
+                    }
+                }
+                SyntaxNodeKind::ExportItem => {
+                    // In case of empty export or double export
+                }
+                _ => {
+                    self.report_proxy_module_invalid_item(current_item);
+                }
+            }
         }
     }
 }

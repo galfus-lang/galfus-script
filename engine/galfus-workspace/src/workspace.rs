@@ -21,7 +21,7 @@ use galfus_frontend::modules::{
     FrontendModuleKind, FrontendRoots, FrontendSession, FrontendSnapshot, FrontendSource,
     FrontendUpdate, SemanticRoot, SemanticRootKind,
 };
-use galfus_frontend::{PrimitiveType, SymbolKind, TypeKind, TypeTable};
+use galfus_frontend::{PrimitiveType, ResolutionLayer, SymbolKind, TypeKind, TypeTable};
 use galfus_runtime::{Execution, Runtime, RuntimeError, format_panic};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -496,15 +496,29 @@ impl Workspace {
                 else {
                     continue;
                 };
+                let proxy_name = module
+                    .path()
+                    .as_str()
+                    .strip_suffix(".gfp")
+                    .unwrap_or(module.path().as_str());
                 let parameter_types = function_type
                     .parameters()
                     .iter()
                     .map(|parameter| {
-                        Self::boundary_type(type_result.layer().table(), parameter.ty())
+                        Self::boundary_type(
+                            type_result.layer().table(),
+                            resolution,
+                            proxy_name,
+                            parameter.ty(),
+                        )
                     })
                     .collect::<Result<Vec<_>, _>>();
-                let return_type =
-                    Self::boundary_type(type_result.layer().table(), function_type.return_type());
+                let return_type = Self::boundary_type(
+                    type_result.layer().table(),
+                    resolution,
+                    proxy_name,
+                    function_type.return_type(),
+                );
                 match parameter_types
                     .and_then(|parameters| return_type.map(|return_type| (parameters, return_type)))
                 {
@@ -529,7 +543,12 @@ impl Workspace {
         }
     }
 
-    fn boundary_type(table: &TypeTable, ty: TypeId) -> Result<BoundaryType, String> {
+    fn boundary_type(
+        table: &TypeTable,
+        resolution: &ResolutionLayer,
+        proxy_name: &str,
+        ty: TypeId,
+    ) -> Result<BoundaryType, String> {
         match table.kind(ty) {
             Some(TypeKind::Primitive(primitive)) => match primitive {
                 PrimitiveType::Null => Ok(BoundaryType::Null),
@@ -548,17 +567,27 @@ impl Workspace {
                     Err("f16 is not supported by the boundary ABI".to_string())
                 }
             },
+            Some(TypeKind::Named { symbol }) => {
+                if let Some(symbol_data) = resolution.symbol(*symbol) {
+                    if symbol_data.kind() == SymbolKind::Struct {
+                        return Ok(BoundaryType::Handle {
+                            kind: format!("{}::{}", proxy_name, symbol_data.name()),
+                        });
+                    }
+                }
+                Err("named type is not supported by the boundary ABI".to_string())
+            }
             Some(TypeKind::Array { element }) => Ok(BoundaryType::Array(Box::new(
-                Self::boundary_type(table, *element)?,
+                Self::boundary_type(table, resolution, proxy_name, *element)?,
             ))),
             Some(TypeKind::Tuple { elements }) => elements
                 .iter()
-                .map(|element| Self::boundary_type(table, *element))
+                .map(|element| Self::boundary_type(table, resolution, proxy_name, *element))
                 .collect::<Result<Vec<_>, _>>()
                 .map(BoundaryType::Tuple),
             Some(TypeKind::Function(_)) => Ok(BoundaryType::Function),
             Some(TypeKind::GenericInstance { arguments, .. }) if arguments.len() == 1 => {
-                Self::boundary_type(table, arguments[0])
+                Self::boundary_type(table, resolution, proxy_name, arguments[0])
             }
             Some(TypeKind::Union { members }) => {
                 let non_null = members
@@ -572,7 +601,12 @@ impl Workspace {
                     .copied()
                     .collect::<Vec<_>>();
                 if non_null.len() == 1 && non_null.len() + 1 == members.len() {
-                    Self::boundary_type(table, non_null[0])
+                    Ok(BoundaryType::Nullable(Box::new(Self::boundary_type(
+                        table,
+                        resolution,
+                        proxy_name,
+                        non_null[0],
+                    )?)))
                 } else {
                     Err("only nullable unions are supported by the boundary ABI".to_string())
                 }

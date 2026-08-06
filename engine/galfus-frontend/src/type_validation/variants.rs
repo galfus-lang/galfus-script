@@ -31,7 +31,23 @@ impl<'a> DeclarationTypeChecker<'a> {
                 let target_type = self.infer_expression_type(target);
                 let target_type = target_type?;
                 let member_name = self.node_text(member);
-                self.member_type_for_target_type(target_type, member_name.as_str())
+                let ty = self.member_type_for_target_type(target_type, member_name.as_str());
+                if let Some(ty) = ty {
+                    if let Some(TypeKind::Named { symbol }) = self.layer.table().kind(ty) {
+                        let resolution = self.graph.resolution()?;
+                        if let Some(symbol_data) = resolution.symbol(*symbol) {
+                            if symbol_data.kind() == SymbolKind::Struct
+                                && self.is_opaque_struct_handle(*symbol)
+                            {
+                                self.report_opaque_handle_not_exportable_as_value(node);
+                                let error = self.layer.table_mut().error();
+                                self.layer.bind_node_type(node, error);
+                                return Some(error);
+                            }
+                        }
+                    }
+                }
+                ty
             }
         }
     }

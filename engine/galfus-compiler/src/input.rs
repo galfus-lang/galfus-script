@@ -59,15 +59,15 @@ impl CompiledModule {
         &self.graph
     }
 
+    pub fn is_adapter_proxy(&self) -> bool {
+        self.is_adapter_proxy
+    }
+
     pub fn type_result(&self) -> Option<&TypeCheckResult> {
         self.type_result.as_ref()
     }
 
     pub fn type_result_mut(&mut self) -> Option<&mut TypeCheckResult> {
         self.type_result.as_mut()
-    }
-
-    pub fn is_adapter_proxy(&self) -> bool {
-        self.is_adapter_proxy
     }
 }

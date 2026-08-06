@@ -332,12 +332,27 @@ fn compile_single_module(
         .type_result()
         .ok_or_else(|| anyhow::anyhow!("Missing type result for {}", module.path().as_str()))?;
 
+    let proxy_name = if module.is_adapter_proxy() {
+        Some(
+            module
+                .path()
+                .as_str()
+                .strip_suffix(".gfp")
+                .unwrap_or(module.path().as_str())
+                .to_string(),
+        )
+    } else {
+        None
+    };
+
     let mut ctx = crate::bytecode_emission::LowerCtx::new(
         type_res,
         module.graph(),
         module.source().text(),
         &mir_mod.constant_pool,
         string_table,
+        module.is_adapter_proxy(),
+        proxy_name,
     );
 
     // Register local functions in ctx.
