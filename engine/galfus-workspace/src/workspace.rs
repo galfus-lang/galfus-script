@@ -21,7 +21,7 @@ use galfus_frontend::modules::{
     FrontendModuleKind, FrontendRoots, FrontendSession, FrontendSnapshot, FrontendSource,
     FrontendUpdate, SemanticRoot, SemanticRootKind,
 };
-use galfus_frontend::{PrimitiveType, SymbolKind, TypeKind, TypeTable};
+use galfus_frontend::{PrimitiveType, ResolutionLayer, SymbolKind, TypeKind, TypeTable};
 use galfus_runtime::{Execution, Runtime, RuntimeError, format_panic};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -500,11 +500,14 @@ impl Workspace {
                     .parameters()
                     .iter()
                     .map(|parameter| {
-                        Self::boundary_type(type_result.layer().table(), parameter.ty())
+                        Self::boundary_type(type_result.layer().table(), resolution, parameter.ty())
                     })
                     .collect::<Result<Vec<_>, _>>();
-                let return_type =
-                    Self::boundary_type(type_result.layer().table(), function_type.return_type());
+                let return_type = Self::boundary_type(
+                    type_result.layer().table(),
+                    resolution,
+                    function_type.return_type(),
+                );
                 match parameter_types
                     .and_then(|parameters| return_type.map(|return_type| (parameters, return_type)))
                 {
@@ -529,7 +532,11 @@ impl Workspace {
         }
     }
 
-    fn boundary_type(table: &TypeTable, ty: TypeId) -> Result<BoundaryType, String> {
+    fn boundary_type(
+        table: &TypeTable,
+        resolution: &ResolutionLayer,
+        ty: TypeId,
+    ) -> Result<BoundaryType, String> {
         match table.kind(ty) {
             Some(TypeKind::Primitive(primitive)) => match primitive {
                 PrimitiveType::Null => Ok(BoundaryType::Null),
@@ -548,17 +555,27 @@ impl Workspace {
                     Err("f16 is not supported by the boundary ABI".to_string())
                 }
             },
+            Some(TypeKind::Named { symbol }) => {
+                if let Some(symbol_data) = resolution.symbol(*symbol) {
+                    if symbol_data.kind() == SymbolKind::Struct {
+                        return Ok(BoundaryType::Handle {
+                            kind: symbol_data.name().to_string(),
+                        });
+                    }
+                }
+                Err("named type is not supported by the boundary ABI".to_string())
+            }
             Some(TypeKind::Array { element }) => Ok(BoundaryType::Array(Box::new(
-                Self::boundary_type(table, *element)?,
+                Self::boundary_type(table, resolution, *element)?,
             ))),
             Some(TypeKind::Tuple { elements }) => elements
                 .iter()
-                .map(|element| Self::boundary_type(table, *element))
+                .map(|element| Self::boundary_type(table, resolution, *element))
                 .collect::<Result<Vec<_>, _>>()
                 .map(BoundaryType::Tuple),
             Some(TypeKind::Function(_)) => Ok(BoundaryType::Function),
             Some(TypeKind::GenericInstance { arguments, .. }) if arguments.len() == 1 => {
-                Self::boundary_type(table, arguments[0])
+                Self::boundary_type(table, resolution, arguments[0])
             }
             Some(TypeKind::Union { members }) => {
                 let non_null = members
@@ -574,6 +591,7 @@ impl Workspace {
                 if non_null.len() == 1 && non_null.len() + 1 == members.len() {
                     Ok(BoundaryType::Nullable(Box::new(Self::boundary_type(
                         table,
+                        resolution,
                         non_null[0],
                     )?)))
                 } else {

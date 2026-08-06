@@ -338,6 +338,7 @@ fn compile_single_module(
         module.source().text(),
         &mir_mod.constant_pool,
         string_table,
+        module.is_adapter_proxy(),
     );
 
     // Register local functions in ctx.

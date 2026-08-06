@@ -29,6 +29,15 @@ impl<'a> DeclarationTypeChecker<'a> {
             return Some(error);
         };
 
+        if self.is_opaque_struct_handle(struct_symbol) {
+            self.report_opaque_handle_not_instantiable(target);
+
+            let error = self.layer.table_mut().error();
+            self.layer.bind_node_type(node, error);
+
+            return Some(error);
+        }
+
         let ty =
             self.check_struct_literal_fields(node, fields, struct_symbol, target_type, struct_name);
 
@@ -131,6 +140,29 @@ impl<'a> DeclarationTypeChecker<'a> {
         } else {
             target_type
         }
+    }
+
+    pub(super) fn is_opaque_struct_handle(&self, struct_symbol: SymbolId) -> bool {
+        let Some(resolution) = self.graph.resolution() else {
+            return false;
+        };
+
+        let fields = self.direct_struct_fields(struct_symbol);
+        if !fields.is_empty() {
+            return false;
+        }
+
+        if let Some(import_id) = resolution.import_for_symbol(struct_symbol) {
+            if let Some(import_record) = resolution.import(import_id) {
+                if import_record.source().ends_with(".gfp") {
+                    return true;
+                }
+            }
+        } else if self.source.name().ends_with(".gfp") {
+            return true;
+        }
+
+        false
     }
 
     pub(super) fn struct_literal_target(

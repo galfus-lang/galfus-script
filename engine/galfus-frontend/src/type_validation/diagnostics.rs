@@ -452,6 +452,21 @@ impl<'a> DeclarationTypeChecker<'a> {
         ));
     }
 
+    pub(super) fn report_opaque_handle_not_instantiable(&mut self, target: NodeId) {
+        let span = self
+            .graph
+            .syntax()
+            .node(target)
+            .map(|node| node.span())
+            .unwrap_or_else(|| self.source.span());
+
+        self.diagnostics.push(Diagnostic::error_with_message(
+            TypeDiagnosticCode::OpaqueHandleNotInstantiable,
+            "opaque handles cannot be instantiated".to_string(),
+            span,
+        ));
+    }
+
     pub(super) fn report_choice_payload_required(&mut self, target: NodeId, variant_name: &str) {
         let span = self
             .graph

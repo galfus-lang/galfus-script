@@ -20,6 +20,7 @@ pub fn lower_module(
         source_text,
         &mir_module.constant_pool,
         string_table,
+        false,
     );
 
     for (i, func) in mir_module.functions.iter().enumerate() {
