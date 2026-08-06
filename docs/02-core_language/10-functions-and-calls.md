@@ -1,4 +1,4 @@
-Previous: [Mutation, Assignment and Ownership](./09-mutation-assignment-and-ownership.md) | Index: [Galfus Core System](./00-index.md) | Next: [Control Flow](./11-control-flow.md)
+Previous: [Mutation, Assignment and Ownership](./09-mutation-assignment-and-ownership.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Control Flow](./11-control-flow.md)
 
 ---
 
@@ -325,4 +325,4 @@ The checker MUST:
 
 ---
 
-Previous: [Mutation, Assignment and Ownership](./09-mutation-assignment-and-ownership.md) | Index: [Galfus Core System](./00-index.md) | Next: [Control Flow](./11-control-flow.md)
+Previous: [Mutation, Assignment and Ownership](./09-mutation-assignment-and-ownership.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Control Flow](./11-control-flow.md)

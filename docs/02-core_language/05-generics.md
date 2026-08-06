@@ -1,4 +1,4 @@
-Previous: [Type System, Inference and Propagation](./04-type-system-inference-and-propagation.md) | Index: [Galfus Core System](./00-index.md) | Next: [Constraints as Traits](./06-constraints-as-traits.md)
+Previous: [Type System, Inference and Propagation](./04-type-system-inference-and-propagation.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Constraints as Traits](./06-constraints-as-traits.md)
 
 ---
 
@@ -282,4 +282,4 @@ The compiler MUST:
 
 ---
 
-Previous: [Type System, Inference and Propagation](./04-type-system-inference-and-propagation.md) | Index: [Galfus Core System](./00-index.md) | Next: [Constraints as Traits](./06-constraints-as-traits.md)
+Previous: [Type System, Inference and Propagation](./04-type-system-inference-and-propagation.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Constraints as Traits](./06-constraints-as-traits.md)

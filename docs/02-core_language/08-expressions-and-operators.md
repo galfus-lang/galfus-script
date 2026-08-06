@@ -1,4 +1,4 @@
-Previous: [Data Forms](./07-data-forms.md) | Index: [Galfus Core System](./00-index.md) | Next: [Mutation, Assignment and Ownership](./09-mutation-assignment-and-ownership.md)
+Previous: [Data Forms](./07-data-forms.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Mutation, Assignment and Ownership](./09-mutation-assignment-and-ownership.md)
 
 ---
 
@@ -349,4 +349,4 @@ The parser/checker MUST:
 
 ---
 
-Previous: [Data Forms](./07-data-forms.md) | Index: [Galfus Core System](./00-index.md) | Next: [Mutation, Assignment and Ownership](./09-mutation-assignment-and-ownership.md)
+Previous: [Data Forms](./07-data-forms.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Mutation, Assignment and Ownership](./09-mutation-assignment-and-ownership.md)

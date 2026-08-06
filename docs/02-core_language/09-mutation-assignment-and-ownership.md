@@ -1,4 +1,4 @@
-Previous: [Expressions and Operators](./08-expressions-and-operators.md) | Index: [Galfus Core System](./00-index.md) | Next: [Functions and Calls](./10-functions-and-calls.md)
+Previous: [Expressions and Operators](./08-expressions-and-operators.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Functions and Calls](./10-functions-and-calls.md)
 
 ---
 
@@ -315,4 +315,4 @@ The checker/lowering MUST:
 
 ---
 
-Previous: [Expressions and Operators](./08-expressions-and-operators.md) | Index: [Galfus Core System](./00-index.md) | Next: [Functions and Calls](./10-functions-and-calls.md)
+Previous: [Expressions and Operators](./08-expressions-and-operators.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Functions and Calls](./10-functions-and-calls.md)

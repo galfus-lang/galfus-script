@@ -1,4 +1,4 @@
-Previous: [Control Flow](./11-control-flow.md) | Index: [Galfus Core System](./00-index.md) | Next: [Pattern Matching and Narrowing](./13-pattern-matching-and-narrowing.md)
+Previous: [Control Flow](./11-control-flow.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Pattern Matching and Narrowing](./13-pattern-matching-and-narrowing.md)
 
 ---
 
@@ -333,4 +333,4 @@ The checker/lowering MUST:
 
 ---
 
-Previous: [Control Flow](./11-control-flow.md) | Index: [Galfus Core System](./00-index.md) | Next: [Pattern Matching and Narrowing](./13-pattern-matching-and-narrowing.md)
+Previous: [Control Flow](./11-control-flow.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Pattern Matching and Narrowing](./13-pattern-matching-and-narrowing.md)

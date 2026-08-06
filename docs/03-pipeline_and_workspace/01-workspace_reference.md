@@ -3,8 +3,8 @@
 > **Status: Historical design.** This document preserves a broader workspace,
 > bundle, adapter, and distribution proposal. Those facilities are not part of
 > the implemented architecture. For the current contract, see
-> [Galfus Architecture Reference](./Galfus_Architecture_Reference.md) and
-> [Galfus Pipeline Boundaries](./Galfus_Pipeline_Boundaries.md).
+> [Galfus Architecture Reference](../01-introduction/02-architecture_overview.md) and
+> [Galfus Pipeline Boundaries](./02-pipeline_boundaries.md).
 
 This document defines the Galfus workspace and project model.
 
@@ -750,7 +750,7 @@ Builtins are modules provided by the Galfus distribution. They are not mandatory
 - **`std/*` (Thin Target Standard Surface)**: Low-level modules (such as `std/io`, `std/fs`, `std/net`, `std/time`, `std/env`, `std/random`, and `std/process`) that interface directly with host capabilities. Access is restricted under a closed sandbox by default.
 - **Rich Utility Modules**: Target-agnostic modules (such as `text`, `format`, `json`, `regex`, `math`, `path`, `http`, `collections`, and `crypto`) that compile to target-agnostic instructions or wrap low-level `std/*` calls.
 
-Detailed specifications for builtins are documented in [Galfus Builtins Reference](Galfus_Builtins_Reference.md).
+Detailed specifications for builtins are documented in [Galfus Builtins Reference](../05-adapters_and_builtins/01-builtins_reference.md).
 
 Builtin modules are included only if used/reached, or if an explicit target/policy requires them.
 

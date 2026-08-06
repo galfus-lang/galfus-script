@@ -1,4 +1,4 @@
-Previous: [Pattern Matching and Narrowing](./13-pattern-matching-and-narrowing.md) | Index: [Galfus Core System](./00-index.md) | Next: [Lowering and Runtime Semantics](./15-lowering-and-runtime-semantics.md)
+Previous: [Pattern Matching and Narrowing](./13-pattern-matching-and-narrowing.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Lowering and Runtime Semantics](./15-lowering-and-runtime-semantics.md)
 
 ---
 
@@ -329,4 +329,4 @@ The checker/lowering MUST:
 
 ---
 
-Previous: [Pattern Matching and Narrowing](./13-pattern-matching-and-narrowing.md) | Index: [Galfus Core System](./00-index.md) | Next: [Lowering and Runtime Semantics](./15-lowering-and-runtime-semantics.md)
+Previous: [Pattern Matching and Narrowing](./13-pattern-matching-and-narrowing.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Lowering and Runtime Semantics](./15-lowering-and-runtime-semantics.md)

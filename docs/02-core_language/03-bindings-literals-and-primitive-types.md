@@ -1,4 +1,4 @@
-Previous: [Source, Names and Modules](./02-source-names-and-modules.md) | Index: [Galfus Core System](./00-index.md) | Next: [Type System, Inference and Propagation](./04-type-system-inference-and-propagation.md)
+Previous: [Source, Names and Modules](./02-source-names-and-modules.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Type System, Inference and Propagation](./04-type-system-inference-and-propagation.md)
 
 ---
 
@@ -272,4 +272,4 @@ The checker MUST:
 
 ---
 
-Previous: [Source, Names and Modules](./02-source-names-and-modules.md) | Index: [Galfus Core System](./00-index.md) | Next: [Type System, Inference and Propagation](./04-type-system-inference-and-propagation.md)
+Previous: [Source, Names and Modules](./02-source-names-and-modules.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Type System, Inference and Propagation](./04-type-system-inference-and-propagation.md)

@@ -1,4 +1,4 @@
-Previous: [Generics](./05-generics.md) | Index: [Galfus Core System](./00-index.md) | Next: [Data Forms](./07-data-forms.md)
+Previous: [Generics](./05-generics.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Data Forms](./07-data-forms.md)
 
 ---
 
@@ -226,4 +226,4 @@ The checker MUST:
 
 ---
 
-Previous: [Generics](./05-generics.md) | Index: [Galfus Core System](./00-index.md) | Next: [Data Forms](./07-data-forms.md)
+Previous: [Generics](./05-generics.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Data Forms](./07-data-forms.md)

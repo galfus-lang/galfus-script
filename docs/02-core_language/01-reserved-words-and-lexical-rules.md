@@ -1,4 +1,4 @@
-Previous: [Galfus Core System](./00-index.md) | Index: [Galfus Core System](./00-index.md) | Next: [Source, Names and Modules](./02-source-names-and-modules.md)
+Previous: [Galfus Core System](./00-intro.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Source, Names and Modules](./02-source-names-and-modules.md)
 
 ---
 
@@ -296,4 +296,4 @@ The lexer and parser MUST:
 
 ---
 
-Previous: [Galfus Core System](./00-index.md) | Index: [Galfus Core System](./00-index.md) | Next: [Source, Names and Modules](./02-source-names-and-modules.md)
+Previous: [Galfus Core System](./00-intro.md) | Index: [Galfus Core System](./00-intro.md) | Next: [Source, Names and Modules](./02-source-names-and-modules.md)

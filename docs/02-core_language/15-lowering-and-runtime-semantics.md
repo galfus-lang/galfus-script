@@ -1,4 +1,4 @@
-Previous: [Decorators and Keyword Metadata](./14-decorators-and-keyword-metadata.md) | Index: [Galfus Core System](./00-index.md)
+Previous: [Decorators and Keyword Metadata](./14-decorators-and-keyword-metadata.md) | Index: [Galfus Core System](./00-intro.md)
 
 ---
 
@@ -468,4 +468,4 @@ Lowering MUST:
 
 ---
 
-Previous: [Decorators and Keyword Metadata](./14-decorators-and-keyword-metadata.md) | Index: [Galfus Core System](./00-index.md)
+Previous: [Decorators and Keyword Metadata](./14-decorators-and-keyword-metadata.md) | Index: [Galfus Core System](./00-intro.md)
