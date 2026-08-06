@@ -21,6 +21,7 @@ pub struct LowerCtx<'a> {
     pub source_text: &'a str,
     pub string_table: &'a galfus_frontend::StringTable,
     pub is_adapter_proxy: bool,
+    pub proxy_name: Option<String>,
     pub types: Vec<BytecodeType>,
     pub struct_layouts: Vec<StructLayout>,
     pub choice_layouts: Vec<ChoiceLayout>,
@@ -45,6 +46,7 @@ impl<'a> LowerCtx<'a> {
         mir_constants: &'a [MirConstant],
         string_table: &'a galfus_frontend::StringTable,
         is_adapter_proxy: bool,
+        proxy_name: Option<String>,
     ) -> Self {
         Self {
             type_result,
@@ -52,6 +54,7 @@ impl<'a> LowerCtx<'a> {
             source_text,
             string_table,
             is_adapter_proxy,
+            proxy_name,
             types: Vec::new(),
             struct_layouts: Vec::new(),
             choice_layouts: Vec::new(),

@@ -496,16 +496,18 @@ impl Workspace {
                 else {
                     continue;
                 };
+                let proxy_name = module.path().as_str().strip_suffix(".gfp").unwrap_or(module.path().as_str());
                 let parameter_types = function_type
                     .parameters()
                     .iter()
                     .map(|parameter| {
-                        Self::boundary_type(type_result.layer().table(), resolution, parameter.ty())
+                        Self::boundary_type(type_result.layer().table(), resolution, proxy_name, parameter.ty())
                     })
                     .collect::<Result<Vec<_>, _>>();
                 let return_type = Self::boundary_type(
                     type_result.layer().table(),
                     resolution,
+                    proxy_name,
                     function_type.return_type(),
                 );
                 match parameter_types
@@ -535,6 +537,7 @@ impl Workspace {
     fn boundary_type(
         table: &TypeTable,
         resolution: &ResolutionLayer,
+        proxy_name: &str,
         ty: TypeId,
     ) -> Result<BoundaryType, String> {
         match table.kind(ty) {
@@ -559,23 +562,23 @@ impl Workspace {
                 if let Some(symbol_data) = resolution.symbol(*symbol) {
                     if symbol_data.kind() == SymbolKind::Struct {
                         return Ok(BoundaryType::Handle {
-                            kind: symbol_data.name().to_string(),
+                            kind: format!("{}::{}", proxy_name, symbol_data.name()),
                         });
                     }
                 }
                 Err("named type is not supported by the boundary ABI".to_string())
             }
             Some(TypeKind::Array { element }) => Ok(BoundaryType::Array(Box::new(
-                Self::boundary_type(table, resolution, *element)?,
+                Self::boundary_type(table, resolution, proxy_name, *element)?,
             ))),
             Some(TypeKind::Tuple { elements }) => elements
                 .iter()
-                .map(|element| Self::boundary_type(table, resolution, *element))
+                .map(|element| Self::boundary_type(table, resolution, proxy_name, *element))
                 .collect::<Result<Vec<_>, _>>()
                 .map(BoundaryType::Tuple),
             Some(TypeKind::Function(_)) => Ok(BoundaryType::Function),
             Some(TypeKind::GenericInstance { arguments, .. }) if arguments.len() == 1 => {
-                Self::boundary_type(table, resolution, arguments[0])
+                Self::boundary_type(table, resolution, proxy_name, arguments[0])
             }
             Some(TypeKind::Union { members }) => {
                 let non_null = members
@@ -592,6 +595,7 @@ impl Workspace {
                     Ok(BoundaryType::Nullable(Box::new(Self::boundary_type(
                         table,
                         resolution,
+                        proxy_name,
                         non_null[0],
                     )?)))
                 } else {

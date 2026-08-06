@@ -52,7 +52,8 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: TypeId) -> TypeIdx {
                 Some(SymbolKind::Struct) => {
                     if ctx.is_adapter_proxy {
                         let name = resolution.symbol(*symbol).unwrap().name().to_string();
-                        BytecodeType::AdapterHandle(name)
+                        let proxy_name = ctx.proxy_name.as_ref().unwrap();
+                        BytecodeType::AdapterHandle(format!("{}::{}", proxy_name, name))
                     } else {
                         let layout_idx = get_or_create_struct_layout(ctx, *symbol);
                         BytecodeType::Struct(layout_idx)
