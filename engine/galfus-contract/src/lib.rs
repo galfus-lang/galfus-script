@@ -9,15 +9,17 @@ pub mod builtins;
 #[cfg(test)]
 mod tests;
 pub mod thread;
+pub mod version;
 
 use std::collections::HashMap;
 use std::sync;
 
 pub use builtins::*;
 pub use thread::*;
+pub use version::*;
 
 /// A typed value that crosses the execution boundary safely.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub enum BoundaryType {
     Null,
     Bool,
@@ -363,6 +365,118 @@ impl Providers {
 
 pub type AdapterConfig = std::collections::BTreeMap<String, AdapterConfigValue>;
 
+/// SHA-256 digest used to identify immutable package and adapter content.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct ContentHash([u8; 32]);
+
+impl ContentHash {
+    pub fn of(content: &[u8]) -> Self {
+        use sha2::{Digest, Sha256};
+
+        Self(Sha256::digest(content).into())
+    }
+
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for ContentHash {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for byte in self.0 {
+            write!(formatter, "{byte:02x}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Opaque execution target identity shared by a package and its execution host.
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct ExecutionTarget(String);
+
+impl ExecutionTarget {
+    pub fn new(value: impl Into<String>) -> Option<Self> {
+        let value = value.into();
+        (!value.trim().is_empty()).then_some(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+/// One adapter-defined artifact candidate for an execution target.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AdapterTarget {
+    pub target: ExecutionTarget,
+    pub locator: String,
+    pub platform: String,
+    pub abi: String,
+    pub artifact: AdapterArtifact,
+}
+
+/// Immutable artifact metadata declared by an adapter target.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AdapterArtifact {
+    pub content_hash: ContentHash,
+    pub size_bytes: u64,
+    pub media_type: String,
+    pub content_version: galfus_core::Version,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum AdapterArtifactIntegrityError {
+    #[error("adapter artifact size is {actual} bytes, expected {expected}")]
+    SizeMismatch { expected: u64, actual: u64 },
+    #[error("adapter artifact content hash is {actual}, expected {expected}")]
+    HashMismatch {
+        expected: ContentHash,
+        actual: ContentHash,
+    },
+}
+
+impl AdapterArtifact {
+    pub fn verify(
+        &self,
+        content: Vec<u8>,
+    ) -> Result<VerifiedAdapterArtifact, AdapterArtifactIntegrityError> {
+        let actual_size = content.len() as u64;
+        if actual_size != self.size_bytes {
+            return Err(AdapterArtifactIntegrityError::SizeMismatch {
+                expected: self.size_bytes,
+                actual: actual_size,
+            });
+        }
+
+        let actual_hash = ContentHash::of(&content);
+        if actual_hash != self.content_hash {
+            return Err(AdapterArtifactIntegrityError::HashMismatch {
+                expected: self.content_hash,
+                actual: actual_hash,
+            });
+        }
+
+        Ok(VerifiedAdapterArtifact { content })
+    }
+}
+
+/// Artifact bytes verified against the immutable metadata in a package image.
+pub struct VerifiedAdapterArtifact {
+    content: Vec<u8>,
+}
+
+impl VerifiedAdapterArtifact {
+    pub fn as_bytes(&self) -> &[u8] {
+        self.content.as_slice()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum AdapterConfigValue {
@@ -379,7 +493,29 @@ pub enum AdapterConfigValue {
 pub struct AdapterModuleDescriptor {
     pub adapter: String,
     pub config: AdapterConfig,
+    pub targets: Vec<AdapterTarget>,
     pub exports: Vec<AdapterFunctionSignature>,
+}
+
+impl AdapterModuleDescriptor {
+    /// Orders schema exports so equivalent adapter declarations have one package representation.
+    pub fn canonicalize(&mut self) {
+        self.exports.sort();
+        self.targets.sort_by(|left, right| {
+            (
+                left.target.as_str(),
+                left.platform.as_str(),
+                left.abi.as_str(),
+                left.locator.as_str(),
+            )
+                .cmp(&(
+                    right.target.as_str(),
+                    right.platform.as_str(),
+                    right.abi.as_str(),
+                    right.locator.as_str(),
+                ))
+        });
+    }
 }
 
 /// A declarative external-module dependency produced during compilation.
@@ -387,9 +523,25 @@ pub struct AdapterModuleDescriptor {
 pub struct AdapterModuleRequirement {
     pub proxy_module: String,
     pub descriptor: AdapterModuleDescriptor,
+    pub boundary_abi: BoundaryAbiVersion,
 }
 
+/// The target and locator selected by preflight for one adapter proxy module.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SelectedAdapterTarget {
+    pub proxy_module: String,
+    pub target: AdapterTarget,
+    pub boundary_abi: BoundaryAbiVersion,
+}
+
+/// A provider schema required by a package image.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProviderModuleRequirement {
+    pub module_path: String,
+    pub schema_fingerprint: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct AdapterFunctionSignature {
     pub name: String,
     pub is_async: bool,
@@ -428,14 +580,24 @@ pub trait AdapterSchema: Send + Sync {
 }
 
 pub struct AdapterLoadContext {
+    pub target: ExecutionTarget,
     pub properties: std::collections::BTreeMap<String, String>,
 }
 
 /// Optional package-time loader. Runtime receives only [`AdapterBindings`].
 pub trait AdapterModuleLoader: Send + Sync {
+    /// Resolves the selected artifact. Preflight verifies the returned bytes before binding.
+    fn load_artifact(
+        &self,
+        selected_target: &SelectedAdapterTarget,
+        context: &AdapterLoadContext,
+    ) -> Result<Vec<u8>, AdapterLoadError>;
+
     fn load_module(
         &self,
         requirement: &AdapterModuleRequirement,
+        selected_target: &SelectedAdapterTarget,
+        artifact: VerifiedAdapterArtifact,
         context: &AdapterLoadContext,
     ) -> Result<Box<dyn AdapterModuleBinding>, AdapterLoadError>;
 }

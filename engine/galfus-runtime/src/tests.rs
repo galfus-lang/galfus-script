@@ -7,9 +7,11 @@ use super::*;
 use galfus_bytecode::instruction::{ConstIdx, FuncIdx, GlobalIdx, Instruction, Reg, TypeIdx};
 use galfus_bytecode::{
     BytecodeFunction, BytecodeGraph, BytecodeModule, BytecodeNode, BytecodeType, Constant,
-    ConstantPool, ExportSlot, ImportEdge, ImportSlot,
+    ConstantPool, ExecutionMetadata, ExportSlot, ImportEdge, ImportSlot, PackageEntryPoint,
+    PackageImage,
 };
-use galfus_core::{ModuleId, ModulePath, SemanticRevision};
+use galfus_contract::ExecutionTarget;
+use galfus_core::{ModuleId, ModulePath, SemanticRevision, SourceId, Span};
 
 struct StartupProvider {
     calls: sync::Arc<sync::Mutex<Vec<String>>>,
@@ -17,6 +19,10 @@ struct StartupProvider {
         sync::Mutex<Option<(usize, u64, sync::Arc<dyn galfus_contract::MessageInjector>)>>,
     >,
     fail_initializer: bool,
+}
+
+fn target() -> ExecutionTarget {
+    ExecutionTarget::new("test").expect("valid target")
 }
 
 impl galfus_contract::HostProvider for StartupProvider {
@@ -159,42 +165,114 @@ fn startup_graph() -> (sync::Arc<BytecodeGraph>, ModuleId) {
     (sync::Arc::new(graph), module_id)
 }
 
+fn package_with_entry(
+    graph: sync::Arc<BytecodeGraph>,
+    module_id: ModuleId,
+) -> sync::Arc<PackageImage> {
+    let module_path = graph
+        .get(module_id)
+        .expect("entry module exists")
+        .path()
+        .clone();
+    sync::Arc::new(
+        PackageImage::try_new(
+            (*graph).clone(),
+            target(),
+            Some(PackageEntryPoint::new(module_path, "main")),
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("graph has no adapter proxies"),
+    )
+}
+
 fn start_with_provider(provider: StartupProvider) -> Execution {
     let (graph, module_id) = startup_graph();
     Runtime::new(
-        graph,
+        package_with_entry(graph, module_id),
         Some(galfus_contract::Providers::with_host(Box::new(provider))),
     )
-    .start(
-        module_id,
-        "main",
-        &[],
-        std::rc::Rc::new(CooperativeDriver::new()),
-    )
+    .start(&[], std::rc::Rc::new(CooperativeDriver::new()))
     .expect("startup execution is created")
 }
 
 #[test]
 fn runtime_rejects_an_unsupported_bytecode_format_before_loading_the_entry_module() {
-    let graph = BytecodeGraph::with_format_version(galfus_bytecode::BytecodeFormatVersion::new(1));
+    let graph =
+        BytecodeGraph::with_format_version(galfus_bytecode::BytecodeFormatVersion::new(1, 0, 0));
 
-    let result = Runtime::new(sync::Arc::new(graph), None).start(
-        ModuleId::new(1),
-        "main",
-        &[],
-        std::rc::Rc::new(CooperativeDriver::new()),
+    let package = sync::Arc::new(
+        PackageImage::try_new(graph, target(), None, Vec::new(), Vec::new())
+            .expect("graph has no adapter proxies"),
     );
+    let result = Runtime::new(package, None).start(&[], std::rc::Rc::new(CooperativeDriver::new()));
     let Err(error) = result else {
         panic!("unsupported bytecode must be rejected before runtime loading");
     };
 
     assert!(matches!(
         error,
-        RuntimeError::BytecodeFormat(galfus_bytecode::BytecodeFormatError::LegacyVersion {
+        RuntimeError::BytecodeFormat(galfus_bytecode::BytecodeFormatError {
             supported: galfus_bytecode::CURRENT_BYTECODE_FORMAT_VERSION,
             actual,
-        }) if actual == galfus_bytecode::BytecodeFormatVersion::new(1)
+        }) if actual == galfus_bytecode::BytecodeFormatVersion::new(1, 0, 0)
     ));
+}
+
+#[test]
+fn format_panic_uses_materialized_module_paths_and_locations() {
+    let module_id = ModuleId::new(7);
+    let mut metadata = ExecutionMetadata::default();
+    metadata.set_function_spans(
+        FuncIdx(0),
+        collections::HashMap::from([(0, Span::new(SourceId::new(99), 4, 8))]),
+    );
+    let graph = BytecodeGraph::from_modules(
+        SemanticRevision::new(0),
+        vec![BytecodeNode {
+            id: module_id,
+            path: ModulePath::new("src/main.gfs").expect("valid module path"),
+            semantic_revision: SemanticRevision::new(0),
+            module: BytecodeModule {
+                name: "main.gfs".to_string(),
+                global_count: 0,
+                constants: ConstantPool::default(),
+                functions: vec![BytecodeFunction {
+                    name: "main".to_string(),
+                    param_count: 0,
+                    local_count: 0,
+                    temp_count: 0,
+                    return_ty: TypeIdx(0),
+                    adapter_proxy_metadata: None,
+                    instructions: vec![Instruction::RetNull],
+                }],
+                types: vec![BytecodeType::Null],
+                struct_layouts: vec![],
+                choice_layouts: vec![],
+                imports: vec![],
+                exports: vec![],
+                init_func_idx: None,
+            },
+            metadata: Some(metadata),
+        }],
+        vec![],
+    )
+    .expect("test graph is valid");
+    let panic = galfus_vm::VmPanic {
+        error: galfus_vm::VmError::Panic {
+            message: "boom".to_string(),
+        },
+        stack_trace: vec![galfus_vm::StackFrameInfo {
+            module_id,
+            func_idx: FuncIdx(0),
+            instruction_offset: 0,
+        }],
+    };
+
+    let formatted = format_panic(&graph, &panic);
+
+    assert!(formatted.contains("src/main.gfs::main (at instruction 0 at src/main.gfs:4..8)"));
+    assert!(!formatted.contains("source#"));
 }
 
 #[test]
@@ -445,13 +523,26 @@ fn run_initializes_dependencies_before_the_entry_module() {
         queue: sync::Mutex::new(collections::VecDeque::new()),
     });
 
+    let package = sync::Arc::new(
+        PackageImage::try_new(
+            graph,
+            target(),
+            Some(PackageEntryPoint::new(
+                ModulePath::new("main.gfs").expect("valid module path"),
+                "main",
+            )),
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("graph has no adapter proxies"),
+    );
     let mut task = Runtime::new(
-        sync::Arc::new(graph.clone()),
+        package,
         Some(galfus_contract::Providers::with_host(Box::new(
             ImmediateProvider,
         ))),
     )
-    .start(entry_id, "main", &[], executor.clone())
+    .start(&[], executor.clone())
     .expect("entry execution succeeds");
 
     let exit_code = match task.run_to_completion() {

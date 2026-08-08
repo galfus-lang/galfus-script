@@ -37,7 +37,12 @@ fn load_workspace_reads_all_nested_source_files() {
     let mut workspace = load_workspace(workspace_root.as_path()).expect("loads workspace");
     assert!(workspace.check().is_valid);
     assert_eq!(
-        workspace.compile().expect("compiles workspace").graph.len(),
+        workspace
+            .compile()
+            .expect("compiles workspace")
+            .package
+            .graph()
+            .len(),
         2
     );
 

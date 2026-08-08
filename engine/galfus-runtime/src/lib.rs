@@ -26,6 +26,8 @@ pub use execution::{Execution, ExecutionHandle, ExecutionState};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
+    #[error("package has no configured entry point")]
+    MissingPackageEntry,
     #[error("module `{0}` is not loaded")]
     ModuleNotLoaded(String),
     #[error("entry function `{0}` is not exported by the entry module")]
@@ -85,20 +87,20 @@ impl EntryAbi {
     }
 }
 
-/// A single execution composed from one executable graph and optional host providers.
+/// A single execution composed from one package image and optional host providers.
 pub struct Runtime {
-    graph: sync::Arc<galfus_bytecode::BytecodeGraph>,
+    package: sync::Arc<galfus_bytecode::PackageImage>,
     providers: Option<sync::Arc<sync::Mutex<Providers>>>,
     adapter_bindings: Option<sync::Arc<sync::Mutex<AdapterBindings>>>,
 }
 
 impl Runtime {
     pub fn new(
-        graph: sync::Arc<galfus_bytecode::BytecodeGraph>,
+        package: sync::Arc<galfus_bytecode::PackageImage>,
         providers: Option<Providers>,
     ) -> Self {
         Self {
-            graph,
+            package,
             providers: providers.map(|p| sync::Arc::new(sync::Mutex::new(p))),
             adapter_bindings: None,
         }
@@ -109,19 +111,32 @@ impl Runtime {
         self
     }
 
-    /// Starts a persistent execution from an exported entry point.
+    /// Starts a persistent execution from the package entry point.
     pub fn start(
         self,
-        module_id: galfus_core::ModuleId,
-        entry_name: &str,
         args: &[Vec<u8>],
         driver: Rc<dyn galfus_contract::KernelDriver>,
     ) -> Result<Execution, RuntimeError> {
-        self.graph.validate_format()?;
+        self.package.graph().validate_format()?;
 
         let mut orchestrator = crate::orchestrator::Orchestrator::new();
-        let graph = self.graph.clone();
-        let image = &graph.get(module_id).unwrap().module;
+        let entry = self
+            .package
+            .entry_point()
+            .ok_or(RuntimeError::MissingPackageEntry)?;
+        let graph = sync::Arc::new(self.package.graph().clone());
+        let module_id = graph
+            .modules()
+            .find(|module| module.path() == entry.module_path())
+            .map(|module| module.id())
+            .ok_or_else(|| {
+                RuntimeError::ModuleNotLoaded(entry.module_path().as_str().to_string())
+            })?;
+        let entry_name = entry.function_name();
+        let image = &graph
+            .get(module_id)
+            .expect("entry module was resolved from the graph")
+            .module;
         let abi = EntryAbi::default_app();
         let entry_idx = image
             .exports
@@ -287,14 +302,16 @@ pub fn format_panic(graph: &galfus_bytecode::BytecodeGraph, panic: &VmPanic) -> 
             let location_str = module
                 .metadata
                 .as_ref()
-                .and_then(|metadata| metadata.span_for(frame.func_idx, frame.instruction_offset))
-                .map(|span| {
+                .and_then(|metadata| {
+                    metadata.location_for(frame.func_idx, frame.instruction_offset)
+                })
+                .map(|location| {
                     format!(
-                        "instruction {} at source#{}:{}..{}",
+                        "instruction {} at {}:{}..{}",
                         frame.instruction_offset,
-                        span.source_id().raw(),
-                        span.start(),
-                        span.end()
+                        module.path.as_str(),
+                        location.start(),
+                        location.end()
                     )
                 })
                 .unwrap_or_else(|| format!("instruction {}", frame.instruction_offset));

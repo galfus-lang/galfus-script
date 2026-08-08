@@ -10,11 +10,11 @@ use crate::state::{
     BytecodeState, CheckState, CompileBlocked, CompileState, RunBlocked, SemanticState,
     SourceState, WorkspaceError,
 };
-use galfus_bytecode::{BytecodeGraph, ImportEdge};
+use galfus_bytecode::{BytecodeGraph, ImportEdge, PackageEntryPoint, PackageImage};
 use galfus_compiler::{CompiledModule, gfp::parse_gfp_frontmatter};
 use galfus_contract::{
     AdapterFunctionSignature, AdapterModuleDescriptor, AdapterModuleRequirement, BoundaryType,
-    Providers,
+    CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget, ProviderModuleRequirement, Providers,
 };
 use galfus_core::{Diagnostic, DiagnosticBag, ModulePath, SourceFile, Span, TypeId};
 use galfus_frontend::modules::{
@@ -56,10 +56,8 @@ pub struct CheckReport<'a> {
 
 /// Result of a successful `compile()` call.
 pub struct CompileReport {
-    /// The compiled module graph, ready to be passed to the runtime.
-    pub graph: Arc<BytecodeGraph>,
-    /// Declarative external dependencies required to bind the graph at package time.
-    pub adapter_requirements: Vec<AdapterModuleRequirement>,
+    /// The immutable compiled package, ready to be delivered to a host.
+    pub package: Arc<PackageImage>,
 }
 
 impl Default for Workspace {
@@ -153,6 +151,7 @@ impl Workspace {
                 Some(AdapterModuleDescriptor {
                     adapter: frontmatter.adapter,
                     config: frontmatter.config,
+                    targets: frontmatter.targets,
                     exports: Vec::new(),
                 }),
             )
@@ -274,12 +273,12 @@ impl Workspace {
         // Mark compile stale when check is invalidated.
         if let CompileState::Ready {
             semantic_revision,
-            graph,
+            package,
         } = &self.bytecode_state.compile_state
         {
             self.bytecode_state.compile_state = CompileState::Stale {
                 semantic_revision: *semantic_revision,
-                graph: Arc::clone(graph),
+                package: Arc::clone(package),
             };
         }
     }
@@ -700,24 +699,21 @@ impl Workspace {
         // Skip recompilation if already up-to-date.
         if let CompileState::Ready {
             semantic_revision: compiled_rev,
-            graph,
+            package,
         } = &self.bytecode_state.compile_state
             && *compiled_rev == semantic_revision
         {
             return Ok(CompileReport {
-                graph: Arc::clone(graph),
-                adapter_requirements: self.adapter_requirements_for(graph),
+                package: Arc::clone(package),
             });
         }
 
         let cached_graph = match &self.bytecode_state.compile_state {
-            CompileState::Stale { graph, .. } => Some(graph),
+            CompileState::Stale { package, .. } => Some(package.graph()),
             _ => None,
         };
         let empty_graph = BytecodeGraph::new();
-        let base_graph = cached_graph
-            .map(|graph| graph.as_ref())
-            .unwrap_or(&empty_graph);
+        let base_graph = cached_graph.unwrap_or(&empty_graph);
 
         // The first compilation has no graph to upsert into, so it must emit
         // every semantic module even if the last frontend delta was narrower.
@@ -835,21 +831,39 @@ impl Workspace {
         )
         .map_err(|error| CompileBlocked::CompilerError(error.to_string()))?;
 
-        let graph = Arc::new(
-            base_graph
-                .apply(transaction)
-                .map_err(|error| CompileBlocked::CompilerError(error.to_string()))?,
+        let graph = base_graph
+            .apply(transaction)
+            .map_err(|error| CompileBlocked::CompilerError(error.to_string()))?;
+        let adapter_requirements = self.adapter_requirements_for(&graph);
+        let provider_requirements = self.provider_requirements_for(&graph);
+        let entry_point = self.config.as_ref().and_then(|config| {
+            config
+                .entry
+                .clone()
+                .map(|entry| PackageEntryPoint::new(entry, config.run_entry.clone()))
+        });
+        let package = Arc::new(
+            PackageImage::try_new(
+                graph,
+                self.config
+                    .as_ref()
+                    .map(WorkspaceConfig::execution_target)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        ExecutionTarget::new("default").expect("default target is valid")
+                    }),
+                entry_point,
+                adapter_requirements,
+                provider_requirements,
+            )
+            .map_err(|error| CompileBlocked::CompilerError(error.to_string()))?,
         );
         self.bytecode_state.compile_state = CompileState::Ready {
             semantic_revision,
-            graph: Arc::clone(&graph),
+            package: Arc::clone(&package),
         };
 
-        let adapter_requirements = self.adapter_requirements_for(&graph);
-        Ok(CompileReport {
-            graph,
-            adapter_requirements,
-        })
+        Ok(CompileReport { package })
     }
 
     fn adapter_requirements_for(&self, graph: &BytecodeGraph) -> Vec<AdapterModuleRequirement> {
@@ -862,11 +876,26 @@ impl Workspace {
                     .map(|descriptor| AdapterModuleRequirement {
                         proxy_module: module.path().as_str().to_string(),
                         descriptor,
+                        boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
                     })
             })
             .collect::<Vec<_>>();
         requirements.sort_by(|left, right| left.proxy_module.cmp(&right.proxy_module));
         requirements
+    }
+
+    fn provider_requirements_for(&self, graph: &BytecodeGraph) -> Vec<ProviderModuleRequirement> {
+        graph
+            .modules()
+            .filter_map(|module| {
+                self.catalog
+                    .provider_schema_fingerprint(module.path().as_str())
+                    .map(|schema_fingerprint| ProviderModuleRequirement {
+                        module_path: module.path().as_str().to_string(),
+                        schema_fingerprint,
+                    })
+            })
+            .collect()
     }
 
     /// Starts the configured entry as a persistent execution.
@@ -876,31 +905,15 @@ impl Workspace {
         providers: Option<Providers>,
         driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
     ) -> Result<Execution, RunBlocked> {
-        let graph = match &self.bytecode_state.compile_state {
-            CompileState::Ready { graph, .. } => Arc::clone(graph),
+        let package = match &self.bytecode_state.compile_state {
+            CompileState::Ready { package, .. } => Arc::clone(package),
             _ => return Err(RunBlocked::CompileRequired),
         };
-        let entry_path = self
-            .config
-            .as_ref()
-            .and_then(|config| config.entry.as_ref())
-            .ok_or(RunBlocked::EntryModuleMissing)?;
-        let entry_id = graph
-            .modules()
-            .find(|image| image.path() == entry_path)
-            .map(|image| image.id())
-            .ok_or(RunBlocked::EntryModuleMissing)?;
-        let entry_name = self
-            .config
-            .as_ref()
-            .expect("a successful compile requires configuration")
-            .run_entry
-            .clone();
-        Runtime::new(graph.clone(), providers)
-            .start(entry_id, entry_name.as_str(), args, driver.clone())
+        Runtime::new(Arc::clone(&package), providers)
+            .start(args, driver.clone())
             .map_err(|error| {
                 if let RuntimeError::VmPanic(panic) = &error {
-                    RunBlocked::RuntimeError(format_panic(&graph, panic))
+                    RunBlocked::RuntimeError(format_panic(package.graph(), panic))
                 } else {
                     RunBlocked::RuntimeError(error.to_string())
                 }
@@ -914,32 +927,16 @@ impl Workspace {
         bindings: galfus_contract::AdapterBindings,
         driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
     ) -> Result<Execution, RunBlocked> {
-        let graph = match &self.bytecode_state.compile_state {
-            CompileState::Ready { graph, .. } => Arc::clone(graph),
+        let package = match &self.bytecode_state.compile_state {
+            CompileState::Ready { package, .. } => Arc::clone(package),
             _ => return Err(RunBlocked::CompileRequired),
         };
-        let entry_path = self
-            .config
-            .as_ref()
-            .and_then(|config| config.entry.as_ref())
-            .ok_or(RunBlocked::EntryModuleMissing)?;
-        let entry_id = graph
-            .modules()
-            .find(|image| image.path() == entry_path)
-            .map(|image| image.id())
-            .ok_or(RunBlocked::EntryModuleMissing)?;
-        let entry_name = self
-            .config
-            .as_ref()
-            .expect("a successful compile requires configuration")
-            .run_entry
-            .clone();
-        Runtime::new(graph.clone(), providers)
+        Runtime::new(Arc::clone(&package), providers)
             .with_adapter_bindings(bindings)
-            .start(entry_id, entry_name.as_str(), args, driver.clone())
+            .start(args, driver.clone())
             .map_err(|error| {
                 if let RuntimeError::VmPanic(panic) = &error {
-                    RunBlocked::RuntimeError(format_panic(&graph, panic))
+                    RunBlocked::RuntimeError(format_panic(package.graph(), panic))
                 } else {
                     RunBlocked::RuntimeError(error.to_string())
                 }

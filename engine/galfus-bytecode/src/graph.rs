@@ -9,20 +9,65 @@ use crate::{
     BytecodeFormatError, BytecodeFormatVersion, BytecodeModule, BytecodeValidationError,
     CURRENT_BYTECODE_FORMAT_VERSION, validate_bytecode_format, validate_bytecode_module,
 };
-use galfus_core::{ModuleId, ModulePath, SemanticRevision};
-use std::collections::{HashMap, HashSet};
+use galfus_core::{ModuleId, ModulePath, SemanticRevision, Span};
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+/// A source location materialized for a bytecode package.
+///
+/// The owning [`BytecodeNode`] carries the logical source path, so this type
+/// intentionally excludes frontend-only `SourceId` values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DebugLocation {
+    start: usize,
+    end: usize,
+}
+
+impl DebugLocation {
+    pub const fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
+
+    pub const fn start(self) -> usize {
+        self.start
+    }
+
+    pub const fn end(self) -> usize {
+        self.end
+    }
+}
+
+impl From<Span> for DebugLocation {
+    fn from(span: Span) -> Self {
+        Self::new(span.start(), span.end())
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct ExecutionMetadata {
-    pub spans: HashMap<instruction::FuncIdx, HashMap<usize, galfus_core::Span>>,
+    spans: BTreeMap<instruction::FuncIdx, BTreeMap<usize, DebugLocation>>,
 }
 
 impl ExecutionMetadata {
-    pub fn span_for(
+    /// Records locations emitted by the compiler before source-session state is discarded.
+    pub fn set_function_spans(
+        &mut self,
+        function: instruction::FuncIdx,
+        spans: HashMap<usize, Span>,
+    ) {
+        self.spans.insert(
+            function,
+            spans
+                .into_iter()
+                .map(|(offset, span)| (offset, DebugLocation::from(span)))
+                .collect(),
+        );
+    }
+
+    pub fn location_for(
         &self,
         function: instruction::FuncIdx,
         instruction_offset: usize,
-    ) -> Option<galfus_core::Span> {
+    ) -> Option<DebugLocation> {
         self.spans
             .get(&function)
             .and_then(|spans| spans.get(&instruction_offset))
@@ -31,12 +76,14 @@ impl ExecutionMetadata {
 }
 
 /// The compiled artifact for one source module.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct BytecodeNode {
     pub id: ModuleId,
     pub path: ModulePath,
+    #[serde(skip)]
     pub semantic_revision: SemanticRevision,
     pub module: BytecodeModule,
+    #[serde(skip)]
     pub metadata: Option<ExecutionMetadata>,
 }
 
@@ -59,7 +106,7 @@ impl BytecodeNode {
 }
 
 /// An edge where `from` imports a symbol from `to`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ImportEdge {
     pub from: ModuleId,
     pub to: ModuleId,
@@ -175,12 +222,14 @@ pub enum BytecodeGraphTransactionError {
 }
 
 /// The immutable executable graph published by a workspace.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct BytecodeGraph {
+    #[serde(skip)]
     version: u64,
     format_version: BytecodeFormatVersion,
-    pub(crate) modules: HashMap<ModuleId, BytecodeNode>,
-    pub(crate) ids_by_path: HashMap<ModulePath, ModuleId>,
+    pub(crate) modules: BTreeMap<ModuleId, BytecodeNode>,
+    #[serde(skip)]
+    pub(crate) ids_by_path: BTreeMap<ModulePath, ModuleId>,
     pub(crate) edges: Vec<ImportEdge>,
 }
 
@@ -210,7 +259,7 @@ impl BytecodeGraph {
 
     /// Verify that this graph can be interpreted by the current VM.
     pub fn validate_format(&self) -> Result<(), BytecodeFormatError> {
-        validate_bytecode_format(self.format_version)
+        validate_bytecode_format(self.format_version).map(|_| ())
     }
 
     /// Construct the first validated graph snapshot from complete module data.
@@ -402,6 +451,8 @@ impl BytecodeGraph {
             next.ids_by_path.insert(node.path.clone(), node.id);
         }
         next.edges = transaction.edges;
+        next.edges
+            .sort_by_key(|edge| (edge.from.raw(), edge.to.raw()));
         next.validate()?;
         next.version += 1;
         Ok(next)
@@ -529,8 +580,8 @@ impl Default for BytecodeGraph {
         Self {
             version: 0,
             format_version: CURRENT_BYTECODE_FORMAT_VERSION,
-            modules: HashMap::new(),
-            ids_by_path: HashMap::new(),
+            modules: BTreeMap::new(),
+            ids_by_path: BTreeMap::new(),
             edges: Vec::new(),
         }
     }

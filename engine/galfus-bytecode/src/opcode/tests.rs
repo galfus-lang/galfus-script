@@ -2,13 +2,13 @@ use super::*;
 use crate::{BytecodeFormatVersion, CURRENT_BYTECODE_FORMAT_VERSION};
 
 #[test]
-fn decoder_distinguishes_legacy_removed_and_unknown_input() {
+fn decoder_distinguishes_incompatible_removed_and_unknown_input() {
     assert_eq!(
-        decode_opcode(BytecodeFormatVersion::new(1), 0),
+        decode_opcode(BytecodeFormatVersion::new(1, 0, 0), 0),
         Err(BytecodeDecodeError::UnsupportedFormat(
-            BytecodeFormatError::LegacyVersion {
+            BytecodeFormatError {
                 supported: CURRENT_BYTECODE_FORMAT_VERSION,
-                actual: BytecodeFormatVersion::new(1),
+                actual: BytecodeFormatVersion::new(1, 0, 0),
             }
         ))
     );

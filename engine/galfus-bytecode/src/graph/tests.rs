@@ -2,8 +2,10 @@ use crate::ImportKind;
 use crate::instruction;
 
 use super::*;
-use crate::{BytecodeFunction, BytecodeModule, ConstantPool, ExportSlot, ImportSlot};
-use std::collections::HashMap;
+use crate::{
+    BytecodeFunction, BytecodeModule, ConstantPool, DebugLocation, ExportSlot, ImportSlot,
+};
+use std::collections::{BTreeMap, HashMap};
 
 fn compiled_module(id: ModuleId, revision: SemanticRevision) -> BytecodeNode {
     BytecodeNode {
@@ -78,7 +80,7 @@ fn apply_returns_a_new_validated_snapshot() {
 
 #[test]
 fn format_version_is_independent_from_graph_revision() {
-    let unsupported = BytecodeFormatVersion::new(1);
+    let unsupported = BytecodeFormatVersion::new(1, 0, 0);
     let graph = BytecodeGraph::with_format_version(unsupported);
     let next = graph
         .apply(transaction(
@@ -95,7 +97,7 @@ fn format_version_is_independent_from_graph_revision() {
     assert_eq!(next.format_version(), unsupported);
     assert_eq!(
         next.validate_format(),
-        Err(BytecodeFormatError::LegacyVersion {
+        Err(BytecodeFormatError {
             supported: CURRENT_BYTECODE_FORMAT_VERSION,
             actual: unsupported,
         })
@@ -390,15 +392,15 @@ fn validation_collects_all_errors_in_canonical_module_order() {
     let forward = BytecodeGraph {
         version: 0,
         format_version: CURRENT_BYTECODE_FORMAT_VERSION,
-        modules: HashMap::from([(first, first_node.clone()), (second, second_node.clone())]),
-        ids_by_path: HashMap::new(),
+        modules: BTreeMap::from([(first, first_node.clone()), (second, second_node.clone())]),
+        ids_by_path: BTreeMap::new(),
         edges: Vec::new(),
     };
     let reverse = BytecodeGraph {
         version: 0,
         format_version: CURRENT_BYTECODE_FORMAT_VERSION,
-        modules: HashMap::from([(second, second_node), (first, first_node)]),
-        ids_by_path: HashMap::new(),
+        modules: BTreeMap::from([(second, second_node), (first, first_node)]),
+        ids_by_path: BTreeMap::new(),
         edges: Vec::new(),
     };
 
@@ -425,10 +427,12 @@ fn validation_collects_all_errors_in_canonical_module_order() {
 fn execution_metadata_resolves_the_span_for_an_instruction() {
     let function = instruction::FuncIdx(3);
     let span = galfus_core::Span::new(galfus_core::SourceId::new(9), 18, 27);
-    let metadata = ExecutionMetadata {
-        spans: HashMap::from([(function, HashMap::from([(4, span)]))]),
-    };
+    let mut metadata = ExecutionMetadata::default();
+    metadata.set_function_spans(function, HashMap::from([(4, span)]));
 
-    assert_eq!(metadata.span_for(function, 4), Some(span));
-    assert_eq!(metadata.span_for(function, 5), None);
+    assert_eq!(
+        metadata.location_for(function, 4),
+        Some(DebugLocation::new(18, 27))
+    );
+    assert_eq!(metadata.location_for(function, 5), None);
 }

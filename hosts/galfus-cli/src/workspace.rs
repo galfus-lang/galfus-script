@@ -7,7 +7,7 @@ use std::sync;
 use crate::native_io::NativeIoProvider;
 use anyhow::{Context, Result, bail};
 use galfus_contract::Providers;
-use galfus_runtime::CooperativeDriver;
+use galfus_runtime::{CooperativeDriver, Runtime};
 use galfus_workspace::{LoadResult, Workspace};
 use std::path::Path;
 
@@ -73,20 +73,25 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
     );
     properties.insert("target_triple".to_string(), target_triple);
 
-    let context = galfus_contract::AdapterLoadContext { properties };
+    let context = galfus_contract::AdapterLoadContext {
+        target: galfus_contract::ExecutionTarget::new("default").expect("default target is valid"),
+        properties,
+    };
 
     let bindings = preflight
-        .run(&compile_report.adapter_requirements, &context)
+        .bind_package(&compile_report.package, &context)
         .map_err(|error| anyhow::anyhow!("package preflight failed: {error:?}"))?;
 
-    workspace
-        .run_with_bindings(
-            args.as_slice(),
-            Some(Providers::with_host(Box::new(NativeIoProvider))),
-            bindings,
-            executor.clone(),
-        )
-        .map_err(|error| anyhow::anyhow!("workspace execution failed: {error:?}"))?;
+    let mut execution = Runtime::new(
+        sync::Arc::clone(&compile_report.package),
+        Some(Providers::with_host(Box::new(NativeIoProvider))),
+    )
+    .with_adapter_bindings(bindings)
+    .start(args.as_slice(), executor.clone())
+    .map_err(|error| anyhow::anyhow!("package execution failed: {error}"))?;
+    let _result = execution
+        .run_to_completion()
+        .map_err(|error| anyhow::anyhow!("package execution failed: {error}"))?;
 
     let code = *exit_code.lock().unwrap();
     Ok(code)

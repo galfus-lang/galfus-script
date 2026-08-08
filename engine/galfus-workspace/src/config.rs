@@ -1,4 +1,5 @@
 use crate::diagnostic::WorkspaceDiagnosticCode;
+use galfus_contract::ExecutionTarget;
 use galfus_core::{Diagnostic, DiagnosticBag, ModulePath, SourceId, Span};
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -41,6 +42,7 @@ impl WorkspaceExport {
 pub struct WorkspaceConfig {
     name: String,
     target: ModuleTarget,
+    execution_target: ExecutionTarget,
     pub(super) entry: Option<ModulePath>,
     pub(super) run_entry: String,
     pub(super) run_args: Vec<String>,
@@ -54,6 +56,10 @@ impl WorkspaceConfig {
 
     pub fn target(&self) -> ModuleTarget {
         self.target
+    }
+
+    pub fn execution_target(&self) -> &ExecutionTarget {
+        &self.execution_target
     }
 
     pub fn entry(&self) -> Option<&ModulePath> {
@@ -77,6 +83,7 @@ impl WorkspaceConfig {
 struct RawWorkspaceConfig {
     module: Option<RawModuleConfig>,
     run: Option<RawRunConfig>,
+    execution: Option<RawExecutionConfig>,
 
     #[serde(default)]
     exports: BTreeMap<String, String>,
@@ -93,6 +100,11 @@ struct RawModuleConfig {
 struct RawRunConfig {
     entry: Option<String>,
     args: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawExecutionConfig {
+    target: Option<String>,
 }
 
 pub(super) fn parse_workspace_config(
@@ -139,6 +151,20 @@ pub(super) fn parse_workspace_config(
         diagnostics.push(Diagnostic::error_with_message(
             WorkspaceDiagnosticCode::InvalidModuleTarget,
             format!("invalid module target `{target_text}`"),
+            workspace_span(),
+        ));
+        return None;
+    };
+
+    let execution_target_text = raw
+        .execution
+        .as_ref()
+        .and_then(|execution| execution.target.as_deref())
+        .unwrap_or("default");
+    let Some(execution_target) = ExecutionTarget::new(execution_target_text) else {
+        diagnostics.push(Diagnostic::error_with_message(
+            WorkspaceDiagnosticCode::InvalidConfig,
+            "execution target must not be empty",
             workspace_span(),
         ));
         return None;
@@ -196,6 +222,7 @@ pub(super) fn parse_workspace_config(
     Some(WorkspaceConfig {
         name,
         target,
+        execution_target,
         entry,
         run_entry,
         run_args,

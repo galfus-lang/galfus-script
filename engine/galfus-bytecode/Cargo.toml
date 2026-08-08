@@ -3,9 +3,16 @@ name = "galfus-bytecode"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+build = "build.rs"
 
 [dependencies]
 galfus-core = { path = "../galfus-core" }
 galfus-contract = { path = "../galfus-contract" }
 indexmap.workspace = true
+serde.workspace = true
+bincode.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
+
+[build-dependencies]
+toml = { workspace = true }

@@ -1,6 +1,6 @@
 use crate::source_store;
 
-use galfus_bytecode::BytecodeGraph;
+use galfus_bytecode::PackageImage;
 use galfus_compiler::CompilerState;
 use galfus_core::{DiagnosticBag, ModuleId, Revision, SemanticRevision};
 use std::collections::HashSet;
@@ -136,13 +136,13 @@ pub enum CompileState {
     /// A previous compiled graph exists but is stale (check result changed).
     Stale {
         semantic_revision: SemanticRevision,
-        graph: Arc<BytecodeGraph>,
+        package: Arc<PackageImage>,
     },
-    /// A compiled graph is available and up-to-date with the last check.
+    /// A compiled package is available and up-to-date with the last check.
     Ready {
         semantic_revision: SemanticRevision,
-        /// The compiled module graph produced by the last successful compile.
-        graph: Arc<BytecodeGraph>,
+        /// The immutable package produced by the last successful compile.
+        package: Arc<PackageImage>,
     },
     /// The last compilation attempt failed.
     Failed {
@@ -156,9 +156,9 @@ impl CompileState {
         matches!(self, Self::Ready { .. })
     }
 
-    pub fn graph(&self) -> Option<&Arc<BytecodeGraph>> {
+    pub fn package(&self) -> Option<&Arc<PackageImage>> {
         match self {
-            Self::Ready { graph, .. } | Self::Stale { graph, .. } => Some(graph),
+            Self::Ready { package, .. } | Self::Stale { package, .. } => Some(package),
             _ => None,
         }
     }

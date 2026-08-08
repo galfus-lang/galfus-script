@@ -6,66 +6,23 @@ pub mod graph;
 pub mod graph_resolver;
 pub mod instruction;
 pub mod opcode;
+pub mod package;
 pub mod validation;
+pub mod version;
 
 pub use graph::{
     BytecodeGraph, BytecodeGraphTransaction, BytecodeGraphTransactionError,
-    BytecodeGraphValidationError, BytecodeGraphValidationErrors, BytecodeNode, ImportEdge,
+    BytecodeGraphValidationError, BytecodeGraphValidationErrors, BytecodeNode, DebugLocation,
+    ExecutionMetadata, ImportEdge,
 };
 pub use graph_resolver::{GraphResolutionError, ModuleImports, ResolvedImport};
 pub use instruction::*;
 pub use opcode::*;
+pub use package::*;
 pub use validation::*;
+pub use version::*;
 
-/// Version of the bytecode instruction set and in-memory layout.
-///
-/// This is independent from [`BytecodeGraph::version`], which only identifies
-/// the ordering of graph snapshots within one compilation session.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct BytecodeFormatVersion(u16);
-
-impl BytecodeFormatVersion {
-    pub const fn new(value: u16) -> Self {
-        Self(value)
-    }
-
-    pub const fn raw(self) -> u16 {
-        self.0
-    }
-}
-
-/// The only bytecode format this runtime release can interpret.
-pub const CURRENT_BYTECODE_FORMAT_VERSION: BytecodeFormatVersion = BytecodeFormatVersion::new(2);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum BytecodeFormatError {
-    #[error("legacy bytecode format version {actual:?}; supported version is {supported:?}")]
-    LegacyVersion {
-        supported: BytecodeFormatVersion,
-        actual: BytecodeFormatVersion,
-    },
-    #[error("future bytecode format version {actual:?}; supported version is {supported:?}")]
-    FutureVersion {
-        supported: BytecodeFormatVersion,
-        actual: BytecodeFormatVersion,
-    },
-}
-
-pub fn validate_bytecode_format(actual: BytecodeFormatVersion) -> Result<(), BytecodeFormatError> {
-    match actual.raw().cmp(&CURRENT_BYTECODE_FORMAT_VERSION.raw()) {
-        std::cmp::Ordering::Less => Err(BytecodeFormatError::LegacyVersion {
-            supported: CURRENT_BYTECODE_FORMAT_VERSION,
-            actual,
-        }),
-        std::cmp::Ordering::Equal => Ok(()),
-        std::cmp::Ordering::Greater => Err(BytecodeFormatError::FutureVersion {
-            supported: CURRENT_BYTECODE_FORMAT_VERSION,
-            actual,
-        }),
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub enum Constant {
     Bool(bool),
     Int8(i8),
@@ -83,7 +40,7 @@ pub enum Constant {
     Function(FuncIdx),
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
 pub struct ConstantPool {
     pub constants: Vec<Constant>,
 }
@@ -92,7 +49,7 @@ pub struct ConstantPool {
 // Types & Layout Table
 // =========================================================================
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum BytecodeType {
     Null,
     Bool,
@@ -117,14 +74,14 @@ pub enum BytecodeType {
     ChoiceVariant(ChoiceLayoutIdx, u16),
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum OwnershipKind {
     Strong,
     Weak,
     Value,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct FieldLayout {
     pub name: String,
     pub ty: TypeIdx,
@@ -132,20 +89,20 @@ pub struct FieldLayout {
     pub ownership: OwnershipKind,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct StructLayout {
     pub name: String,
     pub fields: Vec<FieldLayout>,
     pub constraints: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ChoiceVariantLayout {
     pub name: String,
     pub payload_ty: Option<TypeIdx>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ChoiceLayout {
     pub name: String,
     pub variants: Vec<ChoiceVariantLayout>,
@@ -155,13 +112,13 @@ pub struct ChoiceLayout {
 // Imports & Exports
 // =========================================================================
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum ImportKind {
     Function,
     Global,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ImportSlot {
     pub module_name: String,
     pub symbol_name: String,
@@ -169,13 +126,13 @@ pub struct ImportSlot {
     pub kind: ImportKind,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum ExportKind {
     Function(FuncIdx),
     Global(GlobalIdx),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ExportSlot {
     pub symbol_name: String,
     pub kind: ExportKind,
@@ -185,13 +142,13 @@ pub struct ExportSlot {
 // Bytecode Function & Module Container
 // =========================================================================
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct AdapterProxyMetadata {
     pub proxy_module: String,
     pub symbol: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct BytecodeFunction {
     pub name: String,
     pub param_count: u8,
@@ -202,7 +159,7 @@ pub struct BytecodeFunction {
     pub instructions: Vec<Instruction>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct BytecodeModule {
     pub name: String,
     /// Number of addressable global slots owned by this module.

@@ -213,7 +213,8 @@ fn run_synchronizes_the_runtime_module_graph() {
         .expect("valid helper module");
 
     assert!(workspace.check().is_valid);
-    let first = workspace.compile().expect("workspace compiles").graph;
+    let package = workspace.compile().expect("workspace compiles").package;
+    let first = package.graph();
     first
         .modules()
         .find(|image| image.path().as_str() == "main.gfs")

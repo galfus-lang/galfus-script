@@ -1,5 +1,3 @@
-use std::collections;
-
 use super::LowerCtx;
 use galfus_bytecode::*;
 use galfus_core::SymbolId;
@@ -34,9 +32,7 @@ pub fn lower_module(
 
     let mut functions = Vec::new();
     let mut init_func_idx = None;
-    let mut execution_metadata = galfus_bytecode::graph::ExecutionMetadata {
-        spans: collections::HashMap::new(),
-    };
+    let mut execution_metadata = galfus_bytecode::graph::ExecutionMetadata::default();
 
     for (i, mir_func) in mir_module.functions.iter().enumerate() {
         ctx.active_substitutions = mir_func.type_substitutions.clone();
@@ -62,9 +58,7 @@ pub fn lower_module(
             local_count,
         );
         let (instructions, function_spans) = emitter.emit();
-        execution_metadata
-            .spans
-            .insert(FuncIdx(i as u16), function_spans);
+        execution_metadata.set_function_spans(FuncIdx(i as u16), function_spans);
 
         functions.push(BytecodeFunction {
             name: mir_func.name.clone(),
