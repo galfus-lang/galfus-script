@@ -76,7 +76,7 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
     let context = galfus_contract::AdapterLoadContext { properties };
 
     let bindings = preflight
-        .run(&compile_report.adapter_requirements, &context)
+        .run(compile_report.package.adapter_requirements(), &context)
         .map_err(|error| anyhow::anyhow!("package preflight failed: {error:?}"))?;
 
     workspace

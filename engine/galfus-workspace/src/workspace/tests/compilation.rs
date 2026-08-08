@@ -78,11 +78,12 @@ fn compile_emits_one_module_per_source_module_with_import_slots() {
     assert!(workspace.check().is_valid);
     let report = workspace.compile().expect("workspace compiles");
 
-    assert_eq!(report.graph.len(), 2);
-    assert_eq!(report.graph.edges().len(), 1);
+    assert_eq!(report.package.graph().len(), 2);
+    assert_eq!(report.package.graph().edges().len(), 1);
 
     let main = report
-        .graph
+        .package
+        .graph()
         .modules()
         .find(|image| image.path().as_str() == "main.gfs")
         .expect("main image");
@@ -187,14 +188,14 @@ export fn(async) add(left: i32, right: i32): i32
     );
     let report = workspace.compile().expect("proxy compilation succeeds");
     assert_eq!(
-        report.adapter_requirements,
+        report.package.adapter_requirements(),
         vec![galfus_contract::AdapterModuleRequirement {
             proxy_module: "math.gfp".to_string(),
             descriptor: workspace.adapter_descriptors[&ModulePath::new("math.gfp").unwrap()]
                 .clone(),
         }]
     );
-    let graph = report.graph;
+    let graph = report.package.graph();
     let proxy = graph
         .modules()
         .find(|module| module.path().as_str() == "math.gfp")
@@ -257,7 +258,8 @@ fn compile_updates_changed_modules_and_removes_deleted_modules() {
 
     let check = workspace.check();
     assert!(check.is_valid, "{:?}", check.diagnostics);
-    let first_graph = workspace.compile().expect("initial compilation").graph;
+    let first_package = workspace.compile().expect("initial compilation").package;
+    let first_graph = first_package.graph();
     let main = first_graph
         .modules()
         .find(|image| image.path().as_str() == "main.gfs")
@@ -282,7 +284,8 @@ fn compile_updates_changed_modules_and_removes_deleted_modules() {
         )
         .expect("updated helper module");
     assert!(workspace.check().is_valid);
-    let updated_graph = workspace.compile().expect("incremental compilation").graph;
+    let updated_package = workspace.compile().expect("incremental compilation").package;
+    let updated_graph = updated_package.graph();
 
     assert_eq!(
         updated_graph
@@ -304,10 +307,11 @@ fn compile_updates_changed_modules_and_removes_deleted_modules() {
         Ok(RemoveResult::Success)
     ));
     assert!(workspace.check().is_valid);
-    let deleted_graph = workspace
+    let deleted_package = workspace
         .compile()
         .expect("compilation after deletion")
-        .graph;
+        .package;
+    let deleted_graph = deleted_package.graph();
 
     assert_eq!(deleted_graph.len(), 1);
     assert!(deleted_graph.get(helper_id).is_none());
@@ -369,7 +373,8 @@ fn compile_rebuilds_only_changed_modules_and_transitive_dependents() {
 
     let check = workspace.check();
     assert!(check.is_valid, "{:?}", check.diagnostics);
-    let first = workspace.compile().expect("initial compilation").graph;
+    let first_package = workspace.compile().expect("initial compilation").package;
+    let first = first_package.graph();
     let main = first
         .modules()
         .find(|image| image.path().as_str() == "main.gfs")
@@ -400,7 +405,8 @@ fn compile_rebuilds_only_changed_modules_and_transitive_dependents() {
         )
         .expect("updated dependency module");
     assert!(workspace.check().is_valid);
-    let updated = workspace.compile().expect("incremental compilation").graph;
+    let updated_package = workspace.compile().expect("incremental compilation").package;
+    let updated = updated_package.graph();
 
     assert!(
         updated
@@ -450,7 +456,8 @@ fn compile_removes_unreachable_modules() {
 
     let report1 = workspace.check();
     assert!(report1.is_valid, "{:?}", report1.diagnostics);
-    let graph1 = workspace.compile().unwrap().graph;
+    let package1 = workspace.compile().unwrap().package;
+    let graph1 = package1.graph();
     assert!(graph1.modules().any(|m| m.path().as_str() == "a.gfs"));
 
     // Remove import
@@ -459,7 +466,8 @@ fn compile_removes_unreachable_modules() {
         .expect("valid replacement module");
     let report = workspace.check();
     assert!(report.is_valid, "{:?}", report.diagnostics);
-    let graph2 = workspace.compile().unwrap().graph;
+    let package2 = workspace.compile().unwrap().package;
+    let graph2 = package2.graph();
 
     // The unreachable module should be removed from the graph.
     assert!(!graph2.modules().any(|m| m.path().as_str() == "a.gfs"));
@@ -587,7 +595,7 @@ fn compile_produces_identical_bytecode_regardless_of_module_load_order() {
         .expect("valid ops module");
     assert!(ws_a.check().is_valid, "workspace A must be valid");
     let report_a = ws_a.compile().expect("workspace A must compile");
-    let graph_a = report_a.graph;
+    let graph_a = report_a.package.graph();
 
     // Build workspace B: load in reverse order ops → math → main
     let mut ws_b = Workspace::new();
@@ -600,7 +608,7 @@ fn compile_produces_identical_bytecode_regardless_of_module_load_order() {
         .expect("valid main module");
     assert!(ws_b.check().is_valid, "workspace B must be valid");
     let report_b = ws_b.compile().expect("workspace B must compile");
-    let graph_b = report_b.graph;
+    let graph_b = report_b.package.graph();
 
     // Compare module names and function counts.
     let mut paths_a: Vec<String> = graph_a
@@ -890,7 +898,8 @@ export fn(async) close(window: Window): null
     );
     let report = workspace.compile().expect("workspace compiles");
     let handles = report
-        .graph
+        .package
+        .graph()
         .modules()
         .flat_map(|module| module.module().types.iter())
         .filter_map(|ty| match ty {
