@@ -1,6 +1,6 @@
 use galfus_contract::{
-    AdapterConfig, AdapterModuleDescriptor, AdapterModuleRequirement, CURRENT_BOUNDARY_ABI_VERSION,
-    CURRENT_PRODUCER_VERSION,
+    AdapterConfig, AdapterFunctionSignature, AdapterModuleDescriptor, AdapterModuleRequirement,
+    BoundaryType, CURRENT_BOUNDARY_ABI_VERSION, CURRENT_PRODUCER_VERSION,
 };
 use galfus_core::{ModuleId, ModulePath, SemanticRevision};
 
@@ -128,4 +128,47 @@ fn package_image_rejects_unreachable_and_duplicate_adapter_requirements() {
         Err(PackageValidationError::DuplicateAdapterRequirement { proxy_module })
             if proxy_module == "graphics.gfp"
     ));
+}
+
+#[test]
+fn package_image_canonicalizes_adapter_requirement_and_export_order() {
+    let mut beta = requirement("beta.gfp");
+    beta.descriptor.exports = vec![
+        AdapterFunctionSignature {
+            name: "zeta".to_string(),
+            is_async: true,
+            parameter_types: vec![BoundaryType::I32],
+            return_type: BoundaryType::I32,
+        },
+        AdapterFunctionSignature {
+            name: "alpha".to_string(),
+            is_async: true,
+            parameter_types: Vec::new(),
+            return_type: BoundaryType::Null,
+        },
+    ];
+    let package = PackageImage::try_new(
+        graph(&["alpha.gfp", "beta.gfp"], Vec::new()),
+        None,
+        vec![beta, requirement("alpha.gfp")],
+    )
+    .expect("complete adapter manifest");
+
+    assert_eq!(
+        package
+            .adapter_requirements()
+            .iter()
+            .map(|requirement| requirement.proxy_module.as_str())
+            .collect::<Vec<_>>(),
+        vec!["alpha.gfp", "beta.gfp"]
+    );
+    assert_eq!(
+        package.adapter_requirements()[1]
+            .descriptor
+            .exports
+            .iter()
+            .map(|export| export.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["alpha", "zeta"]
+    );
 }

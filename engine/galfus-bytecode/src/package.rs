@@ -99,8 +99,12 @@ impl PackageImage {
     pub fn try_new(
         graph: BytecodeGraph,
         entry_point: Option<PackageEntryPoint>,
-        adapter_requirements: Vec<AdapterModuleRequirement>,
+        mut adapter_requirements: Vec<AdapterModuleRequirement>,
     ) -> Result<Self, PackageValidationError> {
+        for requirement in &mut adapter_requirements {
+            requirement.descriptor.canonicalize();
+        }
+        adapter_requirements.sort_by(|left, right| left.proxy_module.cmp(&right.proxy_module));
         Self::validate_adapter_requirements(&graph, entry_point.as_ref(), &adapter_requirements)?;
 
         Ok(Self {

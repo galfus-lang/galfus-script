@@ -71,6 +71,14 @@ export fn(async) SDL_Init(flags: u32): i32
             matches!(libraries.get("linux").unwrap(), AdapterConfigValue::String(s) if s == "./bin/libSDL2.so")
         );
         assert!(galfus_code.starts_with("export fn(async) SDL_Init"));
+        assert_eq!(
+            frontmatter
+                .config
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["libraries", "thread_affinity"]
+        );
     }
 
     #[test]

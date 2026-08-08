@@ -10,7 +10,7 @@ use crate::{
     CURRENT_BYTECODE_FORMAT_VERSION, validate_bytecode_format, validate_bytecode_module,
 };
 use galfus_core::{ModuleId, ModulePath, SemanticRevision, Span};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// A source location materialized for a bytecode package.
 ///
@@ -44,7 +44,7 @@ impl From<Span> for DebugLocation {
 
 #[derive(Debug, Clone, Default)]
 pub struct ExecutionMetadata {
-    spans: HashMap<instruction::FuncIdx, HashMap<usize, DebugLocation>>,
+    spans: BTreeMap<instruction::FuncIdx, BTreeMap<usize, DebugLocation>>,
 }
 
 impl ExecutionMetadata {

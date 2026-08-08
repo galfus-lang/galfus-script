@@ -19,7 +19,7 @@ pub use thread::*;
 pub use version::*;
 
 /// A typed value that crosses the execution boundary safely.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub enum BoundaryType {
     Null,
     Bool,
@@ -384,6 +384,13 @@ pub struct AdapterModuleDescriptor {
     pub exports: Vec<AdapterFunctionSignature>,
 }
 
+impl AdapterModuleDescriptor {
+    /// Orders schema exports so equivalent adapter declarations have one package representation.
+    pub fn canonicalize(&mut self) {
+        self.exports.sort();
+    }
+}
+
 /// A declarative external-module dependency produced during compilation.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AdapterModuleRequirement {
@@ -391,7 +398,7 @@ pub struct AdapterModuleRequirement {
     pub descriptor: AdapterModuleDescriptor,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct AdapterFunctionSignature {
     pub name: String,
     pub is_async: bool,
