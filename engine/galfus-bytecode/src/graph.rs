@@ -130,6 +130,26 @@ impl BytecodeGraphValidationErrors {
 pub enum BytecodeGraphTransactionError {
     #[error("transaction targets graph version {expected}, but current version is {actual}")]
     StaleBaseVersion { expected: u64, actual: u64 },
+    #[error("transaction removes module {module_id:?} more than once")]
+    DuplicateRemovedModule { module_id: ModuleId },
+    #[error("transaction upserts module {module_id:?} more than once")]
+    DuplicateUpsertedModule { module_id: ModuleId },
+    #[error("transaction upserts path `{path}` for both {first:?} and {second:?}")]
+    DuplicateUpsertedModulePath {
+        path: ModulePath,
+        first: ModuleId,
+        second: ModuleId,
+    },
+    #[error("transaction both removes and upserts module {module_id:?}")]
+    ConflictingModuleOperations { module_id: ModuleId },
+    #[error(
+        "transaction upserts path `{path}` for {upserted:?}, already owned by retained module {existing:?}"
+    )]
+    RetainedModulePathConflict {
+        path: ModulePath,
+        existing: ModuleId,
+        upserted: ModuleId,
+    },
     #[error(transparent)]
     InvalidGraph(#[from] BytecodeGraphValidationErrors),
 }
@@ -298,6 +318,7 @@ impl BytecodeGraph {
                 actual: self.version,
             });
         }
+        self.validate_transaction(&transaction)?;
 
         let mut next = self.clone();
         for id in transaction.removed_modules {
@@ -315,6 +336,71 @@ impl BytecodeGraph {
         next.validate()?;
         next.version += 1;
         Ok(next)
+    }
+
+    fn validate_transaction(
+        &self,
+        transaction: &BytecodeGraphTransaction,
+    ) -> Result<(), BytecodeGraphTransactionError> {
+        let mut removed_modules = transaction.removed_modules.clone();
+        removed_modules.sort_by_key(|id| id.raw());
+        if let Some(module_id) = removed_modules
+            .windows(2)
+            .find_map(|pair| (pair[0] == pair[1]).then_some(pair[0]))
+        {
+            return Err(BytecodeGraphTransactionError::DuplicateRemovedModule { module_id });
+        }
+        let removed_modules = removed_modules.into_iter().collect::<HashSet<_>>();
+
+        let mut upserted_by_id = transaction.upserted_modules.iter().collect::<Vec<_>>();
+        upserted_by_id.sort_by_key(|module| module.id.raw());
+        if let Some(module_id) = upserted_by_id
+            .windows(2)
+            .find_map(|pair| (pair[0].id == pair[1].id).then_some(pair[0].id))
+        {
+            return Err(BytecodeGraphTransactionError::DuplicateUpsertedModule { module_id });
+        }
+
+        if let Some(module_id) = upserted_by_id
+            .iter()
+            .map(|module| module.id)
+            .find(|id| removed_modules.contains(id))
+        {
+            return Err(BytecodeGraphTransactionError::ConflictingModuleOperations { module_id });
+        }
+
+        let mut upserted_by_path = transaction.upserted_modules.iter().collect::<Vec<_>>();
+        upserted_by_path.sort_by(|left, right| {
+            (left.path.as_str(), left.id.raw()).cmp(&(right.path.as_str(), right.id.raw()))
+        });
+        if let Some((path, first, second)) = upserted_by_path.windows(2).find_map(|pair| {
+            (pair[0].path == pair[1].path).then_some((pair[0].path.clone(), pair[0].id, pair[1].id))
+        }) {
+            return Err(BytecodeGraphTransactionError::DuplicateUpsertedModulePath {
+                path,
+                first,
+                second,
+            });
+        }
+
+        for module in upserted_by_path {
+            let existing = self
+                .modules()
+                .find(|existing| existing.path == module.path)
+                .map(BytecodeNode::id);
+            if let Some(existing) = existing
+                && existing != module.id
+                && !removed_modules.contains(&existing)
+            {
+                return Err(BytecodeGraphTransactionError::RetainedModulePathConflict {
+                    path: module.path.clone(),
+                    existing,
+                    upserted: module.id,
+                });
+            }
+        }
+
+        Ok(())
     }
 
     pub fn get(&self, id: ModuleId) -> Option<&BytecodeNode> {

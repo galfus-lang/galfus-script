@@ -162,6 +162,79 @@ fn apply_rejects_a_stale_transaction_without_changing_the_snapshot() {
 }
 
 #[test]
+fn apply_rejects_conflicting_module_operations() {
+    let existing = ModuleId::new(1);
+    let graph = BytecodeGraph::new()
+        .apply(transaction(
+            &BytecodeGraph::new(),
+            SemanticRevision::new(1),
+            vec![compiled_module(existing, SemanticRevision::new(1))],
+            vec![],
+            vec![],
+        ))
+        .expect("initial transaction is valid");
+    let duplicate = compiled_module(ModuleId::new(2), SemanticRevision::new(2));
+    let mut same_path = compiled_module(ModuleId::new(3), SemanticRevision::new(2));
+    same_path.path = duplicate.path.clone();
+    let mut retained_path = compiled_module(ModuleId::new(4), SemanticRevision::new(2));
+    retained_path.path = graph.get(existing).expect("existing module").path.clone();
+
+    assert!(matches!(
+        graph.apply(transaction(
+            &graph,
+            SemanticRevision::new(2),
+            vec![],
+            vec![existing, existing],
+            vec![],
+        )),
+        Err(BytecodeGraphTransactionError::DuplicateRemovedModule { module_id }) if module_id == existing
+    ));
+    assert!(matches!(
+        graph.apply(transaction(
+            &graph,
+            SemanticRevision::new(2),
+            vec![duplicate.clone(), duplicate.clone()],
+            vec![],
+            vec![],
+        )),
+        Err(BytecodeGraphTransactionError::DuplicateUpsertedModule { module_id }) if module_id == duplicate.id
+    ));
+    assert!(matches!(
+        graph.apply(transaction(
+            &graph,
+            SemanticRevision::new(2),
+            vec![duplicate.clone(), same_path.clone()],
+            vec![],
+            vec![],
+        )),
+        Err(BytecodeGraphTransactionError::DuplicateUpsertedModulePath { path, .. }) if path == duplicate.path
+    ));
+    assert!(matches!(
+        graph.apply(transaction(
+            &graph,
+            SemanticRevision::new(2),
+            vec![compiled_module(existing, SemanticRevision::new(2))],
+            vec![existing],
+            vec![],
+        )),
+        Err(BytecodeGraphTransactionError::ConflictingModuleOperations { module_id }) if module_id == existing
+    ));
+    assert!(matches!(
+        graph.apply(transaction(
+            &graph,
+            SemanticRevision::new(2),
+            vec![retained_path],
+            vec![],
+            vec![],
+        )),
+        Err(BytecodeGraphTransactionError::RetainedModulePathConflict { path, existing: found, .. })
+            if path == graph.get(existing).expect("existing module").path && found == existing
+    ));
+    assert_eq!(graph.version(), 1);
+    assert!(graph.get(existing).is_some());
+}
+
+#[test]
 fn apply_rejects_invalid_imports_without_changing_the_snapshot() {
     let module = ModuleId::new(1);
     let graph = BytecodeGraph::new();
