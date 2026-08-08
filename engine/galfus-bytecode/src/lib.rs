@@ -11,7 +11,8 @@ pub mod version;
 
 pub use graph::{
     BytecodeGraph, BytecodeGraphTransaction, BytecodeGraphTransactionError,
-    BytecodeGraphValidationError, BytecodeGraphValidationErrors, BytecodeNode, ImportEdge,
+    BytecodeGraphValidationError, BytecodeGraphValidationErrors, BytecodeNode, DebugLocation,
+    ExecutionMetadata, ImportEdge,
 };
 pub use graph_resolver::{GraphResolutionError, ModuleImports, ResolvedImport};
 pub use instruction::*;

@@ -6,7 +6,6 @@
 //! - Contains only its own functions; cross-module calls target an import slot
 //!   via a local `FuncIdx` that the runtime resolves at load time.
 
-use std::collections;
 use std::iter;
 
 use crate::CompilerState;
@@ -365,9 +364,7 @@ fn compile_single_module(
             .insert(func.id, func.parameter_types.clone());
     }
 
-    let mut execution_metadata = galfus_bytecode::graph::ExecutionMetadata {
-        spans: collections::HashMap::new(),
-    };
+    let mut execution_metadata = galfus_bytecode::graph::ExecutionMetadata::default();
 
     // Register cross-module calls as import function slots.
     for (&local_id, &(target_mod_idx, target_func_id)) in &cross_module_calls {
@@ -420,9 +417,7 @@ fn compile_single_module(
             instructions = vec![galfus_bytecode::Instruction::RetNull];
             temp_count = temp_count.max(1);
         }
-        execution_metadata
-            .spans
-            .insert(local_func_idx, function_spans);
+        execution_metadata.set_function_spans(local_func_idx, function_spans);
 
         rewrite_global_indices(&mut instructions, modules, mod_idx, string_table)?;
 

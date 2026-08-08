@@ -2,7 +2,9 @@ use crate::ImportKind;
 use crate::instruction;
 
 use super::*;
-use crate::{BytecodeFunction, BytecodeModule, ConstantPool, ExportSlot, ImportSlot};
+use crate::{
+    BytecodeFunction, BytecodeModule, ConstantPool, DebugLocation, ExportSlot, ImportSlot,
+};
 use std::collections::HashMap;
 
 fn compiled_module(id: ModuleId, revision: SemanticRevision) -> BytecodeNode {
@@ -425,10 +427,12 @@ fn validation_collects_all_errors_in_canonical_module_order() {
 fn execution_metadata_resolves_the_span_for_an_instruction() {
     let function = instruction::FuncIdx(3);
     let span = galfus_core::Span::new(galfus_core::SourceId::new(9), 18, 27);
-    let metadata = ExecutionMetadata {
-        spans: HashMap::from([(function, HashMap::from([(4, span)]))]),
-    };
+    let mut metadata = ExecutionMetadata::default();
+    metadata.set_function_spans(function, HashMap::from([(4, span)]));
 
-    assert_eq!(metadata.span_for(function, 4), Some(span));
-    assert_eq!(metadata.span_for(function, 5), None);
+    assert_eq!(
+        metadata.location_for(function, 4),
+        Some(DebugLocation::new(18, 27))
+    );
+    assert_eq!(metadata.location_for(function, 5), None);
 }

@@ -9,20 +9,65 @@ use crate::{
     BytecodeFormatError, BytecodeFormatVersion, BytecodeModule, BytecodeValidationError,
     CURRENT_BYTECODE_FORMAT_VERSION, validate_bytecode_format, validate_bytecode_module,
 };
-use galfus_core::{ModuleId, ModulePath, SemanticRevision};
+use galfus_core::{ModuleId, ModulePath, SemanticRevision, Span};
 use std::collections::{HashMap, HashSet};
+
+/// A source location materialized for a bytecode package.
+///
+/// The owning [`BytecodeNode`] carries the logical source path, so this type
+/// intentionally excludes frontend-only `SourceId` values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DebugLocation {
+    start: usize,
+    end: usize,
+}
+
+impl DebugLocation {
+    pub const fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
+
+    pub const fn start(self) -> usize {
+        self.start
+    }
+
+    pub const fn end(self) -> usize {
+        self.end
+    }
+}
+
+impl From<Span> for DebugLocation {
+    fn from(span: Span) -> Self {
+        Self::new(span.start(), span.end())
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct ExecutionMetadata {
-    pub spans: HashMap<instruction::FuncIdx, HashMap<usize, galfus_core::Span>>,
+    spans: HashMap<instruction::FuncIdx, HashMap<usize, DebugLocation>>,
 }
 
 impl ExecutionMetadata {
-    pub fn span_for(
+    /// Records locations emitted by the compiler before source-session state is discarded.
+    pub fn set_function_spans(
+        &mut self,
+        function: instruction::FuncIdx,
+        spans: HashMap<usize, Span>,
+    ) {
+        self.spans.insert(
+            function,
+            spans
+                .into_iter()
+                .map(|(offset, span)| (offset, DebugLocation::from(span)))
+                .collect(),
+        );
+    }
+
+    pub fn location_for(
         &self,
         function: instruction::FuncIdx,
         instruction_offset: usize,
-    ) -> Option<galfus_core::Span> {
+    ) -> Option<DebugLocation> {
         self.spans
             .get(&function)
             .and_then(|spans| spans.get(&instruction_offset))

@@ -287,14 +287,16 @@ pub fn format_panic(graph: &galfus_bytecode::BytecodeGraph, panic: &VmPanic) -> 
             let location_str = module
                 .metadata
                 .as_ref()
-                .and_then(|metadata| metadata.span_for(frame.func_idx, frame.instruction_offset))
-                .map(|span| {
+                .and_then(|metadata| {
+                    metadata.location_for(frame.func_idx, frame.instruction_offset)
+                })
+                .map(|location| {
                     format!(
-                        "instruction {} at source#{}:{}..{}",
+                        "instruction {} at {}:{}..{}",
                         frame.instruction_offset,
-                        span.source_id().raw(),
-                        span.start(),
-                        span.end()
+                        module.path.as_str(),
+                        location.start(),
+                        location.end()
                     )
                 })
                 .unwrap_or_else(|| format!("instruction {}", frame.instruction_offset));

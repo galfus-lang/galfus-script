@@ -7,9 +7,9 @@ use super::*;
 use galfus_bytecode::instruction::{ConstIdx, FuncIdx, GlobalIdx, Instruction, Reg, TypeIdx};
 use galfus_bytecode::{
     BytecodeFunction, BytecodeGraph, BytecodeModule, BytecodeNode, BytecodeType, Constant,
-    ConstantPool, ExportSlot, ImportEdge, ImportSlot,
+    ConstantPool, ExecutionMetadata, ExportSlot, ImportEdge, ImportSlot,
 };
-use galfus_core::{ModuleId, ModulePath, SemanticRevision};
+use galfus_core::{ModuleId, ModulePath, SemanticRevision, SourceId, Span};
 
 struct StartupProvider {
     calls: sync::Arc<sync::Mutex<Vec<String>>>,
@@ -196,6 +196,62 @@ fn runtime_rejects_an_unsupported_bytecode_format_before_loading_the_entry_modul
             actual,
         }) if actual == galfus_bytecode::BytecodeFormatVersion::new(1, 0, 0)
     ));
+}
+
+#[test]
+fn format_panic_uses_materialized_module_paths_and_locations() {
+    let module_id = ModuleId::new(7);
+    let mut metadata = ExecutionMetadata::default();
+    metadata.set_function_spans(
+        FuncIdx(0),
+        collections::HashMap::from([(0, Span::new(SourceId::new(99), 4, 8))]),
+    );
+    let graph = BytecodeGraph::from_modules(
+        SemanticRevision::new(0),
+        vec![BytecodeNode {
+            id: module_id,
+            path: ModulePath::new("src/main.gfs").expect("valid module path"),
+            semantic_revision: SemanticRevision::new(0),
+            module: BytecodeModule {
+                name: "main.gfs".to_string(),
+                global_count: 0,
+                constants: ConstantPool::default(),
+                functions: vec![BytecodeFunction {
+                    name: "main".to_string(),
+                    param_count: 0,
+                    local_count: 0,
+                    temp_count: 0,
+                    return_ty: TypeIdx(0),
+                    adapter_proxy_metadata: None,
+                    instructions: vec![Instruction::RetNull],
+                }],
+                types: vec![BytecodeType::Null],
+                struct_layouts: vec![],
+                choice_layouts: vec![],
+                imports: vec![],
+                exports: vec![],
+                init_func_idx: None,
+            },
+            metadata: Some(metadata),
+        }],
+        vec![],
+    )
+    .expect("test graph is valid");
+    let panic = galfus_vm::VmPanic {
+        error: galfus_vm::VmError::Panic {
+            message: "boom".to_string(),
+        },
+        stack_trace: vec![galfus_vm::StackFrameInfo {
+            module_id,
+            func_idx: FuncIdx(0),
+            instruction_offset: 0,
+        }],
+    };
+
+    let formatted = format_panic(&graph, &panic);
+
+    assert!(formatted.contains("src/main.gfs::main (at instruction 0 at src/main.gfs:4..8)"));
+    assert!(!formatted.contains("source#"));
 }
 
 #[test]
