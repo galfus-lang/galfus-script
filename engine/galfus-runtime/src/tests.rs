@@ -169,11 +169,14 @@ fn package_with_entry(
         .expect("entry module exists")
         .path()
         .clone();
-    sync::Arc::new(PackageImage::new(
-        (*graph).clone(),
-        Some(PackageEntryPoint::new(module_path, "main")),
-        Vec::new(),
-    ))
+    sync::Arc::new(
+        PackageImage::try_new(
+            (*graph).clone(),
+            Some(PackageEntryPoint::new(module_path, "main")),
+            Vec::new(),
+        )
+        .expect("graph has no adapter proxies"),
+    )
 }
 
 fn start_with_provider(provider: StartupProvider) -> Execution {
@@ -191,7 +194,9 @@ fn runtime_rejects_an_unsupported_bytecode_format_before_loading_the_entry_modul
     let graph =
         BytecodeGraph::with_format_version(galfus_bytecode::BytecodeFormatVersion::new(1, 0, 0));
 
-    let package = sync::Arc::new(PackageImage::new(graph, None, Vec::new()));
+    let package = sync::Arc::new(
+        PackageImage::try_new(graph, None, Vec::new()).expect("graph has no adapter proxies"),
+    );
     let result = Runtime::new(package, None).start(&[], std::rc::Rc::new(CooperativeDriver::new()));
     let Err(error) = result else {
         panic!("unsupported bytecode must be rejected before runtime loading");
@@ -510,14 +515,17 @@ fn run_initializes_dependencies_before_the_entry_module() {
         queue: sync::Mutex::new(collections::VecDeque::new()),
     });
 
-    let package = sync::Arc::new(PackageImage::new(
-        graph,
-        Some(PackageEntryPoint::new(
-            ModulePath::new("main.gfs").expect("valid module path"),
-            "main",
-        )),
-        Vec::new(),
-    ));
+    let package = sync::Arc::new(
+        PackageImage::try_new(
+            graph,
+            Some(PackageEntryPoint::new(
+                ModulePath::new("main.gfs").expect("valid module path"),
+                "main",
+            )),
+            Vec::new(),
+        )
+        .expect("graph has no adapter proxies"),
+    );
     let mut task = Runtime::new(
         package,
         Some(galfus_contract::Providers::with_host(Box::new(

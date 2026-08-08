@@ -1,10 +1,11 @@
 use super::*;
-use galfus_bytecode::{BytecodeGraph, PackageImage};
+use galfus_bytecode::{BytecodeGraph, BytecodeModule, BytecodeNode, ConstantPool, PackageImage};
 use galfus_contract::{
     AdapterConfigValue, AdapterLoadContext, AdapterLoadError, AdapterModuleBinding,
     AdapterModuleDescriptor, AdapterModuleLoader, AdapterModuleRequirement, BoundaryValue,
     CancellationOutcome, MessageInjector,
 };
+use galfus_core::{ModuleId, ModulePath, SemanticRevision};
 use std::collections::BTreeMap;
 
 struct MockLoader {
@@ -63,7 +64,7 @@ fn create_requirement(proxy_module: &str, adapter: &str) -> AdapterModuleRequire
     );
 
     AdapterModuleRequirement {
-        proxy_module: proxy_module.to_string(),
+        proxy_module: format!("{proxy_module}.gfp"),
         descriptor: AdapterModuleDescriptor {
             adapter: adapter.to_string(),
             config,
@@ -79,7 +80,33 @@ fn create_context() -> AdapterLoadContext {
 }
 
 fn create_package(requirements: Vec<AdapterModuleRequirement>) -> PackageImage {
-    PackageImage::new(BytecodeGraph::new(), None, requirements)
+    let modules = requirements
+        .iter()
+        .enumerate()
+        .map(|(index, requirement)| BytecodeNode {
+            id: ModuleId::new(index as u32 + 1),
+            path: ModulePath::new(requirement.proxy_module.as_str())
+                .expect("valid proxy module path"),
+            semantic_revision: SemanticRevision::new(1),
+            module: BytecodeModule {
+                name: requirement.proxy_module.clone(),
+                global_count: 0,
+                constants: ConstantPool::default(),
+                functions: Vec::new(),
+                types: Vec::new(),
+                struct_layouts: Vec::new(),
+                choice_layouts: Vec::new(),
+                imports: Vec::new(),
+                exports: Vec::new(),
+                init_func_idx: None,
+            },
+            metadata: None,
+        })
+        .collect();
+    let graph = BytecodeGraph::from_modules(SemanticRevision::new(1), modules, Vec::new())
+        .expect("valid proxy graph");
+
+    PackageImage::try_new(graph, None, requirements).expect("complete adapter manifest")
 }
 
 #[test]
@@ -139,8 +166,8 @@ fn multiple_modules_using_same_loader() {
     let mut bindings = preflight.bind_package(&package, &create_context()).unwrap();
 
     // confirm bindings are correctly populated
-    assert!(bindings.get_mut("proxy1").is_some());
-    assert!(bindings.get_mut("proxy2").is_some());
+    assert!(bindings.get_mut("proxy1.gfp").is_some());
+    assert!(bindings.get_mut("proxy2.gfp").is_some());
 }
 
 #[test]
@@ -173,7 +200,7 @@ fn two_loaders_with_structurally_different_configurations() {
         AdapterConfigValue::String("val1".to_string()),
     );
     let req1 = AdapterModuleRequirement {
-        proxy_module: "proxy1".to_string(),
+        proxy_module: "proxy1.gfp".to_string(),
         descriptor: AdapterModuleDescriptor {
             adapter: "loader1".to_string(),
             config: config1,
@@ -186,7 +213,7 @@ fn two_loaders_with_structurally_different_configurations() {
     nested.insert("inner_key".to_string(), AdapterConfigValue::Integer(42));
     config2.insert("test_key".to_string(), AdapterConfigValue::Table(nested));
     let req2 = AdapterModuleRequirement {
-        proxy_module: "proxy2".to_string(),
+        proxy_module: "proxy2.gfp".to_string(),
         descriptor: AdapterModuleDescriptor {
             adapter: "loader2".to_string(),
             config: config2,
@@ -196,6 +223,6 @@ fn two_loaders_with_structurally_different_configurations() {
 
     let package = create_package(vec![req1, req2]);
     let mut bindings = preflight.bind_package(&package, &create_context()).unwrap();
-    assert!(bindings.get_mut("proxy1").is_some());
-    assert!(bindings.get_mut("proxy2").is_some());
+    assert!(bindings.get_mut("proxy1.gfp").is_some());
+    assert!(bindings.get_mut("proxy2.gfp").is_some());
 }

@@ -5,7 +5,8 @@ use galfus_contract::{
     AdapterModuleRequirement, BoundaryAbiVersion, CURRENT_BOUNDARY_ABI_VERSION,
     CURRENT_PRODUCER_VERSION, ProducerVersion,
 };
-use galfus_core::ModulePath;
+use galfus_core::{ModuleId, ModulePath};
+use std::collections::BTreeSet;
 
 use crate::{
     BytecodeFormatVersion, BytecodeGraph, CURRENT_PACKAGE_FORMAT_VERSION, PackageFormatVersion,
@@ -83,18 +84,99 @@ pub struct PackageImage {
     versions: PackageVersions,
 }
 
+/// Errors that prevent a package image from having an exact adapter manifest.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum PackageValidationError {
+    #[error("adapter requirement for `{proxy_module}` is duplicated")]
+    DuplicateAdapterRequirement { proxy_module: String },
+    #[error("reachable adapter proxy `{proxy_module}` is missing from the package manifest")]
+    MissingAdapterRequirement { proxy_module: String },
+    #[error("adapter requirement `{proxy_module}` does not match a reachable adapter proxy")]
+    UnexpectedAdapterRequirement { proxy_module: String },
+}
+
 impl PackageImage {
-    pub fn new(
+    pub fn try_new(
         graph: BytecodeGraph,
         entry_point: Option<PackageEntryPoint>,
         adapter_requirements: Vec<AdapterModuleRequirement>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, PackageValidationError> {
+        Self::validate_adapter_requirements(&graph, entry_point.as_ref(), &adapter_requirements)?;
+
+        Ok(Self {
             versions: PackageVersions::for_bytecode(graph.format_version()),
             graph,
             entry_point,
             adapter_requirements,
+        })
+    }
+
+    fn validate_adapter_requirements(
+        graph: &BytecodeGraph,
+        entry_point: Option<&PackageEntryPoint>,
+        adapter_requirements: &[AdapterModuleRequirement],
+    ) -> Result<(), PackageValidationError> {
+        let mut declared_proxies = BTreeSet::new();
+        for requirement in adapter_requirements {
+            if !declared_proxies.insert(requirement.proxy_module.as_str()) {
+                return Err(PackageValidationError::DuplicateAdapterRequirement {
+                    proxy_module: requirement.proxy_module.clone(),
+                });
+            }
         }
+
+        let reachable_modules = match entry_point {
+            Some(entry_point) => graph
+                .modules()
+                .find(|module| module.path() == entry_point.module_path())
+                .map(|entry| Self::reachable_modules(graph, entry.id()))
+                .unwrap_or_default(),
+            None => graph.modules().map(|module| module.id()).collect(),
+        };
+        let reachable_proxies = reachable_modules
+            .into_iter()
+            .filter_map(|module_id| graph.get(module_id))
+            .map(|module| module.path().as_str())
+            .filter(|path| path.ends_with(".gfp"))
+            .collect::<BTreeSet<_>>();
+
+        if let Some(proxy_module) = reachable_proxies
+            .iter()
+            .find(|proxy_module| !declared_proxies.contains(**proxy_module))
+        {
+            return Err(PackageValidationError::MissingAdapterRequirement {
+                proxy_module: (*proxy_module).to_string(),
+            });
+        }
+
+        if let Some(proxy_module) = declared_proxies
+            .iter()
+            .find(|proxy_module| !reachable_proxies.contains(**proxy_module))
+        {
+            return Err(PackageValidationError::UnexpectedAdapterRequirement {
+                proxy_module: (*proxy_module).to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    fn reachable_modules(
+        graph: &BytecodeGraph,
+        entry: galfus_core::ModuleId,
+    ) -> BTreeSet<ModuleId> {
+        let mut reachable = BTreeSet::from([entry]);
+        let mut pending = vec![entry];
+
+        while let Some(module_id) = pending.pop() {
+            for dependency in graph.deps_of(module_id) {
+                if reachable.insert(dependency) {
+                    pending.push(dependency);
+                }
+            }
+        }
+
+        reachable
     }
 
     pub fn graph(&self) -> &BytecodeGraph {

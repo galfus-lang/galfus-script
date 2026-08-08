@@ -178,14 +178,17 @@ fn execution_with_demo_adapter(complete: bool) -> (Execution, Arc<Mutex<DemoAdap
             complete,
         }),
     );
-    let package = Arc::new(PackageImage::new(
-        (*graph).clone(),
-        Some(PackageEntryPoint::new(
-            ModulePath::new("main.gfs").expect("valid module path"),
-            "main",
-        )),
-        Vec::new(),
-    ));
+    let package = Arc::new(
+        PackageImage::try_new(
+            (*graph).clone(),
+            Some(PackageEntryPoint::new(
+                ModulePath::new("main.gfs").expect("valid module path"),
+                "main",
+            )),
+            Vec::new(),
+        )
+        .expect("graph has no adapter proxy modules"),
+    );
     let execution = Runtime::new(package, None)
         .with_adapter_bindings(bindings)
         .start(&[], Rc::new(CooperativeDriver::new()))

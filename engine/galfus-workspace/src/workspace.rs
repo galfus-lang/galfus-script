@@ -840,7 +840,10 @@ impl Workspace {
                 .clone()
                 .map(|entry| PackageEntryPoint::new(entry, config.run_entry.clone()))
         });
-        let package = Arc::new(PackageImage::new(graph, entry_point, adapter_requirements));
+        let package = Arc::new(
+            PackageImage::try_new(graph, entry_point, adapter_requirements)
+                .map_err(|error| CompileBlocked::CompilerError(error.to_string()))?,
+        );
         self.bytecode_state.compile_state = CompileState::Ready {
             semantic_revision,
             package: Arc::clone(&package),
