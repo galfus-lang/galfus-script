@@ -30,20 +30,12 @@ impl ParseResult {
         Self { graph }
     }
 
-    pub fn ast(&self) -> &ModuleAst {
+    pub fn graph(&self) -> &ModuleAst {
         &self.graph
     }
 
-    pub fn into_ast(self) -> ModuleAst {
-        self.graph
-    }
-
-    pub fn graph(&self) -> &ModuleAst {
-        self.ast()
-    }
-
     pub fn into_graph(self) -> ModuleAst {
-        self.into_ast()
+        self.graph
     }
 
     pub fn diagnostics(&self) -> &DiagnosticBag {

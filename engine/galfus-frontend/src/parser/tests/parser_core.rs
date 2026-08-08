@@ -6,7 +6,7 @@ fn parse_stores_tokens_in_graph() {
 
     let result = parse(&source);
 
-    assert!(!result.ast().syntax().tokens().is_empty());
+    assert!(!result.graph().syntax().tokens().is_empty());
 }
 
 #[test]
