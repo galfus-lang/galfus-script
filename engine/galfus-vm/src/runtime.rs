@@ -437,6 +437,11 @@ impl VirtualMachine {
         func_idx: FuncIdx,
         args: Vec<Value>,
     ) -> Result<(), VmPanic> {
+        self.validate_graph_format().map_err(|error| VmPanic {
+            error,
+            stack_trace: vec![],
+        })?;
+
         if (func_idx.raw() as usize) >= self.graph.get(module_id).unwrap().module.functions.len() {
             return Err(VmPanic {
                 error: VmError::FunctionOutOfBounds { index: func_idx },
@@ -481,6 +486,11 @@ impl VirtualMachine {
         func_idx: FuncIdx,
         args: Vec<Value>,
     ) -> Result<Value, VmPanic> {
+        self.validate_graph_format().map_err(|error| VmPanic {
+            error,
+            stack_trace: vec![],
+        })?;
+
         if (func_idx.raw() as usize) >= self.graph.get(module_id).unwrap().module.functions.len() {
             return Err(VmPanic {
                 error: VmError::FunctionOutOfBounds { index: func_idx },
@@ -563,6 +573,8 @@ impl VirtualMachine {
     }
 
     pub fn step(&self, thread: &mut thread::VmThreadState) -> Result<VmStep, VmError> {
+        self.validate_graph_format()?;
+
         if let Some((proxy_module, kind, id)) = thread.pending_adapter_handle_drops.pop() {
             return Ok(VmStep::Suspend {
                 effect: VmEffect::AdapterHandleDropped {
@@ -690,6 +702,15 @@ impl VirtualMachine {
         }
 
         Ok(step)
+    }
+
+    fn validate_graph_format(&self) -> Result<(), VmError> {
+        self.graph
+            .validate_format()
+            .map_err(|error| VmError::UnsupportedBytecodeFormat {
+                supported: error.supported,
+                actual: error.actual,
+            })
     }
 
     fn execute_loop(&self, thread: &mut thread::VmThreadState) -> Result<Value, VmError> {

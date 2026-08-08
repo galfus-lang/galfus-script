@@ -4,11 +4,18 @@ mod tests;
 use std::error;
 use std::fmt;
 
+use galfus_bytecode::BytecodeFormatVersion;
 use galfus_bytecode::instruction::{ConstIdx, FieldIdx, FuncIdx, Reg, TypeIdx};
 use thiserror::Error;
 
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum VmError {
+    #[error("unsupported bytecode format version {actual:?}; VM supports {supported:?}")]
+    UnsupportedBytecodeFormat {
+        supported: BytecodeFormatVersion,
+        actual: BytecodeFormatVersion,
+    },
+
     #[error("Type mismatch: expected {expected}, found {found}")]
     TypeMismatch { expected: String, found: String },
 

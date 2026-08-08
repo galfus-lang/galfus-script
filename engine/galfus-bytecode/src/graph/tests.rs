@@ -67,12 +67,39 @@ fn apply_returns_a_new_validated_snapshot() {
     assert_eq!(graph.version(), 0);
     assert!(graph.is_empty());
     assert_eq!(next.version(), 1);
+    assert_eq!(next.format_version(), CURRENT_BYTECODE_FORMAT_VERSION);
     assert_eq!(
         next.get(main).map(BytecodeNode::semantic_revision),
         Some(SemanticRevision::new(3))
     );
     assert_eq!(next.deps_of(main).collect::<Vec<_>>(), vec![utilities]);
     assert_eq!(next.dependents_of(utilities), vec![main]);
+}
+
+#[test]
+fn format_version_is_independent_from_graph_revision() {
+    let unsupported = BytecodeFormatVersion::new(2);
+    let graph = BytecodeGraph::with_format_version(unsupported);
+    let next = graph
+        .apply(transaction(
+            &graph,
+            SemanticRevision::new(1),
+            vec![compiled_module(ModuleId::new(1), SemanticRevision::new(1))],
+            vec![],
+            vec![],
+        ))
+        .expect("graph structure is valid regardless of the loader format");
+
+    assert_eq!(graph.version(), 0);
+    assert_eq!(next.version(), 1);
+    assert_eq!(next.format_version(), unsupported);
+    assert_eq!(
+        next.validate_format(),
+        Err(BytecodeFormatError {
+            supported: CURRENT_BYTECODE_FORMAT_VERSION,
+            actual: unsupported,
+        })
+    );
 }
 
 #[test]
@@ -362,12 +389,14 @@ fn validation_collects_all_errors_in_canonical_module_order() {
 
     let forward = BytecodeGraph {
         version: 0,
+        format_version: CURRENT_BYTECODE_FORMAT_VERSION,
         modules: HashMap::from([(first, first_node.clone()), (second, second_node.clone())]),
         ids_by_path: HashMap::new(),
         edges: Vec::new(),
     };
     let reverse = BytecodeGraph {
         version: 0,
+        format_version: CURRENT_BYTECODE_FORMAT_VERSION,
         modules: HashMap::from([(second, second_node), (first, first_node)]),
         ids_by_path: HashMap::new(),
         edges: Vec::new(),

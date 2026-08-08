@@ -15,6 +15,33 @@ pub use graph_resolver::{GraphResolutionError, ModuleImports, ResolvedImport};
 pub use instruction::*;
 pub use validation::*;
 
+/// Version of the bytecode instruction set and in-memory layout.
+///
+/// This is independent from [`BytecodeGraph::version`], which only identifies
+/// the ordering of graph snapshots within one compilation session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BytecodeFormatVersion(u16);
+
+impl BytecodeFormatVersion {
+    pub const fn new(value: u16) -> Self {
+        Self(value)
+    }
+
+    pub const fn raw(self) -> u16 {
+        self.0
+    }
+}
+
+/// The only bytecode format this runtime release can interpret.
+pub const CURRENT_BYTECODE_FORMAT_VERSION: BytecodeFormatVersion = BytecodeFormatVersion::new(1);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("unsupported bytecode format version {actual:?}; supported version is {supported:?}")]
+pub struct BytecodeFormatError {
+    pub supported: BytecodeFormatVersion,
+    pub actual: BytecodeFormatVersion,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Constant {
     Bool(bool),

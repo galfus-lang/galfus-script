@@ -5,7 +5,10 @@ mod tests;
 use crate::ExportKind;
 use crate::instruction;
 
-use crate::{BytecodeModule, BytecodeValidationError, validate_bytecode_module};
+use crate::{
+    BytecodeFormatError, BytecodeFormatVersion, BytecodeModule, BytecodeValidationError,
+    CURRENT_BYTECODE_FORMAT_VERSION, validate_bytecode_module,
+};
 use galfus_core::{ModuleId, ModulePath, SemanticRevision};
 use std::collections::{HashMap, HashSet};
 
@@ -172,9 +175,10 @@ pub enum BytecodeGraphTransactionError {
 }
 
 /// The immutable executable graph published by a workspace.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct BytecodeGraph {
     version: u64,
+    format_version: BytecodeFormatVersion,
     pub(crate) modules: HashMap<ModuleId, BytecodeNode>,
     pub(crate) ids_by_path: HashMap<ModulePath, ModuleId>,
     pub(crate) edges: Vec<ImportEdge>,
@@ -185,8 +189,35 @@ impl BytecodeGraph {
         Self::default()
     }
 
+    /// Construct a graph that was loaded from the supplied bytecode format.
+    ///
+    /// Call [`Self::validate_format`] before interpreting its instructions.
+    pub fn with_format_version(format_version: BytecodeFormatVersion) -> Self {
+        Self {
+            format_version,
+            ..Self::default()
+        }
+    }
+
+    /// Monotonic revision of graph snapshots within one compilation session.
     pub fn version(&self) -> u64 {
         self.version
+    }
+
+    pub fn format_version(&self) -> BytecodeFormatVersion {
+        self.format_version
+    }
+
+    /// Verify that this graph can be interpreted by the current VM.
+    pub fn validate_format(&self) -> Result<(), BytecodeFormatError> {
+        if self.format_version == CURRENT_BYTECODE_FORMAT_VERSION {
+            Ok(())
+        } else {
+            Err(BytecodeFormatError {
+                supported: CURRENT_BYTECODE_FORMAT_VERSION,
+                actual: self.format_version,
+            })
+        }
     }
 
     /// Construct the first validated graph snapshot from complete module data.
@@ -195,7 +226,22 @@ impl BytecodeGraph {
         modules: Vec<BytecodeNode>,
         edges: Vec<ImportEdge>,
     ) -> Result<Self, BytecodeGraphTransactionError> {
-        Self::new().apply(BytecodeGraphTransaction {
+        Self::from_modules_with_format_version(
+            CURRENT_BYTECODE_FORMAT_VERSION,
+            semantic_revision,
+            modules,
+            edges,
+        )
+    }
+
+    /// Construct a graph received in a declared bytecode format.
+    pub fn from_modules_with_format_version(
+        format_version: BytecodeFormatVersion,
+        semantic_revision: SemanticRevision,
+        modules: Vec<BytecodeNode>,
+        edges: Vec<ImportEdge>,
+    ) -> Result<Self, BytecodeGraphTransactionError> {
+        Self::with_format_version(format_version).apply(BytecodeGraphTransaction {
             base_version: 0,
             semantic_revision,
             upserted_modules: modules,
@@ -482,5 +528,17 @@ impl BytecodeGraph {
 
     pub fn len(&self) -> usize {
         self.modules.len()
+    }
+}
+
+impl Default for BytecodeGraph {
+    fn default() -> Self {
+        Self {
+            version: 0,
+            format_version: CURRENT_BYTECODE_FORMAT_VERSION,
+            modules: HashMap::new(),
+            ids_by_path: HashMap::new(),
+            edges: Vec::new(),
+        }
     }
 }

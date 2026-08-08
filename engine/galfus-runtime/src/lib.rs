@@ -41,6 +41,8 @@ pub enum RuntimeError {
     #[error("entry arguments require bytecode type `{0}`")]
     MissingArgumentType(&'static str),
     #[error(transparent)]
+    BytecodeFormat(#[from] galfus_bytecode::BytecodeFormatError),
+    #[error(transparent)]
     GraphResolution(#[from] galfus_bytecode::GraphResolutionError),
     #[error("{0}")]
     VmPanic(#[from] VmPanic),
@@ -115,6 +117,8 @@ impl Runtime {
         args: &[Vec<u8>],
         driver: Rc<dyn galfus_contract::KernelDriver>,
     ) -> Result<Execution, RuntimeError> {
+        self.graph.validate_format()?;
+
         let mut orchestrator = crate::orchestrator::Orchestrator::new();
         let graph = self.graph.clone();
         let image = &graph.get(module_id).unwrap().module;

@@ -175,6 +175,29 @@ fn start_with_provider(provider: StartupProvider) -> Execution {
 }
 
 #[test]
+fn runtime_rejects_an_unsupported_bytecode_format_before_loading_the_entry_module() {
+    let graph = BytecodeGraph::with_format_version(galfus_bytecode::BytecodeFormatVersion::new(2));
+
+    let result = Runtime::new(sync::Arc::new(graph), None).start(
+        ModuleId::new(1),
+        "main",
+        &[],
+        std::rc::Rc::new(CooperativeDriver::new()),
+    );
+    let Err(error) = result else {
+        panic!("unsupported bytecode must be rejected before runtime loading");
+    };
+
+    assert!(matches!(
+        error,
+        RuntimeError::BytecodeFormat(galfus_bytecode::BytecodeFormatError {
+            supported: galfus_bytecode::CURRENT_BYTECODE_FORMAT_VERSION,
+            actual,
+        }) if actual == galfus_bytecode::BytecodeFormatVersion::new(2)
+    ));
+}
+
+#[test]
 fn pending_initializer_delays_entry_until_its_completion() {
     let calls = sync::Arc::new(sync::Mutex::new(vec![]));
     let pending = sync::Arc::new(sync::Mutex::new(None));
