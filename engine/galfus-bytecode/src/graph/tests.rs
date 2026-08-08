@@ -95,7 +95,7 @@ fn format_version_is_independent_from_graph_revision() {
     assert_eq!(next.format_version(), unsupported);
     assert_eq!(
         next.validate_format(),
-        Err(BytecodeFormatError {
+        Err(BytecodeFormatError::LegacyVersion {
             supported: CURRENT_BYTECODE_FORMAT_VERSION,
             actual: unsupported,
         })

@@ -50,9 +50,9 @@ fn vm_rejects_an_unsupported_bytecode_format_before_execution() {
 
     assert_eq!(
         panic.error,
-        VmError::UnsupportedBytecodeFormat {
+        VmError::UnsupportedBytecodeFormat(galfus_bytecode::BytecodeFormatError::LegacyVersion {
             supported: galfus_bytecode::CURRENT_BYTECODE_FORMAT_VERSION,
             actual: galfus_bytecode::BytecodeFormatVersion::new(1),
-        }
+        })
     );
 }

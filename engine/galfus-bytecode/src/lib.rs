@@ -5,6 +5,7 @@
 pub mod graph;
 pub mod graph_resolver;
 pub mod instruction;
+pub mod opcode;
 pub mod validation;
 
 pub use graph::{
@@ -13,6 +14,7 @@ pub use graph::{
 };
 pub use graph_resolver::{GraphResolutionError, ModuleImports, ResolvedImport};
 pub use instruction::*;
+pub use opcode::*;
 pub use validation::*;
 
 /// Version of the bytecode instruction set and in-memory layout.
@@ -36,10 +38,31 @@ impl BytecodeFormatVersion {
 pub const CURRENT_BYTECODE_FORMAT_VERSION: BytecodeFormatVersion = BytecodeFormatVersion::new(2);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("unsupported bytecode format version {actual:?}; supported version is {supported:?}")]
-pub struct BytecodeFormatError {
-    pub supported: BytecodeFormatVersion,
-    pub actual: BytecodeFormatVersion,
+pub enum BytecodeFormatError {
+    #[error("legacy bytecode format version {actual:?}; supported version is {supported:?}")]
+    LegacyVersion {
+        supported: BytecodeFormatVersion,
+        actual: BytecodeFormatVersion,
+    },
+    #[error("future bytecode format version {actual:?}; supported version is {supported:?}")]
+    FutureVersion {
+        supported: BytecodeFormatVersion,
+        actual: BytecodeFormatVersion,
+    },
+}
+
+pub fn validate_bytecode_format(actual: BytecodeFormatVersion) -> Result<(), BytecodeFormatError> {
+    match actual.raw().cmp(&CURRENT_BYTECODE_FORMAT_VERSION.raw()) {
+        std::cmp::Ordering::Less => Err(BytecodeFormatError::LegacyVersion {
+            supported: CURRENT_BYTECODE_FORMAT_VERSION,
+            actual,
+        }),
+        std::cmp::Ordering::Equal => Ok(()),
+        std::cmp::Ordering::Greater => Err(BytecodeFormatError::FutureVersion {
+            supported: CURRENT_BYTECODE_FORMAT_VERSION,
+            actual,
+        }),
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -621,10 +621,7 @@ impl VirtualMachine {
     fn validate_graph_format(&self) -> Result<(), VmError> {
         self.graph
             .validate_format()
-            .map_err(|error| VmError::UnsupportedBytecodeFormat {
-                supported: error.supported,
-                actual: error.actual,
-            })
+            .map_err(VmError::UnsupportedBytecodeFormat)
     }
 
     fn execute_loop(&self, thread: &mut thread::VmThreadState) -> Result<Value, VmError> {

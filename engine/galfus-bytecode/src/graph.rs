@@ -7,7 +7,7 @@ use crate::instruction;
 
 use crate::{
     BytecodeFormatError, BytecodeFormatVersion, BytecodeModule, BytecodeValidationError,
-    CURRENT_BYTECODE_FORMAT_VERSION, validate_bytecode_module,
+    CURRENT_BYTECODE_FORMAT_VERSION, validate_bytecode_format, validate_bytecode_module,
 };
 use galfus_core::{ModuleId, ModulePath, SemanticRevision};
 use std::collections::{HashMap, HashSet};
@@ -210,14 +210,7 @@ impl BytecodeGraph {
 
     /// Verify that this graph can be interpreted by the current VM.
     pub fn validate_format(&self) -> Result<(), BytecodeFormatError> {
-        if self.format_version == CURRENT_BYTECODE_FORMAT_VERSION {
-            Ok(())
-        } else {
-            Err(BytecodeFormatError {
-                supported: CURRENT_BYTECODE_FORMAT_VERSION,
-                actual: self.format_version,
-            })
-        }
+        validate_bytecode_format(self.format_version)
     }
 
     /// Construct the first validated graph snapshot from complete module data.

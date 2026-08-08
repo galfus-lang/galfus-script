@@ -190,7 +190,7 @@ fn runtime_rejects_an_unsupported_bytecode_format_before_loading_the_entry_modul
 
     assert!(matches!(
         error,
-        RuntimeError::BytecodeFormat(galfus_bytecode::BytecodeFormatError {
+        RuntimeError::BytecodeFormat(galfus_bytecode::BytecodeFormatError::LegacyVersion {
             supported: galfus_bytecode::CURRENT_BYTECODE_FORMAT_VERSION,
             actual,
         }) if actual == galfus_bytecode::BytecodeFormatVersion::new(1)
