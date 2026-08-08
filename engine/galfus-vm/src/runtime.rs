@@ -13,7 +13,7 @@ use crate::thread;
 
 use crate::error::{StackFrameInfo, VmError, VmPanic};
 use galfus_bytecode::instruction::{
-    ChoiceLayoutIdx, ConstIdx, FuncIdx, Instruction, Reg, StructLayoutIdx, TypeIdx,
+    ChoiceLayoutIdx, FuncIdx, Instruction, Reg, StructLayoutIdx, TypeIdx,
 };
 use galfus_bytecode::{BytecodeGraph, BytecodeType, Constant, OwnershipKind};
 use galfus_contract::Providers;
@@ -601,27 +601,6 @@ impl VirtualMachine {
         };
 
         let release_instruction = instr.clone();
-        if matches!(
-            instr,
-            Instruction::CallNative { .. }
-                | Instruction::ReceiveFilter { .. }
-                | Instruction::MailboxHasMessages { .. }
-                | Instruction::MailboxGetMessage { .. }
-                | Instruction::CreateThread { .. }
-                | Instruction::StartThread { .. }
-                | Instruction::GetThread { .. }
-                | Instruction::ThreadIsRunning { .. }
-                | Instruction::ThreadIsExited { .. }
-                | Instruction::ThreadExitReason { .. }
-                | Instruction::WaitThread { .. }
-                | Instruction::Send { .. }
-        ) {
-            return Err(VmError::UnimplementedInstruction {
-                instruction:
-                    "legacy immediate boundary instruction; use an async Future activation"
-                        .to_string(),
-            });
-        }
         let step = match instr {
             Instruction::LoadConst { .. }
             | Instruction::Move { .. }
@@ -660,17 +639,6 @@ impl VirtualMachine {
             | Instruction::CallDynamic { .. }
             | Instruction::Ret { .. }
             | Instruction::RetNull
-            | Instruction::Send { .. }
-            | Instruction::ReceiveFilter { .. }
-            | Instruction::MailboxHasMessages { .. }
-            | Instruction::MailboxGetMessage { .. }
-            | Instruction::CreateThread { .. }
-            | Instruction::StartThread { .. }
-            | Instruction::GetThread { .. }
-            | Instruction::ThreadIsRunning { .. }
-            | Instruction::ThreadIsExited { .. }
-            | Instruction::ThreadExitReason { .. }
-            | Instruction::WaitThread { .. }
             | Instruction::Panic { .. } => self.execute_control_instruction(thread, instr)?,
 
             Instruction::AllocLocal { .. }
@@ -686,8 +654,6 @@ impl VirtualMachine {
             | Instruction::Instanceof { .. } => self.execute_object_instruction(thread, instr)?,
 
             Instruction::Drop { .. }
-            | Instruction::CallNative { .. }
-            | Instruction::AdapterCall { .. }
             | Instruction::AwaitFuture { .. }
             | Instruction::CreateFuture { .. }
             | Instruction::CreateIndirectFuture { .. }

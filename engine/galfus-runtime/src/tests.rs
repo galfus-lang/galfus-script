@@ -176,7 +176,7 @@ fn start_with_provider(provider: StartupProvider) -> Execution {
 
 #[test]
 fn runtime_rejects_an_unsupported_bytecode_format_before_loading_the_entry_module() {
-    let graph = BytecodeGraph::with_format_version(galfus_bytecode::BytecodeFormatVersion::new(2));
+    let graph = BytecodeGraph::with_format_version(galfus_bytecode::BytecodeFormatVersion::new(1));
 
     let result = Runtime::new(sync::Arc::new(graph), None).start(
         ModuleId::new(1),
@@ -193,7 +193,7 @@ fn runtime_rejects_an_unsupported_bytecode_format_before_loading_the_entry_modul
         RuntimeError::BytecodeFormat(galfus_bytecode::BytecodeFormatError {
             supported: galfus_bytecode::CURRENT_BYTECODE_FORMAT_VERSION,
             actual,
-        }) if actual == galfus_bytecode::BytecodeFormatVersion::new(2)
+        }) if actual == galfus_bytecode::BytecodeFormatVersion::new(1)
     ));
 }
 

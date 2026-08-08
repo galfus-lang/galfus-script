@@ -78,7 +78,7 @@ fn apply_returns_a_new_validated_snapshot() {
 
 #[test]
 fn format_version_is_independent_from_graph_revision() {
-    let unsupported = BytecodeFormatVersion::new(2);
+    let unsupported = BytecodeFormatVersion::new(1);
     let graph = BytecodeGraph::with_format_version(unsupported);
     let next = graph
         .apply(transaction(

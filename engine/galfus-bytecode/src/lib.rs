@@ -33,7 +33,7 @@ impl BytecodeFormatVersion {
 }
 
 /// The only bytecode format this runtime release can interpret.
-pub const CURRENT_BYTECODE_FORMAT_VERSION: BytecodeFormatVersion = BytecodeFormatVersion::new(1);
+pub const CURRENT_BYTECODE_FORMAT_VERSION: BytecodeFormatVersion = BytecodeFormatVersion::new(2);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("unsupported bytecode format version {actual:?}; supported version is {supported:?}")]
