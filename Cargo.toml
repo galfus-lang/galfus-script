@@ -11,6 +11,11 @@ version = "0.0.0"
 edition = "2024"
 license = "MIT"
 
+[workspace.metadata.galfus.package-image]
+format-version = "1.0.0"
+bytecode-format-version = "2.0.0"
+boundary-abi-version = "1.0.0"
+
 [workspace.dependencies]
 # Serialization / binary data format
 serde = { version = "1.0", features = ["derive"] }

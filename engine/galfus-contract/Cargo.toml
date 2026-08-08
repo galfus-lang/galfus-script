@@ -3,10 +3,15 @@ name = "galfus-contract"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+build = "build.rs"
 
 [dependencies]
+galfus-core = { path = "../galfus-core" }
 serde = { workspace = true }
 thiserror = { workspace = true }
+
+[build-dependencies]
+toml = { workspace = true }
 
 [dev-dependencies]
 galfus-core = { path = "../galfus-core" }

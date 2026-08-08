@@ -9,12 +9,14 @@ pub mod builtins;
 #[cfg(test)]
 mod tests;
 pub mod thread;
+pub mod version;
 
 use std::collections::HashMap;
 use std::sync;
 
 pub use builtins::*;
 pub use thread::*;
+pub use version::*;
 
 /// A typed value that crosses the execution boundary safely.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

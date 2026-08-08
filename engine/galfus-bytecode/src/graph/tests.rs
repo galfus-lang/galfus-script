@@ -78,7 +78,7 @@ fn apply_returns_a_new_validated_snapshot() {
 
 #[test]
 fn format_version_is_independent_from_graph_revision() {
-    let unsupported = BytecodeFormatVersion::new(1);
+    let unsupported = BytecodeFormatVersion::new(1, 0, 0);
     let graph = BytecodeGraph::with_format_version(unsupported);
     let next = graph
         .apply(transaction(
@@ -95,7 +95,7 @@ fn format_version_is_independent_from_graph_revision() {
     assert_eq!(next.format_version(), unsupported);
     assert_eq!(
         next.validate_format(),
-        Err(BytecodeFormatError::LegacyVersion {
+        Err(BytecodeFormatError {
             supported: CURRENT_BYTECODE_FORMAT_VERSION,
             actual: unsupported,
         })

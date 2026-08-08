@@ -34,7 +34,7 @@ fn test_vm_creation() {
 #[test]
 fn vm_rejects_an_unsupported_bytecode_format_before_execution() {
     let graph = galfus_bytecode::BytecodeGraph::with_format_version(
-        galfus_bytecode::BytecodeFormatVersion::new(1),
+        galfus_bytecode::BytecodeFormatVersion::new(1, 0, 0),
     );
     let vm = VirtualMachine::new(sync::Arc::new(graph));
     let mut thread = thread::VmThreadState::new();
@@ -50,9 +50,9 @@ fn vm_rejects_an_unsupported_bytecode_format_before_execution() {
 
     assert_eq!(
         panic.error,
-        VmError::UnsupportedBytecodeFormat(galfus_bytecode::BytecodeFormatError::LegacyVersion {
+        VmError::UnsupportedBytecodeFormat(galfus_bytecode::BytecodeFormatError {
             supported: galfus_bytecode::CURRENT_BYTECODE_FORMAT_VERSION,
-            actual: galfus_bytecode::BytecodeFormatVersion::new(1),
+            actual: galfus_bytecode::BytecodeFormatVersion::new(1, 0, 0),
         })
     );
 }

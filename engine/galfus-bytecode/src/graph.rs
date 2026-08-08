@@ -210,7 +210,7 @@ impl BytecodeGraph {
 
     /// Verify that this graph can be interpreted by the current VM.
     pub fn validate_format(&self) -> Result<(), BytecodeFormatError> {
-        validate_bytecode_format(self.format_version)
+        validate_bytecode_format(self.format_version).map(|_| ())
     }
 
     /// Construct the first validated graph snapshot from complete module data.
