@@ -72,7 +72,7 @@ pub struct BytecodeGraphTransaction {
     pub edges: Vec<ImportEdge>,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum BytecodeGraphValidationError {
     #[error("module {module_id:?} contains invalid bytecode: {errors:?}")]
     InvalidModule {
@@ -109,12 +109,29 @@ pub enum BytecodeGraphValidationError {
     },
 }
 
+/// All validation errors found while checking a bytecode graph.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[error("graph validation failed: {errors:?}")]
+pub struct BytecodeGraphValidationErrors {
+    errors: Vec<BytecodeGraphValidationError>,
+}
+
+impl BytecodeGraphValidationErrors {
+    fn new(errors: Vec<BytecodeGraphValidationError>) -> Self {
+        Self { errors }
+    }
+
+    pub fn errors(&self) -> &[BytecodeGraphValidationError] {
+        self.errors.as_slice()
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum BytecodeGraphTransactionError {
     #[error("transaction targets graph version {expected}, but current version is {actual}")]
     StaleBaseVersion { expected: u64, actual: u64 },
     #[error(transparent)]
-    InvalidGraph(#[from] BytecodeGraphValidationError),
+    InvalidGraph(#[from] BytecodeGraphValidationErrors),
 }
 
 /// The immutable executable graph published by a workspace.
@@ -151,22 +168,25 @@ impl BytecodeGraph {
     }
 
     /// Validate the complete graph, including bytecode, imports, exports, and edges.
-    pub fn validate(&self) -> Result<(), BytecodeGraphValidationError> {
+    pub fn validate(&self) -> Result<(), BytecodeGraphValidationErrors> {
         let mut ids_by_path = HashMap::new();
-        for (id, node) in &self.modules {
-            if let Some(first) = ids_by_path.insert(node.path.clone(), *id)
-                && first != *id
+        let mut errors = Vec::new();
+
+        for node in self.modules() {
+            let id = node.id;
+            if let Some(first) = ids_by_path.insert(node.path.clone(), id)
+                && first != id
             {
-                return Err(BytecodeGraphValidationError::DuplicateModulePath {
+                errors.push(BytecodeGraphValidationError::DuplicateModulePath {
                     path: node.path.clone(),
                     first,
-                    second: *id,
+                    second: id,
                 });
             }
-            if let Err(errors) = validate_bytecode_module(&node.module) {
-                return Err(BytecodeGraphValidationError::InvalidModule {
-                    module_id: *id,
-                    errors,
+            if let Err(module_errors) = validate_bytecode_module(&node.module) {
+                errors.push(BytecodeGraphValidationError::InvalidModule {
+                    module_id: id,
+                    errors: module_errors,
                 });
             }
             for function in &node.module.functions {
@@ -185,22 +205,22 @@ impl BytecodeGraph {
                         _ => None,
                     };
                     if let Some((owner, global_idx)) = owner_global
-                        && owner != *id
+                        && owner != id
                     {
                         if let Some(owner_node) = self.modules.get(&owner) {
                             let is_exported = owner_node.module.exports.iter().any(
                                 |e| matches!(e.kind, ExportKind::Global(idx) if idx == global_idx),
                             );
                             if !is_exported {
-                                return Err(BytecodeGraphValidationError::MissingImportedExport {
-                                    importer: *id,
+                                errors.push(BytecodeGraphValidationError::MissingImportedExport {
+                                    importer: id,
                                     module_path: owner_node.path.as_str().to_string(),
                                     symbol_name: format!("global_{}", global_idx.raw()),
                                 });
                             }
                         } else {
-                            return Err(BytecodeGraphValidationError::MissingGlobalModule {
-                                importer: *id,
+                            errors.push(BytecodeGraphValidationError::MissingGlobalModule {
+                                importer: id,
                                 owner,
                             });
                         }
@@ -209,29 +229,38 @@ impl BytecodeGraph {
             }
         }
 
-        for edge in &self.edges {
+        let mut edges = self.edges.iter().collect::<Vec<_>>();
+        edges.sort_by_key(|edge| (edge.from.raw(), edge.to.raw()));
+        for edge in edges {
             if !self.modules.contains_key(&edge.from) || !self.modules.contains_key(&edge.to) {
-                return Err(BytecodeGraphValidationError::MissingDependencyModule {
+                errors.push(BytecodeGraphValidationError::MissingDependencyModule {
                     from: edge.from,
                     to: edge.to,
                 });
             }
         }
 
-        for (importer, node) in &self.modules {
-            for import in &node.module.imports {
-                let path = ModulePath::new(import.module_name.as_str()).ok_or_else(|| {
-                    BytecodeGraphValidationError::InvalidImportPath {
-                        importer: *importer,
+        for node in self.modules() {
+            let mut imports = node.module.imports.iter().collect::<Vec<_>>();
+            imports.sort_by(|left, right| {
+                (&left.module_name, &left.symbol_name)
+                    .cmp(&(&right.module_name, &right.symbol_name))
+            });
+            for import in imports {
+                let Some(path) = ModulePath::new(import.module_name.as_str()) else {
+                    errors.push(BytecodeGraphValidationError::InvalidImportPath {
+                        importer: node.id,
                         module_path: import.module_name.clone(),
-                    }
-                })?;
-                let dependency = ids_by_path.get(&path).copied().ok_or_else(|| {
-                    BytecodeGraphValidationError::MissingImportedModule {
-                        importer: *importer,
+                    });
+                    continue;
+                };
+                let Some(dependency) = ids_by_path.get(&path).copied() else {
+                    errors.push(BytecodeGraphValidationError::MissingImportedModule {
+                        importer: node.id,
                         module_path: import.module_name.clone(),
-                    }
-                })?;
+                    });
+                    continue;
+                };
                 let dependency_node = self
                     .modules
                     .get(&dependency)
@@ -242,8 +271,8 @@ impl BytecodeGraph {
                     .iter()
                     .any(|export| export.symbol_name == import.symbol_name)
                 {
-                    return Err(BytecodeGraphValidationError::MissingImportedExport {
-                        importer: *importer,
+                    errors.push(BytecodeGraphValidationError::MissingImportedExport {
+                        importer: node.id,
                         module_path: import.module_name.clone(),
                         symbol_name: import.symbol_name.clone(),
                     });
@@ -251,7 +280,11 @@ impl BytecodeGraph {
             }
         }
 
-        Ok(())
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(BytecodeGraphValidationErrors::new(errors))
+        }
     }
 
     /// Apply a transaction to a clone and return the next validated snapshot.

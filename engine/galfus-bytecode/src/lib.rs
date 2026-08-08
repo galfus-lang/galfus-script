@@ -9,7 +9,7 @@ pub mod validation;
 
 pub use graph::{
     BytecodeGraph, BytecodeGraphTransaction, BytecodeGraphTransactionError,
-    BytecodeGraphValidationError, BytecodeNode, ImportEdge,
+    BytecodeGraphValidationError, BytecodeGraphValidationErrors, BytecodeNode, ImportEdge,
 };
 pub use graph_resolver::{GraphResolutionError, ModuleImports, ResolvedImport};
 pub use instruction::*;

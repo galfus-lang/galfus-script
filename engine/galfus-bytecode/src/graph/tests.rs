@@ -183,14 +183,68 @@ fn apply_rejects_invalid_imports_without_changing_the_snapshot() {
         ))
         .expect_err("invalid import must fail");
 
+    let BytecodeGraphTransactionError::InvalidGraph(errors) = error else {
+        panic!("invalid import must fail validation");
+    };
     assert!(matches!(
-        error,
-        BytecodeGraphTransactionError::InvalidGraph(
-            BytecodeGraphValidationError::MissingImportedModule { .. }
-        )
+        errors.errors(),
+        [BytecodeGraphValidationError::MissingImportedModule { .. }]
     ));
     assert_eq!(graph.version(), 0);
     assert!(graph.is_empty());
+}
+
+#[test]
+fn validation_collects_all_errors_in_canonical_module_order() {
+    let first = ModuleId::new(31);
+    let second = ModuleId::new(5);
+    let revision = SemanticRevision::new(1);
+
+    let mut first_node = compiled_module(first, revision);
+    first_node.module.imports.push(ImportSlot {
+        module_name: "z_missing.gfs".to_string(),
+        symbol_name: "value".to_string(),
+        ty: instruction::TypeIdx(0),
+        kind: ImportKind::Function,
+    });
+    let mut second_node = compiled_module(second, revision);
+    second_node.module.imports.push(ImportSlot {
+        module_name: "a_missing.gfs".to_string(),
+        symbol_name: "value".to_string(),
+        ty: instruction::TypeIdx(0),
+        kind: ImportKind::Function,
+    });
+
+    let forward = BytecodeGraph {
+        version: 0,
+        modules: HashMap::from([(first, first_node.clone()), (second, second_node.clone())]),
+        ids_by_path: HashMap::new(),
+        edges: Vec::new(),
+    };
+    let reverse = BytecodeGraph {
+        version: 0,
+        modules: HashMap::from([(second, second_node), (first, first_node)]),
+        ids_by_path: HashMap::new(),
+        edges: Vec::new(),
+    };
+
+    let forward_errors = forward.validate().expect_err("graph must be invalid");
+    let reverse_errors = reverse.validate().expect_err("graph must be invalid");
+
+    assert_eq!(forward_errors, reverse_errors);
+    assert_eq!(
+        forward_errors.errors(),
+        [
+            BytecodeGraphValidationError::MissingImportedModule {
+                importer: second,
+                module_path: "a_missing.gfs".to_string(),
+            },
+            BytecodeGraphValidationError::MissingImportedModule {
+                importer: first,
+                module_path: "z_missing.gfs".to_string(),
+            },
+        ]
+    );
 }
 
 #[test]
