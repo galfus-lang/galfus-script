@@ -288,8 +288,11 @@ impl BytecodeGraph {
         self.modules.get(&id)
     }
 
+    /// Iterate modules in canonical `ModuleId` order.
     pub fn modules(&self) -> impl Iterator<Item = &BytecodeNode> {
-        self.modules.values()
+        let mut modules = self.modules.values().collect::<Vec<_>>();
+        modules.sort_by_key(|module| module.id.raw());
+        modules.into_iter()
     }
 
     pub fn edges(&self) -> &[ImportEdge] {

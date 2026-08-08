@@ -75,6 +75,58 @@ fn apply_returns_a_new_validated_snapshot() {
 }
 
 #[test]
+fn modules_are_exposed_in_canonical_module_id_order() {
+    let first = ModuleId::new(37);
+    let second = ModuleId::new(4);
+    let third = ModuleId::new(19);
+
+    let graph = BytecodeGraph::new();
+    let inserted_forward = graph
+        .apply(transaction(
+            &graph,
+            SemanticRevision::new(1),
+            vec![
+                compiled_module(first, SemanticRevision::new(1)),
+                compiled_module(second, SemanticRevision::new(1)),
+                compiled_module(third, SemanticRevision::new(1)),
+            ],
+            vec![],
+            vec![],
+        ))
+        .expect("transaction is valid");
+    let graph = BytecodeGraph::new();
+    let inserted_reverse = graph
+        .apply(transaction(
+            &graph,
+            SemanticRevision::new(1),
+            vec![
+                compiled_module(third, SemanticRevision::new(1)),
+                compiled_module(second, SemanticRevision::new(1)),
+                compiled_module(first, SemanticRevision::new(1)),
+            ],
+            vec![],
+            vec![],
+        ))
+        .expect("transaction is valid");
+
+    let ordered_ids = vec![second, third, first];
+    assert_eq!(
+        inserted_forward
+            .modules()
+            .map(BytecodeNode::id)
+            .collect::<Vec<_>>(),
+        ordered_ids
+    );
+    assert_eq!(
+        inserted_reverse
+            .modules()
+            .map(BytecodeNode::id)
+            .collect::<Vec<_>>(),
+        ordered_ids
+    );
+}
+
+#[test]
 fn apply_rejects_a_stale_transaction_without_changing_the_snapshot() {
     let module = ModuleId::new(1);
     let graph = BytecodeGraph::new();
