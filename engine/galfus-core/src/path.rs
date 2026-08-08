@@ -5,7 +5,9 @@ use std::fmt;
 
 use std::sync::Arc;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct ModulePath(Arc<str>);
 
 impl ModulePath {

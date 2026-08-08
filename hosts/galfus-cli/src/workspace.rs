@@ -73,7 +73,10 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
     );
     properties.insert("target_triple".to_string(), target_triple);
 
-    let context = galfus_contract::AdapterLoadContext { properties };
+    let context = galfus_contract::AdapterLoadContext {
+        target: galfus_contract::ExecutionTarget::new("default").expect("default target is valid"),
+        properties,
+    };
 
     let bindings = preflight
         .bind_package(&compile_report.package, &context)

@@ -1,9 +1,11 @@
 #[cfg(test)]
 mod tests;
 
+use bincode::Options;
 use galfus_contract::{
     AdapterModuleRequirement, BoundaryAbiVersion, CURRENT_BOUNDARY_ABI_VERSION,
-    CURRENT_PRODUCER_VERSION, ExecutionTarget, ProducerVersion, ProviderModuleRequirement,
+    CURRENT_PRODUCER_VERSION, ContentHash, ExecutionTarget, ProducerVersion,
+    ProviderModuleRequirement,
 };
 use galfus_core::{ModuleId, ModulePath};
 use std::collections::BTreeSet;
@@ -13,7 +15,7 @@ use crate::{
 };
 
 /// The exported entry point of a package image.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct PackageEntryPoint {
     module_path: ModulePath,
     function_name: String,
@@ -37,7 +39,7 @@ impl PackageEntryPoint {
 }
 
 /// Version contracts recorded with a package image.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct PackageVersions {
     producer: ProducerVersion,
     package_format: PackageFormatVersion,
@@ -76,7 +78,7 @@ impl PackageVersions {
 ///
 /// The graph and its declarative external requirements are created together
 /// and cannot be replaced independently after publication.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct PackageImage {
     graph: BytecodeGraph,
     target: ExecutionTarget,
@@ -98,6 +100,10 @@ pub enum PackageValidationError {
     #[error("provider requirement for `{module_path}` is duplicated")]
     DuplicateProviderRequirement { module_path: String },
 }
+
+#[derive(Debug, thiserror::Error)]
+#[error("could not encode the canonical package image: {0}")]
+pub struct PackageEncodingError(#[from] bincode::Error);
 
 impl PackageImage {
     pub fn try_new(
@@ -229,5 +235,21 @@ impl PackageImage {
 
     pub const fn versions(&self) -> PackageVersions {
         self.versions
+    }
+
+    /// Encodes this immutable package with a fixed-width, deterministic layout.
+    ///
+    /// Graph snapshot revisions and debug locations are not part of a package image,
+    /// because they do not affect executable behavior.
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, PackageEncodingError> {
+        bincode::DefaultOptions::new()
+            .with_fixint_encoding()
+            .with_little_endian()
+            .serialize(self)
+            .map_err(PackageEncodingError::from)
+    }
+
+    pub fn content_hash(&self) -> Result<ContentHash, PackageEncodingError> {
+        self.canonical_bytes().map(|bytes| ContentHash::of(&bytes))
     }
 }

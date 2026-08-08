@@ -1,37 +1,55 @@
 use super::*;
 use galfus_bytecode::{BytecodeGraph, BytecodeModule, BytecodeNode, ConstantPool, PackageImage};
 use galfus_contract::{
-    AdapterConfigValue, AdapterLoadContext, AdapterLoadError, AdapterModuleBinding,
-    AdapterModuleDescriptor, AdapterModuleLoader, AdapterModuleRequirement, BoundaryValue,
-    CancellationOutcome, MessageInjector,
+    AdapterArtifact, AdapterConfigValue, AdapterLoadContext, AdapterLoadError,
+    AdapterModuleBinding, AdapterModuleDescriptor, AdapterModuleLoader, AdapterModuleRequirement,
+    AdapterTarget, BoundaryValue, CancellationOutcome, ContentHash, MessageInjector,
+    SelectedAdapterTarget, VerifiedAdapterArtifact,
 };
 use galfus_contract::{CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget};
+use galfus_core::Version;
 use galfus_core::{ModuleId, ModulePath, SemanticRevision};
 use std::collections::BTreeMap;
 
 struct MockLoader {
     should_fail: bool,
+    corrupt_artifact: bool,
 }
 
 impl AdapterModuleLoader for MockLoader {
-    fn load_module(
+    fn load_artifact(
         &self,
-        requirement: &AdapterModuleRequirement,
-        context: &AdapterLoadContext,
-    ) -> Result<Box<dyn AdapterModuleBinding>, AdapterLoadError> {
+        _selected_target: &SelectedAdapterTarget,
+        _context: &AdapterLoadContext,
+    ) -> Result<Vec<u8>, AdapterLoadError> {
         if self.should_fail {
             Err(AdapterLoadError {
                 code: "unsupported_platform".into(),
                 message: "mock failure".into(),
             })
         } else {
-            // loader asserts that the context is passed
-            assert!(context.properties.contains_key("os"));
-
-            // assert that config was passed completely
-            assert!(requirement.descriptor.config.contains_key("test_key"));
-            Ok(Box::new(MockBoundModule))
+            Ok(if self.corrupt_artifact {
+                b"corrupt artifact".to_vec()
+            } else {
+                b"mock artifact".to_vec()
+            })
         }
+    }
+
+    fn load_module(
+        &self,
+        requirement: &AdapterModuleRequirement,
+        _selected_target: &SelectedAdapterTarget,
+        artifact: VerifiedAdapterArtifact,
+        context: &AdapterLoadContext,
+    ) -> Result<Box<dyn AdapterModuleBinding>, AdapterLoadError> {
+        // loader asserts that the context is passed
+        assert!(context.properties.contains_key("os"));
+        assert_eq!(artifact.as_bytes(), b"mock artifact");
+
+        // assert that config was passed completely
+        assert!(requirement.descriptor.config.contains_key("test_key"));
+        Ok(Box::new(MockBoundModule))
     }
 }
 
@@ -69,17 +87,35 @@ fn create_requirement(proxy_module: &str, adapter: &str) -> AdapterModuleRequire
         descriptor: AdapterModuleDescriptor {
             adapter: adapter.to_string(),
             config,
-            targets: Vec::new(),
+            targets: vec![mock_target()],
             exports: vec![],
         },
         boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
     }
 }
 
+fn mock_target() -> AdapterTarget {
+    AdapterTarget {
+        target: ExecutionTarget::new("test").expect("valid target"),
+        locator: "memory://mock".to_string(),
+        platform: "test".to_string(),
+        abi: "1".to_string(),
+        artifact: AdapterArtifact {
+            content_hash: ContentHash::of(b"mock artifact"),
+            size_bytes: b"mock artifact".len() as u64,
+            media_type: "application/x-galfus-test".to_string(),
+            content_version: Version::new(1, 0, 0),
+        },
+    }
+}
+
 fn create_context() -> AdapterLoadContext {
     let mut properties = BTreeMap::new();
     properties.insert("os".to_string(), "linux".to_string());
-    AdapterLoadContext { properties }
+    AdapterLoadContext {
+        target: ExecutionTarget::new("test").expect("valid target"),
+        properties,
+    }
 }
 
 fn create_package(requirements: Vec<AdapterModuleRequirement>) -> PackageImage {
@@ -143,7 +179,13 @@ fn missing_loader_returns_error() {
 fn load_failure_returns_adapter_load_error() {
     let mut preflight = AdapterBindingPreflight::new();
     preflight
-        .register_loader("test_adapter", Box::new(MockLoader { should_fail: true }))
+        .register_loader(
+            "test_adapter",
+            Box::new(MockLoader {
+                should_fail: true,
+                corrupt_artifact: false,
+            }),
+        )
         .unwrap();
 
     let req = create_requirement("my_proxy", "test_adapter");
@@ -166,7 +208,13 @@ fn load_failure_returns_adapter_load_error() {
 fn multiple_modules_using_same_loader() {
     let mut preflight = AdapterBindingPreflight::new();
     preflight
-        .register_loader("test_adapter", Box::new(MockLoader { should_fail: false }))
+        .register_loader(
+            "test_adapter",
+            Box::new(MockLoader {
+                should_fail: false,
+                corrupt_artifact: false,
+            }),
+        )
         .unwrap();
 
     let req1 = create_requirement("proxy1", "test_adapter");
@@ -184,11 +232,23 @@ fn multiple_modules_using_same_loader() {
 fn duplicate_loader_registration_fails() {
     let mut preflight = AdapterBindingPreflight::new();
     preflight
-        .register_loader("test_adapter", Box::new(MockLoader { should_fail: false }))
+        .register_loader(
+            "test_adapter",
+            Box::new(MockLoader {
+                should_fail: false,
+                corrupt_artifact: false,
+            }),
+        )
         .unwrap();
 
     let err = preflight
-        .register_loader("test_adapter", Box::new(MockLoader { should_fail: false }))
+        .register_loader(
+            "test_adapter",
+            Box::new(MockLoader {
+                should_fail: false,
+                corrupt_artifact: false,
+            }),
+        )
         .unwrap_err();
 
     assert!(matches!(err, PreflightError::DuplicateLoader(_)));
@@ -198,10 +258,22 @@ fn duplicate_loader_registration_fails() {
 fn two_loaders_with_structurally_different_configurations() {
     let mut preflight = AdapterBindingPreflight::new();
     preflight
-        .register_loader("loader1", Box::new(MockLoader { should_fail: false }))
+        .register_loader(
+            "loader1",
+            Box::new(MockLoader {
+                should_fail: false,
+                corrupt_artifact: false,
+            }),
+        )
         .unwrap();
     preflight
-        .register_loader("loader2", Box::new(MockLoader { should_fail: false }))
+        .register_loader(
+            "loader2",
+            Box::new(MockLoader {
+                should_fail: false,
+                corrupt_artifact: false,
+            }),
+        )
         .unwrap();
 
     let mut config1 = BTreeMap::new();
@@ -214,7 +286,7 @@ fn two_loaders_with_structurally_different_configurations() {
         descriptor: AdapterModuleDescriptor {
             adapter: "loader1".to_string(),
             config: config1,
-            targets: Vec::new(),
+            targets: vec![mock_target()],
             exports: vec![],
         },
         boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
@@ -229,7 +301,7 @@ fn two_loaders_with_structurally_different_configurations() {
         descriptor: AdapterModuleDescriptor {
             adapter: "loader2".to_string(),
             config: config2,
-            targets: Vec::new(),
+            targets: vec![mock_target()],
             exports: vec![],
         },
         boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
@@ -239,4 +311,29 @@ fn two_loaders_with_structurally_different_configurations() {
     let mut bindings = preflight.bind_package(&package, &create_context()).unwrap();
     assert!(bindings.get_mut("proxy1.gfp").is_some());
     assert!(bindings.get_mut("proxy2.gfp").is_some());
+}
+
+#[test]
+fn preflight_rejects_an_adapter_artifact_with_wrong_content() {
+    let mut preflight = AdapterBindingPreflight::new();
+    preflight
+        .register_loader(
+            "test_adapter",
+            Box::new(MockLoader {
+                should_fail: false,
+                corrupt_artifact: true,
+            }),
+        )
+        .unwrap();
+
+    let package = create_package(vec![create_requirement("proxy", "test_adapter")]);
+    let error = preflight
+        .bind_package(&package, &create_context())
+        .err()
+        .expect("corrupt artifact must not bind");
+
+    assert!(matches!(
+        error,
+        PreflightError::ArtifactIntegrityFailed { .. }
+    ));
 }

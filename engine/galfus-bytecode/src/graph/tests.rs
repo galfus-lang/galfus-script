@@ -5,7 +5,7 @@ use super::*;
 use crate::{
     BytecodeFunction, BytecodeModule, ConstantPool, DebugLocation, ExportSlot, ImportSlot,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 fn compiled_module(id: ModuleId, revision: SemanticRevision) -> BytecodeNode {
     BytecodeNode {
@@ -392,15 +392,15 @@ fn validation_collects_all_errors_in_canonical_module_order() {
     let forward = BytecodeGraph {
         version: 0,
         format_version: CURRENT_BYTECODE_FORMAT_VERSION,
-        modules: HashMap::from([(first, first_node.clone()), (second, second_node.clone())]),
-        ids_by_path: HashMap::new(),
+        modules: BTreeMap::from([(first, first_node.clone()), (second, second_node.clone())]),
+        ids_by_path: BTreeMap::new(),
         edges: Vec::new(),
     };
     let reverse = BytecodeGraph {
         version: 0,
         format_version: CURRENT_BYTECODE_FORMAT_VERSION,
-        modules: HashMap::from([(second, second_node), (first, first_node)]),
-        ids_by_path: HashMap::new(),
+        modules: BTreeMap::from([(second, second_node), (first, first_node)]),
+        ids_by_path: BTreeMap::new(),
         edges: Vec::new(),
     };
 

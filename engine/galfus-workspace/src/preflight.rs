@@ -1,7 +1,7 @@
 use galfus_bytecode::PackageImage;
 use galfus_contract::{
-    AdapterBindings, AdapterLoadContext, AdapterLoadError, AdapterModuleLoader,
-    AdapterModuleRequirement,
+    AdapterArtifactIntegrityError, AdapterBindings, AdapterLoadContext, AdapterLoadError,
+    AdapterModuleLoader, AdapterModuleRequirement, SelectedAdapterTarget,
 };
 use std::collections::HashMap;
 
@@ -14,6 +14,18 @@ pub enum PreflightError {
         error: AdapterLoadError,
     },
     DuplicateLoader(String),
+    PackageTargetMismatch {
+        package_target: String,
+        host_target: String,
+    },
+    MissingAdapterTarget {
+        proxy_module: String,
+        target: String,
+    },
+    ArtifactIntegrityFailed {
+        proxy_module: String,
+        error: AdapterArtifactIntegrityError,
+    },
 }
 
 impl std::fmt::Display for PreflightError {
@@ -34,6 +46,30 @@ impl std::fmt::Display for PreflightError {
             Self::DuplicateLoader(adapter) => {
                 write!(f, "Duplicate loader registered for adapter: {}", adapter)
             }
+            Self::PackageTargetMismatch {
+                package_target,
+                host_target,
+            } => write!(
+                f,
+                "Package targets {}, but this execution host targets {}",
+                package_target, host_target
+            ),
+            Self::MissingAdapterTarget {
+                proxy_module,
+                target,
+            } => write!(
+                f,
+                "Adapter proxy {} has no artifact target for {}",
+                proxy_module, target
+            ),
+            Self::ArtifactIntegrityFailed {
+                proxy_module,
+                error,
+            } => write!(
+                f,
+                "Adapter artifact for {} failed integrity verification: {}",
+                proxy_module, error
+            ),
         }
     }
 }
@@ -76,6 +112,12 @@ impl AdapterBindingPreflight {
         package: &PackageImage,
         context: &AdapterLoadContext,
     ) -> Result<AdapterBindings, PreflightError> {
+        if package.target() != &context.target {
+            return Err(PreflightError::PackageTargetMismatch {
+                package_target: package.target().as_str().to_string(),
+                host_target: context.target.as_str().to_string(),
+            });
+        }
         self.bind_requirements(package.adapter_requirements(), context)
     }
 
@@ -97,13 +139,44 @@ impl AdapterBindingPreflight {
                 .get(adapter_name)
                 .ok_or_else(|| PreflightError::MissingLoader(adapter_name.clone()))?;
 
-            let bound_module = loader.load_module(requirement, context).map_err(|error| {
-                PreflightError::LoadFailed {
+            let target = requirement
+                .descriptor
+                .targets
+                .iter()
+                .find(|target| target.target == context.target)
+                .cloned()
+                .ok_or_else(|| PreflightError::MissingAdapterTarget {
+                    proxy_module: requirement.proxy_module.clone(),
+                    target: context.target.as_str().to_string(),
+                })?;
+            let selected_target = SelectedAdapterTarget {
+                proxy_module: requirement.proxy_module.clone(),
+                target,
+                boundary_abi: requirement.boundary_abi,
+            };
+            let artifact = loader
+                .load_artifact(&selected_target, context)
+                .map_err(|error| PreflightError::LoadFailed {
                     proxy_module: requirement.proxy_module.clone(),
                     adapter: adapter_name.clone(),
                     error,
-                }
-            })?;
+                })?;
+            let artifact = selected_target
+                .target
+                .artifact
+                .verify(artifact)
+                .map_err(|error| PreflightError::ArtifactIntegrityFailed {
+                    proxy_module: requirement.proxy_module.clone(),
+                    error,
+                })?;
+
+            let bound_module = loader
+                .load_module(requirement, &selected_target, artifact, context)
+                .map_err(|error| PreflightError::LoadFailed {
+                    proxy_module: requirement.proxy_module.clone(),
+                    adapter: adapter_name.clone(),
+                    error,
+                })?;
 
             bindings.register_module(requirement.proxy_module.clone(), bound_module);
         }

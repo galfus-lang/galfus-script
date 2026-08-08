@@ -76,12 +76,14 @@ impl ExecutionMetadata {
 }
 
 /// The compiled artifact for one source module.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct BytecodeNode {
     pub id: ModuleId,
     pub path: ModulePath,
+    #[serde(skip)]
     pub semantic_revision: SemanticRevision,
     pub module: BytecodeModule,
+    #[serde(skip)]
     pub metadata: Option<ExecutionMetadata>,
 }
 
@@ -104,7 +106,7 @@ impl BytecodeNode {
 }
 
 /// An edge where `from` imports a symbol from `to`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ImportEdge {
     pub from: ModuleId,
     pub to: ModuleId,
@@ -220,12 +222,14 @@ pub enum BytecodeGraphTransactionError {
 }
 
 /// The immutable executable graph published by a workspace.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct BytecodeGraph {
+    #[serde(skip)]
     version: u64,
     format_version: BytecodeFormatVersion,
-    pub(crate) modules: HashMap<ModuleId, BytecodeNode>,
-    pub(crate) ids_by_path: HashMap<ModulePath, ModuleId>,
+    pub(crate) modules: BTreeMap<ModuleId, BytecodeNode>,
+    #[serde(skip)]
+    pub(crate) ids_by_path: BTreeMap<ModulePath, ModuleId>,
     pub(crate) edges: Vec<ImportEdge>,
 }
 
@@ -447,6 +451,8 @@ impl BytecodeGraph {
             next.ids_by_path.insert(node.path.clone(), node.id);
         }
         next.edges = transaction.edges;
+        next.edges
+            .sort_by_key(|edge| (edge.from.raw(), edge.to.raw()));
         next.validate()?;
         next.version += 1;
         Ok(next)
@@ -574,8 +580,8 @@ impl Default for BytecodeGraph {
         Self {
             version: 0,
             format_version: CURRENT_BYTECODE_FORMAT_VERSION,
-            modules: HashMap::new(),
-            ids_by_path: HashMap::new(),
+            modules: BTreeMap::new(),
+            ids_by_path: BTreeMap::new(),
             edges: Vec::new(),
         }
     }

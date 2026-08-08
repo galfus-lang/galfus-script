@@ -167,7 +167,7 @@ fn package_image_canonicalizes_adapter_requirement_and_export_order() {
         graph(&["alpha.gfp", "beta.gfp"], Vec::new()),
         target(),
         None,
-        vec![beta, requirement("alpha.gfp")],
+        vec![beta.clone(), requirement("alpha.gfp")],
         Vec::new(),
     )
     .expect("complete adapter manifest");
@@ -188,5 +188,43 @@ fn package_image_canonicalizes_adapter_requirement_and_export_order() {
             .map(|export| export.name.as_str())
             .collect::<Vec<_>>(),
         vec!["alpha", "zeta"]
+    );
+
+    let same_package = PackageImage::try_new(
+        graph(&["alpha.gfp", "beta.gfp"], Vec::new()),
+        target(),
+        None,
+        vec![requirement("alpha.gfp"), beta],
+        Vec::new(),
+    )
+    .expect("complete adapter manifest");
+    assert_eq!(
+        package.content_hash().expect("canonical package hash"),
+        same_package.content_hash().expect("canonical package hash")
+    );
+}
+
+#[test]
+fn package_content_hash_changes_for_execution_relevant_data() {
+    let first = PackageImage::try_new(
+        graph(&["main.gfs"], Vec::new()),
+        target(),
+        None,
+        Vec::new(),
+        Vec::new(),
+    )
+    .expect("valid package");
+    let second = PackageImage::try_new(
+        graph(&["main.gfs"], Vec::new()),
+        ExecutionTarget::new("other").expect("valid target"),
+        None,
+        Vec::new(),
+        Vec::new(),
+    )
+    .expect("valid package");
+
+    assert_ne!(
+        first.content_hash().expect("canonical package hash"),
+        second.content_hash().expect("canonical package hash")
     );
 }

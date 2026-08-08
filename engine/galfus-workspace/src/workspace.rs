@@ -151,7 +151,7 @@ impl Workspace {
                 Some(AdapterModuleDescriptor {
                     adapter: frontmatter.adapter,
                     config: frontmatter.config,
-                    targets: Vec::new(),
+                    targets: frontmatter.targets,
                     exports: Vec::new(),
                 }),
             )
@@ -845,7 +845,13 @@ impl Workspace {
         let package = Arc::new(
             PackageImage::try_new(
                 graph,
-                ExecutionTarget::new("default").expect("default target is valid"),
+                self.config
+                    .as_ref()
+                    .map(WorkspaceConfig::execution_target)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        ExecutionTarget::new("default").expect("default target is valid")
+                    }),
                 entry_point,
                 adapter_requirements,
                 provider_requirements,
