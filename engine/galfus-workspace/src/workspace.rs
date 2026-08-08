@@ -14,7 +14,7 @@ use galfus_bytecode::{BytecodeGraph, ImportEdge, PackageEntryPoint, PackageImage
 use galfus_compiler::{CompiledModule, gfp::parse_gfp_frontmatter};
 use galfus_contract::{
     AdapterFunctionSignature, AdapterModuleDescriptor, AdapterModuleRequirement, BoundaryType,
-    Providers,
+    CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget, ProviderModuleRequirement, Providers,
 };
 use galfus_core::{Diagnostic, DiagnosticBag, ModulePath, SourceFile, Span, TypeId};
 use galfus_frontend::modules::{
@@ -151,6 +151,7 @@ impl Workspace {
                 Some(AdapterModuleDescriptor {
                     adapter: frontmatter.adapter,
                     config: frontmatter.config,
+                    targets: Vec::new(),
                     exports: Vec::new(),
                 }),
             )
@@ -834,6 +835,7 @@ impl Workspace {
             .apply(transaction)
             .map_err(|error| CompileBlocked::CompilerError(error.to_string()))?;
         let adapter_requirements = self.adapter_requirements_for(&graph);
+        let provider_requirements = self.provider_requirements_for(&graph);
         let entry_point = self.config.as_ref().and_then(|config| {
             config
                 .entry
@@ -841,8 +843,14 @@ impl Workspace {
                 .map(|entry| PackageEntryPoint::new(entry, config.run_entry.clone()))
         });
         let package = Arc::new(
-            PackageImage::try_new(graph, entry_point, adapter_requirements)
-                .map_err(|error| CompileBlocked::CompilerError(error.to_string()))?,
+            PackageImage::try_new(
+                graph,
+                ExecutionTarget::new("default").expect("default target is valid"),
+                entry_point,
+                adapter_requirements,
+                provider_requirements,
+            )
+            .map_err(|error| CompileBlocked::CompilerError(error.to_string()))?,
         );
         self.bytecode_state.compile_state = CompileState::Ready {
             semantic_revision,
@@ -862,11 +870,26 @@ impl Workspace {
                     .map(|descriptor| AdapterModuleRequirement {
                         proxy_module: module.path().as_str().to_string(),
                         descriptor,
+                        boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
                     })
             })
             .collect::<Vec<_>>();
         requirements.sort_by(|left, right| left.proxy_module.cmp(&right.proxy_module));
         requirements
+    }
+
+    fn provider_requirements_for(&self, graph: &BytecodeGraph) -> Vec<ProviderModuleRequirement> {
+        graph
+            .modules()
+            .filter_map(|module| {
+                self.catalog
+                    .provider_schema_fingerprint(module.path().as_str())
+                    .map(|schema_fingerprint| ProviderModuleRequirement {
+                        module_path: module.path().as_str().to_string(),
+                        schema_fingerprint,
+                    })
+            })
+            .collect()
     }
 
     /// Starts the configured entry as a persistent execution.

@@ -126,6 +126,14 @@ impl CapabilityCatalog {
         self.provider_modules.get(path).map(String::as_str)
     }
 
+    pub fn provider_schema_fingerprint(&self, path: &str) -> Option<u64> {
+        self.provider_source(path).map(|source| {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            source.hash(&mut hasher);
+            hasher.finish()
+        })
+    }
+
     /// Retrieves the declarative schema for an adapter, if registered.
     pub fn adapter_schema(&self, name: &str) -> Option<Arc<dyn AdapterSchema>> {
         self.adapter_schemas.get(name).cloned()

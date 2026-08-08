@@ -5,7 +5,8 @@ use galfus_bytecode::{
     ConstantPool, ExportKind, ExportSlot, PackageEntryPoint, PackageImage,
 };
 use galfus_contract::{
-    AdapterBindings, AdapterModuleBinding, BoundaryValue, CancellationOutcome, MessageInjector,
+    AdapterBindings, AdapterModuleBinding, BoundaryValue, CancellationOutcome, ExecutionTarget,
+    MessageInjector,
 };
 use galfus_core::{ModuleId, ModulePath, SemanticRevision};
 use std::rc::Rc;
@@ -181,10 +182,12 @@ fn execution_with_demo_adapter(complete: bool) -> (Execution, Arc<Mutex<DemoAdap
     let package = Arc::new(
         PackageImage::try_new(
             (*graph).clone(),
+            ExecutionTarget::new("test").expect("valid target"),
             Some(PackageEntryPoint::new(
                 ModulePath::new("main.gfs").expect("valid module path"),
                 "main",
             )),
+            Vec::new(),
             Vec::new(),
         )
         .expect("graph has no adapter proxy modules"),

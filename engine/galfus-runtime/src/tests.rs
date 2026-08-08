@@ -10,6 +10,7 @@ use galfus_bytecode::{
     ConstantPool, ExecutionMetadata, ExportSlot, ImportEdge, ImportSlot, PackageEntryPoint,
     PackageImage,
 };
+use galfus_contract::ExecutionTarget;
 use galfus_core::{ModuleId, ModulePath, SemanticRevision, SourceId, Span};
 
 struct StartupProvider {
@@ -18,6 +19,10 @@ struct StartupProvider {
         sync::Mutex<Option<(usize, u64, sync::Arc<dyn galfus_contract::MessageInjector>)>>,
     >,
     fail_initializer: bool,
+}
+
+fn target() -> ExecutionTarget {
+    ExecutionTarget::new("test").expect("valid target")
 }
 
 impl galfus_contract::HostProvider for StartupProvider {
@@ -172,7 +177,9 @@ fn package_with_entry(
     sync::Arc::new(
         PackageImage::try_new(
             (*graph).clone(),
+            target(),
             Some(PackageEntryPoint::new(module_path, "main")),
+            Vec::new(),
             Vec::new(),
         )
         .expect("graph has no adapter proxies"),
@@ -195,7 +202,8 @@ fn runtime_rejects_an_unsupported_bytecode_format_before_loading_the_entry_modul
         BytecodeGraph::with_format_version(galfus_bytecode::BytecodeFormatVersion::new(1, 0, 0));
 
     let package = sync::Arc::new(
-        PackageImage::try_new(graph, None, Vec::new()).expect("graph has no adapter proxies"),
+        PackageImage::try_new(graph, target(), None, Vec::new(), Vec::new())
+            .expect("graph has no adapter proxies"),
     );
     let result = Runtime::new(package, None).start(&[], std::rc::Rc::new(CooperativeDriver::new()));
     let Err(error) = result else {
@@ -518,10 +526,12 @@ fn run_initializes_dependencies_before_the_entry_module() {
     let package = sync::Arc::new(
         PackageImage::try_new(
             graph,
+            target(),
             Some(PackageEntryPoint::new(
                 ModulePath::new("main.gfs").expect("valid module path"),
                 "main",
             )),
+            Vec::new(),
             Vec::new(),
         )
         .expect("graph has no adapter proxies"),

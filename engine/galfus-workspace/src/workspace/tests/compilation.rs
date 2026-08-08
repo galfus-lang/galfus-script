@@ -193,6 +193,7 @@ export fn(async) add(left: i32, right: i32): i32
             proxy_module: "math.gfp".to_string(),
             descriptor: workspace.adapter_descriptors[&ModulePath::new("math.gfp").unwrap()]
                 .clone(),
+            boundary_abi: galfus_contract::CURRENT_BOUNDARY_ABI_VERSION,
         }]
     );
     let graph = report.package.graph();
@@ -214,7 +215,10 @@ export fn(async) add(left: i32, right: i32): i32
         ),
         "{instructions:?}"
     );
-    let adapter_proxy_metadata = function.adapter_proxy_metadata.as_ref().expect("proxy metadata");
+    let adapter_proxy_metadata = function
+        .adapter_proxy_metadata
+        .as_ref()
+        .expect("proxy metadata");
     assert_eq!(adapter_proxy_metadata.proxy_module, "math.gfp");
     assert_eq!(adapter_proxy_metadata.symbol, "add");
 }
@@ -284,7 +288,10 @@ fn compile_updates_changed_modules_and_removes_deleted_modules() {
         )
         .expect("updated helper module");
     assert!(workspace.check().is_valid);
-    let updated_package = workspace.compile().expect("incremental compilation").package;
+    let updated_package = workspace
+        .compile()
+        .expect("incremental compilation")
+        .package;
     let updated_graph = updated_package.graph();
 
     assert_eq!(
@@ -405,7 +412,10 @@ fn compile_rebuilds_only_changed_modules_and_transitive_dependents() {
         )
         .expect("updated dependency module");
     assert!(workspace.check().is_valid);
-    let updated_package = workspace.compile().expect("incremental compilation").package;
+    let updated_package = workspace
+        .compile()
+        .expect("incremental compilation")
+        .package;
     let updated = updated_package.graph();
 
     assert!(
@@ -753,9 +763,11 @@ fn compile_nullable_exports_with_nullable_boundary_type() {
     }
 
     let mut workspace = Workspace::new();
-    let catalog =
-        galfus_contract::CapabilityCatalog::new(Vec::new(), vec![std::sync::Arc::new(NullableSchema)])
-            .expect("demo catalog is valid");
+    let catalog = galfus_contract::CapabilityCatalog::new(
+        Vec::new(),
+        vec![std::sync::Arc::new(NullableSchema)],
+    )
+    .expect("demo catalog is valid");
     workspace.set_catalog(std::sync::Arc::new(catalog));
     workspace
         .load_config(
@@ -802,10 +814,14 @@ export fn(async) add(left: i32 | null, right: i32): i32 | null
             name: "add".to_string(),
             is_async: true,
             parameter_types: vec![
-                galfus_contract::BoundaryType::Nullable(Box::new(galfus_contract::BoundaryType::I32)),
+                galfus_contract::BoundaryType::Nullable(Box::new(
+                    galfus_contract::BoundaryType::I32
+                )),
                 galfus_contract::BoundaryType::I32,
             ],
-            return_type: galfus_contract::BoundaryType::Nullable(Box::new(galfus_contract::BoundaryType::I32)),
+            return_type: galfus_contract::BoundaryType::Nullable(Box::new(
+                galfus_contract::BoundaryType::I32
+            )),
         }]
     );
 }
@@ -882,8 +898,10 @@ export fn(async) close(window: Window): null
     }
 
     assert!(workspace.check().is_valid);
-    let alpha_exports = &workspace.adapter_descriptors[&ModulePath::new("alpha.gfp").unwrap()].exports;
-    let beta_exports = &workspace.adapter_descriptors[&ModulePath::new("beta.gfp").unwrap()].exports;
+    let alpha_exports =
+        &workspace.adapter_descriptors[&ModulePath::new("alpha.gfp").unwrap()].exports;
+    let beta_exports =
+        &workspace.adapter_descriptors[&ModulePath::new("beta.gfp").unwrap()].exports;
     assert_eq!(
         alpha_exports[0].return_type,
         galfus_contract::BoundaryType::Handle {

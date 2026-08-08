@@ -1,6 +1,6 @@
 use galfus_contract::{
     AdapterConfig, AdapterFunctionSignature, AdapterModuleDescriptor, AdapterModuleRequirement,
-    BoundaryType, CURRENT_BOUNDARY_ABI_VERSION, CURRENT_PRODUCER_VERSION,
+    BoundaryType, CURRENT_BOUNDARY_ABI_VERSION, CURRENT_PRODUCER_VERSION, ExecutionTarget,
 };
 use galfus_core::{ModuleId, ModulePath, SemanticRevision};
 
@@ -46,9 +46,15 @@ fn requirement(proxy_module: &str) -> AdapterModuleRequirement {
         descriptor: AdapterModuleDescriptor {
             adapter: "test".to_string(),
             config: AdapterConfig::new(),
+            targets: Vec::new(),
             exports: Vec::new(),
         },
+        boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
     }
+}
+
+fn target() -> ExecutionTarget {
+    ExecutionTarget::new("test").expect("valid target")
 }
 
 #[test]
@@ -57,8 +63,14 @@ fn package_image_owns_its_graph_manifest_and_versions() {
         ModulePath::new("src/main.gfs").expect("valid module path"),
         "main",
     );
-    let package = PackageImage::try_new(crate::BytecodeGraph::new(), Some(entry), Vec::new())
-        .expect("empty graph has no adapter requirements");
+    let package = PackageImage::try_new(
+        crate::BytecodeGraph::new(),
+        target(),
+        Some(entry),
+        Vec::new(),
+        Vec::new(),
+    )
+    .expect("empty graph has no adapter requirements");
 
     assert!(package.graph().is_empty());
     assert_eq!(package.adapter_requirements(), []);
@@ -96,7 +108,7 @@ fn package_image_rejects_a_missing_reachable_adapter_requirement() {
     );
 
     assert!(matches!(
-        PackageImage::try_new(graph, Some(entry), Vec::new()),
+        PackageImage::try_new(graph, target(), Some(entry), Vec::new(), Vec::new()),
         Err(PackageValidationError::MissingAdapterRequirement { proxy_module })
             if proxy_module == "graphics.gfp"
     ));
@@ -113,8 +125,10 @@ fn package_image_rejects_unreachable_and_duplicate_adapter_requirements() {
     assert!(matches!(
         PackageImage::try_new(
             graph.clone(),
+            target(),
             Some(entry.clone()),
-            vec![requirement("graphics.gfp")]
+            vec![requirement("graphics.gfp")],
+            Vec::new(),
         ),
         Err(PackageValidationError::UnexpectedAdapterRequirement { proxy_module })
             if proxy_module == "graphics.gfp"
@@ -122,8 +136,10 @@ fn package_image_rejects_unreachable_and_duplicate_adapter_requirements() {
     assert!(matches!(
         PackageImage::try_new(
             graph,
+            target(),
             Some(entry),
             vec![requirement("graphics.gfp"), requirement("graphics.gfp")],
+            Vec::new(),
         ),
         Err(PackageValidationError::DuplicateAdapterRequirement { proxy_module })
             if proxy_module == "graphics.gfp"
@@ -149,8 +165,10 @@ fn package_image_canonicalizes_adapter_requirement_and_export_order() {
     ];
     let package = PackageImage::try_new(
         graph(&["alpha.gfp", "beta.gfp"], Vec::new()),
+        target(),
         None,
         vec![beta, requirement("alpha.gfp")],
+        Vec::new(),
     )
     .expect("complete adapter manifest");
 

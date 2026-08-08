@@ -4,7 +4,9 @@ mod tests;
 use std::fmt;
 
 /// A semantic version used by Galfus package and compatibility contracts.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct Version {
     major: u16,
     minor: u16,

@@ -3,7 +3,7 @@ mod tests;
 
 use galfus_contract::{
     AdapterModuleRequirement, BoundaryAbiVersion, CURRENT_BOUNDARY_ABI_VERSION,
-    CURRENT_PRODUCER_VERSION, ProducerVersion,
+    CURRENT_PRODUCER_VERSION, ExecutionTarget, ProducerVersion, ProviderModuleRequirement,
 };
 use galfus_core::{ModuleId, ModulePath};
 use std::collections::BTreeSet;
@@ -79,8 +79,10 @@ impl PackageVersions {
 #[derive(Clone, Debug)]
 pub struct PackageImage {
     graph: BytecodeGraph,
+    target: ExecutionTarget,
     entry_point: Option<PackageEntryPoint>,
     adapter_requirements: Vec<AdapterModuleRequirement>,
+    provider_requirements: Vec<ProviderModuleRequirement>,
     versions: PackageVersions,
 }
 
@@ -93,25 +95,33 @@ pub enum PackageValidationError {
     MissingAdapterRequirement { proxy_module: String },
     #[error("adapter requirement `{proxy_module}` does not match a reachable adapter proxy")]
     UnexpectedAdapterRequirement { proxy_module: String },
+    #[error("provider requirement for `{module_path}` is duplicated")]
+    DuplicateProviderRequirement { module_path: String },
 }
 
 impl PackageImage {
     pub fn try_new(
         graph: BytecodeGraph,
+        target: ExecutionTarget,
         entry_point: Option<PackageEntryPoint>,
         mut adapter_requirements: Vec<AdapterModuleRequirement>,
+        mut provider_requirements: Vec<ProviderModuleRequirement>,
     ) -> Result<Self, PackageValidationError> {
         for requirement in &mut adapter_requirements {
             requirement.descriptor.canonicalize();
         }
         adapter_requirements.sort_by(|left, right| left.proxy_module.cmp(&right.proxy_module));
+        provider_requirements.sort_by(|left, right| left.module_path.cmp(&right.module_path));
         Self::validate_adapter_requirements(&graph, entry_point.as_ref(), &adapter_requirements)?;
+        Self::validate_provider_requirements(&provider_requirements)?;
 
         Ok(Self {
             versions: PackageVersions::for_bytecode(graph.format_version()),
             graph,
+            target,
             entry_point,
             adapter_requirements,
+            provider_requirements,
         })
     }
 
@@ -183,8 +193,26 @@ impl PackageImage {
         reachable
     }
 
+    fn validate_provider_requirements(
+        provider_requirements: &[ProviderModuleRequirement],
+    ) -> Result<(), PackageValidationError> {
+        let mut paths = BTreeSet::new();
+        for requirement in provider_requirements {
+            if !paths.insert(requirement.module_path.as_str()) {
+                return Err(PackageValidationError::DuplicateProviderRequirement {
+                    module_path: requirement.module_path.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
     pub fn graph(&self) -> &BytecodeGraph {
         &self.graph
+    }
+
+    pub fn target(&self) -> &ExecutionTarget {
+        &self.target
     }
 
     pub fn entry_point(&self) -> Option<&PackageEntryPoint> {
@@ -193,6 +221,10 @@ impl PackageImage {
 
     pub fn adapter_requirements(&self) -> &[AdapterModuleRequirement] {
         self.adapter_requirements.as_slice()
+    }
+
+    pub fn provider_requirements(&self) -> &[ProviderModuleRequirement] {
+        self.provider_requirements.as_slice()
     }
 
     pub const fn versions(&self) -> PackageVersions {

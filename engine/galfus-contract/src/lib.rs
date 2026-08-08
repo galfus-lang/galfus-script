@@ -365,6 +365,32 @@ impl Providers {
 
 pub type AdapterConfig = std::collections::BTreeMap<String, AdapterConfigValue>;
 
+/// Opaque execution target identity shared by a package and its execution host.
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct ExecutionTarget(String);
+
+impl ExecutionTarget {
+    pub fn new(value: impl Into<String>) -> Option<Self> {
+        let value = value.into();
+        (!value.trim().is_empty()).then_some(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+/// One adapter-defined artifact candidate for an execution target.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AdapterTarget {
+    pub target: ExecutionTarget,
+    pub locator: String,
+    pub platform: String,
+    pub abi: String,
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum AdapterConfigValue {
@@ -381,6 +407,7 @@ pub enum AdapterConfigValue {
 pub struct AdapterModuleDescriptor {
     pub adapter: String,
     pub config: AdapterConfig,
+    pub targets: Vec<AdapterTarget>,
     pub exports: Vec<AdapterFunctionSignature>,
 }
 
@@ -396,6 +423,22 @@ impl AdapterModuleDescriptor {
 pub struct AdapterModuleRequirement {
     pub proxy_module: String,
     pub descriptor: AdapterModuleDescriptor,
+    pub boundary_abi: BoundaryAbiVersion,
+}
+
+/// The target and locator selected by preflight for one adapter proxy module.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SelectedAdapterTarget {
+    pub proxy_module: String,
+    pub target: AdapterTarget,
+    pub boundary_abi: BoundaryAbiVersion,
+}
+
+/// A provider schema required by a package image.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProviderModuleRequirement {
+    pub module_path: String,
+    pub schema_fingerprint: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]

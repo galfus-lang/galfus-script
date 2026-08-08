@@ -5,6 +5,7 @@ use galfus_contract::{
     AdapterModuleDescriptor, AdapterModuleLoader, AdapterModuleRequirement, BoundaryValue,
     CancellationOutcome, MessageInjector,
 };
+use galfus_contract::{CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget};
 use galfus_core::{ModuleId, ModulePath, SemanticRevision};
 use std::collections::BTreeMap;
 
@@ -68,8 +69,10 @@ fn create_requirement(proxy_module: &str, adapter: &str) -> AdapterModuleRequire
         descriptor: AdapterModuleDescriptor {
             adapter: adapter.to_string(),
             config,
+            targets: Vec::new(),
             exports: vec![],
         },
+        boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
     }
 }
 
@@ -106,7 +109,14 @@ fn create_package(requirements: Vec<AdapterModuleRequirement>) -> PackageImage {
     let graph = BytecodeGraph::from_modules(SemanticRevision::new(1), modules, Vec::new())
         .expect("valid proxy graph");
 
-    PackageImage::try_new(graph, None, requirements).expect("complete adapter manifest")
+    PackageImage::try_new(
+        graph,
+        ExecutionTarget::new("test").expect("valid target"),
+        None,
+        requirements,
+        Vec::new(),
+    )
+    .expect("complete adapter manifest")
 }
 
 #[test]
@@ -204,8 +214,10 @@ fn two_loaders_with_structurally_different_configurations() {
         descriptor: AdapterModuleDescriptor {
             adapter: "loader1".to_string(),
             config: config1,
+            targets: Vec::new(),
             exports: vec![],
         },
+        boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
     };
 
     let mut config2 = BTreeMap::new();
@@ -217,8 +229,10 @@ fn two_loaders_with_structurally_different_configurations() {
         descriptor: AdapterModuleDescriptor {
             adapter: "loader2".to_string(),
             config: config2,
+            targets: Vec::new(),
             exports: vec![],
         },
+        boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
     };
 
     let package = create_package(vec![req1, req2]);
