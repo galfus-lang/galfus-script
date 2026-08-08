@@ -467,6 +467,7 @@ fn test_nested_calls_return_to_explicit_destinations() {
 
     let image = BytecodeModule {
         name: "test".to_string(),
+        global_count: 0,
         constants: ConstantPool {
             constants: vec![Constant::Int64(1), Constant::Int64(2)],
         },
@@ -527,4 +528,3 @@ fn test_nested_calls_return_to_explicit_destinations() {
 
     assert_eq!(res, Value::Int64(3));
 }
-

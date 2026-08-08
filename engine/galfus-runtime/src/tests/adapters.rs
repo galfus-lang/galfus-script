@@ -85,6 +85,7 @@ fn adapter_graph() -> (Arc<BytecodeGraph>, ModuleId) {
     let module_id = ModuleId::new(1);
     let module = BytecodeModule {
         name: "main.gfs".to_string(),
+        global_count: 0,
         constants: ConstantPool {
             constants: vec![
                 Constant::String("graphics.gfp".to_string()),

@@ -13,7 +13,7 @@ use crate::CompilerState;
 
 use crate::compile::{
     context::MyWorkspaceContext,
-    globals::{image_local_count, rewrite_global_indices},
+    globals::{global_count, image_local_count, rewrite_global_indices},
 };
 use crate::input::CompiledModule;
 /// Compile all modules in `modules`, each producing its own
@@ -449,9 +449,11 @@ fn compile_single_module(
         idx
     };
     let _ = null_type_idx;
+    let global_count = global_count(module.id(), &functions, &export_slots);
 
     let module = BytecodeModule {
         name: module.path().as_str().to_string(),
+        global_count,
         constants: ctx.constant_pool,
         functions,
         types: ctx.types,

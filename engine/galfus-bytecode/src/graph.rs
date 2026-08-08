@@ -89,6 +89,15 @@ pub enum BytecodeGraphValidationError {
     MissingDependencyModule { from: ModuleId, to: ModuleId },
     #[error("module {importer:?} accesses globals owned by missing module {owner:?}")]
     MissingGlobalModule { importer: ModuleId, owner: ModuleId },
+    #[error(
+        "module {importer:?} accesses global {global_idx:?} of module {owner:?}, which has {global_count} slots"
+    )]
+    GlobalIndexOutOfBounds {
+        importer: ModuleId,
+        owner: ModuleId,
+        global_idx: instruction::GlobalIdx,
+        global_count: u32,
+    },
     #[error("module {importer:?} imports an invalid module path `{module_path}`")]
     InvalidImportPath {
         importer: ModuleId,
@@ -98,6 +107,14 @@ pub enum BytecodeGraphValidationError {
     MissingImportedModule {
         importer: ModuleId,
         module_path: String,
+    },
+    #[error(
+        "module {importer:?} imports `{module_path}`, whose path index refers to missing module {dependency:?}"
+    )]
+    MissingIndexedImportedModule {
+        importer: ModuleId,
+        module_path: String,
+        dependency: ModuleId,
     },
     #[error(
         "module {importer:?} imports `{symbol_name}` from `{module_path}`, but it is not exported"
@@ -224,19 +241,28 @@ impl BytecodeGraph {
                         } => Some((*module_id, *global_idx)),
                         _ => None,
                     };
-                    if let Some((owner, global_idx)) = owner_global
-                        && owner != id
-                    {
+                    if let Some((owner, global_idx)) = owner_global {
                         if let Some(owner_node) = self.modules.get(&owner) {
-                            let is_exported = owner_node.module.exports.iter().any(
-                                |e| matches!(e.kind, ExportKind::Global(idx) if idx == global_idx),
-                            );
-                            if !is_exported {
-                                errors.push(BytecodeGraphValidationError::MissingImportedExport {
+                            if u32::from(global_idx.raw()) >= owner_node.module.global_count {
+                                errors.push(BytecodeGraphValidationError::GlobalIndexOutOfBounds {
                                     importer: id,
-                                    module_path: owner_node.path.as_str().to_string(),
-                                    symbol_name: format!("global_{}", global_idx.raw()),
+                                    owner,
+                                    global_idx,
+                                    global_count: owner_node.module.global_count,
                                 });
+                            } else if owner != id {
+                                let is_exported = owner_node.module.exports.iter().any(
+                                    |e| matches!(e.kind, ExportKind::Global(idx) if idx == global_idx),
+                                );
+                                if !is_exported {
+                                    errors.push(
+                                        BytecodeGraphValidationError::MissingImportedExport {
+                                            importer: id,
+                                            module_path: owner_node.path.as_str().to_string(),
+                                            symbol_name: format!("global_{}", global_idx.raw()),
+                                        },
+                                    );
+                                }
                             }
                         } else {
                             errors.push(BytecodeGraphValidationError::MissingGlobalModule {
@@ -281,10 +307,14 @@ impl BytecodeGraph {
                     });
                     continue;
                 };
-                let dependency_node = self
-                    .modules
-                    .get(&dependency)
-                    .expect("module path index refers to a graph node");
+                let Some(dependency_node) = self.modules.get(&dependency) else {
+                    errors.push(BytecodeGraphValidationError::MissingIndexedImportedModule {
+                        importer: node.id,
+                        module_path: import.module_name.clone(),
+                        dependency,
+                    });
+                    continue;
+                };
                 if !dependency_node
                     .module
                     .exports

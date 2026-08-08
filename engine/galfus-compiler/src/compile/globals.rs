@@ -2,6 +2,44 @@ use super::resolve::import_target_index;
 use crate::input::CompiledModule;
 use anyhow::Result;
 use galfus_bytecode::instruction::{GlobalIdx, Instruction};
+use galfus_bytecode::{BytecodeFunction, ExportKind, ExportSlot};
+
+pub(super) fn global_count(
+    module_id: galfus_core::ModuleId,
+    functions: &[BytecodeFunction],
+    exports: &[ExportSlot],
+) -> u32 {
+    let highest_instruction_index = functions
+        .iter()
+        .flat_map(|function| function.instructions.iter())
+        .filter_map(|instruction| match instruction {
+            Instruction::LoadGlobal {
+                module_id: owner,
+                global_idx,
+                ..
+            }
+            | Instruction::StoreGlobal {
+                module_id: owner,
+                global_idx,
+                ..
+            } if *owner == module_id => Some(u32::from(global_idx.raw())),
+            _ => None,
+        })
+        .max();
+    let highest_export_index = exports
+        .iter()
+        .filter_map(|export| match export.kind {
+            ExportKind::Global(global_idx) => Some(u32::from(global_idx.raw())),
+            ExportKind::Function(_) => None,
+        })
+        .max();
+
+    highest_instruction_index
+        .into_iter()
+        .chain(highest_export_index)
+        .max()
+        .map_or(0, |index| index + 1)
+}
 
 fn canonical_global_ref(
     modules: &[CompiledModule],

@@ -54,6 +54,7 @@ fn startup_graph() -> (sync::Arc<BytecodeGraph>, ModuleId) {
     let module_id = ModuleId::new(1);
     let module = BytecodeModule {
         name: "main.gfs".to_string(),
+        global_count: 0,
         constants: ConstantPool {
             constants: vec![
                 Constant::String("initialize".to_string()),
@@ -265,6 +266,7 @@ fn run_initializes_dependencies_before_the_entry_module() {
     let entry_id = ModuleId::new(2);
     let dependency = BytecodeModule {
         name: "dependency.gfs".to_string(),
+        global_count: 1,
         constants: ConstantPool {
             constants: vec![Constant::Int32(42)],
         },
@@ -306,6 +308,7 @@ fn run_initializes_dependencies_before_the_entry_module() {
     };
     let entry = BytecodeModule {
         name: "main.gfs".to_string(),
+        global_count: 0,
         constants: ConstantPool::default(),
         functions: vec![BytecodeFunction {
             name: "main".to_string(),

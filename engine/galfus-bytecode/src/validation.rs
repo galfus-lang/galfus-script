@@ -74,6 +74,11 @@ pub enum BytecodeValidationError {
         symbol_name: String,
         func_idx: FuncIdx,
     },
+    ExportGlobalOutOfBounds {
+        symbol_name: String,
+        global_idx: GlobalIdx,
+        global_count: u32,
+    },
     InitFunctionOutOfBounds {
         func_idx: FuncIdx,
     },
@@ -102,9 +107,14 @@ pub fn validate_bytecode_module(
                     });
                 }
             }
-            ExportKind::Global(_global_idx) => {
-                // Global index validation requires information not currently in BytecodeModule
-                // (number of globals is not explicitly recorded).
+            ExportKind::Global(global_idx) => {
+                if u32::from(global_idx.raw()) >= module.global_count {
+                    errors.push(BytecodeValidationError::ExportGlobalOutOfBounds {
+                        symbol_name: export.symbol_name.clone(),
+                        global_idx,
+                        global_count: module.global_count,
+                    });
+                }
             }
         }
     }
@@ -200,11 +210,7 @@ pub fn validate_bytecode_module(
                     check_reg(dest, &mut errors);
                     check_reg(src, &mut errors);
                 }
-                Instruction::LoadGlobal {
-                    dest,
-                    global_idx: _,
-                    ..
-                } => {
+                Instruction::LoadGlobal { dest, .. } => {
                     check_reg(dest, &mut errors);
                 }
                 Instruction::StoreGlobal {

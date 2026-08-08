@@ -75,6 +75,7 @@ fn execution_stack_does_not_replace_a_failure_stack() {
 fn module(types: Vec<BytecodeType>) -> BytecodeModule {
     BytecodeModule {
         name: "test".to_string(),
+        global_count: 0,
         constants: ConstantPool::default(),
         functions: vec![],
         types,

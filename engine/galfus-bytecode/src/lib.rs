@@ -155,6 +155,8 @@ pub struct BytecodeFunction {
 #[derive(Clone, Debug, PartialEq)]
 pub struct BytecodeModule {
     pub name: String,
+    /// Number of addressable global slots owned by this module.
+    pub global_count: u32,
     pub constants: ConstantPool,
     pub functions: Vec<BytecodeFunction>,
     pub types: Vec<BytecodeType>,

@@ -5,6 +5,7 @@ use super::*;
 fn create_dummy_module(instructions: Vec<Instruction>) -> BytecodeModule {
     BytecodeModule {
         name: "test".to_string(),
+        global_count: 0,
         constants: ConstantPool {
             constants: vec![Constant::Int64(42)],
         },
@@ -62,6 +63,25 @@ fn test_valid_module() {
         Instruction::Ret { src: Reg(1) },
     ]);
     assert!(validate_bytecode_module(&image).is_ok());
+}
+
+#[test]
+fn test_export_global_out_of_bounds() {
+    let mut image = create_dummy_module(vec![]);
+    image.exports.push(ExportSlot {
+        symbol_name: "value".to_string(),
+        kind: ExportKind::Global(GlobalIdx(0)),
+    });
+
+    let errors = validate_bytecode_module(&image).expect_err("global export is out of bounds");
+    assert!(matches!(
+        errors.as_slice(),
+        [BytecodeValidationError::ExportGlobalOutOfBounds {
+            global_idx: GlobalIdx(0),
+            global_count: 0,
+            ..
+        }]
+    ));
 }
 
 #[test]

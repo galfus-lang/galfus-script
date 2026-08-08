@@ -6,6 +6,7 @@ use super::*;
 fn test_vm_creation() {
     let image = galfus_bytecode::BytecodeModule {
         name: "test".to_string(),
+        global_count: 0,
         constants: galfus_bytecode::ConstantPool::default(),
         functions: vec![],
         types: vec![],

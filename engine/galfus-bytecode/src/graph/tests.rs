@@ -2,7 +2,7 @@ use crate::ImportKind;
 use crate::instruction;
 
 use super::*;
-use crate::{BytecodeModule, ConstantPool, ImportSlot};
+use crate::{BytecodeFunction, BytecodeModule, ConstantPool, ExportSlot, ImportSlot};
 use std::collections::HashMap;
 
 fn compiled_module(id: ModuleId, revision: SemanticRevision) -> BytecodeNode {
@@ -12,6 +12,7 @@ fn compiled_module(id: ModuleId, revision: SemanticRevision) -> BytecodeNode {
         semantic_revision: revision,
         module: BytecodeModule {
             name: id.raw().to_string(),
+            global_count: 0,
             constants: ConstantPool::default(),
             functions: Vec::new(),
             types: Vec::new(),
@@ -265,6 +266,77 @@ fn apply_rejects_invalid_imports_without_changing_the_snapshot() {
     ));
     assert_eq!(graph.version(), 0);
     assert!(graph.is_empty());
+}
+
+#[test]
+fn apply_rejects_out_of_bounds_local_and_imported_globals() {
+    let owner = ModuleId::new(1);
+    let importer = ModuleId::new(2);
+    let revision = SemanticRevision::new(1);
+    let mut owner_node = compiled_module(owner, revision);
+    owner_node.module.global_count = 1;
+    owner_node.module.exports.push(ExportSlot {
+        symbol_name: "value".to_string(),
+        kind: ExportKind::Global(instruction::GlobalIdx(0)),
+    });
+    owner_node.module.functions.push(BytecodeFunction {
+        name: "local".to_string(),
+        param_count: 0,
+        local_count: 1,
+        temp_count: 0,
+        return_ty: instruction::TypeIdx(0),
+        adapter_proxy_metadata: None,
+        instructions: vec![instruction::Instruction::LoadGlobal {
+            dest: instruction::Reg(0),
+            module_id: owner,
+            global_idx: instruction::GlobalIdx(1),
+        }],
+    });
+    let mut importer_node = compiled_module(importer, revision);
+    importer_node.module.functions.push(BytecodeFunction {
+        name: "imported".to_string(),
+        param_count: 0,
+        local_count: 1,
+        temp_count: 0,
+        return_ty: instruction::TypeIdx(0),
+        adapter_proxy_metadata: None,
+        instructions: vec![instruction::Instruction::LoadGlobal {
+            dest: instruction::Reg(0),
+            module_id: owner,
+            global_idx: instruction::GlobalIdx(1),
+        }],
+    });
+    let graph = BytecodeGraph::new();
+
+    let error = graph
+        .apply(transaction(
+            &graph,
+            revision,
+            vec![owner_node, importer_node],
+            vec![],
+            vec![],
+        ))
+        .expect_err("out-of-bounds globals must be rejected");
+    let BytecodeGraphTransactionError::InvalidGraph(errors) = error else {
+        panic!("global index must fail graph validation");
+    };
+    assert_eq!(
+        errors.errors(),
+        [
+            BytecodeGraphValidationError::GlobalIndexOutOfBounds {
+                importer: owner,
+                owner,
+                global_idx: instruction::GlobalIdx(1),
+                global_count: 1,
+            },
+            BytecodeGraphValidationError::GlobalIndexOutOfBounds {
+                importer,
+                owner,
+                global_idx: instruction::GlobalIdx(1),
+                global_count: 1,
+            },
+        ]
+    );
 }
 
 #[test]

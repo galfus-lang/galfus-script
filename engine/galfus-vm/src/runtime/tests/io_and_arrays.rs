@@ -89,6 +89,7 @@ fn test_len_and_copy_array() {
 
     let image = BytecodeModule {
         name: "test".to_string(),
+        global_count: 0,
         constants: ConstantPool {
             constants: vec![
                 Constant::Int64(3),  // 0
