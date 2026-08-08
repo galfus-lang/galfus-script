@@ -303,7 +303,7 @@ fn boundary_type_preserves_nullable_wrapper() {
         BytecodeType::Nullable(TypeIdx(0)),
     ]);
 
-    let result = super::boundary_type(&module, TypeIdx(1));
+    let result = module.boundary_type(TypeIdx(1));
     assert_eq!(
         result,
         Ok(galfus_contract::BoundaryType::Nullable(Box::new(

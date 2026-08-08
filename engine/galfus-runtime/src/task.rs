@@ -94,7 +94,7 @@ pub(crate) fn decode_from_thread_heap(
                 .map(|element| decode_from_thread_heap(heap, element, *element_type, module))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(BoundaryValue::Array {
-                element_type: boundary_type(module, *element_type)?,
+                element_type: module.boundary_type(*element_type)?,
                 values,
             })
         }
@@ -260,7 +260,7 @@ pub(crate) fn encode_into_thread_heap(
                 values,
             },
         ) => {
-            if actual_element_type != boundary_type(module, *element_type)? {
+            if actual_element_type != module.boundary_type(*element_type)? {
                 return Err(mismatch());
             }
             let elements = values
@@ -313,45 +313,6 @@ pub(crate) fn encode_into_thread_heap(
             Ok(galfus_vm::VmValue::Object(reference))
         }
         _ => Err(mismatch()),
-    }
-}
-
-pub(crate) fn boundary_type(
-    module: &galfus_bytecode::BytecodeModule,
-    type_index: galfus_bytecode::instruction::TypeIdx,
-) -> Result<galfus_contract::BoundaryType, galfus_contract::BoundaryCodecError> {
-    use galfus_bytecode::BytecodeType;
-    use galfus_contract::{BoundaryCodecError, BoundaryType};
-
-    match module.types.get(type_index.raw() as usize) {
-        Some(BytecodeType::Null) => Ok(BoundaryType::Null),
-        Some(BytecodeType::Bool) => Ok(BoundaryType::Bool),
-        Some(BytecodeType::Int8) => Ok(BoundaryType::I8),
-        Some(BytecodeType::Int16) => Ok(BoundaryType::I16),
-        Some(BytecodeType::Int32) => Ok(BoundaryType::I32),
-        Some(BytecodeType::Int64) => Ok(BoundaryType::I64),
-        Some(BytecodeType::Uint8) => Ok(BoundaryType::U8),
-        Some(BytecodeType::Uint16) => Ok(BoundaryType::U16),
-        Some(BytecodeType::Uint32) => Ok(BoundaryType::U32),
-        Some(BytecodeType::Uint64) => Ok(BoundaryType::U64),
-        Some(BytecodeType::Float32) => Ok(BoundaryType::F32),
-        Some(BytecodeType::Float64) => Ok(BoundaryType::F64),
-        Some(BytecodeType::Function { .. }) => Ok(BoundaryType::Function),
-        Some(BytecodeType::AdapterHandle(kind)) => Ok(BoundaryType::Handle { kind: kind.clone() }),
-        Some(BytecodeType::Array(element)) => Ok(BoundaryType::Array(Box::new(boundary_type(
-            module, *element,
-        )?))),
-        Some(BytecodeType::Nullable(inner)) => Ok(BoundaryType::Nullable(Box::new(boundary_type(
-            module, *inner,
-        )?))),
-        Some(BytecodeType::Tuple(elements)) => elements
-            .iter()
-            .copied()
-            .map(|element| boundary_type(module, element))
-            .collect::<Result<Vec<_>, _>>()
-            .map(BoundaryType::Tuple),
-        Some(BytecodeType::Choice(_)) => Err(BoundaryCodecError::UnsupportedType),
-        _ => Err(BoundaryCodecError::UnsupportedType),
     }
 }
 

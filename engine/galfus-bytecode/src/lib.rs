@@ -164,3 +164,46 @@ pub struct BytecodeModule {
     pub exports: Vec<ExportSlot>,
     pub init_func_idx: Option<FuncIdx>,
 }
+
+impl BytecodeModule {
+    /// Converts a validated bytecode type into the ABI contract shared with hosts.
+    pub fn boundary_type(
+        &self,
+        type_index: TypeIdx,
+    ) -> Result<galfus_contract::BoundaryType, galfus_contract::BoundaryCodecError> {
+        use galfus_contract::{BoundaryCodecError, BoundaryType};
+
+        match self.types.get(type_index.raw() as usize) {
+            Some(BytecodeType::Null) => Ok(BoundaryType::Null),
+            Some(BytecodeType::Bool) => Ok(BoundaryType::Bool),
+            Some(BytecodeType::Int8) => Ok(BoundaryType::I8),
+            Some(BytecodeType::Int16) => Ok(BoundaryType::I16),
+            Some(BytecodeType::Int32) => Ok(BoundaryType::I32),
+            Some(BytecodeType::Int64) => Ok(BoundaryType::I64),
+            Some(BytecodeType::Uint8) => Ok(BoundaryType::U8),
+            Some(BytecodeType::Uint16) => Ok(BoundaryType::U16),
+            Some(BytecodeType::Uint32) => Ok(BoundaryType::U32),
+            Some(BytecodeType::Uint64) => Ok(BoundaryType::U64),
+            Some(BytecodeType::Float32) => Ok(BoundaryType::F32),
+            Some(BytecodeType::Float64) => Ok(BoundaryType::F64),
+            Some(BytecodeType::Function { .. }) => Ok(BoundaryType::Function),
+            Some(BytecodeType::AdapterHandle(kind)) => {
+                Ok(BoundaryType::Handle { kind: kind.clone() })
+            }
+            Some(BytecodeType::Array(element)) => {
+                Ok(BoundaryType::Array(Box::new(self.boundary_type(*element)?)))
+            }
+            Some(BytecodeType::Nullable(inner)) => Ok(BoundaryType::Nullable(Box::new(
+                self.boundary_type(*inner)?,
+            ))),
+            Some(BytecodeType::Tuple(elements)) => elements
+                .iter()
+                .copied()
+                .map(|element| self.boundary_type(element))
+                .collect::<Result<Vec<_>, _>>()
+                .map(BoundaryType::Tuple),
+            Some(BytecodeType::Choice(_)) | None => Err(BoundaryCodecError::UnsupportedType),
+            _ => Err(BoundaryCodecError::UnsupportedType),
+        }
+    }
+}

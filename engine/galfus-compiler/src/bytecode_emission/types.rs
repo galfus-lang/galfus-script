@@ -51,7 +51,11 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: TypeId) -> TypeIdx {
             match sym_kind {
                 Some(SymbolKind::Struct) => {
                     if ctx.is_adapter_proxy {
-                        let name = resolution.symbol(*symbol).unwrap().name().to_string();
+                        let name = ctx
+                            .string_table
+                            .resolve(resolution.symbol(*symbol).unwrap().name())
+                            .unwrap_or("")
+                            .to_string();
                         let proxy_name = ctx.proxy_name.as_ref().unwrap();
                         BytecodeType::AdapterHandle(format!("{}::{}", proxy_name, name))
                     } else {

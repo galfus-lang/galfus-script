@@ -21,7 +21,9 @@ use galfus_frontend::modules::{
     FrontendModuleKind, FrontendRoots, FrontendSession, FrontendSnapshot, FrontendSource,
     FrontendUpdate, SemanticRoot, SemanticRootKind,
 };
-use galfus_frontend::{PrimitiveType, ResolutionLayer, SymbolKind, TypeKind, TypeTable};
+use galfus_frontend::{
+    PrimitiveType, ResolutionLayer, StringTable, SymbolKind, TypeKind, TypeTable,
+};
 use galfus_runtime::{Execution, Runtime, RuntimeError, format_panic};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -508,6 +510,7 @@ impl Workspace {
                         Self::boundary_type(
                             type_result.layer().table(),
                             resolution,
+                            self.frontend.string_table(),
                             proxy_name,
                             parameter.ty(),
                         )
@@ -516,6 +519,7 @@ impl Workspace {
                 let return_type = Self::boundary_type(
                     type_result.layer().table(),
                     resolution,
+                    self.frontend.string_table(),
                     proxy_name,
                     function_type.return_type(),
                 );
@@ -546,6 +550,7 @@ impl Workspace {
     fn boundary_type(
         table: &TypeTable,
         resolution: &ResolutionLayer,
+        string_table: &StringTable,
         proxy_name: &str,
         ty: TypeId,
     ) -> Result<BoundaryType, String> {
@@ -570,24 +575,29 @@ impl Workspace {
             Some(TypeKind::Named { symbol }) => {
                 if let Some(symbol_data) = resolution.symbol(*symbol) {
                     if symbol_data.kind() == SymbolKind::Struct {
+                        let name = string_table.resolve(symbol_data.name()).ok_or_else(|| {
+                            "struct name is missing from the string table".to_string()
+                        })?;
                         return Ok(BoundaryType::Handle {
-                            kind: format!("{}::{}", proxy_name, symbol_data.name()),
+                            kind: format!("{}::{name}", proxy_name),
                         });
                     }
                 }
                 Err("named type is not supported by the boundary ABI".to_string())
             }
             Some(TypeKind::Array { element }) => Ok(BoundaryType::Array(Box::new(
-                Self::boundary_type(table, resolution, proxy_name, *element)?,
+                Self::boundary_type(table, resolution, string_table, proxy_name, *element)?,
             ))),
             Some(TypeKind::Tuple { elements }) => elements
                 .iter()
-                .map(|element| Self::boundary_type(table, resolution, proxy_name, *element))
+                .map(|element| {
+                    Self::boundary_type(table, resolution, string_table, proxy_name, *element)
+                })
                 .collect::<Result<Vec<_>, _>>()
                 .map(BoundaryType::Tuple),
             Some(TypeKind::Function(_)) => Ok(BoundaryType::Function),
             Some(TypeKind::GenericInstance { arguments, .. }) if arguments.len() == 1 => {
-                Self::boundary_type(table, resolution, proxy_name, arguments[0])
+                Self::boundary_type(table, resolution, string_table, proxy_name, arguments[0])
             }
             Some(TypeKind::Union { members }) => {
                 let non_null = members
@@ -604,6 +614,7 @@ impl Workspace {
                     Ok(BoundaryType::Nullable(Box::new(Self::boundary_type(
                         table,
                         resolution,
+                        string_table,
                         proxy_name,
                         non_null[0],
                     )?)))
