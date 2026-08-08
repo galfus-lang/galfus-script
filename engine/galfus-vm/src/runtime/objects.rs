@@ -481,12 +481,12 @@ impl VirtualMachine {
                     payload: Value::Null,
                 },
                 HeapObject::AdapterHandle {
-                    proxy_module,
-                    kind,
+                    binding_id,
+                    type_id,
                     id,
                 } => HeapObject::AdapterHandle {
-                    proxy_module,
-                    kind,
+                    binding_id,
+                    type_id,
                     id,
                 },
             };

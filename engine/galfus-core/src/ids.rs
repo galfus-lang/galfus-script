@@ -13,6 +13,66 @@ impl ModuleId {
     }
 }
 
+/// Nominal identity of an opaque type exported by one adapter proxy module.
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct OpaqueTypeId {
+    proxy_module: String,
+    name: String,
+}
+
+impl OpaqueTypeId {
+    pub fn new(proxy_module: impl Into<String>, name: impl Into<String>) -> Option<Self> {
+        let proxy_module = proxy_module.into();
+        let name = name.into();
+        if proxy_module.trim().is_empty() || name.trim().is_empty() {
+            return None;
+        }
+        Some(Self { proxy_module, name })
+    }
+
+    pub fn proxy_module(&self) -> &str {
+        self.proxy_module.as_str()
+    }
+
+    pub fn name(&self) -> &str {
+        self.name.as_str()
+    }
+}
+
+/// Immutable identity assigned to one adapter binding during bootstrap.
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct BindingId(u64);
+
+impl BindingId {
+    pub const fn new(id: u64) -> Self {
+        Self(id)
+    }
+
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
+}
+
+/// Public, non-reusable resource identity within one adapter binding.
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct HandleId(u32);
+
+impl HandleId {
+    pub const fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceId(u32);
 

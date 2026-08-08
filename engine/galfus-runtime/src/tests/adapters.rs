@@ -8,7 +8,7 @@ use galfus_contract::{
     AdapterBindings, AdapterModuleBinding, BoundaryValue, CancellationOutcome, ExecutionTarget,
     MessageInjector,
 };
-use galfus_core::{ModuleId, ModulePath, SemanticRevision};
+use galfus_core::{HandleId, ModuleId, ModulePath, OpaqueTypeId, SemanticRevision};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
@@ -52,9 +52,9 @@ impl AdapterModuleBinding for DemoAdapter {
                     0,
                     0,
                     Ok(BoundaryValue::Handle {
-                        proxy_module: None,
-                        kind: "graphics::Texture".to_string(),
-                        id: 7,
+                        type_id: OpaqueTypeId::new("graphics", "Texture").unwrap(),
+                        binding_id: None,
+                        id: HandleId::new(1),
                     }),
                 );
             })
@@ -73,12 +73,12 @@ impl AdapterModuleBinding for DemoAdapter {
         CancellationOutcome::Confirmed
     }
 
-    fn release_handle(&mut self, kind: &str, id: u64) {
+    fn release_handle(&mut self, type_id: &OpaqueTypeId, id: HandleId) {
         self.state
             .lock()
             .unwrap()
             .releases
-            .push((kind.to_string(), id));
+            .push((type_id.name().to_string(), u64::from(id.raw())));
     }
 }
 
@@ -138,7 +138,7 @@ fn adapter_graph() -> (Arc<BytecodeGraph>, ModuleId) {
             },
         ],
         types: vec![
-            BytecodeType::AdapterHandle("graphics::Texture".to_string()),
+            BytecodeType::AdapterHandle(OpaqueTypeId::new("graphics", "Texture").unwrap()),
             BytecodeType::Int32,
             BytecodeType::Uint8,
             BytecodeType::Array(TypeIdx(2)),
@@ -209,7 +209,7 @@ fn demo_adapter_completes_from_a_worker_and_releases_its_handle_once() {
     assert_eq!(state.dispatch_threads, vec![main_thread]);
     assert_eq!(state.completion_threads.len(), 1);
     assert_ne!(state.completion_threads[0], main_thread);
-    assert_eq!(state.releases, vec![("graphics::Texture".to_string(), 7)]);
+    assert_eq!(state.releases, vec![("Texture".to_string(), 1)]);
 }
 
 #[test]

@@ -16,7 +16,7 @@ use galfus_contract::{
     AdapterFunctionSignature, AdapterModuleDescriptor, AdapterModuleRequirement, BoundaryType,
     CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget, ProviderModuleRequirement, Providers,
 };
-use galfus_core::{Diagnostic, DiagnosticBag, ModulePath, SourceFile, Span, TypeId};
+use galfus_core::{Diagnostic, DiagnosticBag, ModulePath, OpaqueTypeId, SourceFile, Span, TypeId};
 use galfus_frontend::modules::{
     FrontendModuleKind, FrontendRoots, FrontendSession, FrontendSnapshot, FrontendSource,
     FrontendUpdate, SemanticRoot, SemanticRootKind,
@@ -578,7 +578,8 @@ impl Workspace {
                             "struct name is missing from the string table".to_string()
                         })?;
                         return Ok(BoundaryType::Handle {
-                            kind: format!("{}::{name}", proxy_name),
+                            type_id: OpaqueTypeId::new(proxy_name, name)
+                                .expect("adapter proxy types have a module path and name"),
                         });
                     }
                 }

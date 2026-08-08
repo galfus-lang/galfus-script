@@ -1,4 +1,5 @@
 use super::*;
+use galfus_core::{HandleId, OpaqueTypeId};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -17,7 +18,7 @@ impl AdapterModuleBinding for DummyAdapter {
     ) {
     }
 
-    fn release_handle(&mut self, _kind: &str, _id: u64) {
+    fn release_handle(&mut self, _type_id: &OpaqueTypeId, _id: HandleId) {
         self.0.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     }
 }
@@ -68,32 +69,98 @@ fn adapter_bindings_are_registered_by_nominal_proxy_module() {
 fn adapter_bindings_own_and_release_nominal_handles() {
     let releases = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut bindings = AdapterBindings::default();
-    bindings.register_module("graphics", Box::new(DummyAdapter(releases.clone())));
-    assert!(bindings.register_handle("graphics", "texture", 7));
-    assert!(bindings.contains_handle("graphics", "texture", 7));
-    assert!(bindings.release_handle("graphics", "texture", 7));
-    assert!(!bindings.contains_handle("graphics", "texture", 7));
-    assert!(!bindings.release_handle("graphics", "texture", 7));
+    let binding_id = bindings.register_module("graphics", Box::new(DummyAdapter(releases.clone())));
+    let type_id = OpaqueTypeId::new("graphics", "Texture").unwrap();
+    let handle_id = HandleId::new(1);
+    assert!(bindings.register_handle(binding_id, type_id.clone(), handle_id));
+    assert!(bindings.contains_handle(binding_id, &type_id, handle_id));
+    assert!(bindings.release_handle(binding_id, &type_id, handle_id));
+    assert!(!bindings.contains_handle(binding_id, &type_id, handle_id));
+    assert!(!bindings.release_handle(binding_id, &type_id, handle_id));
     assert_eq!(releases.load(std::sync::atomic::Ordering::Acquire), 1);
 }
 
 #[test]
 fn adapter_handle_batches_are_registered_atomically() {
     let mut bindings = AdapterBindings::default();
-    bindings.register_module(
+    let binding_id = bindings.register_module(
         "graphics",
         Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
             0,
         )))),
     );
-    assert!(bindings.register_handle("graphics", "texture", 7));
+    let type_id = OpaqueTypeId::new("graphics", "Texture").unwrap();
+    assert!(bindings.register_handle(binding_id, type_id.clone(), HandleId::new(1)));
 
     assert!(!bindings.register_handles(
-        "graphics",
-        &[("texture".to_string(), 8), ("texture".to_string(), 7)],
+        binding_id,
+        &[
+            (type_id.clone(), HandleId::new(2)),
+            (type_id.clone(), HandleId::new(1))
+        ],
     ));
-    assert!(!bindings.contains_handle("graphics", "texture", 8));
-    assert!(bindings.contains_handle("graphics", "texture", 7));
+    assert!(!bindings.contains_handle(binding_id, &type_id, HandleId::new(2)));
+    assert!(bindings.contains_handle(binding_id, &type_id, HandleId::new(1)));
+}
+
+#[test]
+fn adapter_handle_ids_are_monotonic_and_never_reused() {
+    let mut bindings = AdapterBindings::default();
+    let binding_id = bindings.register_module(
+        "graphics",
+        Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
+            0,
+        )))),
+    );
+    let type_id = OpaqueTypeId::new("graphics", "Texture").unwrap();
+
+    assert!(bindings.register_handle(binding_id, type_id.clone(), HandleId::new(1)));
+    assert!(bindings.release_handle(binding_id, &type_id, HandleId::new(1)));
+    assert!(!bindings.register_handle(binding_id, type_id.clone(), HandleId::new(1)));
+    assert!(bindings.register_handle(binding_id, type_id, HandleId::new(2)));
+}
+
+#[test]
+fn adapter_handles_require_the_binding_that_created_them() {
+    let mut bindings = AdapterBindings::default();
+    let first_binding = bindings.register_module(
+        "graphics.gfp",
+        Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
+            0,
+        )))),
+    );
+    let second_binding = bindings.register_module(
+        "audio.gfp",
+        Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
+            0,
+        )))),
+    );
+    let type_id = OpaqueTypeId::new("graphics", "Texture").unwrap();
+    let handle_id = HandleId::new(1);
+
+    assert!(bindings.register_handle(first_binding, type_id.clone(), handle_id));
+    assert!(!bindings.release_handle(second_binding, &type_id, handle_id));
+    assert!(bindings.contains_handle(first_binding, &type_id, handle_id));
+}
+
+#[test]
+fn adapter_handle_id_space_stops_after_u32_max() {
+    let mut bindings = AdapterBindings::default();
+    let binding_id = bindings.register_module(
+        "graphics.gfp",
+        Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
+            0,
+        )))),
+    );
+    let type_id = OpaqueTypeId::new("graphics", "Texture").unwrap();
+    bindings
+        .modules
+        .get_mut("graphics.gfp")
+        .unwrap()
+        .next_handle_id = Some(HandleId::new(u32::MAX));
+
+    assert!(bindings.register_handle(binding_id, type_id.clone(), HandleId::new(u32::MAX)));
+    assert!(!bindings.register_handle(binding_id, type_id, HandleId::new(u32::MAX)));
 }
 
 #[test]

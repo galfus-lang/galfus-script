@@ -31,7 +31,10 @@ use pending::{
 };
 pub(crate) use startup::StartupPlan;
 
-fn collect_adapter_handles(value: &BoundaryValue, handles: &mut Vec<(String, u64)>) {
+fn collect_adapter_handles(
+    value: &BoundaryValue,
+    handles: &mut Vec<(galfus_core::OpaqueTypeId, galfus_core::HandleId)>,
+) {
     match value {
         BoundaryValue::Array { values, .. } | BoundaryValue::Tuple(values) => {
             for value in values {
@@ -42,32 +45,39 @@ fn collect_adapter_handles(value: &BoundaryValue, handles: &mut Vec<(String, u64
             payload: Some(payload),
             ..
         } => collect_adapter_handles(payload, handles),
-        BoundaryValue::Handle { kind, id, .. } => handles.push((kind.clone(), *id)),
+        BoundaryValue::Handle { type_id, id, .. } => handles.push((type_id.clone(), *id)),
         _ => {}
     }
 }
 
-fn stamp_adapter_handles(value: &mut BoundaryValue, proxy_module: Option<&str>) {
+fn stamp_adapter_handles(
+    value: &mut BoundaryValue,
+    proxy_module: Option<&str>,
+    binding_id: Option<galfus_core::BindingId>,
+) -> bool {
     match value {
-        BoundaryValue::Array { values, .. } | BoundaryValue::Tuple(values) => {
-            for value in values {
-                stamp_adapter_handles(value, proxy_module);
-            }
-        }
+        BoundaryValue::Array { values, .. } | BoundaryValue::Tuple(values) => values
+            .iter_mut()
+            .all(|value| stamp_adapter_handles(value, proxy_module, binding_id)),
         BoundaryValue::Choice {
             payload: Some(payload),
             ..
-        } => stamp_adapter_handles(payload, proxy_module),
+        } => stamp_adapter_handles(payload, proxy_module, binding_id),
         BoundaryValue::Handle {
-            proxy_module: pm, ..
+            type_id,
+            binding_id: handle_binding_id,
+            ..
         } => {
-            if pm.is_none() {
-                if let Some(m) = proxy_module {
-                    *pm = Some(m.to_string());
-                }
+            let valid = type_id.proxy_module()
+                == proxy_module.unwrap_or_default().trim_end_matches(".gfp")
+                && handle_binding_id.is_none()
+                && binding_id.is_some();
+            if valid {
+                *handle_binding_id = binding_id;
             }
+            valid
         }
-        _ => {}
+        _ => true,
     }
 }
 
@@ -444,8 +454,18 @@ impl Orchestrator {
             .future_registry
             .adapter_proxy_module(thread_id, future_id);
 
-        if let Ok(value) = &mut result {
-            stamp_adapter_handles(value, adapter_proxy_module.as_deref());
+        let binding_id = adapter_proxy_module.as_deref().and_then(|proxy_module| {
+            self.adapter_bindings
+                .as_ref()
+                .and_then(|bindings| bindings.lock().ok()?.binding_id(proxy_module))
+        });
+        if result.as_mut().is_ok_and(|value| {
+            !stamp_adapter_handles(value, adapter_proxy_module.as_deref(), binding_id)
+        }) {
+            result = Err(ExecutionFailure::new(
+                ExecutionFailureKind::BoundaryCodecFailure,
+                "adapter returned a handle for a different binding or opaque type namespace",
+            ));
         }
 
         if let (Some((payload_module_id, payload_type)), Ok(value)) = (
@@ -531,7 +551,10 @@ impl Orchestrator {
             return false;
         };
         let mut bindings = bindings.lock().unwrap();
-        bindings.register_handles(proxy_module, &handles)
+        let Some(binding_id) = bindings.binding_id(proxy_module) else {
+            return false;
+        };
+        bindings.register_handles(binding_id, &handles)
     }
 
     pub(super) fn register_thread_exit_future(
@@ -864,8 +887,8 @@ impl Orchestrator {
         }
         if let Some(bindings) = &self.adapter_bindings {
             let mut bindings = bindings.lock().unwrap();
-            for (proxy_module, kind, id) in handles {
-                bindings.release_handle(&proxy_module, &kind, id);
+            for (binding_id, type_id, id) in handles {
+                bindings.release_handle(binding_id, &type_id, id);
             }
         }
     }
@@ -877,8 +900,8 @@ impl Orchestrator {
         }
         if let Some(bindings) = &self.adapter_bindings {
             let mut bindings = bindings.lock().unwrap();
-            for (proxy_module, kind, id) in handles {
-                bindings.release_handle(&proxy_module, &kind, id);
+            for (binding_id, type_id, id) in handles {
+                bindings.release_handle(binding_id, &type_id, id);
             }
         }
     }

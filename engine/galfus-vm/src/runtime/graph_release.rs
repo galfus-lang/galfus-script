@@ -7,7 +7,11 @@ impl VirtualMachine {
     pub fn release_unreachable(
         &self,
         thread: &mut thread::VmThreadState,
-    ) -> Vec<(String, String, u64)> {
+    ) -> Vec<(
+        galfus_core::BindingId,
+        galfus_core::OpaqueTypeId,
+        galfus_core::HandleId,
+    )> {
         use std::collections::{HashSet, VecDeque};
 
         thread.heap.allocations_since_release = 0;
@@ -105,14 +109,18 @@ impl VirtualMachine {
             return Vec::new();
         }
 
-        let released_handles: Vec<(String, String, u64)> = dead_objects
+        let released_handles: Vec<(
+            galfus_core::BindingId,
+            galfus_core::OpaqueTypeId,
+            galfus_core::HandleId,
+        )> = dead_objects
             .iter()
             .filter_map(|&idx| match thread.heap.objects[idx].as_ref() {
                 Some(HeapObject::AdapterHandle {
-                    proxy_module,
-                    kind,
+                    binding_id,
+                    type_id,
                     id,
-                }) => Some((proxy_module.clone(), kind.clone(), *id)),
+                }) => Some((*binding_id, type_id.clone(), *id)),
                 _ => None,
             })
             .collect();

@@ -14,6 +14,8 @@ pub mod version;
 use std::collections::HashMap;
 use std::sync;
 
+use galfus_core::{BindingId, HandleId, OpaqueTypeId};
+
 pub use builtins::*;
 pub use thread::*;
 pub use version::*;
@@ -43,7 +45,7 @@ pub enum BoundaryType {
         payload: Option<Box<BoundaryType>>,
     },
     Handle {
-        kind: String,
+        type_id: OpaqueTypeId,
     },
 }
 
@@ -76,9 +78,9 @@ pub enum BoundaryValue {
         payload: Option<Box<BoundaryValue>>,
     },
     Handle {
-        proxy_module: Option<String>, // Set by Orchestrator upon future completion
-        kind: String,                 // AdapterHandleKind
-        id: u64,                      // AdapterHandleId
+        type_id: OpaqueTypeId,
+        binding_id: Option<BindingId>, // Set by Orchestrator upon future completion
+        id: HandleId,
     },
 }
 
@@ -248,14 +250,21 @@ pub trait AdapterModuleBinding: Send {
     }
 
     /// Releases a foreign resource previously exposed through a nominal handle.
-    fn release_handle(&mut self, _kind: &str, _id: u64) {}
+    fn release_handle(&mut self, _type_id: &OpaqueTypeId, _id: HandleId) {}
 }
 
 /// Adapter bindings are explicit and keyed by nominal proxy module.
 #[derive(Default)]
 pub struct AdapterBindings {
-    modules: HashMap<String, Box<dyn AdapterModuleBinding>>,
-    handles: std::collections::HashSet<(String, String, u64)>, // (proxy_module, kind, id)
+    modules: HashMap<String, AdapterBinding>,
+    handles: std::collections::HashSet<(BindingId, OpaqueTypeId, HandleId)>,
+    next_binding_id: u64,
+}
+
+struct AdapterBinding {
+    id: BindingId,
+    next_handle_id: Option<HandleId>,
+    module: Box<dyn AdapterModuleBinding>,
 }
 
 impl AdapterBindings {
@@ -263,13 +272,30 @@ impl AdapterBindings {
         &mut self,
         proxy_module: impl Into<String>,
         module: Box<dyn AdapterModuleBinding>,
-    ) {
-        self.modules.insert(proxy_module.into(), module);
+    ) -> BindingId {
+        let id = BindingId::new(self.next_binding_id);
+        self.next_binding_id = self
+            .next_binding_id
+            .checked_add(1)
+            .expect("adapter binding identifier space is exhausted");
+        self.modules.insert(
+            proxy_module.into(),
+            AdapterBinding {
+                id,
+                next_handle_id: Some(HandleId::new(1)),
+                module,
+            },
+        );
+        id
     }
 
     pub fn get_mut(&mut self, proxy_module: &str) -> Option<&mut (dyn AdapterModuleBinding + '_)> {
-        let module = self.modules.get_mut(proxy_module)?;
-        Some(&mut **module)
+        let binding = self.modules.get_mut(proxy_module)?;
+        Some(&mut *binding.module)
+    }
+
+    pub fn binding_id(&self, proxy_module: &str) -> Option<BindingId> {
+        self.modules.get(proxy_module).map(|binding| binding.id)
     }
 
     /// Notifies the owning adapter that a request no longer has an execution owner.
@@ -286,61 +312,95 @@ impl AdapterBindings {
 
     pub fn register_handle(
         &mut self,
-        proxy_module: impl Into<String>,
-        kind: impl Into<String>,
-        id: u64,
+        binding_id: BindingId,
+        type_id: OpaqueTypeId,
+        id: HandleId,
     ) -> bool {
-        let owner = proxy_module.into();
-        if !self.modules.contains_key(&owner) {
-            return false;
-        }
-        self.handles.insert((owner, kind.into(), id))
+        self.register_handles(binding_id, &[(type_id, id)])
     }
 
     /// Atomically attaches every returned external handle to one adapter.
     /// A duplicate is rejected without registering any handle from the batch.
-    pub fn register_handles(&mut self, proxy_module: &str, handles: &[(String, u64)]) -> bool {
-        if !self.modules.contains_key(proxy_module) {
+    pub fn register_handles(
+        &mut self,
+        binding_id: BindingId,
+        handles: &[(OpaqueTypeId, HandleId)],
+    ) -> bool {
+        let Some(proxy_module) = self.proxy_module_for(binding_id).map(str::to_string) else {
             return false;
-        }
-        let mut batch = std::collections::HashSet::new();
-        if handles.iter().any(|(kind, id)| {
-            !batch.insert((kind.clone(), *id))
-                || self
-                    .handles
-                    .contains(&(proxy_module.to_string(), kind.clone(), *id))
-        }) {
-            if let Some(module) = self.modules.get_mut(proxy_module) {
-                for (kind, id) in handles {
-                    module.release_handle(kind, *id);
-                }
+        };
+        let Some(binding) = self
+            .modules
+            .values_mut()
+            .find(|binding| binding.id == binding_id)
+        else {
+            return false;
+        };
+        let mut next_handle_id = binding.next_handle_id;
+        let valid = handles.iter().all(|(type_id, id)| {
+            let Some(expected_id) = next_handle_id else {
+                return false;
+            };
+            if !type_id_belongs_to_proxy(type_id, &proxy_module)
+                || *id != expected_id
+                || self.handles.contains(&(binding_id, type_id.clone(), *id))
+            {
+                return false;
+            }
+            next_handle_id = id.raw().checked_add(1).map(HandleId::new);
+            true
+        });
+        if !valid {
+            for (type_id, id) in handles {
+                binding.module.release_handle(type_id, *id);
             }
             return false;
         }
-        for (kind, id) in handles {
-            self.handles
-                .insert((proxy_module.to_string(), kind.clone(), *id));
+        binding.next_handle_id = next_handle_id;
+        for (type_id, id) in handles {
+            self.handles.insert((binding_id, type_id.clone(), *id));
         }
         true
     }
 
-    pub fn contains_handle(&self, proxy_module: &str, kind: &str, id: u64) -> bool {
-        self.handles
-            .contains(&(proxy_module.to_string(), kind.to_string(), id))
+    pub fn contains_handle(
+        &self,
+        binding_id: BindingId,
+        type_id: &OpaqueTypeId,
+        id: HandleId,
+    ) -> bool {
+        self.handles.contains(&(binding_id, type_id.clone(), id))
     }
 
-    pub fn release_handle(&mut self, proxy_module: &str, kind: &str, id: u64) -> bool {
-        if !self
-            .handles
-            .remove(&(proxy_module.to_string(), kind.to_string(), id))
-        {
+    pub fn release_handle(
+        &mut self,
+        binding_id: BindingId,
+        type_id: &OpaqueTypeId,
+        id: HandleId,
+    ) -> bool {
+        let Some(binding) = self
+            .modules
+            .values_mut()
+            .find(|binding| binding.id == binding_id)
+        else {
+            return false;
+        };
+        if !self.handles.remove(&(binding_id, type_id.clone(), id)) {
             return false;
         }
-        if let Some(module) = self.get_mut(proxy_module) {
-            module.release_handle(kind, id);
-        }
+        binding.module.release_handle(type_id, id);
         true
     }
+
+    fn proxy_module_for(&self, binding_id: BindingId) -> Option<&str> {
+        self.modules.iter().find_map(|(proxy_module, binding)| {
+            (binding.id == binding_id).then_some(proxy_module.as_str())
+        })
+    }
+}
+
+fn type_id_belongs_to_proxy(type_id: &OpaqueTypeId, proxy_module: &str) -> bool {
+    type_id.proxy_module() == proxy_module.trim_end_matches(".gfp")
 }
 
 /// Optional host capabilities supplied for one execution.

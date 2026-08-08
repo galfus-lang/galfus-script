@@ -905,13 +905,13 @@ export fn(async) close(window: Window): null
     assert_eq!(
         alpha_exports[0].return_type,
         galfus_contract::BoundaryType::Handle {
-            kind: "alpha::Window".to_string(),
+            type_id: galfus_core::OpaqueTypeId::new("alpha", "Window").unwrap(),
         }
     );
     assert_eq!(
         beta_exports[1].parameter_types,
         vec![galfus_contract::BoundaryType::Handle {
-            kind: "beta::Window".to_string(),
+            type_id: galfus_core::OpaqueTypeId::new("beta", "Window").unwrap(),
         }]
     );
     let report = workspace.compile().expect("workspace compiles");
@@ -921,11 +921,21 @@ export fn(async) close(window: Window): null
         .modules()
         .flat_map(|module| module.module().types.iter())
         .filter_map(|ty| match ty {
-            galfus_bytecode::BytecodeType::AdapterHandle(kind) => Some(kind.as_str()),
+            galfus_bytecode::BytecodeType::AdapterHandle(type_id) => Some(type_id),
             _ => None,
         })
         .collect::<Vec<_>>();
 
-    assert!(handles.contains(&"alpha::Window"), "{handles:?}");
-    assert!(handles.contains(&"beta::Window"), "{handles:?}");
+    assert!(
+        handles
+            .iter()
+            .any(|type_id| **type_id == galfus_core::OpaqueTypeId::new("alpha", "Window").unwrap()),
+        "{handles:?}"
+    );
+    assert!(
+        handles
+            .iter()
+            .any(|type_id| **type_id == galfus_core::OpaqueTypeId::new("beta", "Window").unwrap()),
+        "{handles:?}"
+    );
 }

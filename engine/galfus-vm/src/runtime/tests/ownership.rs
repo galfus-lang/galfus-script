@@ -4,6 +4,7 @@ use crate::thread;
 
 use super::*;
 use galfus_bytecode::BytecodeModule;
+use galfus_core::{BindingId, HandleId, OpaqueTypeId};
 
 #[test]
 fn test_ownership_deterministic_release() {
@@ -101,9 +102,9 @@ fn test_ownership_deterministic_release() {
     assert!(thread.heap.objects[node2_ref.raw()].is_some());
 
     let handle_ref = thread.heap.alloc(HeapObject::AdapterHandle {
-        proxy_module: "".to_string(),
-        kind: "texture".to_string(),
-        id: 42,
+        binding_id: BindingId::new(1),
+        type_id: OpaqueTypeId::new("graphics", "Texture").unwrap(),
+        id: HandleId::new(42),
     });
     let released_handles = vm.release_unreachable(&mut thread);
     assert!(thread.heap.objects[node1_ref.raw()].is_none());
@@ -111,7 +112,11 @@ fn test_ownership_deterministic_release() {
     assert!(thread.heap.objects[handle_ref.raw()].is_none());
     assert_eq!(
         released_handles,
-        vec![("".to_string(), "texture".to_string(), 42)]
+        vec![(
+            BindingId::new(1),
+            OpaqueTypeId::new("graphics", "Texture").unwrap(),
+            HandleId::new(42),
+        ),]
     );
 }
 
