@@ -64,9 +64,6 @@ pub enum VmError {
 
     #[error("Invalid bytecode module")]
     InvalidModule,
-
-    #[error("Unimplemented instruction: {instruction}")]
-    UnimplementedInstruction { instruction: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

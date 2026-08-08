@@ -197,10 +197,6 @@ pub struct ExecutionHandle {
 }
 
 impl ExecutionHandle {
-    pub(crate) fn new(sink: EventSink) -> Self {
-        Self { sink }
-    }
-
     pub fn cancel_thread(&self, thread_id: usize) {
         if let Some(thread_id) = crate::registry::ThreadId::from_raw(thread_id as u64) {
             self.sink.send(RuntimeEvent::CancelThread { thread_id });

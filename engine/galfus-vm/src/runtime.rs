@@ -61,61 +61,10 @@ impl Continuation {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum VmEffect {
-    SendMsg {
-        target: u64,
-        bytes: Vec<u8>,
-    },
-    ProviderCall {
-        module_id: ModuleId,
-        name: String,
-        args: Vec<Value>,
-        arg_types: Vec<TypeIdx>,
-        return_type: TypeIdx,
-    },
-    AdapterCall {
-        module_id: ModuleId,
-        proxy_module: String,
-        symbol: String,
-        args: Vec<Value>,
-        arg_types: Vec<TypeIdx>,
-        return_type: TypeIdx,
-    },
-    TimerWait {
-        delay_ms: u64,
-    },
     FutureWait {
         future_id: u64,
         module_id: ModuleId,
         return_type: TypeIdx,
-    },
-    ReceiveFilter {
-        sender_id: u64,
-        timeout: Option<u64>,
-    },
-    MailboxHasMessages,
-    MailboxGetMessage,
-    CreateThread {
-        func: Value,
-        key: Value,
-    },
-    StartThread {
-        thread_id: u64,
-        arg: Value,
-    },
-    GetThread {
-        key: Value,
-    },
-    ThreadIsRunning {
-        thread_id: u64,
-    },
-    ThreadIsExited {
-        thread_id: u64,
-    },
-    ThreadExitReason {
-        thread_id: u64,
-    },
-    WaitThread {
-        thread_id: u64,
     },
     CreateFuture {
         /// Module whose type table encodes the call arguments and Future payload.
@@ -152,7 +101,6 @@ pub enum VmEffect {
         module_id: ModuleId,
         return_type: TypeIdx,
     },
-    Blocked,
 }
 
 pub enum VmStep {

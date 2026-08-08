@@ -156,30 +156,6 @@ pub(crate) fn decode_from_thread_heap(
     }
 }
 
-/// Converts a scalar `VmValue` produced by a VM intrinsic effect into a `BoundaryValue`
-/// without requiring heap or type-table context. Only covers the primitive types returned
-/// by thread intrinsics (i64, bool, i32, null).
-pub(crate) fn vm_value_to_boundary(value: galfus_vm::VmValue) -> galfus_contract::BoundaryValue {
-    use galfus_contract::BoundaryValue;
-    match value {
-        galfus_vm::VmValue::Null => BoundaryValue::Null,
-        galfus_vm::VmValue::Bool(v) => BoundaryValue::Bool(v),
-        galfus_vm::VmValue::Int8(v) => BoundaryValue::I8(v),
-        galfus_vm::VmValue::Int16(v) => BoundaryValue::I16(v),
-        galfus_vm::VmValue::Int32(v) => BoundaryValue::I32(v),
-        galfus_vm::VmValue::Int64(v) => BoundaryValue::I64(v),
-        galfus_vm::VmValue::Uint8(v) => BoundaryValue::U8(v),
-        galfus_vm::VmValue::Uint16(v) => BoundaryValue::U16(v),
-        galfus_vm::VmValue::Uint32(v) => BoundaryValue::U32(v),
-        galfus_vm::VmValue::Uint64(v) => BoundaryValue::U64(v),
-        galfus_vm::VmValue::Future(v) => BoundaryValue::U64(v),
-        galfus_vm::VmValue::Float32(v) => BoundaryValue::F32(v),
-        galfus_vm::VmValue::Float64(v) => BoundaryValue::F64(v),
-        // Heap objects are not expected from thread intrinsic effects; fall back to Null.
-        galfus_vm::VmValue::Object(_) | galfus_vm::VmValue::Function { .. } => BoundaryValue::Null,
-    }
-}
-
 pub(crate) fn encode_into_thread_heap(
     heap: &mut galfus_vm::thread::PrivateHeap,
     value: galfus_contract::BoundaryValue,
@@ -508,26 +484,5 @@ impl RunnableTask for RuntimeTask {
 
     fn into_any_thread(self: Box<Self>) -> Option<Box<dyn RunnableTask + Send>> {
         Some(self)
-    }
-}
-
-pub(crate) fn thread_key(
-    thread: &galfus_vm::thread::VmThreadState,
-    value: galfus_vm::VmValue,
-) -> Option<String> {
-    match value {
-        galfus_vm::VmValue::Object(r) => match thread.heap.get_object(r).ok() {
-            Some(galfus_vm::HeapObject::Array { elements, .. }) => {
-                let mut s = String::new();
-                for e in elements {
-                    if let galfus_vm::VmValue::Uint8(b) = e {
-                        s.push((*b) as char);
-                    }
-                }
-                Some(s)
-            }
-            _ => None,
-        },
-        _ => None,
     }
 }
