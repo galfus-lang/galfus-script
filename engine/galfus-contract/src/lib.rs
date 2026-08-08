@@ -202,6 +202,9 @@ pub trait MessageInjector: Send + Sync {
 }
 
 pub trait HostProvider: Send {
+    /// Immutable declaration of every provider module and operation implemented by this host.
+    fn descriptor(&self) -> ProviderDescriptor;
+
     /// Declares the execution lane required to invoke this provider.
     ///
     /// Main-thread affinity is the safe default for host integrations that may
@@ -231,6 +234,9 @@ pub trait HostProvider: Send {
 /// Implementations may create and coordinate arbitrary internal workers. Those workers must
 /// report completion exclusively through the supplied `MessageInjector`.
 pub trait AdapterModuleBinding: Send {
+    /// Immutable declaration of the adapter proxy surface implemented by this binding.
+    fn descriptor(&self) -> AdapterModuleDescriptor;
+
     fn dispatch(
         &mut self,
         symbol: &str,
@@ -421,6 +427,12 @@ impl Providers {
     pub fn host_mut(&mut self) -> Option<&mut (dyn HostProvider + 'static)> {
         self.host.as_deref_mut()
     }
+
+    pub fn validates(&self, requirement: &ProviderModuleRequirement) -> bool {
+        self.host
+            .as_deref()
+            .is_some_and(|host| host.descriptor().validates(requirement))
+    }
 }
 
 pub type AdapterConfig = std::collections::BTreeMap<String, AdapterConfigValue>;
@@ -558,6 +570,15 @@ pub struct AdapterModuleDescriptor {
 }
 
 impl AdapterModuleDescriptor {
+    pub fn empty() -> Self {
+        Self {
+            adapter: String::new(),
+            config: AdapterConfig::new(),
+            targets: Vec::new(),
+            exports: Vec::new(),
+        }
+    }
+
     /// Orders schema exports so equivalent adapter declarations have one package representation.
     pub fn canonicalize(&mut self) {
         self.exports.sort();
@@ -599,6 +620,41 @@ pub struct SelectedAdapterTarget {
 pub struct ProviderModuleRequirement {
     pub module_path: String,
     pub schema_fingerprint: u64,
+    pub boundary_abi: BoundaryAbiVersion,
+    pub exports: Vec<ProviderFunctionSignature>,
+}
+
+/// Concrete provider surface for one declarative bridge module.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderModuleDescriptor {
+    pub module_path: String,
+    pub schema_fingerprint: u64,
+    pub boundary_abi: BoundaryAbiVersion,
+    pub exports: Vec<ProviderFunctionSignature>,
+}
+
+/// Immutable provider capability table supplied by one host.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ProviderDescriptor {
+    pub modules: Vec<ProviderModuleDescriptor>,
+}
+
+impl ProviderDescriptor {
+    pub fn validates(&self, requirement: &ProviderModuleRequirement) -> bool {
+        self.modules.iter().any(|module| {
+            module.module_path == requirement.module_path
+                && module.schema_fingerprint == requirement.schema_fingerprint
+                && module.boundary_abi == requirement.boundary_abi
+                && module.exports == requirement.exports
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub struct ProviderFunctionSignature {
+    pub name: String,
+    pub parameter_types: Vec<BoundaryType>,
+    pub return_type: BoundaryType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]

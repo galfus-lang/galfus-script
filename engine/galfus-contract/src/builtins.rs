@@ -25,6 +25,28 @@ pub static UTILITY_MODULES: &[(&str, &str)] = &[
 /// Bridge templates for optional host capability modules.
 pub static BRIDGE_TEMPLATES: &[(&str, &str)] = &[("std/io", STD_IO_SOURCE)];
 
+pub fn std_io_provider_descriptor() -> ProviderDescriptor {
+    ProviderDescriptor {
+        modules: vec![ProviderModuleDescriptor {
+            module_path: "std/io".to_string(),
+            schema_fingerprint: provider_schema_fingerprint(STD_IO_SOURCE),
+            boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
+            exports: vec![
+                ProviderFunctionSignature {
+                    name: "io_read".to_string(),
+                    parameter_types: vec![BoundaryType::Array(Box::new(BoundaryType::U8))],
+                    return_type: BoundaryType::Array(Box::new(BoundaryType::U8)),
+                },
+                ProviderFunctionSignature {
+                    name: "io_write".to_string(),
+                    parameter_types: vec![BoundaryType::Array(Box::new(BoundaryType::U8))],
+                    return_type: BoundaryType::Null,
+                },
+            ],
+        }],
+    }
+}
+
 /// Combined builtin modules for standard workspace lookup.
 pub static BUILTIN_MODULES: &[(&str, &str)] = &[
     ("std/async", ASYNC_SOURCE),
@@ -64,3 +86,7 @@ impl BridgeModule {
         }
     }
 }
+use crate::{
+    BoundaryType, CURRENT_BOUNDARY_ABI_VERSION, ProviderDescriptor, ProviderFunctionSignature,
+    ProviderModuleDescriptor, provider_schema_fingerprint,
+};

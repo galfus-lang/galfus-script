@@ -10,6 +10,10 @@ use std::sync::Arc;
 pub struct NativeIoProvider;
 
 impl HostProvider for NativeIoProvider {
+    fn descriptor(&self) -> galfus_contract::ProviderDescriptor {
+        galfus_contract::std_io_provider_descriptor()
+    }
+
     fn dispatch(
         &mut self,
         thread_id: usize,

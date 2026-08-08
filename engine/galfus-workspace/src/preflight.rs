@@ -26,6 +26,9 @@ pub enum PreflightError {
         proxy_module: String,
         error: AdapterArtifactIntegrityError,
     },
+    DescriptorMismatch {
+        proxy_module: String,
+    },
 }
 
 impl std::fmt::Display for PreflightError {
@@ -69,6 +72,11 @@ impl std::fmt::Display for PreflightError {
                 f,
                 "Adapter artifact for {} failed integrity verification: {}",
                 proxy_module, error
+            ),
+            Self::DescriptorMismatch { proxy_module } => write!(
+                f,
+                "Adapter binding descriptor does not match proxy module {}",
+                proxy_module
             ),
         }
     }
@@ -177,6 +185,12 @@ impl AdapterBindingPreflight {
                     adapter: adapter_name.clone(),
                     error,
                 })?;
+
+            if bound_module.descriptor() != requirement.descriptor {
+                return Err(PreflightError::DescriptorMismatch {
+                    proxy_module: requirement.proxy_module.clone(),
+                });
+            }
 
             bindings.register_module(requirement.proxy_module.clone(), bound_module);
         }

@@ -5,9 +5,15 @@ use std::sync::Arc;
 
 struct DummyHost;
 
+struct IoHost;
+
 struct DummyAdapter(Arc<std::sync::atomic::AtomicUsize>);
 
 impl AdapterModuleBinding for DummyAdapter {
+    fn descriptor(&self) -> AdapterModuleDescriptor {
+        AdapterModuleDescriptor::empty()
+    }
+
     fn dispatch(
         &mut self,
         _symbol: &str,
@@ -24,6 +30,10 @@ impl AdapterModuleBinding for DummyAdapter {
 }
 
 impl HostProvider for DummyHost {
+    fn descriptor(&self) -> ProviderDescriptor {
+        ProviderDescriptor::default()
+    }
+
     fn dispatch(
         &mut self,
         _thread_id: usize,
@@ -33,6 +43,22 @@ impl HostProvider for DummyHost {
         _injector: Arc<dyn MessageInjector>,
     ) {
         // dummy
+    }
+}
+
+impl HostProvider for IoHost {
+    fn descriptor(&self) -> ProviderDescriptor {
+        std_io_provider_descriptor()
+    }
+
+    fn dispatch(
+        &mut self,
+        _thread_id: usize,
+        _request_id: u64,
+        _method: &str,
+        _args: &[BoundaryValue],
+        _injector: Arc<dyn MessageInjector>,
+    ) {
     }
 }
 
@@ -50,6 +76,21 @@ fn providers_allow_host() {
 #[test]
 fn providers_default_to_main_thread_affinity() {
     assert_eq!(DummyHost.affinity("operation"), TaskAffinity::Main);
+}
+
+#[test]
+fn provider_descriptors_validate_the_complete_compiled_requirement() {
+    let descriptor = std_io_provider_descriptor();
+    let module = descriptor.modules.first().unwrap();
+    let requirement = ProviderModuleRequirement {
+        module_path: module.module_path.clone(),
+        schema_fingerprint: module.schema_fingerprint,
+        boundary_abi: module.boundary_abi,
+        exports: module.exports.clone(),
+    };
+
+    assert!(Providers::with_host(Box::new(IoHost)).validates(&requirement));
+    assert!(!Providers::with_host(Box::new(DummyHost)).validates(&requirement));
 }
 
 #[test]
@@ -188,6 +229,10 @@ fn execution_failures_preserve_asynchronous_frames() {
 struct CancellationRecordingAdapter(std::sync::Arc<std::sync::atomic::AtomicU64>);
 
 impl AdapterModuleBinding for CancellationRecordingAdapter {
+    fn descriptor(&self) -> AdapterModuleDescriptor {
+        AdapterModuleDescriptor::empty()
+    }
+
     fn dispatch(
         &mut self,
         _symbol: &str,

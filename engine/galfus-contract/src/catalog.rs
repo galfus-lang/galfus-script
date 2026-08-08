@@ -127,11 +127,7 @@ impl CapabilityCatalog {
     }
 
     pub fn provider_schema_fingerprint(&self, path: &str) -> Option<u64> {
-        self.provider_source(path).map(|source| {
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            source.hash(&mut hasher);
-            hasher.finish()
-        })
+        self.provider_source(path).map(provider_schema_fingerprint)
     }
 
     /// Retrieves the declarative schema for an adapter, if registered.
@@ -142,4 +138,10 @@ impl CapabilityCatalog {
     pub fn has_adapter(&self, name: &str) -> bool {
         self.adapter_schemas.contains_key(name)
     }
+}
+
+pub fn provider_schema_fingerprint(source: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    source.hash(&mut hasher);
+    hasher.finish()
 }

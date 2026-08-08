@@ -26,6 +26,10 @@ fn target() -> ExecutionTarget {
 }
 
 impl galfus_contract::HostProvider for StartupProvider {
+    fn descriptor(&self) -> galfus_contract::ProviderDescriptor {
+        galfus_contract::ProviderDescriptor::default()
+    }
+
     fn dispatch(
         &mut self,
         thread_id: usize,
@@ -465,6 +469,10 @@ fn run_initializes_dependencies_before_the_entry_module() {
     }
     struct ImmediateProvider;
     impl galfus_contract::HostProvider for ImmediateProvider {
+        fn descriptor(&self) -> galfus_contract::ProviderDescriptor {
+            galfus_contract::ProviderDescriptor::default()
+        }
+
         fn dispatch(
             &mut self,
             thread_id: usize,

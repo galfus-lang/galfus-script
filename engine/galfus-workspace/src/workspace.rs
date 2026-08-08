@@ -14,7 +14,8 @@ use galfus_bytecode::{BytecodeGraph, ImportEdge, PackageEntryPoint, PackageImage
 use galfus_compiler::{CompiledModule, gfp::parse_gfp_frontmatter};
 use galfus_contract::{
     AdapterFunctionSignature, AdapterModuleDescriptor, AdapterModuleRequirement, BoundaryType,
-    CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget, ProviderModuleRequirement, Providers,
+    CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget, ProviderFunctionSignature,
+    ProviderModuleRequirement, Providers,
 };
 use galfus_core::{Diagnostic, DiagnosticBag, ModulePath, OpaqueTypeId, SourceFile, Span, TypeId};
 use galfus_frontend::modules::{
@@ -894,9 +895,72 @@ impl Workspace {
                     .map(|schema_fingerprint| ProviderModuleRequirement {
                         module_path: module.path().as_str().to_string(),
                         schema_fingerprint,
+                        boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
+                        exports: self.provider_exports_for(module.path()),
                     })
             })
             .collect()
+    }
+
+    fn provider_exports_for(&self, path: &ModulePath) -> Vec<ProviderFunctionSignature> {
+        let Some(module) = self
+            .frontend
+            .modules()
+            .iter()
+            .find(|module| module.path() == path)
+        else {
+            return Vec::new();
+        };
+        let Some(type_result) = module.type_result() else {
+            return Vec::new();
+        };
+        let Some(resolution) = module.graph().resolution() else {
+            return Vec::new();
+        };
+        let table = type_result.layer().table();
+        let mut exports = resolution
+            .symbols()
+            .iter()
+            .filter(|symbol| symbol.kind() == SymbolKind::Function)
+            .filter_map(|symbol| {
+                let name = self.frontend.string_table().resolve(symbol.name())?;
+                let name = name.strip_prefix("__provider_")?;
+                let TypeKind::Function(function) =
+                    table.kind(type_result.layer().symbol_type(symbol.id())?)?
+                else {
+                    return None;
+                };
+                let parameter_types = function
+                    .parameters()
+                    .iter()
+                    .map(|parameter| {
+                        Self::boundary_type(
+                            table,
+                            resolution,
+                            self.frontend.string_table(),
+                            path.as_str(),
+                            parameter.ty(),
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .ok()?;
+                let return_type = Self::boundary_type(
+                    table,
+                    resolution,
+                    self.frontend.string_table(),
+                    path.as_str(),
+                    function.return_type(),
+                )
+                .ok()?;
+                Some(ProviderFunctionSignature {
+                    name: name.to_string(),
+                    parameter_types,
+                    return_type,
+                })
+            })
+            .collect::<Vec<_>>();
+        exports.sort();
+        exports
     }
 
     /// Starts the configured entry as a persistent execution.

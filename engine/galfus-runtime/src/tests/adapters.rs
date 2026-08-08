@@ -27,6 +27,10 @@ struct DemoAdapter {
 }
 
 impl AdapterModuleBinding for DemoAdapter {
+    fn descriptor(&self) -> galfus_contract::AdapterModuleDescriptor {
+        galfus_contract::AdapterModuleDescriptor::empty()
+    }
+
     fn dispatch(
         &mut self,
         symbol: &str,
