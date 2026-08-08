@@ -7,7 +7,8 @@ use super::*;
 use galfus_bytecode::instruction::{ConstIdx, FuncIdx, GlobalIdx, Instruction, Reg, TypeIdx};
 use galfus_bytecode::{
     BytecodeFunction, BytecodeGraph, BytecodeModule, BytecodeNode, BytecodeType, Constant,
-    ConstantPool, ExecutionMetadata, ExportSlot, ImportEdge, ImportSlot,
+    ConstantPool, ExecutionMetadata, ExportSlot, ImportEdge, ImportSlot, PackageEntryPoint,
+    PackageImage,
 };
 use galfus_core::{ModuleId, ModulePath, SemanticRevision, SourceId, Span};
 
@@ -159,18 +160,29 @@ fn startup_graph() -> (sync::Arc<BytecodeGraph>, ModuleId) {
     (sync::Arc::new(graph), module_id)
 }
 
+fn package_with_entry(
+    graph: sync::Arc<BytecodeGraph>,
+    module_id: ModuleId,
+) -> sync::Arc<PackageImage> {
+    let module_path = graph
+        .get(module_id)
+        .expect("entry module exists")
+        .path()
+        .clone();
+    sync::Arc::new(PackageImage::new(
+        (*graph).clone(),
+        Some(PackageEntryPoint::new(module_path, "main")),
+        Vec::new(),
+    ))
+}
+
 fn start_with_provider(provider: StartupProvider) -> Execution {
     let (graph, module_id) = startup_graph();
     Runtime::new(
-        graph,
+        package_with_entry(graph, module_id),
         Some(galfus_contract::Providers::with_host(Box::new(provider))),
     )
-    .start(
-        module_id,
-        "main",
-        &[],
-        std::rc::Rc::new(CooperativeDriver::new()),
-    )
+    .start(&[], std::rc::Rc::new(CooperativeDriver::new()))
     .expect("startup execution is created")
 }
 
@@ -179,12 +191,8 @@ fn runtime_rejects_an_unsupported_bytecode_format_before_loading_the_entry_modul
     let graph =
         BytecodeGraph::with_format_version(galfus_bytecode::BytecodeFormatVersion::new(1, 0, 0));
 
-    let result = Runtime::new(sync::Arc::new(graph), None).start(
-        ModuleId::new(1),
-        "main",
-        &[],
-        std::rc::Rc::new(CooperativeDriver::new()),
-    );
+    let package = sync::Arc::new(PackageImage::new(graph, None, Vec::new()));
+    let result = Runtime::new(package, None).start(&[], std::rc::Rc::new(CooperativeDriver::new()));
     let Err(error) = result else {
         panic!("unsupported bytecode must be rejected before runtime loading");
     };
@@ -502,13 +510,21 @@ fn run_initializes_dependencies_before_the_entry_module() {
         queue: sync::Mutex::new(collections::VecDeque::new()),
     });
 
+    let package = sync::Arc::new(PackageImage::new(
+        graph,
+        Some(PackageEntryPoint::new(
+            ModulePath::new("main.gfs").expect("valid module path"),
+            "main",
+        )),
+        Vec::new(),
+    ));
     let mut task = Runtime::new(
-        sync::Arc::new(graph.clone()),
+        package,
         Some(galfus_contract::Providers::with_host(Box::new(
             ImmediateProvider,
         ))),
     )
-    .start(entry_id, "main", &[], executor.clone())
+    .start(&[], executor.clone())
     .expect("entry execution succeeds");
 
     let exit_code = match task.run_to_completion() {

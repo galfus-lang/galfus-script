@@ -877,21 +877,11 @@ impl Workspace {
             CompileState::Ready { package, .. } => Arc::clone(package),
             _ => return Err(RunBlocked::CompileRequired),
         };
-        let entry = package
-            .entry_point()
-            .ok_or(RunBlocked::EntryModuleMissing)?;
-        let graph = Arc::new(package.graph().clone());
-        let entry_id = graph
-            .modules()
-            .find(|image| image.path() == entry.module_path())
-            .map(|image| image.id())
-            .ok_or(RunBlocked::EntryModuleMissing)?;
-        let entry_name = entry.function_name();
-        Runtime::new(graph.clone(), providers)
-            .start(entry_id, entry_name, args, driver.clone())
+        Runtime::new(Arc::clone(&package), providers)
+            .start(args, driver.clone())
             .map_err(|error| {
                 if let RuntimeError::VmPanic(panic) = &error {
-                    RunBlocked::RuntimeError(format_panic(&graph, panic))
+                    RunBlocked::RuntimeError(format_panic(package.graph(), panic))
                 } else {
                     RunBlocked::RuntimeError(error.to_string())
                 }
@@ -909,22 +899,12 @@ impl Workspace {
             CompileState::Ready { package, .. } => Arc::clone(package),
             _ => return Err(RunBlocked::CompileRequired),
         };
-        let entry = package
-            .entry_point()
-            .ok_or(RunBlocked::EntryModuleMissing)?;
-        let graph = Arc::new(package.graph().clone());
-        let entry_id = graph
-            .modules()
-            .find(|image| image.path() == entry.module_path())
-            .map(|image| image.id())
-            .ok_or(RunBlocked::EntryModuleMissing)?;
-        let entry_name = entry.function_name();
-        Runtime::new(graph.clone(), providers)
+        Runtime::new(Arc::clone(&package), providers)
             .with_adapter_bindings(bindings)
-            .start(entry_id, entry_name, args, driver.clone())
+            .start(args, driver.clone())
             .map_err(|error| {
                 if let RuntimeError::VmPanic(panic) = &error {
-                    RunBlocked::RuntimeError(format_panic(&graph, panic))
+                    RunBlocked::RuntimeError(format_panic(package.graph(), panic))
                 } else {
                     RunBlocked::RuntimeError(error.to_string())
                 }

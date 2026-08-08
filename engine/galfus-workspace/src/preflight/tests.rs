@@ -1,4 +1,5 @@
 use super::*;
+use galfus_bytecode::{BytecodeGraph, PackageImage};
 use galfus_contract::{
     AdapterConfigValue, AdapterLoadContext, AdapterLoadError, AdapterModuleBinding,
     AdapterModuleDescriptor, AdapterModuleLoader, AdapterModuleRequirement, BoundaryValue,
@@ -77,17 +78,26 @@ fn create_context() -> AdapterLoadContext {
     AdapterLoadContext { properties }
 }
 
+fn create_package(requirements: Vec<AdapterModuleRequirement>) -> PackageImage {
+    PackageImage::new(BytecodeGraph::new(), None, requirements)
+}
+
 #[test]
 fn no_requirements_produces_empty_bindings() {
     let preflight = AdapterBindingPreflight::new();
-    let _bindings = preflight.run(&[], &create_context()).unwrap();
+    let package = create_package(Vec::new());
+    let _bindings = preflight.bind_package(&package, &create_context()).unwrap();
 }
 
 #[test]
 fn missing_loader_returns_error() {
     let preflight = AdapterBindingPreflight::new();
     let req = create_requirement("my_proxy", "missing_adapter");
-    let err = preflight.run(&[req], &create_context()).err().unwrap();
+    let package = create_package(vec![req]);
+    let err = preflight
+        .bind_package(&package, &create_context())
+        .err()
+        .unwrap();
 
     assert!(matches!(err, PreflightError::MissingLoader(_)));
 }
@@ -100,7 +110,11 @@ fn load_failure_returns_adapter_load_error() {
         .unwrap();
 
     let req = create_requirement("my_proxy", "test_adapter");
-    let err = preflight.run(&[req], &create_context()).err().unwrap();
+    let package = create_package(vec![req]);
+    let err = preflight
+        .bind_package(&package, &create_context())
+        .err()
+        .unwrap();
 
     assert!(matches!(
         err,
@@ -121,7 +135,8 @@ fn multiple_modules_using_same_loader() {
     let req1 = create_requirement("proxy1", "test_adapter");
     let req2 = create_requirement("proxy2", "test_adapter");
 
-    let mut bindings = preflight.run(&[req1, req2], &create_context()).unwrap();
+    let package = create_package(vec![req1, req2]);
+    let mut bindings = preflight.bind_package(&package, &create_context()).unwrap();
 
     // confirm bindings are correctly populated
     assert!(bindings.get_mut("proxy1").is_some());
@@ -179,7 +194,8 @@ fn two_loaders_with_structurally_different_configurations() {
         },
     };
 
-    let mut bindings = preflight.run(&[req1, req2], &create_context()).unwrap();
+    let package = create_package(vec![req1, req2]);
+    let mut bindings = preflight.bind_package(&package, &create_context()).unwrap();
     assert!(bindings.get_mut("proxy1").is_some());
     assert!(bindings.get_mut("proxy2").is_some());
 }

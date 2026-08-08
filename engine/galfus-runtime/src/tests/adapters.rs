@@ -2,7 +2,7 @@ use super::*;
 use galfus_bytecode::instruction::{ConstIdx, FuncIdx, Instruction, Reg, TypeIdx};
 use galfus_bytecode::{
     BytecodeFunction, BytecodeGraph, BytecodeModule, BytecodeNode, BytecodeType, Constant,
-    ConstantPool, ExportKind, ExportSlot,
+    ConstantPool, ExportKind, ExportSlot, PackageEntryPoint, PackageImage,
 };
 use galfus_contract::{
     AdapterBindings, AdapterModuleBinding, BoundaryValue, CancellationOutcome, MessageInjector,
@@ -168,7 +168,7 @@ fn adapter_graph() -> (Arc<BytecodeGraph>, ModuleId) {
 }
 
 fn execution_with_demo_adapter(complete: bool) -> (Execution, Arc<Mutex<DemoAdapterState>>) {
-    let (graph, module_id) = adapter_graph();
+    let (graph, _) = adapter_graph();
     let state = Arc::new(Mutex::new(DemoAdapterState::default()));
     let mut bindings = AdapterBindings::default();
     bindings.register_module(
@@ -178,9 +178,17 @@ fn execution_with_demo_adapter(complete: bool) -> (Execution, Arc<Mutex<DemoAdap
             complete,
         }),
     );
-    let execution = Runtime::new(graph, None)
+    let package = Arc::new(PackageImage::new(
+        (*graph).clone(),
+        Some(PackageEntryPoint::new(
+            ModulePath::new("main.gfs").expect("valid module path"),
+            "main",
+        )),
+        Vec::new(),
+    ));
+    let execution = Runtime::new(package, None)
         .with_adapter_bindings(bindings)
-        .start(module_id, "main", &[], Rc::new(CooperativeDriver::new()))
+        .start(&[], Rc::new(CooperativeDriver::new()))
         .unwrap();
     (execution, state)
 }

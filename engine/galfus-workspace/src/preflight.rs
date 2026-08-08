@@ -1,3 +1,4 @@
+use galfus_bytecode::PackageImage;
 use galfus_contract::{
     AdapterBindings, AdapterLoadContext, AdapterLoadError, AdapterModuleLoader,
     AdapterModuleRequirement,
@@ -69,7 +70,16 @@ impl AdapterBindingPreflight {
         Ok(())
     }
 
-    pub fn run(
+    /// Binds every external module declared by one immutable package image.
+    pub fn bind_package(
+        &self,
+        package: &PackageImage,
+        context: &AdapterLoadContext,
+    ) -> Result<AdapterBindings, PreflightError> {
+        self.bind_requirements(package.adapter_requirements(), context)
+    }
+
+    fn bind_requirements(
         &self,
         requirements: &[AdapterModuleRequirement],
         context: &AdapterLoadContext,
