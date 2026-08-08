@@ -25,8 +25,19 @@ fn graph_with_nodes(
 }
 
 fn create_test_module(instructions: Vec<Instruction>, constants: Vec<Constant>) -> BytecodeModule {
+    let global_count = instructions
+        .iter()
+        .filter_map(|instruction| match instruction {
+            Instruction::LoadGlobal { global_idx, .. }
+            | Instruction::StoreGlobal { global_idx, .. } => Some(u32::from(global_idx.raw()) + 1),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0);
+
     BytecodeModule {
         name: "test".to_string(),
+        global_count,
         constants: ConstantPool { constants },
         functions: vec![BytecodeFunction {
             name: "main".to_string(),

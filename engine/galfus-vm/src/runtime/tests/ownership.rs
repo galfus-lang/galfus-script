@@ -9,6 +9,7 @@ use galfus_bytecode::BytecodeModule;
 fn test_ownership_deterministic_release() {
     let image = BytecodeModule {
         name: "test".to_string(),
+        global_count: 0,
         constants: ConstantPool { constants: vec![] },
         functions: vec![BytecodeFunction {
             name: "main".to_string(),
@@ -118,6 +119,7 @@ fn test_ownership_deterministic_release() {
 fn test_ownership_cycle_release() {
     let image = BytecodeModule {
         name: "test".to_string(),
+        global_count: 0,
         constants: ConstantPool { constants: vec![] },
         functions: vec![BytecodeFunction {
             name: "main".to_string(),
@@ -228,6 +230,7 @@ fn test_ownership_cycle_release() {
 fn test_ownership_weak_invalidation() {
     let image = BytecodeModule {
         name: "test".to_string(),
+        global_count: 0,
         constants: ConstantPool { constants: vec![] },
         functions: vec![BytecodeFunction {
             name: "main".to_string(),

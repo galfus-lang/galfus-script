@@ -78,28 +78,6 @@ impl Orchestrator {
             };
             pending.active.store(false, Ordering::Release);
             match pending.operation {
-                PendingOperation::Provider => {
-                    let Some(vm) = self.vm.as_ref() else {
-                        continue;
-                    };
-                    let Some(providers) = vm.providers() else {
-                        continue;
-                    };
-                    let mut providers = providers.lock().unwrap();
-                    if let Some(host) = providers.host_mut() {
-                        let _outcome = host.cancel(thread_id.raw() as usize, pending.request_id);
-                    }
-                }
-                PendingOperation::Adapter { module, symbol } => {
-                    if let Some(bindings) = &self.adapter_bindings {
-                        let _outcome = bindings.lock().unwrap().cancel(
-                            &module,
-                            &symbol,
-                            thread_id.raw() as usize,
-                            pending.request_id,
-                        );
-                    }
-                }
                 PendingOperation::Future | PendingOperation::AggregateMember { .. } => {}
             }
         }

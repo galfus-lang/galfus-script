@@ -360,26 +360,6 @@ impl FutureRegistry {
         Ok(std::mem::take(&mut record.waiters))
     }
 
-    pub fn insert_resolved(
-        &mut self,
-        owner_thread_id: ThreadId,
-        future_id: u64,
-        result: Result<BoundaryValue, ExecutionFailure>,
-    ) -> Result<(), ExecutionFailure> {
-        self.create(
-            owner_thread_id,
-            future_id,
-            None,
-            None,
-            Activation::Internal {
-                operation: "intrinsic".to_string(),
-                args: vec![],
-            },
-        )?;
-        let _waiters = self.complete(owner_thread_id, future_id, result)?;
-        Ok(())
-    }
-
     pub fn payload_schema(
         &self,
         owner_thread_id: ThreadId,

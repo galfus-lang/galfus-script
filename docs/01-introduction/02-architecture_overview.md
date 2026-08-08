@@ -104,25 +104,28 @@ transitions it to a suspended state.
 | Blocked  | Suspended in `BlockedQueue`, waiting for an external event or timeout. |
 | Exited   | Function returned; exit code is stored in the registry.                |
 
-**I/O suspension:** When a thread emits a `VmEffect` (e.g. `ProviderCall` for
-`println`), it is suspended and its continuation is stored. The I/O task is
-dispatched to the **back** of the FIFO queue so the scheduler remains fair.
-When the effect completes, the thread is resumed at the front of the queue to
-continue promptly.
+**I/O suspension:** A provider call first creates a lazy `Future` activation.
+When the future is awaited, the thread is suspended and its continuation is
+stored. The provider task is dispatched to the **back** of the FIFO queue so
+the scheduler remains fair. When the activation completes, the thread is
+resumed at the front of the queue to continue promptly.
 
-### Waiter Mechanism (`WaitThread`)
+### Waiter Mechanism (`Thread::wait`)
 
-`WaitThread` implements join semantics without busy-waiting:
+`Thread::wait` implements join semantics through an internal lazy future,
+without busy-waiting:
 
-1. The calling thread emits `VmEffect::WaitThread { thread_id }`.
-2. The orchestrator checks if the target is already `Exited`.
+1. The `std/thread` implementation creates the `__internal_thread_wait`
+   activation and returns its future.
+2. When that future starts, the orchestrator checks if the target is already
+   `Exited`.
    - **Yes**: Resumes the caller immediately with the stored exit code.
    - **No**: Calls `kernel.block(caller)` and registers the caller in a
      `waiters: HashMap<ThreadId, Vec<WaiterEntry>>` on the `VirtualKernel`.
 3. When the target thread exits (the `Exited` runtime event fires),
-   `kernel.drain_waiters(target_id)` is called. Each waiter's thread is taken
-   from the registry and resumed via `resume_or_fail_front`, putting it at the
-   front of the FIFO queue with the exit code as its result.
+   the wait future is completed. Each awaiting thread is taken from the
+   registry and resumed at the front of the FIFO queue with the exit code as
+   its result.
 
 ---
 

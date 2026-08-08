@@ -22,9 +22,11 @@ an existing graph. This split lets applications use only the layer they need.
 
 Native calls use `HostProvider` and typed `BoundaryValue` values. The provider
 gets a thread ID, request ID, arguments, and a `MessageInjector`; it does not
-receive mutable access to VM or scheduler internals. This makes immediate and
-callback-based host operations possible while preserving orchestrator ownership
-of execution state.
+receive mutable access to VM or scheduler internals. This supports synchronous
+and asynchronous host completions while preserving orchestrator ownership
+of execution state. Every provider interaction is represented by a lazy
+future activation; a host may complete that activation synchronously or later
+through its injector.
 
 The absence of a provider is also explicit. Programs without native calls can
 run without one. A reached native call fails with a structured missing-provider

@@ -74,6 +74,11 @@ pub enum BytecodeValidationError {
         symbol_name: String,
         func_idx: FuncIdx,
     },
+    ExportGlobalOutOfBounds {
+        symbol_name: String,
+        global_idx: GlobalIdx,
+        global_count: u32,
+    },
     InitFunctionOutOfBounds {
         func_idx: FuncIdx,
     },
@@ -102,9 +107,14 @@ pub fn validate_bytecode_module(
                     });
                 }
             }
-            ExportKind::Global(_global_idx) => {
-                // Global index validation requires information not currently in BytecodeModule
-                // (number of globals is not explicitly recorded).
+            ExportKind::Global(global_idx) => {
+                if u32::from(global_idx.raw()) >= module.global_count {
+                    errors.push(BytecodeValidationError::ExportGlobalOutOfBounds {
+                        symbol_name: export.symbol_name.clone(),
+                        global_idx,
+                        global_count: module.global_count,
+                    });
+                }
             }
         }
     }
@@ -200,11 +210,7 @@ pub fn validate_bytecode_module(
                     check_reg(dest, &mut errors);
                     check_reg(src, &mut errors);
                 }
-                Instruction::LoadGlobal {
-                    dest,
-                    global_idx: _,
-                    ..
-                } => {
+                Instruction::LoadGlobal { dest, .. } => {
                     check_reg(dest, &mut errors);
                 }
                 Instruction::StoreGlobal {
@@ -327,57 +333,6 @@ pub fn validate_bytecode_module(
                     check_reg(src, &mut errors);
                 }
                 Instruction::RetNull => {}
-                Instruction::ReceiveFilter {
-                    dest: _,
-                    sender: _,
-                    timeout: _,
-                } => {
-                    // Requires no validation (arguments are not bounds-checked here)
-                }
-                Instruction::MailboxHasMessages { dest: _ }
-                | Instruction::MailboxGetMessage { dest: _ } => {
-                    // Requires no validation
-                }
-                Instruction::Send {
-                    dest: _,
-                    target: _,
-                    msg: _,
-                } => {
-                    // Requires no validation
-                }
-                Instruction::CreateThread {
-                    dest: _,
-                    func: _,
-                    key: _,
-                } => {
-                    // Requires no validation
-                }
-                Instruction::StartThread {
-                    dest: _,
-                    thread_id: _,
-                    arg: _,
-                } => {
-                    // Requires no validation
-                }
-                Instruction::GetThread { dest: _, key: _ }
-                | Instruction::ThreadIsRunning {
-                    dest: _,
-                    thread_id: _,
-                }
-                | Instruction::ThreadIsExited {
-                    dest: _,
-                    thread_id: _,
-                }
-                | Instruction::ThreadExitReason {
-                    dest: _,
-                    thread_id: _,
-                }
-                | Instruction::WaitThread {
-                    dest: _,
-                    thread_id: _,
-                } => {
-                    // Requires no validation
-                }
                 Instruction::Panic { const_idx } => {
                     check_const(const_idx, &mut errors);
                 }
@@ -565,60 +520,6 @@ pub fn validate_bytecode_module(
                     check_reg(reg, &mut errors);
                 }
 
-                Instruction::CallNative {
-                    dest,
-                    name_const,
-                    args_start,
-                    arg_count,
-                    arg_types,
-                    return_type,
-                } => {
-                    check_reg(dest, &mut errors);
-                    check_const(name_const, &mut errors);
-                    check_type(return_type, &mut errors);
-                    if arg_types.len() != arg_count as usize {
-                        errors.push(BytecodeValidationError::TupleCountMismatch {
-                            func_name: func_name.clone(),
-                            instr_idx,
-                            expected_count: arg_count as usize,
-                            found_count: arg_types.len(),
-                        });
-                    }
-                    for arg_type in arg_types {
-                        check_type(arg_type, &mut errors);
-                    }
-                    if arg_count > 0 {
-                        check_reg(Reg(args_start.raw() + arg_count as u16 - 1), &mut errors);
-                    }
-                }
-                Instruction::AdapterCall {
-                    dest,
-                    proxy_module_const,
-                    symbol_const,
-                    args_start,
-                    arg_count,
-                    arg_types,
-                    return_type,
-                } => {
-                    check_reg(dest, &mut errors);
-                    check_const(proxy_module_const, &mut errors);
-                    check_const(symbol_const, &mut errors);
-                    check_type(return_type, &mut errors);
-                    if arg_types.len() != arg_count as usize {
-                        errors.push(BytecodeValidationError::FutureArgumentTypeCountMismatch {
-                            func_name: func_name.clone(),
-                            instr_idx,
-                            expected_count: arg_count as usize,
-                            found_count: arg_types.len(),
-                        });
-                    }
-                    for arg_type in arg_types {
-                        check_type(arg_type, &mut errors);
-                    }
-                    if arg_count > 0 {
-                        check_reg(Reg(args_start.raw() + arg_count as u16 - 1), &mut errors);
-                    }
-                }
                 Instruction::AwaitFuture {
                     dest,
                     future_id,

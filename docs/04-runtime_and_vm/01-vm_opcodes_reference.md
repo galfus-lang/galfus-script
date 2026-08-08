@@ -1,12 +1,33 @@
-# Galfus VM Bytecode and Opcode Specification
+# Galfus Bytecode v1 Migration Reference
 
-> **Status: Historical design.** The current VM executes the in-memory Rust
-> `Instruction` representation. It has no serialized bytecode format or
-> variable-length binary encoding. Thread instructions are implemented and
-> cooperative multithreading is supported.
+> **Status: migration reference.** The content below describes the removed v1
+> immediate-boundary proposal. It is not the current bytecode contract.
 
-This document preserves an earlier binary instruction-set proposal for the
-Galfus Virtual Machine.
+## Current contract: bytecode v2
+
+The current VM executes the in-memory Rust `Instruction` representation. A
+graph carries a bytecode format header and must be accepted before execution:
+v1 is rejected as a legacy format and later versions are rejected as future
+formats. The graph is not yet serialized; the opcode-tag decoder is the shared
+foundation for the future `PackageImage` loader.
+
+All interactions that can suspend use the lazy Future lifecycle:
+
+- `CreateFuture` or `CreateIndirectFuture` creates an activation without
+  dispatching it;
+- `AwaitFuture`, `AwaitAll`, and `AwaitRace` start or wait for that activation;
+- provider, adapter, thread, mailbox, and timer work are represented by an
+  `Activation` owned by the runtime registry.
+
+There are no direct provider, adapter, mailbox, or thread opcodes in v2. The
+decoder reports a removed v1 opcode separately from an unknown opcode tag.
+
+---
+
+## Removed v1 proposal
+
+The remainder of this document is retained solely to map v1 artifacts during
+migration. It must not be used to implement or document current features.
 
 ---
 

@@ -2,6 +2,7 @@
 fn test_dynamic_call_returns_to_destination() {
     let image = BytecodeModule {
         name: "test".to_string(),
+        global_count: 0,
         constants: ConstantPool {
             constants: vec![Constant::Function(FuncIdx(1)), Constant::Int64(7)],
         },

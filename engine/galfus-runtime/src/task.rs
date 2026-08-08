@@ -94,7 +94,7 @@ pub(crate) fn decode_from_thread_heap(
                 .map(|element| decode_from_thread_heap(heap, element, *element_type, module))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(BoundaryValue::Array {
-                element_type: boundary_type(module, *element_type)?,
+                element_type: module.boundary_type(*element_type)?,
                 values,
             })
         }
@@ -153,30 +153,6 @@ pub(crate) fn decode_from_thread_heap(
             })
         }
         _ => Err(mismatch()),
-    }
-}
-
-/// Converts a scalar `VmValue` produced by a VM intrinsic effect into a `BoundaryValue`
-/// without requiring heap or type-table context. Only covers the primitive types returned
-/// by thread intrinsics (i64, bool, i32, null).
-pub(crate) fn vm_value_to_boundary(value: galfus_vm::VmValue) -> galfus_contract::BoundaryValue {
-    use galfus_contract::BoundaryValue;
-    match value {
-        galfus_vm::VmValue::Null => BoundaryValue::Null,
-        galfus_vm::VmValue::Bool(v) => BoundaryValue::Bool(v),
-        galfus_vm::VmValue::Int8(v) => BoundaryValue::I8(v),
-        galfus_vm::VmValue::Int16(v) => BoundaryValue::I16(v),
-        galfus_vm::VmValue::Int32(v) => BoundaryValue::I32(v),
-        galfus_vm::VmValue::Int64(v) => BoundaryValue::I64(v),
-        galfus_vm::VmValue::Uint8(v) => BoundaryValue::U8(v),
-        galfus_vm::VmValue::Uint16(v) => BoundaryValue::U16(v),
-        galfus_vm::VmValue::Uint32(v) => BoundaryValue::U32(v),
-        galfus_vm::VmValue::Uint64(v) => BoundaryValue::U64(v),
-        galfus_vm::VmValue::Future(v) => BoundaryValue::U64(v),
-        galfus_vm::VmValue::Float32(v) => BoundaryValue::F32(v),
-        galfus_vm::VmValue::Float64(v) => BoundaryValue::F64(v),
-        // Heap objects are not expected from thread intrinsic effects; fall back to Null.
-        galfus_vm::VmValue::Object(_) | galfus_vm::VmValue::Function { .. } => BoundaryValue::Null,
     }
 }
 
@@ -260,7 +236,7 @@ pub(crate) fn encode_into_thread_heap(
                 values,
             },
         ) => {
-            if actual_element_type != boundary_type(module, *element_type)? {
+            if actual_element_type != module.boundary_type(*element_type)? {
                 return Err(mismatch());
             }
             let elements = values
@@ -313,45 +289,6 @@ pub(crate) fn encode_into_thread_heap(
             Ok(galfus_vm::VmValue::Object(reference))
         }
         _ => Err(mismatch()),
-    }
-}
-
-pub(crate) fn boundary_type(
-    module: &galfus_bytecode::BytecodeModule,
-    type_index: galfus_bytecode::instruction::TypeIdx,
-) -> Result<galfus_contract::BoundaryType, galfus_contract::BoundaryCodecError> {
-    use galfus_bytecode::BytecodeType;
-    use galfus_contract::{BoundaryCodecError, BoundaryType};
-
-    match module.types.get(type_index.raw() as usize) {
-        Some(BytecodeType::Null) => Ok(BoundaryType::Null),
-        Some(BytecodeType::Bool) => Ok(BoundaryType::Bool),
-        Some(BytecodeType::Int8) => Ok(BoundaryType::I8),
-        Some(BytecodeType::Int16) => Ok(BoundaryType::I16),
-        Some(BytecodeType::Int32) => Ok(BoundaryType::I32),
-        Some(BytecodeType::Int64) => Ok(BoundaryType::I64),
-        Some(BytecodeType::Uint8) => Ok(BoundaryType::U8),
-        Some(BytecodeType::Uint16) => Ok(BoundaryType::U16),
-        Some(BytecodeType::Uint32) => Ok(BoundaryType::U32),
-        Some(BytecodeType::Uint64) => Ok(BoundaryType::U64),
-        Some(BytecodeType::Float32) => Ok(BoundaryType::F32),
-        Some(BytecodeType::Float64) => Ok(BoundaryType::F64),
-        Some(BytecodeType::Function { .. }) => Ok(BoundaryType::Function),
-        Some(BytecodeType::AdapterHandle(kind)) => Ok(BoundaryType::Handle { kind: kind.clone() }),
-        Some(BytecodeType::Array(element)) => Ok(BoundaryType::Array(Box::new(boundary_type(
-            module, *element,
-        )?))),
-        Some(BytecodeType::Nullable(inner)) => Ok(BoundaryType::Nullable(Box::new(boundary_type(
-            module, *inner,
-        )?))),
-        Some(BytecodeType::Tuple(elements)) => elements
-            .iter()
-            .copied()
-            .map(|element| boundary_type(module, element))
-            .collect::<Result<Vec<_>, _>>()
-            .map(BoundaryType::Tuple),
-        Some(BytecodeType::Choice(_)) => Err(BoundaryCodecError::UnsupportedType),
-        _ => Err(BoundaryCodecError::UnsupportedType),
     }
 }
 
@@ -547,26 +484,5 @@ impl RunnableTask for RuntimeTask {
 
     fn into_any_thread(self: Box<Self>) -> Option<Box<dyn RunnableTask + Send>> {
         Some(self)
-    }
-}
-
-pub(crate) fn thread_key(
-    thread: &galfus_vm::thread::VmThreadState,
-    value: galfus_vm::VmValue,
-) -> Option<String> {
-    match value {
-        galfus_vm::VmValue::Object(r) => match thread.heap.get_object(r).ok() {
-            Some(galfus_vm::HeapObject::Array { elements, .. }) => {
-                let mut s = String::new();
-                for e in elements {
-                    if let galfus_vm::VmValue::Uint8(b) = e {
-                        s.push((*b) as char);
-                    }
-                }
-                Some(s)
-            }
-            _ => None,
-        },
-        _ => None,
     }
 }

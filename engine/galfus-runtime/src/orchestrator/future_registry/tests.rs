@@ -29,7 +29,6 @@ fn waiter() -> Waiter {
             ),
             module_id: ModuleId::new(1),
             return_type: TypeIdx(0),
-            request_id: 7,
             stack: vec![],
             operation: super::super::pending::PendingOperation::Future,
             active: Arc::new(AtomicBool::new(true)),

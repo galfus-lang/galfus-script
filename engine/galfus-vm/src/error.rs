@@ -4,11 +4,15 @@ mod tests;
 use std::error;
 use std::fmt;
 
+use galfus_bytecode::BytecodeFormatError;
 use galfus_bytecode::instruction::{ConstIdx, FieldIdx, FuncIdx, Reg, TypeIdx};
 use thiserror::Error;
 
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum VmError {
+    #[error(transparent)]
+    UnsupportedBytecodeFormat(#[from] BytecodeFormatError),
+
     #[error("Type mismatch: expected {expected}, found {found}")]
     TypeMismatch { expected: String, found: String },
 
@@ -57,9 +61,6 @@ pub enum VmError {
 
     #[error("Invalid bytecode module")]
     InvalidModule,
-
-    #[error("Unimplemented instruction: {instruction}")]
-    UnimplementedInstruction { instruction: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

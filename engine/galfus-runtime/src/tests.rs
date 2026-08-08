@@ -54,6 +54,7 @@ fn startup_graph() -> (sync::Arc<BytecodeGraph>, ModuleId) {
     let module_id = ModuleId::new(1);
     let module = BytecodeModule {
         name: "main.gfs".to_string(),
+        global_count: 0,
         constants: ConstantPool {
             constants: vec![
                 Constant::String("initialize".to_string()),
@@ -174,6 +175,29 @@ fn start_with_provider(provider: StartupProvider) -> Execution {
 }
 
 #[test]
+fn runtime_rejects_an_unsupported_bytecode_format_before_loading_the_entry_module() {
+    let graph = BytecodeGraph::with_format_version(galfus_bytecode::BytecodeFormatVersion::new(1));
+
+    let result = Runtime::new(sync::Arc::new(graph), None).start(
+        ModuleId::new(1),
+        "main",
+        &[],
+        std::rc::Rc::new(CooperativeDriver::new()),
+    );
+    let Err(error) = result else {
+        panic!("unsupported bytecode must be rejected before runtime loading");
+    };
+
+    assert!(matches!(
+        error,
+        RuntimeError::BytecodeFormat(galfus_bytecode::BytecodeFormatError::LegacyVersion {
+            supported: galfus_bytecode::CURRENT_BYTECODE_FORMAT_VERSION,
+            actual,
+        }) if actual == galfus_bytecode::BytecodeFormatVersion::new(1)
+    ));
+}
+
+#[test]
 fn pending_initializer_delays_entry_until_its_completion() {
     let calls = sync::Arc::new(sync::Mutex::new(vec![]));
     let pending = sync::Arc::new(sync::Mutex::new(None));
@@ -265,6 +289,7 @@ fn run_initializes_dependencies_before_the_entry_module() {
     let entry_id = ModuleId::new(2);
     let dependency = BytecodeModule {
         name: "dependency.gfs".to_string(),
+        global_count: 1,
         constants: ConstantPool {
             constants: vec![Constant::Int32(42)],
         },
@@ -306,6 +331,7 @@ fn run_initializes_dependencies_before_the_entry_module() {
     };
     let entry = BytecodeModule {
         name: "main.gfs".to_string(),
+        global_count: 0,
         constants: ConstantPool::default(),
         functions: vec![BytecodeFunction {
             name: "main".to_string(),

@@ -75,6 +75,7 @@ fn execution_stack_does_not_replace_a_failure_stack() {
 fn module(types: Vec<BytecodeType>) -> BytecodeModule {
     BytecodeModule {
         name: "test".to_string(),
+        global_count: 0,
         constants: ConstantPool::default(),
         functions: vec![],
         types,
@@ -303,7 +304,7 @@ fn boundary_type_preserves_nullable_wrapper() {
         BytecodeType::Nullable(TypeIdx(0)),
     ]);
 
-    let result = super::boundary_type(&module, TypeIdx(1));
+    let result = module.boundary_type(TypeIdx(1));
     assert_eq!(
         result,
         Ok(galfus_contract::BoundaryType::Nullable(Box::new(

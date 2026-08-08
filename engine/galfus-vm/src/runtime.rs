@@ -13,7 +13,7 @@ use crate::thread;
 
 use crate::error::{StackFrameInfo, VmError, VmPanic};
 use galfus_bytecode::instruction::{
-    ChoiceLayoutIdx, ConstIdx, FuncIdx, Instruction, Reg, StructLayoutIdx, TypeIdx,
+    ChoiceLayoutIdx, FuncIdx, Instruction, Reg, StructLayoutIdx, TypeIdx,
 };
 use galfus_bytecode::{BytecodeGraph, BytecodeType, Constant, OwnershipKind};
 use galfus_contract::Providers;
@@ -61,61 +61,10 @@ impl Continuation {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum VmEffect {
-    SendMsg {
-        target: u64,
-        bytes: Vec<u8>,
-    },
-    ProviderCall {
-        module_id: ModuleId,
-        name: String,
-        args: Vec<Value>,
-        arg_types: Vec<TypeIdx>,
-        return_type: TypeIdx,
-    },
-    AdapterCall {
-        module_id: ModuleId,
-        proxy_module: String,
-        symbol: String,
-        args: Vec<Value>,
-        arg_types: Vec<TypeIdx>,
-        return_type: TypeIdx,
-    },
-    TimerWait {
-        delay_ms: u64,
-    },
     FutureWait {
         future_id: u64,
         module_id: ModuleId,
         return_type: TypeIdx,
-    },
-    ReceiveFilter {
-        sender_id: u64,
-        timeout: Option<u64>,
-    },
-    MailboxHasMessages,
-    MailboxGetMessage,
-    CreateThread {
-        func: Value,
-        key: Value,
-    },
-    StartThread {
-        thread_id: u64,
-        arg: Value,
-    },
-    GetThread {
-        key: Value,
-    },
-    ThreadIsRunning {
-        thread_id: u64,
-    },
-    ThreadIsExited {
-        thread_id: u64,
-    },
-    ThreadExitReason {
-        thread_id: u64,
-    },
-    WaitThread {
-        thread_id: u64,
     },
     CreateFuture {
         /// Module whose type table encodes the call arguments and Future payload.
@@ -152,7 +101,6 @@ pub enum VmEffect {
         module_id: ModuleId,
         return_type: TypeIdx,
     },
-    Blocked,
 }
 
 pub enum VmStep {
@@ -437,6 +385,11 @@ impl VirtualMachine {
         func_idx: FuncIdx,
         args: Vec<Value>,
     ) -> Result<(), VmPanic> {
+        self.validate_graph_format().map_err(|error| VmPanic {
+            error,
+            stack_trace: vec![],
+        })?;
+
         if (func_idx.raw() as usize) >= self.graph.get(module_id).unwrap().module.functions.len() {
             return Err(VmPanic {
                 error: VmError::FunctionOutOfBounds { index: func_idx },
@@ -481,6 +434,11 @@ impl VirtualMachine {
         func_idx: FuncIdx,
         args: Vec<Value>,
     ) -> Result<Value, VmPanic> {
+        self.validate_graph_format().map_err(|error| VmPanic {
+            error,
+            stack_trace: vec![],
+        })?;
+
         if (func_idx.raw() as usize) >= self.graph.get(module_id).unwrap().module.functions.len() {
             return Err(VmPanic {
                 error: VmError::FunctionOutOfBounds { index: func_idx },
@@ -563,6 +521,8 @@ impl VirtualMachine {
     }
 
     pub fn step(&self, thread: &mut thread::VmThreadState) -> Result<VmStep, VmError> {
+        self.validate_graph_format()?;
+
         if let Some((proxy_module, kind, id)) = thread.pending_adapter_handle_drops.pop() {
             return Ok(VmStep::Suspend {
                 effect: VmEffect::AdapterHandleDropped {
@@ -589,27 +549,6 @@ impl VirtualMachine {
         };
 
         let release_instruction = instr.clone();
-        if matches!(
-            instr,
-            Instruction::CallNative { .. }
-                | Instruction::ReceiveFilter { .. }
-                | Instruction::MailboxHasMessages { .. }
-                | Instruction::MailboxGetMessage { .. }
-                | Instruction::CreateThread { .. }
-                | Instruction::StartThread { .. }
-                | Instruction::GetThread { .. }
-                | Instruction::ThreadIsRunning { .. }
-                | Instruction::ThreadIsExited { .. }
-                | Instruction::ThreadExitReason { .. }
-                | Instruction::WaitThread { .. }
-                | Instruction::Send { .. }
-        ) {
-            return Err(VmError::UnimplementedInstruction {
-                instruction:
-                    "legacy immediate boundary instruction; use an async Future activation"
-                        .to_string(),
-            });
-        }
         let step = match instr {
             Instruction::LoadConst { .. }
             | Instruction::Move { .. }
@@ -648,17 +587,6 @@ impl VirtualMachine {
             | Instruction::CallDynamic { .. }
             | Instruction::Ret { .. }
             | Instruction::RetNull
-            | Instruction::Send { .. }
-            | Instruction::ReceiveFilter { .. }
-            | Instruction::MailboxHasMessages { .. }
-            | Instruction::MailboxGetMessage { .. }
-            | Instruction::CreateThread { .. }
-            | Instruction::StartThread { .. }
-            | Instruction::GetThread { .. }
-            | Instruction::ThreadIsRunning { .. }
-            | Instruction::ThreadIsExited { .. }
-            | Instruction::ThreadExitReason { .. }
-            | Instruction::WaitThread { .. }
             | Instruction::Panic { .. } => self.execute_control_instruction(thread, instr)?,
 
             Instruction::AllocLocal { .. }
@@ -674,8 +602,6 @@ impl VirtualMachine {
             | Instruction::Instanceof { .. } => self.execute_object_instruction(thread, instr)?,
 
             Instruction::Drop { .. }
-            | Instruction::CallNative { .. }
-            | Instruction::AdapterCall { .. }
             | Instruction::AwaitFuture { .. }
             | Instruction::CreateFuture { .. }
             | Instruction::CreateIndirectFuture { .. }
@@ -690,6 +616,12 @@ impl VirtualMachine {
         }
 
         Ok(step)
+    }
+
+    fn validate_graph_format(&self) -> Result<(), VmError> {
+        self.graph
+            .validate_format()
+            .map_err(VmError::UnsupportedBytecodeFormat)
     }
 
     fn execute_loop(&self, thread: &mut thread::VmThreadState) -> Result<Value, VmError> {

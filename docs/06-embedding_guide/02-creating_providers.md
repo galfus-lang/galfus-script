@@ -41,7 +41,7 @@ impl HostProvider for MyIOProvider {
                     }
                 }
 
-                // Return immediate success (synchronous)
+                // Complete the activation synchronously.
                 injector.inject_system_response(thread_id, request_id, Ok(BoundaryValue::Null));
             },
             _ => {

@@ -5,7 +5,10 @@ mod tests;
 use crate::ExportKind;
 use crate::instruction;
 
-use crate::{BytecodeModule, BytecodeValidationError, validate_bytecode_module};
+use crate::{
+    BytecodeFormatError, BytecodeFormatVersion, BytecodeModule, BytecodeValidationError,
+    CURRENT_BYTECODE_FORMAT_VERSION, validate_bytecode_format, validate_bytecode_module,
+};
 use galfus_core::{ModuleId, ModulePath, SemanticRevision};
 use std::collections::{HashMap, HashSet};
 
@@ -72,7 +75,7 @@ pub struct BytecodeGraphTransaction {
     pub edges: Vec<ImportEdge>,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum BytecodeGraphValidationError {
     #[error("module {module_id:?} contains invalid bytecode: {errors:?}")]
     InvalidModule {
@@ -89,6 +92,15 @@ pub enum BytecodeGraphValidationError {
     MissingDependencyModule { from: ModuleId, to: ModuleId },
     #[error("module {importer:?} accesses globals owned by missing module {owner:?}")]
     MissingGlobalModule { importer: ModuleId, owner: ModuleId },
+    #[error(
+        "module {importer:?} accesses global {global_idx:?} of module {owner:?}, which has {global_count} slots"
+    )]
+    GlobalIndexOutOfBounds {
+        importer: ModuleId,
+        owner: ModuleId,
+        global_idx: instruction::GlobalIdx,
+        global_count: u32,
+    },
     #[error("module {importer:?} imports an invalid module path `{module_path}`")]
     InvalidImportPath {
         importer: ModuleId,
@@ -100,6 +112,14 @@ pub enum BytecodeGraphValidationError {
         module_path: String,
     },
     #[error(
+        "module {importer:?} imports `{module_path}`, whose path index refers to missing module {dependency:?}"
+    )]
+    MissingIndexedImportedModule {
+        importer: ModuleId,
+        module_path: String,
+        dependency: ModuleId,
+    },
+    #[error(
         "module {importer:?} imports `{symbol_name}` from `{module_path}`, but it is not exported"
     )]
     MissingImportedExport {
@@ -109,18 +129,56 @@ pub enum BytecodeGraphValidationError {
     },
 }
 
+/// All validation errors found while checking a bytecode graph.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[error("graph validation failed: {errors:?}")]
+pub struct BytecodeGraphValidationErrors {
+    errors: Vec<BytecodeGraphValidationError>,
+}
+
+impl BytecodeGraphValidationErrors {
+    fn new(errors: Vec<BytecodeGraphValidationError>) -> Self {
+        Self { errors }
+    }
+
+    pub fn errors(&self) -> &[BytecodeGraphValidationError] {
+        self.errors.as_slice()
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum BytecodeGraphTransactionError {
     #[error("transaction targets graph version {expected}, but current version is {actual}")]
     StaleBaseVersion { expected: u64, actual: u64 },
+    #[error("transaction removes module {module_id:?} more than once")]
+    DuplicateRemovedModule { module_id: ModuleId },
+    #[error("transaction upserts module {module_id:?} more than once")]
+    DuplicateUpsertedModule { module_id: ModuleId },
+    #[error("transaction upserts path `{path}` for both {first:?} and {second:?}")]
+    DuplicateUpsertedModulePath {
+        path: ModulePath,
+        first: ModuleId,
+        second: ModuleId,
+    },
+    #[error("transaction both removes and upserts module {module_id:?}")]
+    ConflictingModuleOperations { module_id: ModuleId },
+    #[error(
+        "transaction upserts path `{path}` for {upserted:?}, already owned by retained module {existing:?}"
+    )]
+    RetainedModulePathConflict {
+        path: ModulePath,
+        existing: ModuleId,
+        upserted: ModuleId,
+    },
     #[error(transparent)]
-    InvalidGraph(#[from] BytecodeGraphValidationError),
+    InvalidGraph(#[from] BytecodeGraphValidationErrors),
 }
 
 /// The immutable executable graph published by a workspace.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct BytecodeGraph {
     version: u64,
+    format_version: BytecodeFormatVersion,
     pub(crate) modules: HashMap<ModuleId, BytecodeNode>,
     pub(crate) ids_by_path: HashMap<ModulePath, ModuleId>,
     pub(crate) edges: Vec<ImportEdge>,
@@ -131,8 +189,28 @@ impl BytecodeGraph {
         Self::default()
     }
 
+    /// Construct a graph that was loaded from the supplied bytecode format.
+    ///
+    /// Call [`Self::validate_format`] before interpreting its instructions.
+    pub fn with_format_version(format_version: BytecodeFormatVersion) -> Self {
+        Self {
+            format_version,
+            ..Self::default()
+        }
+    }
+
+    /// Monotonic revision of graph snapshots within one compilation session.
     pub fn version(&self) -> u64 {
         self.version
+    }
+
+    pub fn format_version(&self) -> BytecodeFormatVersion {
+        self.format_version
+    }
+
+    /// Verify that this graph can be interpreted by the current VM.
+    pub fn validate_format(&self) -> Result<(), BytecodeFormatError> {
+        validate_bytecode_format(self.format_version)
     }
 
     /// Construct the first validated graph snapshot from complete module data.
@@ -141,7 +219,22 @@ impl BytecodeGraph {
         modules: Vec<BytecodeNode>,
         edges: Vec<ImportEdge>,
     ) -> Result<Self, BytecodeGraphTransactionError> {
-        Self::new().apply(BytecodeGraphTransaction {
+        Self::from_modules_with_format_version(
+            CURRENT_BYTECODE_FORMAT_VERSION,
+            semantic_revision,
+            modules,
+            edges,
+        )
+    }
+
+    /// Construct a graph received in a declared bytecode format.
+    pub fn from_modules_with_format_version(
+        format_version: BytecodeFormatVersion,
+        semantic_revision: SemanticRevision,
+        modules: Vec<BytecodeNode>,
+        edges: Vec<ImportEdge>,
+    ) -> Result<Self, BytecodeGraphTransactionError> {
+        Self::with_format_version(format_version).apply(BytecodeGraphTransaction {
             base_version: 0,
             semantic_revision,
             upserted_modules: modules,
@@ -151,22 +244,25 @@ impl BytecodeGraph {
     }
 
     /// Validate the complete graph, including bytecode, imports, exports, and edges.
-    pub fn validate(&self) -> Result<(), BytecodeGraphValidationError> {
+    pub fn validate(&self) -> Result<(), BytecodeGraphValidationErrors> {
         let mut ids_by_path = HashMap::new();
-        for (id, node) in &self.modules {
-            if let Some(first) = ids_by_path.insert(node.path.clone(), *id)
-                && first != *id
+        let mut errors = Vec::new();
+
+        for node in self.modules() {
+            let id = node.id;
+            if let Some(first) = ids_by_path.insert(node.path.clone(), id)
+                && first != id
             {
-                return Err(BytecodeGraphValidationError::DuplicateModulePath {
+                errors.push(BytecodeGraphValidationError::DuplicateModulePath {
                     path: node.path.clone(),
                     first,
-                    second: *id,
+                    second: id,
                 });
             }
-            if let Err(errors) = validate_bytecode_module(&node.module) {
-                return Err(BytecodeGraphValidationError::InvalidModule {
-                    module_id: *id,
-                    errors,
+            if let Err(module_errors) = validate_bytecode_module(&node.module) {
+                errors.push(BytecodeGraphValidationError::InvalidModule {
+                    module_id: id,
+                    errors: module_errors,
                 });
             }
             for function in &node.module.functions {
@@ -184,23 +280,32 @@ impl BytecodeGraph {
                         } => Some((*module_id, *global_idx)),
                         _ => None,
                     };
-                    if let Some((owner, global_idx)) = owner_global
-                        && owner != *id
-                    {
+                    if let Some((owner, global_idx)) = owner_global {
                         if let Some(owner_node) = self.modules.get(&owner) {
-                            let is_exported = owner_node.module.exports.iter().any(
-                                |e| matches!(e.kind, ExportKind::Global(idx) if idx == global_idx),
-                            );
-                            if !is_exported {
-                                return Err(BytecodeGraphValidationError::MissingImportedExport {
-                                    importer: *id,
-                                    module_path: owner_node.path.as_str().to_string(),
-                                    symbol_name: format!("global_{}", global_idx.raw()),
+                            if u32::from(global_idx.raw()) >= owner_node.module.global_count {
+                                errors.push(BytecodeGraphValidationError::GlobalIndexOutOfBounds {
+                                    importer: id,
+                                    owner,
+                                    global_idx,
+                                    global_count: owner_node.module.global_count,
                                 });
+                            } else if owner != id {
+                                let is_exported = owner_node.module.exports.iter().any(
+                                    |e| matches!(e.kind, ExportKind::Global(idx) if idx == global_idx),
+                                );
+                                if !is_exported {
+                                    errors.push(
+                                        BytecodeGraphValidationError::MissingImportedExport {
+                                            importer: id,
+                                            module_path: owner_node.path.as_str().to_string(),
+                                            symbol_name: format!("global_{}", global_idx.raw()),
+                                        },
+                                    );
+                                }
                             }
                         } else {
-                            return Err(BytecodeGraphValidationError::MissingGlobalModule {
-                                importer: *id,
+                            errors.push(BytecodeGraphValidationError::MissingGlobalModule {
+                                importer: id,
                                 owner,
                             });
                         }
@@ -209,41 +314,54 @@ impl BytecodeGraph {
             }
         }
 
-        for edge in &self.edges {
+        let mut edges = self.edges.iter().collect::<Vec<_>>();
+        edges.sort_by_key(|edge| (edge.from.raw(), edge.to.raw()));
+        for edge in edges {
             if !self.modules.contains_key(&edge.from) || !self.modules.contains_key(&edge.to) {
-                return Err(BytecodeGraphValidationError::MissingDependencyModule {
+                errors.push(BytecodeGraphValidationError::MissingDependencyModule {
                     from: edge.from,
                     to: edge.to,
                 });
             }
         }
 
-        for (importer, node) in &self.modules {
-            for import in &node.module.imports {
-                let path = ModulePath::new(import.module_name.as_str()).ok_or_else(|| {
-                    BytecodeGraphValidationError::InvalidImportPath {
-                        importer: *importer,
+        for node in self.modules() {
+            let mut imports = node.module.imports.iter().collect::<Vec<_>>();
+            imports.sort_by(|left, right| {
+                (&left.module_name, &left.symbol_name)
+                    .cmp(&(&right.module_name, &right.symbol_name))
+            });
+            for import in imports {
+                let Some(path) = ModulePath::new(import.module_name.as_str()) else {
+                    errors.push(BytecodeGraphValidationError::InvalidImportPath {
+                        importer: node.id,
                         module_path: import.module_name.clone(),
-                    }
-                })?;
-                let dependency = ids_by_path.get(&path).copied().ok_or_else(|| {
-                    BytecodeGraphValidationError::MissingImportedModule {
-                        importer: *importer,
+                    });
+                    continue;
+                };
+                let Some(dependency) = ids_by_path.get(&path).copied() else {
+                    errors.push(BytecodeGraphValidationError::MissingImportedModule {
+                        importer: node.id,
                         module_path: import.module_name.clone(),
-                    }
-                })?;
-                let dependency_node = self
-                    .modules
-                    .get(&dependency)
-                    .expect("module path index refers to a graph node");
+                    });
+                    continue;
+                };
+                let Some(dependency_node) = self.modules.get(&dependency) else {
+                    errors.push(BytecodeGraphValidationError::MissingIndexedImportedModule {
+                        importer: node.id,
+                        module_path: import.module_name.clone(),
+                        dependency,
+                    });
+                    continue;
+                };
                 if !dependency_node
                     .module
                     .exports
                     .iter()
                     .any(|export| export.symbol_name == import.symbol_name)
                 {
-                    return Err(BytecodeGraphValidationError::MissingImportedExport {
-                        importer: *importer,
+                    errors.push(BytecodeGraphValidationError::MissingImportedExport {
+                        importer: node.id,
                         module_path: import.module_name.clone(),
                         symbol_name: import.symbol_name.clone(),
                     });
@@ -251,7 +369,11 @@ impl BytecodeGraph {
             }
         }
 
-        Ok(())
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(BytecodeGraphValidationErrors::new(errors))
+        }
     }
 
     /// Apply a transaction to a clone and return the next validated snapshot.
@@ -265,6 +387,7 @@ impl BytecodeGraph {
                 actual: self.version,
             });
         }
+        self.validate_transaction(&transaction)?;
 
         let mut next = self.clone();
         for id in transaction.removed_modules {
@@ -284,12 +407,80 @@ impl BytecodeGraph {
         Ok(next)
     }
 
+    fn validate_transaction(
+        &self,
+        transaction: &BytecodeGraphTransaction,
+    ) -> Result<(), BytecodeGraphTransactionError> {
+        let mut removed_modules = transaction.removed_modules.clone();
+        removed_modules.sort_by_key(|id| id.raw());
+        if let Some(module_id) = removed_modules
+            .windows(2)
+            .find_map(|pair| (pair[0] == pair[1]).then_some(pair[0]))
+        {
+            return Err(BytecodeGraphTransactionError::DuplicateRemovedModule { module_id });
+        }
+        let removed_modules = removed_modules.into_iter().collect::<HashSet<_>>();
+
+        let mut upserted_by_id = transaction.upserted_modules.iter().collect::<Vec<_>>();
+        upserted_by_id.sort_by_key(|module| module.id.raw());
+        if let Some(module_id) = upserted_by_id
+            .windows(2)
+            .find_map(|pair| (pair[0].id == pair[1].id).then_some(pair[0].id))
+        {
+            return Err(BytecodeGraphTransactionError::DuplicateUpsertedModule { module_id });
+        }
+
+        if let Some(module_id) = upserted_by_id
+            .iter()
+            .map(|module| module.id)
+            .find(|id| removed_modules.contains(id))
+        {
+            return Err(BytecodeGraphTransactionError::ConflictingModuleOperations { module_id });
+        }
+
+        let mut upserted_by_path = transaction.upserted_modules.iter().collect::<Vec<_>>();
+        upserted_by_path.sort_by(|left, right| {
+            (left.path.as_str(), left.id.raw()).cmp(&(right.path.as_str(), right.id.raw()))
+        });
+        if let Some((path, first, second)) = upserted_by_path.windows(2).find_map(|pair| {
+            (pair[0].path == pair[1].path).then_some((pair[0].path.clone(), pair[0].id, pair[1].id))
+        }) {
+            return Err(BytecodeGraphTransactionError::DuplicateUpsertedModulePath {
+                path,
+                first,
+                second,
+            });
+        }
+
+        for module in upserted_by_path {
+            let existing = self
+                .modules()
+                .find(|existing| existing.path == module.path)
+                .map(BytecodeNode::id);
+            if let Some(existing) = existing
+                && existing != module.id
+                && !removed_modules.contains(&existing)
+            {
+                return Err(BytecodeGraphTransactionError::RetainedModulePathConflict {
+                    path: module.path.clone(),
+                    existing,
+                    upserted: module.id,
+                });
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn get(&self, id: ModuleId) -> Option<&BytecodeNode> {
         self.modules.get(&id)
     }
 
+    /// Iterate modules in canonical `ModuleId` order.
     pub fn modules(&self) -> impl Iterator<Item = &BytecodeNode> {
-        self.modules.values()
+        let mut modules = self.modules.values().collect::<Vec<_>>();
+        modules.sort_by_key(|module| module.id.raw());
+        modules.into_iter()
     }
 
     pub fn edges(&self) -> &[ImportEdge] {
@@ -330,5 +521,17 @@ impl BytecodeGraph {
 
     pub fn len(&self) -> usize {
         self.modules.len()
+    }
+}
+
+impl Default for BytecodeGraph {
+    fn default() -> Self {
+        Self {
+            version: 0,
+            format_version: CURRENT_BYTECODE_FORMAT_VERSION,
+            modules: HashMap::new(),
+            ids_by_path: HashMap::new(),
+            edges: Vec::new(),
+        }
     }
 }

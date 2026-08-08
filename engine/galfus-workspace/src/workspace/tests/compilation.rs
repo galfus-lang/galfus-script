@@ -801,3 +801,104 @@ export fn(async) add(left: i32 | null, right: i32): i32 | null
         }]
     );
 }
+
+#[test]
+fn compiled_adapter_handles_are_qualified_and_do_not_collide() {
+    struct AdapterSchema;
+
+    impl galfus_contract::AdapterSchema for AdapterSchema {
+        fn name(&self) -> &str {
+            "demo"
+        }
+
+        fn catalog_schema(&self) -> String {
+            "adapter demo { handle Window }".to_string()
+        }
+
+        fn validate_schema(
+            &self,
+            _descriptor: &galfus_contract::AdapterModuleDescriptor,
+        ) -> Result<(), galfus_contract::AdapterValidationError> {
+            Ok(())
+        }
+    }
+
+    let mut workspace = Workspace::new();
+    let catalog = galfus_contract::CapabilityCatalog::new(
+        Vec::new(),
+        vec![std::sync::Arc::new(AdapterSchema)],
+    )
+    .expect("adapter catalog is valid");
+    workspace.set_catalog(std::sync::Arc::new(catalog));
+    workspace
+        .load_config(
+            br#"
+            [module]
+            name = "qualified-handles"
+            target = "app"
+            entry = "main.gfs"
+            "#,
+        )
+        .expect("valid configuration");
+    workspace
+        .load_module(
+            "main.gfs",
+            br#"
+            import { create } from "./alpha.gfp"
+            import beta from "./beta.gfp"
+
+            export fn main(args: [[u8]]): i32 {
+                return 0
+            }
+            "#,
+        )
+        .expect("valid main module");
+
+    for path in ["alpha.gfp", "beta.gfp"] {
+        workspace
+            .load_module(
+                path,
+                br#"---
+adapter = "demo"
+[config]
+test = "memory"
+---
+
+struct Window {}
+
+export fn(async) create(): Window
+export fn(async) close(window: Window): null
+"#,
+            )
+            .expect("valid adapter proxy");
+    }
+
+    assert!(workspace.check().is_valid);
+    let alpha_exports = &workspace.adapter_descriptors[&ModulePath::new("alpha.gfp").unwrap()].exports;
+    let beta_exports = &workspace.adapter_descriptors[&ModulePath::new("beta.gfp").unwrap()].exports;
+    assert_eq!(
+        alpha_exports[0].return_type,
+        galfus_contract::BoundaryType::Handle {
+            kind: "alpha::Window".to_string(),
+        }
+    );
+    assert_eq!(
+        beta_exports[1].parameter_types,
+        vec![galfus_contract::BoundaryType::Handle {
+            kind: "beta::Window".to_string(),
+        }]
+    );
+    let report = workspace.compile().expect("workspace compiles");
+    let handles = report
+        .graph
+        .modules()
+        .flat_map(|module| module.module().types.iter())
+        .filter_map(|ty| match ty {
+            galfus_bytecode::BytecodeType::AdapterHandle(kind) => Some(kind.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(handles.contains(&"alpha::Window"), "{handles:?}");
+    assert!(handles.contains(&"beta::Window"), "{handles:?}");
+}

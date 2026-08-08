@@ -95,6 +95,7 @@ pub fn lower_module(
 
     let module = BytecodeModule {
         name: module_graph.source_id().raw().to_string(),
+        global_count: 0,
         constants: ctx.constant_pool,
         functions,
         types: ctx.types,

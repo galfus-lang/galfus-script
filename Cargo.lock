@@ -150,6 +150,7 @@ dependencies = [
 name = "galfus-bytecode"
 version = "0.0.0"
 dependencies = [
+ "galfus-contract",
  "galfus-core",
  "indexmap",
  "thiserror",

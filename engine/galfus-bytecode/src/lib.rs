@@ -5,15 +5,65 @@
 pub mod graph;
 pub mod graph_resolver;
 pub mod instruction;
+pub mod opcode;
 pub mod validation;
 
 pub use graph::{
     BytecodeGraph, BytecodeGraphTransaction, BytecodeGraphTransactionError,
-    BytecodeGraphValidationError, BytecodeNode, ImportEdge,
+    BytecodeGraphValidationError, BytecodeGraphValidationErrors, BytecodeNode, ImportEdge,
 };
 pub use graph_resolver::{GraphResolutionError, ModuleImports, ResolvedImport};
 pub use instruction::*;
+pub use opcode::*;
 pub use validation::*;
+
+/// Version of the bytecode instruction set and in-memory layout.
+///
+/// This is independent from [`BytecodeGraph::version`], which only identifies
+/// the ordering of graph snapshots within one compilation session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BytecodeFormatVersion(u16);
+
+impl BytecodeFormatVersion {
+    pub const fn new(value: u16) -> Self {
+        Self(value)
+    }
+
+    pub const fn raw(self) -> u16 {
+        self.0
+    }
+}
+
+/// The only bytecode format this runtime release can interpret.
+pub const CURRENT_BYTECODE_FORMAT_VERSION: BytecodeFormatVersion = BytecodeFormatVersion::new(2);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum BytecodeFormatError {
+    #[error("legacy bytecode format version {actual:?}; supported version is {supported:?}")]
+    LegacyVersion {
+        supported: BytecodeFormatVersion,
+        actual: BytecodeFormatVersion,
+    },
+    #[error("future bytecode format version {actual:?}; supported version is {supported:?}")]
+    FutureVersion {
+        supported: BytecodeFormatVersion,
+        actual: BytecodeFormatVersion,
+    },
+}
+
+pub fn validate_bytecode_format(actual: BytecodeFormatVersion) -> Result<(), BytecodeFormatError> {
+    match actual.raw().cmp(&CURRENT_BYTECODE_FORMAT_VERSION.raw()) {
+        std::cmp::Ordering::Less => Err(BytecodeFormatError::LegacyVersion {
+            supported: CURRENT_BYTECODE_FORMAT_VERSION,
+            actual,
+        }),
+        std::cmp::Ordering::Equal => Ok(()),
+        std::cmp::Ordering::Greater => Err(BytecodeFormatError::FutureVersion {
+            supported: CURRENT_BYTECODE_FORMAT_VERSION,
+            actual,
+        }),
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Constant {
@@ -155,6 +205,8 @@ pub struct BytecodeFunction {
 #[derive(Clone, Debug, PartialEq)]
 pub struct BytecodeModule {
     pub name: String,
+    /// Number of addressable global slots owned by this module.
+    pub global_count: u32,
     pub constants: ConstantPool,
     pub functions: Vec<BytecodeFunction>,
     pub types: Vec<BytecodeType>,
@@ -163,4 +215,47 @@ pub struct BytecodeModule {
     pub imports: Vec<ImportSlot>,
     pub exports: Vec<ExportSlot>,
     pub init_func_idx: Option<FuncIdx>,
+}
+
+impl BytecodeModule {
+    /// Converts a validated bytecode type into the ABI contract shared with hosts.
+    pub fn boundary_type(
+        &self,
+        type_index: TypeIdx,
+    ) -> Result<galfus_contract::BoundaryType, galfus_contract::BoundaryCodecError> {
+        use galfus_contract::{BoundaryCodecError, BoundaryType};
+
+        match self.types.get(type_index.raw() as usize) {
+            Some(BytecodeType::Null) => Ok(BoundaryType::Null),
+            Some(BytecodeType::Bool) => Ok(BoundaryType::Bool),
+            Some(BytecodeType::Int8) => Ok(BoundaryType::I8),
+            Some(BytecodeType::Int16) => Ok(BoundaryType::I16),
+            Some(BytecodeType::Int32) => Ok(BoundaryType::I32),
+            Some(BytecodeType::Int64) => Ok(BoundaryType::I64),
+            Some(BytecodeType::Uint8) => Ok(BoundaryType::U8),
+            Some(BytecodeType::Uint16) => Ok(BoundaryType::U16),
+            Some(BytecodeType::Uint32) => Ok(BoundaryType::U32),
+            Some(BytecodeType::Uint64) => Ok(BoundaryType::U64),
+            Some(BytecodeType::Float32) => Ok(BoundaryType::F32),
+            Some(BytecodeType::Float64) => Ok(BoundaryType::F64),
+            Some(BytecodeType::Function { .. }) => Ok(BoundaryType::Function),
+            Some(BytecodeType::AdapterHandle(kind)) => {
+                Ok(BoundaryType::Handle { kind: kind.clone() })
+            }
+            Some(BytecodeType::Array(element)) => {
+                Ok(BoundaryType::Array(Box::new(self.boundary_type(*element)?)))
+            }
+            Some(BytecodeType::Nullable(inner)) => Ok(BoundaryType::Nullable(Box::new(
+                self.boundary_type(*inner)?,
+            ))),
+            Some(BytecodeType::Tuple(elements)) => elements
+                .iter()
+                .copied()
+                .map(|element| self.boundary_type(element))
+                .collect::<Result<Vec<_>, _>>()
+                .map(BoundaryType::Tuple),
+            Some(BytecodeType::Choice(_)) | None => Err(BoundaryCodecError::UnsupportedType),
+            _ => Err(BoundaryCodecError::UnsupportedType),
+        }
+    }
 }

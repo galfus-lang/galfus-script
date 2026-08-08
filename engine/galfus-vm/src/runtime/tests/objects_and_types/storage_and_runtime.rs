@@ -390,6 +390,7 @@ fn test_unwinding_call_stack() {
 
     let image = BytecodeModule {
         name: "test".to_string(),
+        global_count: 0,
         constants: ConstantPool {
             constants: vec![Constant::Int64(5), Constant::Int64(0)],
         },
@@ -441,4 +442,3 @@ fn test_unwinding_call_stack() {
     assert_eq!(panic_err.error, VmError::DivisionByZero);
     assert_eq!(panic_err.stack_trace.len(), 2);
 }
-

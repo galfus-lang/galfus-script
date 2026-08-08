@@ -393,3 +393,59 @@ fn test_copy_rejects_fieldless_structs_at_runtime() {
 
     assert!(matches!(err.error, VmError::TypeMismatch { .. }));
 }
+
+#[test]
+fn fieldless_struct_allocations_keep_distinct_object_identity() {
+    let instrs = vec![
+        Instruction::AllocLocal {
+            dest: Reg(1),
+            type_idx: TypeIdx(8),
+        },
+        Instruction::AllocLocal {
+            dest: Reg(2),
+            type_idx: TypeIdx(8),
+        },
+        Instruction::Ret { src: Reg(2) },
+    ];
+
+    let mut image = create_test_module(instrs, vec![]);
+    image.types.push(BytecodeType::Struct(StructLayoutIdx(1)));
+    image.struct_layouts.push(StructLayout {
+        name: "Token".to_string(),
+        fields: vec![],
+        constraints: vec![],
+    });
+
+    let graph = graph_with_node(galfus_bytecode::BytecodeNode {
+        id: galfus_core::ModuleId::new(0),
+        path: galfus_core::ModulePath::new("test.gfs").unwrap(),
+        semantic_revision: galfus_core::SemanticRevision::new(0),
+        module: image,
+        metadata: None,
+    });
+    let vm = VirtualMachine::new(sync::Arc::new(graph));
+    let mut thread = thread::VmThreadState::new();
+    let returned = vm
+        .run_function(
+            &mut thread,
+            galfus_core::ModuleId::new(0),
+            FuncIdx(0),
+            vec![],
+        )
+        .expect("fieldless structs allocate successfully");
+
+    let Value::Object(returned_ref) = returned else {
+        panic!("fieldless struct allocation must return an object");
+    };
+    let allocated = thread
+        .heap
+        .objects
+        .iter()
+        .enumerate()
+        .filter_map(|(index, object)| object.as_ref().map(|_| index))
+        .collect::<Vec<_>>();
+
+    assert_eq!(allocated.len(), 2);
+    assert!(allocated.contains(&returned_ref.raw()));
+    assert_ne!(allocated[0], allocated[1]);
+}

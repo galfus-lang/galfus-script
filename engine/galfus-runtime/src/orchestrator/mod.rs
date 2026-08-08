@@ -290,30 +290,6 @@ impl Orchestrator {
         self.kernel.enqueue_runnable(thread_id, thread);
     }
 
-    pub(super) fn resume_or_fail(
-        &mut self,
-        thread_id: crate::registry::ThreadId,
-        mut thread: galfus_vm::thread::VmThreadState,
-        continuation: galfus_vm::Continuation,
-        value: galfus_vm::VmValue,
-    ) {
-        let result = self
-            .vm
-            .as_ref()
-            .expect("VM is configured before execution")
-            .resume(thread_id.raw(), &mut thread, continuation, value);
-        match result {
-            Ok(()) => self.kernel.enqueue_runnable(thread_id, thread),
-            Err(error) => {
-                self.failure = Some(with_execution_stack(
-                    error.with_thread_id(thread_id.raw()),
-                    execution_stack(&thread),
-                ));
-                self.cancel_and_teardown_thread(thread_id);
-            }
-        }
-    }
-
     pub(super) fn resume_or_fail_front(
         &mut self,
         thread_id: crate::registry::ThreadId,

@@ -52,7 +52,7 @@ impl AdapterModuleBinding for DemoAdapter {
                     0,
                     Ok(BoundaryValue::Handle {
                         proxy_module: None,
-                        kind: "texture".to_string(),
+                        kind: "graphics::Texture".to_string(),
                         id: 7,
                     }),
                 );
@@ -85,6 +85,7 @@ fn adapter_graph() -> (Arc<BytecodeGraph>, ModuleId) {
     let module_id = ModuleId::new(1);
     let module = BytecodeModule {
         name: "main.gfs".to_string(),
+        global_count: 0,
         constants: ConstantPool {
             constants: vec![
                 Constant::String("graphics.gfp".to_string()),
@@ -136,7 +137,7 @@ fn adapter_graph() -> (Arc<BytecodeGraph>, ModuleId) {
             },
         ],
         types: vec![
-            BytecodeType::AdapterHandle("texture".to_string()),
+            BytecodeType::AdapterHandle("graphics::Texture".to_string()),
             BytecodeType::Int32,
             BytecodeType::Uint8,
             BytecodeType::Array(TypeIdx(2)),
@@ -194,7 +195,7 @@ fn demo_adapter_completes_from_a_worker_and_releases_its_handle_once() {
     assert_eq!(state.dispatch_threads, vec![main_thread]);
     assert_eq!(state.completion_threads.len(), 1);
     assert_ne!(state.completion_threads[0], main_thread);
-    assert_eq!(state.releases, vec![("texture".to_string(), 7)]);
+    assert_eq!(state.releases, vec![("graphics::Texture".to_string(), 7)]);
 }
 
 #[test]

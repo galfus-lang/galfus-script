@@ -250,52 +250,6 @@ pub enum Instruction {
         src: Reg,
     },
     RetNull,
-    ReceiveFilter {
-        dest: Reg,
-        sender: Reg,
-        timeout: Reg,
-    },
-    MailboxHasMessages {
-        dest: Reg,
-    },
-    MailboxGetMessage {
-        dest: Reg,
-    },
-    Send {
-        dest: Reg,
-        target: Reg,
-        msg: Reg,
-    },
-    CreateThread {
-        dest: Reg,
-        func: Reg,
-        key: Reg,
-    },
-    StartThread {
-        dest: Reg, // To store success/fail status
-        thread_id: Reg,
-        arg: Reg,
-    },
-    GetThread {
-        dest: Reg,
-        key: Reg,
-    },
-    ThreadIsRunning {
-        dest: Reg,
-        thread_id: Reg,
-    },
-    ThreadIsExited {
-        dest: Reg,
-        thread_id: Reg,
-    },
-    ThreadExitReason {
-        dest: Reg,
-        thread_id: Reg,
-    },
-    WaitThread {
-        dest: Reg,
-        thread_id: Reg,
-    },
     Panic {
         const_idx: ConstIdx,
     },
@@ -362,24 +316,7 @@ pub enum Instruction {
         reg: Reg,
     },
 
-    // Category G: Native Integrations
-    CallNative {
-        dest: Reg,
-        name_const: ConstIdx,
-        args_start: Reg,
-        arg_count: u8,
-        arg_types: Vec<TypeIdx>,
-        return_type: TypeIdx,
-    },
-    AdapterCall {
-        dest: Reg,
-        proxy_module_const: ConstIdx,
-        symbol_const: ConstIdx,
-        args_start: Reg,
-        arg_count: u8,
-        arg_types: Vec<TypeIdx>,
-        return_type: TypeIdx,
-    },
+    // Category G: Future Activations
     AwaitFuture {
         dest: Reg,
         future_id: Reg,

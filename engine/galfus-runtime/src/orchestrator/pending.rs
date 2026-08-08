@@ -5,7 +5,6 @@ pub(crate) struct PendingContinuation {
     pub(crate) continuation: galfus_vm::Continuation,
     pub(crate) module_id: galfus_core::ModuleId,
     pub(crate) return_type: galfus_bytecode::instruction::TypeIdx,
-    pub(crate) request_id: u64,
     pub(crate) stack: Vec<galfus_contract::ExecutionFrame>,
     pub(crate) operation: PendingOperation,
     pub(crate) active: Arc<AtomicBool>,
@@ -18,8 +17,6 @@ pub(crate) enum PendingKey {
 }
 
 pub(crate) enum PendingOperation {
-    Provider,
-    Adapter { module: String, symbol: String },
     Future,
     AggregateMember { coordinator_id: u64, index: usize },
 }
