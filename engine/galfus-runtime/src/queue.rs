@@ -2,6 +2,8 @@
 mod tests;
 
 use crate::registry::ThreadId;
+use galfus_contract::{ExecutionFailure, ExecutionFailureKind};
+use galfus_core::TimerId;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 pub struct RunnableQueue {
@@ -49,7 +51,7 @@ impl Default for RunnableQueue {
 pub struct BlockedQueue {
     blocked: HashSet<ThreadId>,
     clock_ms: u64,
-    next_timer_id: u64,
+    next_timer_id: u32,
     timers: BTreeSet<TimerEntry>,
     active_timers: HashMap<ThreadId, TimerEntry>,
 }
@@ -57,8 +59,8 @@ pub struct BlockedQueue {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct TimerEntry {
     deadline_ms: u64,
-    timer_id: u64,
-    thread_id: u64,
+    timer_id: TimerId,
+    thread_id: ThreadId,
 }
 
 impl BlockedQueue {
@@ -77,17 +79,29 @@ impl BlockedQueue {
         self.blocked.insert(id);
     }
 
-    pub fn block_with_timeout(&mut self, id: ThreadId, timeout_ms: u64) {
-        self.blocked.insert(id);
-        self.remove_timer(id);
+    pub fn block_with_timeout(
+        &mut self,
+        id: ThreadId,
+        timeout_ms: u64,
+    ) -> Result<(), ExecutionFailure> {
+        let raw_timer_id = self.next_timer_id;
+        let next_timer_id = self.next_timer_id.checked_add(1).ok_or_else(|| {
+            ExecutionFailure::new(
+                ExecutionFailureKind::IdSpaceExhausted,
+                "timer id space exhausted",
+            )
+        })?;
         let timer = TimerEntry {
             deadline_ms: self.clock_ms.saturating_add(timeout_ms),
-            timer_id: self.next_timer_id,
-            thread_id: id.raw(),
+            timer_id: TimerId::new(raw_timer_id),
+            thread_id: id,
         };
-        self.next_timer_id = self.next_timer_id.saturating_add(1);
+        self.next_timer_id = next_timer_id;
+        self.remove_timer(id);
+        self.blocked.insert(id);
         self.timers.insert(timer);
         self.active_timers.insert(id, timer);
+        Ok(())
     }
 
     pub fn unblock(&mut self, id: ThreadId) -> bool {
@@ -117,9 +131,7 @@ impl BlockedQueue {
             }
             self.timers.remove(&timer);
 
-            let Some(thread_id) = ThreadId::from_raw(timer.thread_id) else {
-                continue;
-            };
+            let thread_id = timer.thread_id;
             if self.active_timers.get(&thread_id) != Some(&timer) {
                 continue;
             }

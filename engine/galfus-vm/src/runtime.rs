@@ -27,7 +27,7 @@ pub struct Continuation {
     dest: Option<Reg>,
     expected_result: Option<(ModuleId, TypeIdx)>,
     resumed: Arc<AtomicBool>,
-    pub origin_thread_id: Option<u64>,
+    pub origin_thread_id: Option<galfus_core::ThreadId>,
 }
 
 impl Continuation {
@@ -40,7 +40,7 @@ impl Continuation {
         }
     }
 
-    pub fn with_origin(mut self, origin: u64) -> Self {
+    pub fn with_origin(mut self, origin: galfus_core::ThreadId) -> Self {
         self.origin_thread_id = Some(origin);
         self
     }
@@ -62,7 +62,7 @@ impl Continuation {
 #[derive(Debug, Clone, PartialEq)]
 pub enum VmEffect {
     FutureWait {
-        future_id: u64,
+        future_id: galfus_core::FutureId,
         module_id: ModuleId,
         return_type: TypeIdx,
     },
@@ -84,7 +84,7 @@ pub enum VmEffect {
         return_type: TypeIdx,
     },
     FutureDropped {
-        future_id: u64,
+        future_id: galfus_core::FutureId,
     },
     AdapterHandleDropped {
         binding_id: BindingId,
@@ -92,12 +92,12 @@ pub enum VmEffect {
         id: HandleId,
     },
     FutureWaitAll {
-        future_ids: Vec<u64>,
+        future_ids: Vec<galfus_core::FutureId>,
         module_id: ModuleId,
         return_type: TypeIdx,
     },
     FutureWaitRace {
-        future_ids: Vec<u64>,
+        future_ids: Vec<galfus_core::FutureId>,
         module_id: ModuleId,
         return_type: TypeIdx,
     },
@@ -138,7 +138,7 @@ pub enum VmValue {
     Uint16(u16),
     Uint32(u32),
     Uint64(u64),
-    Future(u64),
+    Future(galfus_core::FutureId),
     Float32(f32),
     Float64(f64),
     Object(VmObjectRef),
@@ -218,7 +218,7 @@ impl VirtualMachine {
     #[allow(clippy::result_large_err)]
     pub fn resume(
         &self,
-        thread_id: u64,
+        thread_id: galfus_core::ThreadId,
         thread: &mut thread::VmThreadState,
         continuation: Continuation,
         value: Value,

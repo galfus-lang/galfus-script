@@ -45,14 +45,94 @@ impl OpaqueTypeId {
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
 )]
-pub struct BindingId(u64);
+pub struct BindingId(u32);
 
 impl BindingId {
-    pub const fn new(id: u64) -> Self {
+    pub const fn new(id: u32) -> Self {
         Self(id)
     }
 
-    pub const fn raw(self) -> u64 {
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+}
+
+/// Identifies a unique thread of execution within the virtual kernel.
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct ThreadId(u32);
+
+impl ThreadId {
+    pub const fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+}
+
+/// Identifies a pending external request dispatched to a host provider or adapter.
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct RequestId(u32);
+
+impl RequestId {
+    pub const fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+}
+
+/// Identifies an asynchronous future managed by the Orchestrator.
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct FutureId(u32);
+
+impl FutureId {
+    pub const fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+}
+
+/// Identifies an active timeout in the BlockedQueue.
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct TimerId(u32);
+
+impl TimerId {
+    pub const fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+}
+
+/// Identifies one aggregate future wait within an Orchestrator.
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct CoordinatorId(u32);
+
+impl CoordinatorId {
+    pub const fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    pub const fn raw(self) -> u32 {
         self.0
     }
 }

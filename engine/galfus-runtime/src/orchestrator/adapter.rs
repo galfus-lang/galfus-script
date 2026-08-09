@@ -9,8 +9,8 @@ use std::sync::{
 
 pub(crate) struct ProviderDispatchTask {
     pub(crate) providers: Arc<std::sync::Mutex<galfus_contract::Providers>>,
-    pub(crate) thread_id: usize,
-    pub(crate) request_id: u64,
+    pub(crate) thread_id: galfus_core::ThreadId,
+    pub(crate) request_id: galfus_core::RequestId,
     pub(crate) name: String,
     pub(crate) args: Vec<BoundaryValue>,
     pub(crate) injector: Arc<dyn MessageInjector>,
@@ -19,8 +19,8 @@ pub(crate) struct ProviderDispatchTask {
 
 pub(crate) struct AdapterDispatchTask {
     pub(crate) bindings: Arc<std::sync::Mutex<galfus_contract::AdapterBindings>>,
-    pub(crate) thread_id: usize,
-    pub(crate) request_id: u64,
+    pub(crate) thread_id: galfus_core::ThreadId,
+    pub(crate) request_id: galfus_core::RequestId,
     pub(crate) module: String,
     pub(crate) symbol: String,
     pub(crate) args: Vec<BoundaryValue>,

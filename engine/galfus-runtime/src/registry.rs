@@ -32,7 +32,7 @@ impl ThreadState {
 }
 
 pub struct MailboxMessage {
-    pub sender_id: u64,
+    pub sender_id: ThreadId,
     pub data: Vec<u8>,
 }
 
@@ -44,22 +44,7 @@ pub struct ThreadControlBlock {
     pub vm_state: Option<VmThreadState>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ThreadId(u64);
-
-impl ThreadId {
-    pub(crate) fn from_executor(value: u64) -> Option<Self> {
-        (value != 0).then_some(Self(value))
-    }
-
-    pub(crate) fn from_raw(value: u64) -> Option<Self> {
-        Self::from_executor(value)
-    }
-
-    pub(crate) fn raw(self) -> u64 {
-        self.0
-    }
-}
+pub use galfus_core::ThreadId;
 
 pub struct ThreadRegistry {
     tcbs: HashMap<ThreadId, ThreadControlBlock>,

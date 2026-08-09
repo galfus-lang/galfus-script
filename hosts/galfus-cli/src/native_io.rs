@@ -16,8 +16,8 @@ impl HostProvider for NativeIoProvider {
 
     fn dispatch(
         &mut self,
-        thread_id: usize,
-        request_id: u64,
+        thread_id: galfus_core::ThreadId,
+        request_id: galfus_core::RequestId,
         method: &str,
         args: &[BoundaryValue],
         injector: Arc<dyn MessageInjector>,

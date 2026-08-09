@@ -5,15 +5,15 @@ use galfus_vm::thread::VmThreadState;
 #[test]
 fn expired_timers_are_enqueued_in_deterministic_order() {
     let mut kernel = VirtualKernel::new();
-    let first = kernel.spawn(VmThreadState::new(), None);
-    let second = kernel.spawn(VmThreadState::new(), None);
-    let earlier = kernel.spawn(VmThreadState::new(), None);
+    let first = kernel.spawn(VmThreadState::new(), None).unwrap();
+    let second = kernel.spawn(VmThreadState::new(), None).unwrap();
+    let earlier = kernel.spawn(VmThreadState::new(), None).unwrap();
 
     for (thread_id, timeout_ms) in [(first, 10), (second, 10), (earlier, 5)] {
         let thread = kernel
             .take_thread(thread_id)
             .expect("spawned thread remains available for blocking");
-        kernel.block(thread_id, thread, Some(timeout_ms));
+        kernel.block(thread_id, thread, Some(timeout_ms)).unwrap();
     }
 
     assert_eq!(kernel.tick(5), vec![earlier]);
@@ -26,14 +26,14 @@ fn expired_timers_are_enqueued_in_deterministic_order() {
 #[test]
 fn mailbox_wakeups_keep_their_arrival_order() {
     let mut kernel = VirtualKernel::new();
-    let first = kernel.spawn(VmThreadState::new(), None);
-    let second = kernel.spawn(VmThreadState::new(), None);
+    let first = kernel.spawn(VmThreadState::new(), None).unwrap();
+    let second = kernel.spawn(VmThreadState::new(), None).unwrap();
 
     for thread_id in [first, second] {
         let thread = kernel
             .take_thread(thread_id)
             .expect("spawned thread remains available for blocking");
-        kernel.block(thread_id, thread, None);
+        kernel.block(thread_id, thread, None).unwrap();
     }
 
     for thread_id in [second, first] {
@@ -43,7 +43,7 @@ fn mailbox_wakeups_keep_their_arrival_order() {
             .lock()
             .unwrap()
             .push_back(MailboxMessage {
-                sender_id: 0,
+                sender_id: galfus_core::ThreadId::new(0),
                 data: vec![thread_id.raw() as u8],
             });
         assert!(kernel.unblock(thread_id));
@@ -51,4 +51,22 @@ fn mailbox_wakeups_keep_their_arrival_order() {
 
     assert_eq!(kernel.next_runnable(), Some(second));
     assert_eq!(kernel.next_runnable(), Some(first));
+}
+
+#[test]
+fn thread_id_exhaustion_does_not_register_a_partial_thread() {
+    let mut kernel = VirtualKernel::new();
+    kernel.next_thread_id = u32::MAX - 1;
+
+    assert_eq!(
+        kernel.spawn(VmThreadState::new(), None).unwrap().raw(),
+        u32::MAX - 1
+    );
+    let error = kernel.spawn(VmThreadState::new(), None).unwrap_err();
+
+    assert_eq!(
+        error.kind,
+        galfus_contract::ExecutionFailureKind::IdSpaceExhausted
+    );
+    assert_eq!(kernel.active_count(), 1);
 }

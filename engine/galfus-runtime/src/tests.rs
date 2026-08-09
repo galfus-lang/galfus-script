@@ -19,7 +19,13 @@ use galfus_core::{ModuleId, ModulePath, SemanticRevision, SourceId, Span};
 struct StartupProvider {
     calls: sync::Arc<sync::Mutex<Vec<String>>>,
     pending: sync::Arc<
-        sync::Mutex<Option<(usize, u64, sync::Arc<dyn galfus_contract::MessageInjector>)>>,
+        sync::Mutex<
+            Option<(
+                galfus_core::ThreadId,
+                galfus_core::RequestId,
+                sync::Arc<dyn galfus_contract::MessageInjector>,
+            )>,
+        >,
     >,
     fail_initializer: bool,
 }
@@ -35,8 +41,8 @@ impl galfus_contract::HostProvider for StartupProvider {
 
     fn dispatch(
         &mut self,
-        thread_id: usize,
-        request_id: u64,
+        thread_id: galfus_core::ThreadId,
+        request_id: galfus_core::RequestId,
         name: &str,
         _args: &[galfus_contract::BoundaryValue],
         injector: sync::Arc<dyn galfus_contract::MessageInjector>,
@@ -351,7 +357,7 @@ fn pending_initializer_delays_entry_until_its_completion() {
         .take()
         .expect("initializer is pending");
     injector.inject_system_response(
-        thread_id + 1,
+        galfus_core::ThreadId::new(thread_id.raw() + 1),
         request_id,
         Ok(galfus_contract::BoundaryValue::Null),
     );
@@ -523,8 +529,8 @@ fn run_initializes_dependencies_before_the_entry_module() {
 
         fn dispatch(
             &mut self,
-            thread_id: usize,
-            request_id: u64,
+            thread_id: galfus_core::ThreadId,
+            request_id: galfus_core::RequestId,
             _name: &str,
             _args: &[galfus_contract::BoundaryValue],
             injector: sync::Arc<dyn galfus_contract::MessageInjector>,

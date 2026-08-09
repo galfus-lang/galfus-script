@@ -2,14 +2,21 @@ use super::*;
 use std::sync::{Arc, Mutex};
 
 struct MockInjector {
-    response: Arc<Mutex<Option<(u64, Result<BoundaryValue, ExecutionFailure>)>>>,
+    response: Arc<
+        Mutex<
+            Option<(
+                galfus_core::RequestId,
+                Result<BoundaryValue, ExecutionFailure>,
+            )>,
+        >,
+    >,
 }
 
 impl MessageInjector for MockInjector {
     fn inject_system_response(
         &self,
-        _thread_id: usize,
-        request_id: u64,
+        _thread_id: galfus_core::ThreadId,
+        request_id: galfus_core::RequestId,
         response: Result<BoundaryValue, ExecutionFailure>,
     ) {
         *self.response.lock().unwrap() = Some((request_id, response));
@@ -25,7 +32,13 @@ fn call_dispatch(
     let injector = Arc::new(MockInjector {
         response: Arc::clone(&response),
     });
-    provider.dispatch(0, 1, method, args, injector);
+    provider.dispatch(
+        galfus_core::ThreadId::new(0),
+        galfus_core::RequestId::new(1),
+        method,
+        args,
+        injector,
+    );
     response
         .lock()
         .unwrap()
@@ -99,8 +112,8 @@ fn pending_reads_preserve_the_provider_request_id() {
     });
 
     provider.dispatch(
-        7,
-        42,
+        galfus_core::ThreadId::new(7),
+        galfus_core::RequestId::new(42),
         "read",
         &[BoundaryValue::Bytes(b"\n".to_vec())],
         injector,
@@ -109,7 +122,10 @@ fn pending_reads_preserve_the_provider_request_id() {
 
     assert_eq!(
         response.lock().unwrap().take(),
-        Some((42, Ok(BoundaryValue::Bytes(b"value".to_vec()))))
+        Some((
+            galfus_core::RequestId::new(42),
+            Ok(BoundaryValue::Bytes(b"value".to_vec()))
+        ))
     );
 }
 

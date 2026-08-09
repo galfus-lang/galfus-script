@@ -116,19 +116,23 @@ pub(crate) struct Orchestrator {
     pub(crate) failure: Option<galfus_contract::ExecutionFailure>,
     pending_continuations: HashMap<PendingKey, PendingContinuation>,
     startup_plans: HashMap<crate::registry::ThreadId, StartupPlan>,
-    next_request_id: u64,
+    next_request_id: u32,
+    next_future_id: u32,
+    next_coordinator_id: u32,
     adapter_bindings: Option<Arc<std::sync::Mutex<galfus_contract::AdapterBindings>>>,
     initialization_complete: Arc<AtomicBool>,
     shutting_down: bool,
     late_completions: VecDeque<LateCompletion>,
     root_thread_id: Option<crate::registry::ThreadId>,
-    future_workers: HashMap<crate::registry::ThreadId, (crate::registry::ThreadId, u64)>,
-    thread_exit_waits: HashMap<crate::registry::ThreadId, Vec<(crate::registry::ThreadId, u64)>>,
+    future_workers:
+        HashMap<crate::registry::ThreadId, (crate::registry::ThreadId, galfus_core::FutureId)>,
+    thread_exit_waits:
+        HashMap<crate::registry::ThreadId, Vec<(crate::registry::ThreadId, galfus_core::FutureId)>>,
     mailbox_future_waits: HashMap<crate::registry::ThreadId, Vec<MailboxFutureWait>>,
     virtual_time_ms: u64,
     pub(crate) future_registry: FutureRegistry,
-    aggregate_coordinators: HashMap<u64, AggregateCoordinator>,
-    aggregate_registration: Option<(u64, usize)>,
+    aggregate_coordinators: HashMap<galfus_core::CoordinatorId, AggregateCoordinator>,
+    aggregate_registration: Option<(galfus_core::CoordinatorId, usize)>,
 }
 
 #[derive(Clone, Copy)]
@@ -139,7 +143,7 @@ pub(crate) enum AggregateMode {
 
 pub(crate) struct AggregateCoordinator {
     pub(crate) mode: AggregateMode,
-    pub(crate) future_ids: Vec<u64>,
+    pub(crate) future_ids: Vec<galfus_core::FutureId>,
     pub(crate) pending: PendingContinuation,
     pub(crate) results: Vec<Option<Result<BoundaryValue, ExecutionFailure>>>,
     pub(crate) winner: Option<Result<BoundaryValue, ExecutionFailure>>,
@@ -149,8 +153,8 @@ pub(crate) struct AggregateCoordinator {
 #[derive(Clone, Copy)]
 pub(crate) struct MailboxFutureWait {
     owner_thread_id: crate::registry::ThreadId,
-    future_id: u64,
-    sender_id: Option<u64>,
+    future_id: galfus_core::FutureId,
+    sender_id: Option<crate::registry::ThreadId>,
     deadline_ms: Option<u64>,
 }
 
@@ -169,6 +173,8 @@ impl Orchestrator {
             pending_continuations: HashMap::new(),
             startup_plans: HashMap::new(),
             next_request_id: 1,
+            next_future_id: 1,
+            next_coordinator_id: 1,
             adapter_bindings: None,
             initialization_complete: Arc::new(AtomicBool::new(true)),
             shutting_down: false,
@@ -264,7 +270,7 @@ impl Orchestrator {
                     galfus_contract::ExecutionFailureKind::InitializationFailure,
                     "module initializer completed without a startup plan",
                 )
-                .with_thread_id(thread_id.raw())
+                .with_thread_id(thread_id)
                 .with_module_id(initialized_module_id.raw().into())
                 .with_stack(execution_stack(&thread)),
             );
@@ -290,7 +296,7 @@ impl Orchestrator {
                     galfus_contract::ExecutionFailureKind::InitializationFailure,
                     error.to_string(),
                 )
-                .with_thread_id(thread_id.raw())
+                .with_thread_id(thread_id)
                 .with_module_id(initialized_module_id.raw().into()),
             );
             self.startup_plans.remove(&thread_id);
@@ -311,12 +317,12 @@ impl Orchestrator {
             .vm
             .as_ref()
             .expect("VM is configured before execution")
-            .resume(thread_id.raw(), &mut thread, continuation, value);
+            .resume(thread_id, &mut thread, continuation, value);
         match result {
             Ok(()) => self.kernel.enqueue_runnable_front(thread_id, thread),
             Err(error) => {
                 self.failure = Some(with_execution_stack(
-                    error.with_thread_id(thread_id.raw()),
+                    error.with_thread_id(thread_id),
                     execution_stack(&thread),
                 ));
                 self.cancel_and_teardown_thread(thread_id);
@@ -324,14 +330,16 @@ impl Orchestrator {
         }
     }
 
-    fn record_late_completion(&mut self, thread_id: crate::registry::ThreadId, request_id: u64) {
+    fn record_late_completion(
+        &mut self,
+        thread_id: crate::registry::ThreadId,
+        key: crate::orchestrator::pending::PendingKey,
+    ) {
         if self.late_completions.len() == MAX_LATE_COMPLETIONS {
             self.late_completions.pop_front();
         }
-        self.late_completions.push_back(LateCompletion {
-            thread_id,
-            request_id,
-        });
+        self.late_completions
+            .push_back(LateCompletion { thread_id, key });
     }
 
     #[cfg(test)]
@@ -346,18 +354,12 @@ impl Orchestrator {
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
         let Some(pending) = self.pending_continuations.remove(&key) else {
-            let id = match key {
-                PendingKey::Request(id) | PendingKey::Future(id) => id,
-            };
-            self.record_late_completion(thread_id, id);
+            self.record_late_completion(thread_id, key);
             return;
         };
         if pending.thread_id != thread_id {
             self.pending_continuations.insert(key, pending);
-            let id = match key {
-                PendingKey::Request(id) | PendingKey::Future(id) => id,
-            };
-            self.record_late_completion(thread_id, id);
+            self.record_late_completion(thread_id, key);
             return;
         }
         self.resume_pending(thread_id, pending, result, key);
@@ -390,6 +392,7 @@ impl Orchestrator {
         let with_pending_id = |failure: ExecutionFailure| match key {
             PendingKey::Request(request_id) => failure.with_request_id(request_id),
             PendingKey::Future(future_id) => failure.with_future_id(future_id),
+            PendingKey::Coordinator(_) => failure,
         };
         match result {
             Ok(value) => {
@@ -412,7 +415,7 @@ impl Orchestrator {
                                 ExecutionFailureKind::BoundaryCodecFailure,
                                 format!("invalid asynchronous result: {error:?}"),
                             ))
-                            .with_thread_id(thread_id.raw())
+                            .with_thread_id(thread_id)
                             .with_module_id(pending.module_id.raw().into())
                             .with_stack(pending.stack.clone()),
                         );
@@ -425,7 +428,7 @@ impl Orchestrator {
             Err(error) => {
                 let error = with_execution_stack(
                     with_pending_id(error)
-                        .with_thread_id(thread_id.raw())
+                        .with_thread_id(thread_id)
                         .with_module_id(pending.module_id.raw().into()),
                     pending.stack,
                 );
@@ -434,7 +437,7 @@ impl Orchestrator {
                         ExecutionFailureKind::InitializationFailure,
                         "module initializer asynchronous request failed",
                     )
-                    .with_thread_id(thread_id.raw())
+                    .with_thread_id(thread_id)
                     .with_module_id(initializing_module_id.raw().into())
                     .with_cause(error),
                     None => error,
@@ -447,7 +450,7 @@ impl Orchestrator {
     pub(super) fn complete_future(
         &mut self,
         thread_id: crate::registry::ThreadId,
-        future_id: u64,
+        future_id: galfus_core::FutureId,
         mut result: Result<BoundaryValue, ExecutionFailure>,
     ) {
         let adapter_proxy_module = self
@@ -493,7 +496,7 @@ impl Orchestrator {
                         ExecutionFailureKind::BoundaryCodecFailure,
                         format!("invalid future worker result: {error:?}"),
                     )
-                    .with_thread_id(thread_id.raw())
+                    .with_thread_id(thread_id)
                     .with_future_id(future_id)
                     .with_module_id(payload_module_id.raw().into()),
                 );
@@ -508,7 +511,7 @@ impl Orchestrator {
             Ok(waiters) => waiters,
             Err(error) => {
                 if error.kind == ExecutionFailureKind::DuplicateCompletion {
-                    self.record_late_completion(thread_id, future_id);
+                    self.record_late_completion(thread_id, PendingKey::Future(future_id));
                     return;
                 }
                 self.failure = Some(error);
@@ -516,19 +519,25 @@ impl Orchestrator {
                 return;
             }
         };
-        if let (Some(proxy_module), Ok(value)) = (adapter_proxy_module, &result)
-            && !self.register_adapter_handles(&proxy_module, value)
-        {
-            self.failure = Some(
-                ExecutionFailure::new(
-                    ExecutionFailureKind::BoundaryCodecFailure,
-                    "adapter returned an external handle without a unique bound owner",
-                )
-                .with_thread_id(thread_id.raw())
-                .with_future_id(future_id),
-            );
-            self.cancel_and_teardown_thread(thread_id);
-            return;
+        if let (Some(proxy_module), Ok(value)) = (adapter_proxy_module, &result) {
+            if let Err(error) = self.register_adapter_handles(&proxy_module, value) {
+                let kind = match error {
+                    galfus_contract::AdapterBindingError::IdSpaceExhausted { .. } => {
+                        ExecutionFailureKind::IdSpaceExhausted
+                    }
+                    galfus_contract::AdapterBindingError::DuplicateProxyModule(_)
+                    | galfus_contract::AdapterBindingError::InvalidHandle => {
+                        ExecutionFailureKind::BoundaryCodecFailure
+                    }
+                };
+                self.failure = Some(
+                    ExecutionFailure::new(kind, error.to_string())
+                        .with_thread_id(thread_id)
+                        .with_future_id(future_id),
+                );
+                self.cancel_and_teardown_thread(thread_id);
+                return;
+            }
         }
         for waiter in waiters {
             let waiter_thread_id = waiter.continuation.thread_id;
@@ -541,18 +550,22 @@ impl Orchestrator {
         }
     }
 
-    fn register_adapter_handles(&mut self, proxy_module: &str, value: &BoundaryValue) -> bool {
+    fn register_adapter_handles(
+        &mut self,
+        proxy_module: &str,
+        value: &BoundaryValue,
+    ) -> Result<(), galfus_contract::AdapterBindingError> {
         let mut handles = Vec::new();
         collect_adapter_handles(value, &mut handles);
         if handles.is_empty() {
-            return true;
+            return Ok(());
         }
         let Some(bindings) = &self.adapter_bindings else {
-            return false;
+            return Err(galfus_contract::AdapterBindingError::InvalidHandle);
         };
         let mut bindings = bindings.lock().unwrap();
         let Some(binding_id) = bindings.binding_id(proxy_module) else {
-            return false;
+            return Err(galfus_contract::AdapterBindingError::InvalidHandle);
         };
         bindings.register_handles(binding_id, &handles)
     }
@@ -561,7 +574,7 @@ impl Orchestrator {
         &mut self,
         target_thread_id: crate::registry::ThreadId,
         owner_thread_id: crate::registry::ThreadId,
-        future_id: u64,
+        future_id: galfus_core::FutureId,
     ) {
         self.thread_exit_waits
             .entry(target_thread_id)
@@ -573,8 +586,8 @@ impl Orchestrator {
         &mut self,
         target_thread_id: crate::registry::ThreadId,
         owner_thread_id: crate::registry::ThreadId,
-        future_id: u64,
-        sender_id: Option<u64>,
+        future_id: galfus_core::FutureId,
+        sender_id: Option<crate::registry::ThreadId>,
         timeout_ms: Option<u64>,
     ) {
         self.mailbox_future_waits
@@ -666,7 +679,7 @@ impl Orchestrator {
     pub(super) fn remove_mailbox_future_wait(
         &mut self,
         owner_thread_id: crate::registry::ThreadId,
-        future_id: u64,
+        future_id: galfus_core::FutureId,
     ) {
         self.mailbox_future_waits.retain(|_, waits| {
             waits.retain(|wait| {
@@ -678,7 +691,7 @@ impl Orchestrator {
 
     fn complete_aggregate_member(
         &mut self,
-        coordinator_id: u64,
+        coordinator_id: galfus_core::CoordinatorId,
         index: usize,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
@@ -698,7 +711,7 @@ impl Orchestrator {
         self.finish_aggregate_if_ready(coordinator_id);
     }
 
-    pub(super) fn finish_aggregate_if_ready(&mut self, coordinator_id: u64) {
+    pub(super) fn finish_aggregate_if_ready(&mut self, coordinator_id: galfus_core::CoordinatorId) {
         let Some(coordinator) = self.aggregate_coordinators.get(&coordinator_id) else {
             return;
         };
@@ -738,7 +751,7 @@ impl Orchestrator {
             coordinator.pending.thread_id,
             coordinator.pending,
             result,
-            PendingKey::Future(coordinator_id),
+            PendingKey::Coordinator(coordinator_id),
         );
     }
 
@@ -777,7 +790,14 @@ impl Orchestrator {
             match event {
                 RuntimeEvent::ThreadSpawned { mut thread } => {
                     self.flush_thread_handle_drops(&mut thread);
-                    let id = self.kernel.spawn(thread, None);
+                    let id = match self.kernel.spawn(thread, None) {
+                        Ok(id) => id,
+                        Err(error) => {
+                            self.failure = Some(error);
+                            self.cancel_and_teardown_all_threads();
+                            return;
+                        }
+                    };
                     let thread = self
                         .kernel
                         .take_thread(id)
@@ -808,7 +828,7 @@ impl Orchestrator {
                     self.advance_startup(thread_id, thread, module_id)
                 }
                 RuntimeEvent::Failed { thread_id, error } => {
-                    self.failure = Some(error.with_thread_id(thread_id.raw()));
+                    self.failure = Some(error.with_thread_id(thread_id));
                     self.cancel_pending_continuations(thread_id);
                     self.startup_plans.remove(&thread_id);
                     self.cancel_and_teardown_thread(thread_id);

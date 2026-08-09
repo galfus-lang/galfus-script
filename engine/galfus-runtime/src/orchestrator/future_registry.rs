@@ -27,11 +27,13 @@ pub enum Activation {
     Provider {
         name: String,
         args: Vec<BoundaryValue>,
+        request_id: Option<galfus_core::RequestId>,
     },
     Adapter {
         proxy_module: String,
         symbol: String,
         args: Vec<BoundaryValue>,
+        request_id: Option<galfus_core::RequestId>,
     },
 }
 
@@ -75,8 +77,8 @@ pub struct FutureRecord {
 
 #[derive(Default)]
 pub struct FutureRegistry {
-    records: HashMap<(ThreadId, u64), FutureRecord>,
-    tombstones: std::collections::VecDeque<(ThreadId, u64)>,
+    records: HashMap<(ThreadId, galfus_core::FutureId), FutureRecord>,
+    tombstones: std::collections::VecDeque<(ThreadId, galfus_core::FutureId)>,
 }
 
 impl FutureRegistry {
@@ -90,7 +92,7 @@ impl FutureRegistry {
     pub fn create(
         &mut self,
         owner_thread_id: ThreadId,
-        future_id: u64,
+        future_id: galfus_core::FutureId,
         payload_type: Option<TypeIdx>,
         payload_module_id: Option<ModuleId>,
         activation: Activation,
@@ -100,7 +102,7 @@ impl FutureRegistry {
                 galfus_contract::ExecutionFailureKind::DuplicateCompletion,
                 "duplicate future id for owner thread",
             )
-            .with_thread_id(owner_thread_id.raw())
+            .with_thread_id(owner_thread_id)
             .with_future_id(future_id));
         }
         let record = FutureRecord {
@@ -119,7 +121,7 @@ impl FutureRegistry {
     pub fn insert_created(
         &mut self,
         owner_thread_id: ThreadId,
-        future_id: u64,
+        future_id: galfus_core::FutureId,
         payload_type: Option<TypeIdx>,
         payload_module_id: Option<ModuleId>,
         activation: Activation,
@@ -136,7 +138,7 @@ impl FutureRegistry {
     pub fn take_activation_for_start(
         &mut self,
         owner_thread_id: ThreadId,
-        future_id: u64,
+        future_id: galfus_core::FutureId,
     ) -> Result<Option<Activation>, ExecutionFailure> {
         let record = self
             .records
@@ -146,7 +148,7 @@ impl FutureRegistry {
                     galfus_contract::ExecutionFailureKind::InvalidContinuation,
                     "unknown future",
                 )
-                .with_thread_id(owner_thread_id.raw())
+                .with_thread_id(owner_thread_id)
                 .with_future_id(future_id)
             })?;
         match record.state {
@@ -163,7 +165,7 @@ impl FutureRegistry {
     pub fn adapter_proxy_module(
         &self,
         owner_thread_id: ThreadId,
-        future_id: u64,
+        future_id: galfus_core::FutureId,
     ) -> Option<String> {
         let record = self.records.get(&(owner_thread_id, future_id))?;
         match record.running_activation.as_ref()? {
@@ -172,10 +174,58 @@ impl FutureRegistry {
         }
     }
 
+    pub fn assign_request_id(
+        &mut self,
+        owner_thread_id: ThreadId,
+        future_id: galfus_core::FutureId,
+        request_id: galfus_core::RequestId,
+    ) -> Result<(), ExecutionFailure> {
+        let record = self
+            .records
+            .get_mut(&(owner_thread_id, future_id))
+            .ok_or_else(|| {
+                ExecutionFailure::new(
+                    galfus_contract::ExecutionFailureKind::InvalidContinuation,
+                    "unknown future while assigning request id",
+                )
+                .with_thread_id(owner_thread_id)
+                .with_future_id(future_id)
+            })?;
+        let activation = record.running_activation.as_mut().ok_or_else(|| {
+            ExecutionFailure::new(
+                galfus_contract::ExecutionFailureKind::InvalidContinuation,
+                "future request id was assigned before activation started",
+            )
+            .with_thread_id(owner_thread_id)
+            .with_future_id(future_id)
+        })?;
+        match activation {
+            Activation::Provider {
+                request_id: active_request_id,
+                ..
+            }
+            | Activation::Adapter {
+                request_id: active_request_id,
+                ..
+            } => {
+                *active_request_id = Some(request_id);
+                Ok(())
+            }
+            Activation::GalfusFunction { .. } | Activation::Internal { .. } => {
+                Err(ExecutionFailure::new(
+                    galfus_contract::ExecutionFailureKind::InvalidContinuation,
+                    "future activation does not dispatch an external request",
+                )
+                .with_thread_id(owner_thread_id)
+                .with_future_id(future_id))
+            }
+        }
+    }
+
     pub fn add_waiter(
         &mut self,
         owner_thread_id: ThreadId,
-        future_id: u64,
+        future_id: galfus_core::FutureId,
         waiter: Waiter,
     ) -> Result<WaitDisposition, ExecutionFailure> {
         let record = self
@@ -186,7 +236,7 @@ impl FutureRegistry {
                     galfus_contract::ExecutionFailureKind::InvalidContinuation,
                     "unknown or foreign future",
                 )
-                .with_thread_id(owner_thread_id.raw())
+                .with_thread_id(owner_thread_id)
                 .with_future_id(future_id)
             })?;
         match &record.state {
@@ -205,7 +255,7 @@ impl FutureRegistry {
     pub fn discard(
         &mut self,
         owner_thread_id: ThreadId,
-        future_id: u64,
+        future_id: galfus_core::FutureId,
     ) -> Result<DiscardDisposition, ExecutionFailure> {
         self.discard_inner(owner_thread_id, future_id, false)
     }
@@ -213,12 +263,15 @@ impl FutureRegistry {
     pub fn discard_for_race(
         &mut self,
         owner_thread_id: ThreadId,
-        future_id: u64,
+        future_id: galfus_core::FutureId,
     ) -> Result<DiscardDisposition, ExecutionFailure> {
         self.discard_inner(owner_thread_id, future_id, true)
     }
 
-    pub fn discard_all_for_owner(&mut self, owner_thread_id: ThreadId) -> Vec<(u64, Activation)> {
+    pub fn discard_all_for_owner(
+        &mut self,
+        owner_thread_id: ThreadId,
+    ) -> Vec<(galfus_core::FutureId, Activation)> {
         self.records
             .iter_mut()
             .filter_map(|((owner, future_id), record)| {
@@ -244,7 +297,7 @@ impl FutureRegistry {
             .collect()
     }
 
-    pub fn discard_all(&mut self) -> Vec<(ThreadId, u64, Activation)> {
+    pub fn discard_all(&mut self) -> Vec<(ThreadId, galfus_core::FutureId, Activation)> {
         let owners = self
             .records
             .keys()
@@ -263,7 +316,7 @@ impl FutureRegistry {
     fn discard_inner(
         &mut self,
         owner_thread_id: ThreadId,
-        future_id: u64,
+        future_id: galfus_core::FutureId,
         force: bool,
     ) -> Result<DiscardDisposition, ExecutionFailure> {
         let (is_terminal, res) = {
@@ -275,7 +328,7 @@ impl FutureRegistry {
                         galfus_contract::ExecutionFailureKind::InvalidContinuation,
                         "unknown future",
                     )
-                    .with_thread_id(owner_thread_id.raw())
+                    .with_thread_id(owner_thread_id)
                     .with_future_id(future_id)
                 })?;
             if !force && !record.waiters.is_empty() {
@@ -294,7 +347,7 @@ impl FutureRegistry {
                             galfus_contract::ExecutionFailureKind::InvalidContinuation,
                             "running future has no activation descriptor",
                         )
-                        .with_thread_id(owner_thread_id.raw())
+                        .with_thread_id(owner_thread_id)
                         .with_future_id(future_id)
                     })?;
                     record.state = FutureState::Discarded;
@@ -320,7 +373,7 @@ impl FutureRegistry {
     pub fn complete(
         &mut self,
         owner_thread_id: ThreadId,
-        future_id: u64,
+        future_id: galfus_core::FutureId,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) -> Result<Vec<Waiter>, ExecutionFailure> {
         let record = match self.records.get_mut(&(owner_thread_id, future_id)) {
@@ -331,14 +384,14 @@ impl FutureRegistry {
                         galfus_contract::ExecutionFailureKind::DuplicateCompletion,
                         "future completed after being discarded",
                     )
-                    .with_thread_id(owner_thread_id.raw())
+                    .with_thread_id(owner_thread_id)
                     .with_future_id(future_id));
                 } else {
                     return Err(ExecutionFailure::new(
                         galfus_contract::ExecutionFailureKind::InvalidContinuation,
                         "unknown future completion",
                     )
-                    .with_thread_id(owner_thread_id.raw())
+                    .with_thread_id(owner_thread_id)
                     .with_future_id(future_id));
                 }
             }
@@ -351,7 +404,7 @@ impl FutureRegistry {
                 galfus_contract::ExecutionFailureKind::DuplicateCompletion,
                 "future completed after reaching a terminal state",
             )
-            .with_thread_id(owner_thread_id.raw())
+            .with_thread_id(owner_thread_id)
             .with_future_id(future_id));
         }
         record.activation = None;
@@ -363,7 +416,7 @@ impl FutureRegistry {
     pub fn payload_schema(
         &self,
         owner_thread_id: ThreadId,
-        future_id: u64,
+        future_id: galfus_core::FutureId,
     ) -> Option<(ModuleId, TypeIdx)> {
         let record = self.records.get(&(owner_thread_id, future_id))?;
         Some((record.payload_module_id?, record.payload_type?))
@@ -372,7 +425,7 @@ impl FutureRegistry {
     pub fn active_flag(
         &self,
         owner_thread_id: ThreadId,
-        future_id: u64,
+        future_id: galfus_core::FutureId,
     ) -> Option<Arc<AtomicBool>> {
         self.records
             .get(&(owner_thread_id, future_id))
@@ -380,7 +433,11 @@ impl FutureRegistry {
     }
 
     #[cfg(test)]
-    pub fn get(&self, thread_id: ThreadId, future_id: u64) -> Option<&FutureRecord> {
+    pub fn get(
+        &self,
+        thread_id: ThreadId,
+        future_id: galfus_core::FutureId,
+    ) -> Option<&FutureRecord> {
         self.records.get(&(thread_id, future_id))
     }
 }

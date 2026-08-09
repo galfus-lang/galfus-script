@@ -214,6 +214,7 @@ dependencies = [
  "anyhow",
  "clap",
  "galfus-contract",
+ "galfus-core",
  "galfus-runtime",
  "galfus-workspace",
  "tracing",
@@ -281,6 +282,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "galfus-contract",
+ "galfus-core",
  "galfus-runtime",
  "galfus-workspace",
  "js-sys",

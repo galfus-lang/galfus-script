@@ -211,7 +211,10 @@ impl Runtime {
             };
 
         let token = orchestrator.main_thread_token();
-        let main_thread_id = orchestrator.kernel_mut(token).spawn(thread, None);
+        let main_thread_id = orchestrator
+            .kernel_mut(token)
+            .spawn(thread, None)
+            .expect("failed to spawn main thread");
         orchestrator.set_root_thread(main_thread_id);
 
         let is_initializing = startup_plan.is_some();

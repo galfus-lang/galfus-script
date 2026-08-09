@@ -19,11 +19,14 @@ impl Orchestrator {
     pub(super) fn cancel_future_activation(
         &mut self,
         thread_id: crate::registry::ThreadId,
-        future_id: u64,
+        future_id: galfus_core::FutureId,
         activation: Activation,
     ) {
         match activation {
-            Activation::Provider { .. } => {
+            Activation::Provider {
+                request_id: Some(request_id),
+                ..
+            } => {
                 let Some(vm) = self.vm.as_ref() else {
                     return;
                 };
@@ -31,23 +34,30 @@ impl Orchestrator {
                     return;
                 };
                 if let Some(host) = providers.lock().unwrap().host_mut() {
-                    let _outcome = host.cancel(thread_id.raw() as usize, future_id);
+                    let _outcome = host.cancel(thread_id, request_id);
                 }
             }
+            Activation::Provider {
+                request_id: None, ..
+            } => {}
             Activation::Adapter {
                 proxy_module,
                 symbol,
+                request_id: Some(request_id),
                 ..
             } => {
                 if let Some(bindings) = &self.adapter_bindings {
                     let _outcome = bindings.lock().unwrap().cancel(
                         &proxy_module,
                         &symbol,
-                        thread_id.raw() as usize,
-                        future_id,
+                        thread_id,
+                        request_id,
                     );
                 }
             }
+            Activation::Adapter {
+                request_id: None, ..
+            } => {}
             Activation::GalfusFunction { .. } => {
                 let workers = self
                     .future_workers
