@@ -31,8 +31,12 @@ impl VirtualMachine {
                 BytecodeType::Uint16 => Some(Value::Uint16(*x as u16)),
                 BytecodeType::Uint32 => Some(Value::Uint32(*x as u32)),
                 BytecodeType::Uint64 => Some(Value::Uint64(*x as u64)),
-                BytecodeType::Float32 => Some(Value::Float32(*x as f32)),
-                BytecodeType::Float64 => Some(Value::Float64(*x as f64)),
+                BytecodeType::Float32 => {
+                    Some(Value::Float32(galfus_core::normalize_f32(*x as f32)))
+                }
+                BytecodeType::Float64 => {
+                    Some(Value::Float64(galfus_core::normalize_f64(*x as f64)))
+                }
                 _ => None,
             },
             Value::Int16(x) => match ty {
@@ -44,8 +48,12 @@ impl VirtualMachine {
                 BytecodeType::Uint16 => Some(Value::Uint16(*x as u16)),
                 BytecodeType::Uint32 => Some(Value::Uint32(*x as u32)),
                 BytecodeType::Uint64 => Some(Value::Uint64(*x as u64)),
-                BytecodeType::Float32 => Some(Value::Float32(*x as f32)),
-                BytecodeType::Float64 => Some(Value::Float64(*x as f64)),
+                BytecodeType::Float32 => {
+                    Some(Value::Float32(galfus_core::normalize_f32(*x as f32)))
+                }
+                BytecodeType::Float64 => {
+                    Some(Value::Float64(galfus_core::normalize_f64(*x as f64)))
+                }
                 _ => None,
             },
             Value::Int32(x) => match ty {
@@ -57,8 +65,12 @@ impl VirtualMachine {
                 BytecodeType::Uint16 => Some(Value::Uint16(*x as u16)),
                 BytecodeType::Uint32 => Some(Value::Uint32(*x as u32)),
                 BytecodeType::Uint64 => Some(Value::Uint64(*x as u64)),
-                BytecodeType::Float32 => Some(Value::Float32(*x as f32)),
-                BytecodeType::Float64 => Some(Value::Float64(*x as f64)),
+                BytecodeType::Float32 => {
+                    Some(Value::Float32(galfus_core::normalize_f32(*x as f32)))
+                }
+                BytecodeType::Float64 => {
+                    Some(Value::Float64(galfus_core::normalize_f64(*x as f64)))
+                }
                 _ => None,
             },
             Value::Int64(x) => match ty {
@@ -70,8 +82,12 @@ impl VirtualMachine {
                 BytecodeType::Uint16 => Some(Value::Uint16(*x as u16)),
                 BytecodeType::Uint32 => Some(Value::Uint32(*x as u32)),
                 BytecodeType::Uint64 => Some(Value::Uint64(*x as u64)),
-                BytecodeType::Float32 => Some(Value::Float32(*x as f32)),
-                BytecodeType::Float64 => Some(Value::Float64(*x as f64)),
+                BytecodeType::Float32 => {
+                    Some(Value::Float32(galfus_core::normalize_f32(*x as f32)))
+                }
+                BytecodeType::Float64 => {
+                    Some(Value::Float64(galfus_core::normalize_f64(*x as f64)))
+                }
                 _ => None,
             },
             Value::Uint8(x) => match ty {
@@ -83,8 +99,12 @@ impl VirtualMachine {
                 BytecodeType::Uint16 => Some(Value::Uint16(*x as u16)),
                 BytecodeType::Uint32 => Some(Value::Uint32(*x as u32)),
                 BytecodeType::Uint64 => Some(Value::Uint64(*x as u64)),
-                BytecodeType::Float32 => Some(Value::Float32(*x as f32)),
-                BytecodeType::Float64 => Some(Value::Float64(*x as f64)),
+                BytecodeType::Float32 => {
+                    Some(Value::Float32(galfus_core::normalize_f32(*x as f32)))
+                }
+                BytecodeType::Float64 => {
+                    Some(Value::Float64(galfus_core::normalize_f64(*x as f64)))
+                }
                 _ => None,
             },
             Value::Uint16(x) => match ty {
@@ -96,8 +116,12 @@ impl VirtualMachine {
                 BytecodeType::Uint16 => Some(Value::Uint16(*x)),
                 BytecodeType::Uint32 => Some(Value::Uint32(*x as u32)),
                 BytecodeType::Uint64 => Some(Value::Uint64(*x as u64)),
-                BytecodeType::Float32 => Some(Value::Float32(*x as f32)),
-                BytecodeType::Float64 => Some(Value::Float64(*x as f64)),
+                BytecodeType::Float32 => {
+                    Some(Value::Float32(galfus_core::normalize_f32(*x as f32)))
+                }
+                BytecodeType::Float64 => {
+                    Some(Value::Float64(galfus_core::normalize_f64(*x as f64)))
+                }
                 _ => None,
             },
             Value::Uint32(x) => match ty {
@@ -109,8 +133,12 @@ impl VirtualMachine {
                 BytecodeType::Uint16 => Some(Value::Uint16(*x as u16)),
                 BytecodeType::Uint32 => Some(Value::Uint32(*x)),
                 BytecodeType::Uint64 => Some(Value::Uint64(*x as u64)),
-                BytecodeType::Float32 => Some(Value::Float32(*x as f32)),
-                BytecodeType::Float64 => Some(Value::Float64(*x as f64)),
+                BytecodeType::Float32 => {
+                    Some(Value::Float32(galfus_core::normalize_f32(*x as f32)))
+                }
+                BytecodeType::Float64 => {
+                    Some(Value::Float64(galfus_core::normalize_f64(*x as f64)))
+                }
                 _ => None,
             },
             Value::Uint64(x) => match ty {
@@ -122,8 +150,12 @@ impl VirtualMachine {
                 BytecodeType::Uint16 => Some(Value::Uint16(*x as u16)),
                 BytecodeType::Uint32 => Some(Value::Uint32(*x as u32)),
                 BytecodeType::Uint64 => Some(Value::Uint64(*x)),
-                BytecodeType::Float32 => Some(Value::Float32(*x as f32)),
-                BytecodeType::Float64 => Some(Value::Float64(*x as f64)),
+                BytecodeType::Float32 => {
+                    Some(Value::Float32(galfus_core::normalize_f32(*x as f32)))
+                }
+                BytecodeType::Float64 => {
+                    Some(Value::Float64(galfus_core::normalize_f64(*x as f64)))
+                }
                 _ => None,
             },
             Value::Float32(x) => match ty {
@@ -135,8 +167,10 @@ impl VirtualMachine {
                 BytecodeType::Uint16 => Some(Value::Uint16(*x as u16)),
                 BytecodeType::Uint32 => Some(Value::Uint32(*x as u32)),
                 BytecodeType::Uint64 => Some(Value::Uint64(*x as u64)),
-                BytecodeType::Float32 => Some(Value::Float32(*x)),
-                BytecodeType::Float64 => Some(Value::Float64(*x as f64)),
+                BytecodeType::Float32 => Some(Value::Float32(galfus_core::normalize_f32(*x))),
+                BytecodeType::Float64 => {
+                    Some(Value::Float64(galfus_core::normalize_f64(*x as f64)))
+                }
                 _ => None,
             },
             Value::Float64(x) => match ty {
@@ -148,8 +182,10 @@ impl VirtualMachine {
                 BytecodeType::Uint16 => Some(Value::Uint16(*x as u16)),
                 BytecodeType::Uint32 => Some(Value::Uint32(*x as u32)),
                 BytecodeType::Uint64 => Some(Value::Uint64(*x as u64)),
-                BytecodeType::Float32 => Some(Value::Float32(*x as f32)),
-                BytecodeType::Float64 => Some(Value::Float64(*x)),
+                BytecodeType::Float32 => {
+                    Some(Value::Float32(galfus_core::normalize_f32(*x as f32)))
+                }
+                BytecodeType::Float64 => Some(Value::Float64(galfus_core::normalize_f64(*x))),
                 _ => None,
             },
             _ => None,

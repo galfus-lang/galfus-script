@@ -7,6 +7,7 @@ use galfus_core::{
 
 pub type ProducerVersion = Version;
 pub type BoundaryAbiVersion = Version;
+pub type NumericSemanticsVersion = Version;
 pub type PackageCompatibilityWarning = VersionCompatibilityWarning;
 pub type PackageCompatibilityError = VersionCompatibilityError;
 
@@ -27,6 +28,10 @@ pub const CURRENT_PRODUCER_VERSION: ProducerVersion = version_from_env!("GALFUS_
 pub const CURRENT_BOUNDARY_ABI_VERSION: BoundaryAbiVersion =
     version_from_env!("GALFUS_BOUNDARY_ABI_VERSION");
 
+/// The numeric semantics version accepted by this release, configured in the workspace manifest.
+pub const CURRENT_NUMERIC_SEMANTICS_VERSION: NumericSemanticsVersion =
+    version_from_env!("GALFUS_NUMERIC_SEMANTICS_VERSION");
+
 /// Applies the producer-version compatibility policy for a package image.
 pub fn check_producer_compatibility(
     package: ProducerVersion,
@@ -39,6 +44,13 @@ pub fn validate_boundary_abi(
     actual: BoundaryAbiVersion,
 ) -> Result<Option<PackageCompatibilityWarning>, PackageCompatibilityError> {
     check_version_compatibility(CURRENT_BOUNDARY_ABI_VERSION, actual)
+}
+
+/// Validates that a package uses compatible numeric semantics.
+pub fn validate_numeric_semantics(
+    actual: NumericSemanticsVersion,
+) -> Result<Option<PackageCompatibilityWarning>, PackageCompatibilityError> {
+    check_version_compatibility(CURRENT_NUMERIC_SEMANTICS_VERSION, actual)
 }
 
 const fn parse_u16(value: &str) -> u16 {

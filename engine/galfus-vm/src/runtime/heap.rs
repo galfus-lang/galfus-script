@@ -65,8 +65,12 @@ impl VirtualMachine {
             (Value::Uint16(l), Value::Uint16(r)) => Value::Uint16(l.wrapping_pow(r as u32)),
             (Value::Uint32(l), Value::Uint32(r)) => Value::Uint32(l.wrapping_pow(r)),
             (Value::Uint64(l), Value::Uint64(r)) => Value::Uint64(l.wrapping_pow(r as u32)),
-            (Value::Float32(l), Value::Float32(r)) => Value::Float32(l.powf(r)),
-            (Value::Float64(l), Value::Float64(r)) => Value::Float64(l.powf(r)),
+            (Value::Float32(l), Value::Float32(r)) => {
+                Value::Float32(galfus_core::normalize_f32(l.powf(r)))
+            }
+            (Value::Float64(l), Value::Float64(r)) => {
+                Value::Float64(galfus_core::normalize_f64(l.powf(r)))
+            }
             (l, r) => {
                 return Err(VmError::TypeMismatch {
                     expected: "matching numeric types".to_string(),

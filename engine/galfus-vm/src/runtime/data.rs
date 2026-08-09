@@ -28,8 +28,8 @@ impl VirtualMachine {
                     Constant::Uint16(i) => Value::Uint16(*i),
                     Constant::Uint32(i) => Value::Uint32(*i),
                     Constant::Uint64(i) => Value::Uint64(*i),
-                    Constant::Float32(f) => Value::Float32(*f),
-                    Constant::Float64(f) => Value::Float64(*f),
+                    Constant::Float32(f) => Value::Float32(galfus_core::normalize_f32(*f)),
+                    Constant::Float64(f) => Value::Float64(galfus_core::normalize_f64(*f)),
                     Constant::String(s) => {
                         let element_ty = self.uint8_type_idx(thread);
                         let obj = HeapObject::Array {

@@ -4,8 +4,8 @@ mod tests;
 use bincode::Options;
 use galfus_contract::{
     AdapterModuleRequirement, BoundaryAbiVersion, CURRENT_BOUNDARY_ABI_VERSION,
-    CURRENT_PRODUCER_VERSION, ContentHash, ExecutionTarget, ProducerVersion,
-    ProviderModuleRequirement,
+    CURRENT_NUMERIC_SEMANTICS_VERSION, CURRENT_PRODUCER_VERSION, ContentHash, ExecutionTarget,
+    NumericSemanticsVersion, ProducerVersion, ProviderModuleRequirement,
 };
 use galfus_core::{ModuleId, ModulePath};
 use std::collections::BTreeSet;
@@ -45,6 +45,7 @@ pub struct PackageVersions {
     package_format: PackageFormatVersion,
     bytecode_format: BytecodeFormatVersion,
     boundary_abi: BoundaryAbiVersion,
+    numeric_semantics: NumericSemanticsVersion,
 }
 
 impl PackageVersions {
@@ -54,6 +55,7 @@ impl PackageVersions {
             package_format: CURRENT_PACKAGE_FORMAT_VERSION,
             bytecode_format,
             boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
+            numeric_semantics: CURRENT_NUMERIC_SEMANTICS_VERSION,
         }
     }
 
@@ -71,6 +73,10 @@ impl PackageVersions {
 
     pub const fn boundary_abi(self) -> BoundaryAbiVersion {
         self.boundary_abi
+    }
+
+    pub const fn numeric_semantics(self) -> NumericSemanticsVersion {
+        self.numeric_semantics
     }
 }
 

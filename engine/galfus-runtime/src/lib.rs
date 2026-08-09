@@ -20,6 +20,7 @@ use std::sync;
 
 use galfus_contract::{
     AdapterBindings, BoundaryType, BoundaryValue, Providers, RuntimeCapabilities,
+    validate_numeric_semantics,
 };
 use galfus_vm::{VirtualMachine, VmPanic, VmValue};
 
@@ -48,6 +49,8 @@ pub enum RuntimeError {
     ProviderRequirementUnsatisfied { module_path: String },
     #[error("required adapter proxy module `{proxy_module}` is unavailable or incompatible")]
     AdapterRequirementUnsatisfied { proxy_module: String },
+    #[error("package numeric semantics are incompatible: {0}")]
+    NumericSemantics(galfus_contract::PackageCompatibilityError),
     #[error(transparent)]
     BytecodeFormat(#[from] galfus_bytecode::BytecodeFormatError),
     #[error(transparent)]
@@ -122,6 +125,8 @@ impl Runtime {
         } = self;
         let (providers, adapter_bindings) = capabilities.into_runtime_handles();
         package.graph().validate_format()?;
+        validate_numeric_semantics(package.versions().numeric_semantics())
+            .map_err(RuntimeError::NumericSemantics)?;
         preflight_capabilities(&package, providers.as_ref(), &adapter_bindings)?;
 
         let mut orchestrator = crate::orchestrator::Orchestrator::new();

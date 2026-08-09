@@ -1,7 +1,8 @@
 use super::{
-    BoundaryAbiVersion, CURRENT_BOUNDARY_ABI_VERSION, CURRENT_PRODUCER_VERSION,
-    PackageCompatibilityError, PackageCompatibilityWarning, ProducerVersion,
-    check_producer_compatibility, validate_boundary_abi,
+    BoundaryAbiVersion, CURRENT_BOUNDARY_ABI_VERSION, CURRENT_NUMERIC_SEMANTICS_VERSION,
+    CURRENT_PRODUCER_VERSION, NumericSemanticsVersion, PackageCompatibilityError,
+    PackageCompatibilityWarning, ProducerVersion, check_producer_compatibility,
+    validate_boundary_abi, validate_numeric_semantics,
 };
 
 #[test]
@@ -59,4 +60,24 @@ fn boundary_abi_uses_the_common_compatibility_policy() {
             PackageCompatibilityWarning::MinorVersionMismatch { .. }
         ))
     ));
+
+    let newer_minor = NumericSemanticsVersion::new(
+        CURRENT_NUMERIC_SEMANTICS_VERSION.major(),
+        CURRENT_NUMERIC_SEMANTICS_VERSION.minor() + 1,
+        0,
+    );
+    assert!(matches!(
+        validate_numeric_semantics(newer_minor),
+        Ok(Some(
+            PackageCompatibilityWarning::MinorVersionMismatch { .. }
+        ))
+    ));
+}
+
+#[test]
+fn numeric_semantics_rejects_a_different_major_version() {
+    let incompatible =
+        NumericSemanticsVersion::new(CURRENT_NUMERIC_SEMANTICS_VERSION.major() + 1, 0, 0);
+
+    assert!(validate_numeric_semantics(incompatible).is_err());
 }

@@ -184,6 +184,38 @@ fn codec_round_trips_nullable_values() {
 }
 
 #[test]
+fn codec_normalizes_float_values_at_the_host_boundary() {
+    let module = module(vec![BytecodeType::Float64]);
+    let mut heap = galfus_vm::thread::PrivateHeap::new();
+
+    let negative_zero = encode_into_thread_heap(
+        &mut heap,
+        BoundaryValue::F64(-0.0),
+        TypeIdx(0),
+        galfus_core::ModuleId::new(1),
+        &module,
+    )
+    .expect("negative zero encodes");
+    assert_eq!(negative_zero, VmValue::Float64(0.0));
+
+    let non_canonical_nan = encode_into_thread_heap(
+        &mut heap,
+        BoundaryValue::F64(f64::from_bits(0xFFF8_0000_0000_0001)),
+        TypeIdx(0),
+        galfus_core::ModuleId::new(1),
+        &module,
+    )
+    .expect("NaN encodes");
+    let BoundaryValue::F64(value) =
+        decode_from_thread_heap(&heap, non_canonical_nan, TypeIdx(0), &module)
+            .expect("NaN decodes")
+    else {
+        panic!("float codec must return an f64");
+    };
+    assert_eq!(value.to_bits(), galfus_core::CANONICAL_F64_NAN);
+}
+
+#[test]
 fn codec_encodes_a_choice_with_its_declared_variant_payload() {
     let module = BytecodeModule {
         choice_layouts: vec![ChoiceLayout {

@@ -46,14 +46,14 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 let text = self.builder.node_text(expr_id);
                 let val = text.parse::<f64>().unwrap_or(0.0);
 
-                let mut constant = Constant::Float32(val as f32);
+                let mut constant = Constant::Float32(galfus_core::normalize_f32(val as f32));
                 if let Some(ty) = self.node_type(expr_id) {
                     let resolved = self.builder.resolve_alias_type(ty);
                     if let Some(TypeKind::Primitive(p)) =
                         self.builder.type_result.layer().table().kind(resolved)
                         && p == &galfus_frontend::PrimitiveType::Float64
                     {
-                        constant = Constant::Float64(val);
+                        constant = Constant::Float64(galfus_core::normalize_f64(val));
                     }
                 }
                 Operand::Constant(constant)

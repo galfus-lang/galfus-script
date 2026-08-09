@@ -15,6 +15,7 @@ license = "MIT"
 format-version = "1.0.0"
 bytecode-format-version = "2.0.0"
 boundary-abi-version = "1.0.0"
+numeric-semantics-version = "1.0.0"
 
 [workspace.dependencies]
 # Serialization / binary data format
