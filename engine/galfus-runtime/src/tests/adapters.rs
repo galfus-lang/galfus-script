@@ -6,7 +6,7 @@ use galfus_bytecode::{
 };
 use galfus_contract::{
     AdapterBindings, AdapterModuleBinding, BoundaryValue, CancellationOutcome, ExecutionTarget,
-    MessageInjector,
+    MessageInjector, RuntimeCapabilities,
 };
 use galfus_core::{HandleId, ModuleId, ModulePath, OpaqueTypeId, SemanticRevision};
 use std::rc::Rc;
@@ -176,13 +176,15 @@ fn execution_with_demo_adapter(complete: bool) -> (Execution, Arc<Mutex<DemoAdap
     let (graph, _) = adapter_graph();
     let state = Arc::new(Mutex::new(DemoAdapterState::default()));
     let mut bindings = AdapterBindings::default();
-    bindings.register_module(
-        "graphics.gfp",
-        Box::new(DemoAdapter {
-            state: Arc::clone(&state),
-            complete,
-        }),
-    );
+    bindings
+        .register_module(
+            "graphics.gfp",
+            Box::new(DemoAdapter {
+                state: Arc::clone(&state),
+                complete,
+            }),
+        )
+        .expect("adapter binding registers");
     let package = Arc::new(
         PackageImage::try_new(
             (*graph).clone(),
@@ -196,10 +198,14 @@ fn execution_with_demo_adapter(complete: bool) -> (Execution, Arc<Mutex<DemoAdap
         )
         .expect("graph has no adapter proxy modules"),
     );
-    let execution = Runtime::new(package, None)
-        .with_adapter_bindings(bindings)
-        .start(&[], Rc::new(CooperativeDriver::new()))
-        .unwrap();
+    let execution = Runtime::new(
+        package,
+        RuntimeCapabilities::builder()
+            .with_adapter_bindings(bindings)
+            .build(),
+    )
+    .start(&[], Rc::new(CooperativeDriver::new()))
+    .unwrap();
     (execution, state)
 }
 

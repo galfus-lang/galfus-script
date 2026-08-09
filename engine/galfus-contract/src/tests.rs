@@ -96,21 +96,52 @@ fn provider_descriptors_validate_the_complete_compiled_requirement() {
 #[test]
 fn adapter_bindings_are_registered_by_nominal_proxy_module() {
     let mut bindings = AdapterBindings::default();
-    bindings.register_module(
+    bindings
+        .register_module(
+            "graphics",
+            Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
+                0,
+            )))),
+        )
+        .expect("adapter binding registers");
+    assert!(bindings.get_mut("graphics").is_some());
+    assert!(bindings.get_mut("missing").is_none());
+}
+
+#[test]
+fn adapter_bindings_reject_duplicate_proxy_modules() {
+    let mut builder = RuntimeCapabilities::builder();
+    builder
+        .register_adapter(
+            "graphics",
+            Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
+                0,
+            )))),
+        )
+        .expect("initial adapter binding registers");
+
+    let result = builder.register_adapter(
         "graphics",
         Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
             0,
         )))),
     );
-    assert!(bindings.get_mut("graphics").is_some());
-    assert!(bindings.get_mut("missing").is_none());
+
+    assert_eq!(
+        result,
+        Err(AdapterBindingError::DuplicateProxyModule(
+            "graphics".to_string()
+        ))
+    );
 }
 
 #[test]
 fn adapter_bindings_own_and_release_nominal_handles() {
     let releases = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut bindings = AdapterBindings::default();
-    let binding_id = bindings.register_module("graphics", Box::new(DummyAdapter(releases.clone())));
+    let binding_id = bindings
+        .register_module("graphics", Box::new(DummyAdapter(releases.clone())))
+        .expect("adapter binding registers");
     let type_id = OpaqueTypeId::new("graphics", "Texture").unwrap();
     let handle_id = HandleId::new(1);
     assert!(bindings.register_handle(binding_id, type_id.clone(), handle_id));
@@ -124,12 +155,14 @@ fn adapter_bindings_own_and_release_nominal_handles() {
 #[test]
 fn adapter_handle_batches_are_registered_atomically() {
     let mut bindings = AdapterBindings::default();
-    let binding_id = bindings.register_module(
-        "graphics",
-        Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
-            0,
-        )))),
-    );
+    let binding_id = bindings
+        .register_module(
+            "graphics",
+            Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
+                0,
+            )))),
+        )
+        .expect("adapter binding registers");
     let type_id = OpaqueTypeId::new("graphics", "Texture").unwrap();
     assert!(bindings.register_handle(binding_id, type_id.clone(), HandleId::new(1)));
 
@@ -147,12 +180,14 @@ fn adapter_handle_batches_are_registered_atomically() {
 #[test]
 fn adapter_handle_ids_are_monotonic_and_never_reused() {
     let mut bindings = AdapterBindings::default();
-    let binding_id = bindings.register_module(
-        "graphics",
-        Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
-            0,
-        )))),
-    );
+    let binding_id = bindings
+        .register_module(
+            "graphics",
+            Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
+                0,
+            )))),
+        )
+        .expect("adapter binding registers");
     let type_id = OpaqueTypeId::new("graphics", "Texture").unwrap();
 
     assert!(bindings.register_handle(binding_id, type_id.clone(), HandleId::new(1)));
@@ -164,18 +199,22 @@ fn adapter_handle_ids_are_monotonic_and_never_reused() {
 #[test]
 fn adapter_handles_require_the_binding_that_created_them() {
     let mut bindings = AdapterBindings::default();
-    let first_binding = bindings.register_module(
-        "graphics.gfp",
-        Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
-            0,
-        )))),
-    );
-    let second_binding = bindings.register_module(
-        "audio.gfp",
-        Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
-            0,
-        )))),
-    );
+    let first_binding = bindings
+        .register_module(
+            "graphics.gfp",
+            Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
+                0,
+            )))),
+        )
+        .expect("adapter binding registers");
+    let second_binding = bindings
+        .register_module(
+            "audio.gfp",
+            Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
+                0,
+            )))),
+        )
+        .expect("adapter binding registers");
     let type_id = OpaqueTypeId::new("graphics", "Texture").unwrap();
     let handle_id = HandleId::new(1);
 
@@ -187,12 +226,14 @@ fn adapter_handles_require_the_binding_that_created_them() {
 #[test]
 fn adapter_handle_id_space_stops_after_u32_max() {
     let mut bindings = AdapterBindings::default();
-    let binding_id = bindings.register_module(
-        "graphics.gfp",
-        Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
-            0,
-        )))),
-    );
+    let binding_id = bindings
+        .register_module(
+            "graphics.gfp",
+            Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
+                0,
+            )))),
+        )
+        .expect("adapter binding registers");
     let type_id = OpaqueTypeId::new("graphics", "Texture").unwrap();
     bindings
         .modules
@@ -256,10 +297,12 @@ impl AdapterModuleBinding for CancellationRecordingAdapter {
 fn adapter_bindings_route_cancellation_to_the_owning_symbol() {
     let cancellation = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let mut bindings = AdapterBindings::default();
-    bindings.register_module(
-        "io",
-        Box::new(CancellationRecordingAdapter(cancellation.clone())),
-    );
+    bindings
+        .register_module(
+            "io",
+            Box::new(CancellationRecordingAdapter(cancellation.clone())),
+        )
+        .expect("adapter binding registers");
 
     bindings.cancel("io", "read", 3, 4);
 

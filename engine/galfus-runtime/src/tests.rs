@@ -10,7 +10,7 @@ use galfus_bytecode::{
     ConstantPool, ExecutionMetadata, ExportSlot, ImportEdge, ImportSlot, PackageEntryPoint,
     PackageImage,
 };
-use galfus_contract::ExecutionTarget;
+use galfus_contract::{ExecutionTarget, Providers, RuntimeCapabilities};
 use galfus_core::{ModuleId, ModulePath, SemanticRevision, SourceId, Span};
 
 struct StartupProvider {
@@ -194,7 +194,9 @@ fn start_with_provider(provider: StartupProvider) -> Execution {
     let (graph, module_id) = startup_graph();
     Runtime::new(
         package_with_entry(graph, module_id),
-        Some(galfus_contract::Providers::with_host(Box::new(provider))),
+        RuntimeCapabilities::builder()
+            .with_providers(Providers::with_host(Box::new(provider)))
+            .build(),
     )
     .start(&[], std::rc::Rc::new(CooperativeDriver::new()))
     .expect("startup execution is created")
@@ -209,7 +211,8 @@ fn runtime_rejects_an_unsupported_bytecode_format_before_loading_the_entry_modul
         PackageImage::try_new(graph, target(), None, Vec::new(), Vec::new())
             .expect("graph has no adapter proxies"),
     );
-    let result = Runtime::new(package, None).start(&[], std::rc::Rc::new(CooperativeDriver::new()));
+    let result = Runtime::new(package, RuntimeCapabilities::builder().build())
+        .start(&[], std::rc::Rc::new(CooperativeDriver::new()));
     let Err(error) = result else {
         panic!("unsupported bytecode must be rejected before runtime loading");
     };
@@ -546,9 +549,9 @@ fn run_initializes_dependencies_before_the_entry_module() {
     );
     let mut task = Runtime::new(
         package,
-        Some(galfus_contract::Providers::with_host(Box::new(
-            ImmediateProvider,
-        ))),
+        RuntimeCapabilities::builder()
+            .with_providers(Providers::with_host(Box::new(ImmediateProvider)))
+            .build(),
     )
     .start(&[], executor.clone())
     .expect("entry execution succeeds");

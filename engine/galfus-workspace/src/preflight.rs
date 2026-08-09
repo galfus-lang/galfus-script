@@ -192,7 +192,16 @@ impl AdapterBindingPreflight {
                 });
             }
 
-            bindings.register_module(requirement.proxy_module.clone(), bound_module);
+            bindings
+                .register_module(requirement.proxy_module.clone(), bound_module)
+                .map_err(|error| PreflightError::LoadFailed {
+                    proxy_module: requirement.proxy_module.clone(),
+                    adapter: adapter_name.clone(),
+                    error: AdapterLoadError {
+                        code: "duplicate_proxy_module".to_string(),
+                        message: error.to_string(),
+                    },
+                })?;
         }
 
         Ok(bindings)

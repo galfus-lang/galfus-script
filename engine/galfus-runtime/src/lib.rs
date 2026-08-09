@@ -18,7 +18,7 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync;
 
-use galfus_contract::{AdapterBindings, BoundaryType, BoundaryValue, Providers};
+use galfus_contract::{BoundaryType, BoundaryValue, RuntimeCapabilities};
 use galfus_vm::{VirtualMachine, VmPanic, VmValue};
 
 pub use driver::CooperativeDriver;
@@ -90,25 +90,18 @@ impl EntryAbi {
 /// A single execution composed from one package image and optional host providers.
 pub struct Runtime {
     package: sync::Arc<galfus_bytecode::PackageImage>,
-    providers: Option<sync::Arc<sync::Mutex<Providers>>>,
-    adapter_bindings: Option<sync::Arc<sync::Mutex<AdapterBindings>>>,
+    capabilities: RuntimeCapabilities,
 }
 
 impl Runtime {
     pub fn new(
         package: sync::Arc<galfus_bytecode::PackageImage>,
-        providers: Option<Providers>,
+        capabilities: RuntimeCapabilities,
     ) -> Self {
         Self {
             package,
-            providers: providers.map(|p| sync::Arc::new(sync::Mutex::new(p))),
-            adapter_bindings: None,
+            capabilities,
         }
-    }
-
-    pub fn with_adapter_bindings(mut self, bindings: AdapterBindings) -> Self {
-        self.adapter_bindings = Some(sync::Arc::new(sync::Mutex::new(bindings)));
-        self
     }
 
     /// Starts a persistent execution from the package entry point.
@@ -117,14 +110,18 @@ impl Runtime {
         args: &[Vec<u8>],
         driver: Rc<dyn galfus_contract::KernelDriver>,
     ) -> Result<Execution, RuntimeError> {
-        self.package.graph().validate_format()?;
+        let Runtime {
+            package,
+            capabilities,
+        } = self;
+        let (providers, adapter_bindings) = capabilities.into_runtime_handles();
+        package.graph().validate_format()?;
 
         let mut orchestrator = crate::orchestrator::Orchestrator::new();
-        let entry = self
-            .package
+        let entry = package
             .entry_point()
             .ok_or(RuntimeError::MissingPackageEntry)?;
-        let graph = sync::Arc::new(self.package.graph().clone());
+        let graph = sync::Arc::new(package.graph().clone());
         let module_id = graph
             .modules()
             .find(|module| module.path() == entry.module_path())
@@ -164,7 +161,7 @@ impl Runtime {
         }
 
         let mut thread = galfus_vm::thread::VmThreadState::new();
-        let vm = VirtualMachine::new(graph.clone()).with_provider_handle(self.providers.clone());
+        let vm = VirtualMachine::new(graph.clone()).with_provider_handle(providers);
 
         let mut initializers = VecDeque::new();
         for initialized_module_id in graph.initialization_order(module_id)? {
@@ -219,7 +216,7 @@ impl Runtime {
         let vm = sync::Arc::new(vm);
 
         orchestrator.set_vm(vm);
-        orchestrator.set_adapter_bindings(self.adapter_bindings.clone());
+        orchestrator.set_adapter_bindings(Some(adapter_bindings));
         orchestrator.set_driver(driver.clone());
         orchestrator
             .kernel_mut(token)

@@ -15,7 +15,7 @@ use galfus_compiler::{CompiledModule, gfp::parse_gfp_frontmatter};
 use galfus_contract::{
     AdapterFunctionSignature, AdapterModuleDescriptor, AdapterModuleRequirement, BoundaryType,
     CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget, ProviderFunctionSignature,
-    ProviderModuleRequirement, Providers,
+    ProviderModuleRequirement, Providers, RuntimeCapabilities,
 };
 use galfus_core::{Diagnostic, DiagnosticBag, ModulePath, OpaqueTypeId, SourceFile, Span, TypeId};
 use galfus_frontend::modules::{
@@ -974,15 +974,22 @@ impl Workspace {
             CompileState::Ready { package, .. } => Arc::clone(package),
             _ => return Err(RunBlocked::CompileRequired),
         };
-        Runtime::new(Arc::clone(&package), providers)
-            .start(args, driver.clone())
-            .map_err(|error| {
-                if let RuntimeError::VmPanic(panic) = &error {
-                    RunBlocked::RuntimeError(format_panic(package.graph(), panic))
-                } else {
-                    RunBlocked::RuntimeError(error.to_string())
-                }
-            })
+        Runtime::new(
+            Arc::clone(&package),
+            providers
+                .map_or_else(RuntimeCapabilities::builder, |providers| {
+                    RuntimeCapabilities::builder().with_providers(providers)
+                })
+                .build(),
+        )
+        .start(args, driver.clone())
+        .map_err(|error| {
+            if let RuntimeError::VmPanic(panic) = &error {
+                RunBlocked::RuntimeError(format_panic(package.graph(), panic))
+            } else {
+                RunBlocked::RuntimeError(error.to_string())
+            }
+        })
     }
 
     pub fn start_execution_with_bindings(
@@ -996,16 +1003,23 @@ impl Workspace {
             CompileState::Ready { package, .. } => Arc::clone(package),
             _ => return Err(RunBlocked::CompileRequired),
         };
-        Runtime::new(Arc::clone(&package), providers)
-            .with_adapter_bindings(bindings)
-            .start(args, driver.clone())
-            .map_err(|error| {
-                if let RuntimeError::VmPanic(panic) = &error {
-                    RunBlocked::RuntimeError(format_panic(package.graph(), panic))
-                } else {
-                    RunBlocked::RuntimeError(error.to_string())
-                }
-            })
+        Runtime::new(
+            Arc::clone(&package),
+            providers
+                .map_or_else(RuntimeCapabilities::builder, |providers| {
+                    RuntimeCapabilities::builder().with_providers(providers)
+                })
+                .with_adapter_bindings(bindings)
+                .build(),
+        )
+        .start(args, driver.clone())
+        .map_err(|error| {
+            if let RuntimeError::VmPanic(panic) = &error {
+                RunBlocked::RuntimeError(format_panic(package.graph(), panic))
+            } else {
+                RunBlocked::RuntimeError(error.to_string())
+            }
+        })
     }
 
     /// Compatibility helper that drives the returned execution through the supplied driver.

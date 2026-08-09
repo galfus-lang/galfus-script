@@ -267,6 +267,12 @@ pub struct AdapterBindings {
     next_binding_id: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum AdapterBindingError {
+    #[error("adapter binding for proxy module `{0}` is already registered")]
+    DuplicateProxyModule(String),
+}
+
 struct AdapterBinding {
     id: BindingId,
     next_handle_id: Option<HandleId>,
@@ -278,21 +284,25 @@ impl AdapterBindings {
         &mut self,
         proxy_module: impl Into<String>,
         module: Box<dyn AdapterModuleBinding>,
-    ) -> BindingId {
+    ) -> Result<BindingId, AdapterBindingError> {
+        let proxy_module = proxy_module.into();
+        if self.modules.contains_key(&proxy_module) {
+            return Err(AdapterBindingError::DuplicateProxyModule(proxy_module));
+        }
         let id = BindingId::new(self.next_binding_id);
         self.next_binding_id = self
             .next_binding_id
             .checked_add(1)
             .expect("adapter binding identifier space is exhausted");
         self.modules.insert(
-            proxy_module.into(),
+            proxy_module,
             AdapterBinding {
                 id,
                 next_handle_id: Some(HandleId::new(1)),
                 module,
             },
         );
-        id
+        Ok(id)
     }
 
     pub fn get_mut(&mut self, proxy_module: &str) -> Option<&mut (dyn AdapterModuleBinding + '_)> {
@@ -432,6 +442,69 @@ impl Providers {
         self.host
             .as_deref()
             .is_some_and(|host| host.descriptor().validates(requirement))
+    }
+}
+
+/// Mutable bootstrap state for one runtime capability set.
+#[derive(Default)]
+pub struct RuntimeCapabilitiesBuilder {
+    providers: Option<Providers>,
+    adapter_bindings: AdapterBindings,
+}
+
+impl RuntimeCapabilitiesBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_providers(mut self, providers: Providers) -> Self {
+        self.providers = Some(providers);
+        self
+    }
+
+    pub fn with_adapter_bindings(mut self, adapter_bindings: AdapterBindings) -> Self {
+        self.adapter_bindings = adapter_bindings;
+        self
+    }
+
+    pub fn register_adapter(
+        &mut self,
+        proxy_module: impl Into<String>,
+        module: Box<dyn AdapterModuleBinding>,
+    ) -> Result<BindingId, AdapterBindingError> {
+        self.adapter_bindings.register_module(proxy_module, module)
+    }
+
+    /// Consumes construction state and publishes immutable capability topology.
+    pub fn build(self) -> RuntimeCapabilities {
+        RuntimeCapabilities {
+            providers: self
+                .providers
+                .map(|providers| sync::Arc::new(sync::Mutex::new(providers))),
+            adapter_bindings: sync::Arc::new(sync::Mutex::new(self.adapter_bindings)),
+        }
+    }
+}
+
+/// Frozen capability topology for one runtime execution.
+pub struct RuntimeCapabilities {
+    providers: Option<sync::Arc<sync::Mutex<Providers>>>,
+    adapter_bindings: sync::Arc<sync::Mutex<AdapterBindings>>,
+}
+
+impl RuntimeCapabilities {
+    pub fn builder() -> RuntimeCapabilitiesBuilder {
+        RuntimeCapabilitiesBuilder::new()
+    }
+
+    /// Transfers the frozen capabilities to a single runtime execution.
+    pub fn into_runtime_handles(
+        self,
+    ) -> (
+        Option<sync::Arc<sync::Mutex<Providers>>>,
+        sync::Arc<sync::Mutex<AdapterBindings>>,
+    ) {
+        (self.providers, self.adapter_bindings)
     }
 }
 
