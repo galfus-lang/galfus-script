@@ -80,18 +80,18 @@ impl BlockedQueue {
     }
 
     pub fn block_with_timeout(&mut self, id: ThreadId, timeout_ms: u64) -> Result<(), ExecutionFailure> {
-        self.blocked.insert(id);
-        self.remove_timer(id);
-        
+        let raw_timer_id = self.next_timer_id;
+        let next_timer_id = self.next_timer_id.checked_add(1).ok_or_else(|| {
+            ExecutionFailure::new(ExecutionFailureKind::IdSpaceExhausted, "timer id space exhausted")
+        })?;
         let timer = TimerEntry {
             deadline_ms: self.clock_ms.saturating_add(timeout_ms),
-            timer_id: TimerId::new(self.next_timer_id),
+            timer_id: TimerId::new(raw_timer_id),
             thread_id: id,
         };
-        
-        self.next_timer_id = self.next_timer_id.checked_add(1)
-            .ok_or_else(|| ExecutionFailure::new(ExecutionFailureKind::IdSpaceExhausted, "timer id space exhausted"))?;
-            
+        self.next_timer_id = next_timer_id;
+        self.remove_timer(id);
+        self.blocked.insert(id);
         self.timers.insert(timer);
         self.active_timers.insert(id, timer);
         Ok(())

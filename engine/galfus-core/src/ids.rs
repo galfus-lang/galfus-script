@@ -121,6 +121,22 @@ impl TimerId {
     }
 }
 
+/// Identifies one aggregate future wait within an Orchestrator.
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct CoordinatorId(u32);
+
+impl CoordinatorId {
+    pub const fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+}
+
 /// Public, non-reusable resource identity within one adapter binding.
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,

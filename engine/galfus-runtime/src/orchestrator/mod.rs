@@ -124,13 +124,15 @@ pub(crate) struct Orchestrator {
     shutting_down: bool,
     late_completions: VecDeque<LateCompletion>,
     root_thread_id: Option<crate::registry::ThreadId>,
-    future_workers: HashMap<crate::registry::ThreadId, (crate::registry::ThreadId, galfus_core::FutureId)>,
-    thread_exit_waits: HashMap<crate::registry::ThreadId, Vec<(crate::registry::ThreadId, galfus_core::FutureId)>>,
+    future_workers:
+        HashMap<crate::registry::ThreadId, (crate::registry::ThreadId, galfus_core::FutureId)>,
+    thread_exit_waits:
+        HashMap<crate::registry::ThreadId, Vec<(crate::registry::ThreadId, galfus_core::FutureId)>>,
     mailbox_future_waits: HashMap<crate::registry::ThreadId, Vec<MailboxFutureWait>>,
     virtual_time_ms: u64,
     pub(crate) future_registry: FutureRegistry,
-    aggregate_coordinators: HashMap<u32, AggregateCoordinator>,
-    aggregate_registration: Option<(u32, usize)>,
+    aggregate_coordinators: HashMap<galfus_core::CoordinatorId, AggregateCoordinator>,
+    aggregate_registration: Option<(galfus_core::CoordinatorId, usize)>,
 }
 
 #[derive(Clone, Copy)]
@@ -328,14 +330,16 @@ impl Orchestrator {
         }
     }
 
-    fn record_late_completion(&mut self, thread_id: crate::registry::ThreadId, key: crate::orchestrator::pending::PendingKey) {
+    fn record_late_completion(
+        &mut self,
+        thread_id: crate::registry::ThreadId,
+        key: crate::orchestrator::pending::PendingKey,
+    ) {
         if self.late_completions.len() == MAX_LATE_COMPLETIONS {
             self.late_completions.pop_front();
         }
-        self.late_completions.push_back(LateCompletion {
-            thread_id,
-            key,
-        });
+        self.late_completions
+            .push_back(LateCompletion { thread_id, key });
     }
 
     #[cfg(test)]
@@ -515,19 +519,25 @@ impl Orchestrator {
                 return;
             }
         };
-        if let (Some(proxy_module), Ok(value)) = (adapter_proxy_module, &result)
-            && !self.register_adapter_handles(&proxy_module, value)
-        {
-            self.failure = Some(
-                ExecutionFailure::new(
-                    ExecutionFailureKind::BoundaryCodecFailure,
-                    "adapter returned an external handle without a unique bound owner",
-                )
-                .with_thread_id(thread_id)
-                .with_future_id(future_id),
-            );
-            self.cancel_and_teardown_thread(thread_id);
-            return;
+        if let (Some(proxy_module), Ok(value)) = (adapter_proxy_module, &result) {
+            if let Err(error) = self.register_adapter_handles(&proxy_module, value) {
+                let kind = match error {
+                    galfus_contract::AdapterBindingError::IdSpaceExhausted { .. } => {
+                        ExecutionFailureKind::IdSpaceExhausted
+                    }
+                    galfus_contract::AdapterBindingError::DuplicateProxyModule(_) |
+                    galfus_contract::AdapterBindingError::InvalidHandle => {
+                        ExecutionFailureKind::BoundaryCodecFailure
+                    }
+                };
+                self.failure = Some(
+                    ExecutionFailure::new(kind, error.to_string())
+                        .with_thread_id(thread_id)
+                        .with_future_id(future_id),
+                );
+                self.cancel_and_teardown_thread(thread_id);
+                return;
+            }
         }
         for waiter in waiters {
             let waiter_thread_id = waiter.continuation.thread_id;
@@ -540,20 +550,24 @@ impl Orchestrator {
         }
     }
 
-    fn register_adapter_handles(&mut self, proxy_module: &str, value: &BoundaryValue) -> bool {
+    fn register_adapter_handles(
+        &mut self,
+        proxy_module: &str,
+        value: &BoundaryValue,
+    ) -> Result<(), galfus_contract::AdapterBindingError> {
         let mut handles = Vec::new();
         collect_adapter_handles(value, &mut handles);
         if handles.is_empty() {
-            return true;
+            return Ok(());
         }
         let Some(bindings) = &self.adapter_bindings else {
-            return false;
+            return Err(galfus_contract::AdapterBindingError::InvalidHandle);
         };
         let mut bindings = bindings.lock().unwrap();
         let Some(binding_id) = bindings.binding_id(proxy_module) else {
-            return false;
+            return Err(galfus_contract::AdapterBindingError::InvalidHandle);
         };
-        bindings.register_handles(binding_id, &handles).is_ok()
+        bindings.register_handles(binding_id, &handles)
     }
 
     pub(super) fn register_thread_exit_future(
@@ -677,7 +691,7 @@ impl Orchestrator {
 
     fn complete_aggregate_member(
         &mut self,
-        coordinator_id: u32,
+        coordinator_id: galfus_core::CoordinatorId,
         index: usize,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
@@ -697,7 +711,7 @@ impl Orchestrator {
         self.finish_aggregate_if_ready(coordinator_id);
     }
 
-    pub(super) fn finish_aggregate_if_ready(&mut self, coordinator_id: u32) {
+    pub(super) fn finish_aggregate_if_ready(&mut self, coordinator_id: galfus_core::CoordinatorId) {
         let Some(coordinator) = self.aggregate_coordinators.get(&coordinator_id) else {
             return;
         };
@@ -776,7 +790,14 @@ impl Orchestrator {
             match event {
                 RuntimeEvent::ThreadSpawned { mut thread } => {
                     self.flush_thread_handle_drops(&mut thread);
-                    let id = self.kernel.spawn(thread, None).expect("failed to spawn thread");
+                    let id = match self.kernel.spawn(thread, None) {
+                        Ok(id) => id,
+                        Err(error) => {
+                            self.failure = Some(error);
+                            self.cancel_and_teardown_all_threads();
+                            return;
+                        }
+                    };
                     let thread = self
                         .kernel
                         .take_thread(id)

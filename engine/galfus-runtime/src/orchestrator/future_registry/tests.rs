@@ -2,11 +2,11 @@ use super::*;
 use std::sync::{Arc, atomic::AtomicBool};
 
 fn owner() -> ThreadId {
-    galfus_core::ThreadId::new(1 as u32)
+    galfus_core::ThreadId::new(1)
 }
 
 fn foreign_owner() -> ThreadId {
-    galfus_core::ThreadId::new(2 as u32)
+    galfus_core::ThreadId::new(2)
 }
 
 fn activation() -> Activation {

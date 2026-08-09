@@ -14,12 +14,15 @@ pub(crate) struct PendingContinuation {
 pub(crate) enum PendingKey {
     Request(galfus_core::RequestId),
     Future(galfus_core::FutureId),
-    Coordinator(u32),
+    Coordinator(galfus_core::CoordinatorId),
 }
 
 pub(crate) enum PendingOperation {
     Future,
-    AggregateMember { coordinator_id: u32, index: usize },
+    AggregateMember {
+        coordinator_id: galfus_core::CoordinatorId,
+        index: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

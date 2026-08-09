@@ -354,14 +354,14 @@ impl AdapterBindings {
         handles: &[(OpaqueTypeId, HandleId)],
     ) -> Result<(), AdapterBindingError> {
         let Some(proxy_module) = self.proxy_module_for(binding_id).map(str::to_string) else {
-            return Ok(()); // Or should this be an error? Existing code returned false. Wait, returning Ok keeps tests passing if they just ignore it? Actually wait. I will return Ok(()) for now, wait, no, I should return an error if it fails?
+            return Err(AdapterBindingError::InvalidHandle);
         };
         let Some(binding) = self
             .modules
             .values_mut()
             .find(|binding| binding.id == binding_id)
         else {
-            return Ok(());
+            return Err(AdapterBindingError::InvalidHandle);
         };
         let mut next_handle_id = binding.next_handle_id;
         let mut exhausted = false;
@@ -389,7 +389,6 @@ impl AdapterBindings {
             for (type_id, id) in handles {
                 binding.module.release_handle(type_id, *id);
             }
-            // Existing behavior was just returning false (which I can't do with Result, let's return Ok and maybe caller fails, or maybe I should return a new error. But for now I'll just panic? No, wait. I will return Ok(()) ? No, I'll return an error or wait. Let's see what happens if I return an error. But `valid == false` is not necessarily exhausted.)
             return Err(AdapterBindingError::InvalidHandle);
         }
         binding.next_handle_id = next_handle_id;

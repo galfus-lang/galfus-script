@@ -246,6 +246,32 @@ fn adapter_handle_id_space_stops_after_u32_max() {
 }
 
 #[test]
+fn adapter_binding_id_space_stops_without_registering_a_module() {
+    let mut bindings = AdapterBindings::default();
+    bindings.next_binding_id = u32::MAX - 1;
+    let releases = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+    assert_eq!(
+        bindings
+            .register_module("first.gfp", Box::new(DummyAdapter(releases.clone())))
+            .unwrap()
+            .raw(),
+        u32::MAX - 1
+    );
+    let error = bindings
+        .register_module("second.gfp", Box::new(DummyAdapter(releases)))
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        AdapterBindingError::IdSpaceExhausted {
+            domain: "BindingId"
+        }
+    );
+    assert!(bindings.binding_id("second.gfp").is_none());
+}
+
+#[test]
 fn execution_failures_preserve_machine_readable_context() {
     let failure = ExecutionFailure::new(ExecutionFailureKind::ProviderFailure, "request failed")
         .with_thread_id(galfus_core::ThreadId::new(7))

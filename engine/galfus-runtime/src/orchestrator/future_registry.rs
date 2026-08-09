@@ -27,11 +27,13 @@ pub enum Activation {
     Provider {
         name: String,
         args: Vec<BoundaryValue>,
+        request_id: Option<galfus_core::RequestId>,
     },
     Adapter {
         proxy_module: String,
         symbol: String,
         args: Vec<BoundaryValue>,
+        request_id: Option<galfus_core::RequestId>,
     },
 }
 
@@ -169,6 +171,54 @@ impl FutureRegistry {
         match record.running_activation.as_ref()? {
             Activation::Adapter { proxy_module, .. } => Some(proxy_module.clone()),
             _ => None,
+        }
+    }
+
+    pub fn assign_request_id(
+        &mut self,
+        owner_thread_id: ThreadId,
+        future_id: galfus_core::FutureId,
+        request_id: galfus_core::RequestId,
+    ) -> Result<(), ExecutionFailure> {
+        let record = self
+            .records
+            .get_mut(&(owner_thread_id, future_id))
+            .ok_or_else(|| {
+                ExecutionFailure::new(
+                    galfus_contract::ExecutionFailureKind::InvalidContinuation,
+                    "unknown future while assigning request id",
+                )
+                .with_thread_id(owner_thread_id)
+                .with_future_id(future_id)
+            })?;
+        let activation = record.running_activation.as_mut().ok_or_else(|| {
+            ExecutionFailure::new(
+                galfus_contract::ExecutionFailureKind::InvalidContinuation,
+                "future request id was assigned before activation started",
+            )
+            .with_thread_id(owner_thread_id)
+            .with_future_id(future_id)
+        })?;
+        match activation {
+            Activation::Provider {
+                request_id: active_request_id,
+                ..
+            }
+            | Activation::Adapter {
+                request_id: active_request_id,
+                ..
+            } => {
+                *active_request_id = Some(request_id);
+                Ok(())
+            }
+            Activation::GalfusFunction { .. } | Activation::Internal { .. } => Err(
+                ExecutionFailure::new(
+                    galfus_contract::ExecutionFailureKind::InvalidContinuation,
+                    "future activation does not dispatch an external request",
+                )
+                .with_thread_id(owner_thread_id)
+                .with_future_id(future_id),
+            ),
         }
     }
 
