@@ -101,6 +101,132 @@ fn test_sub_mul_div_rem_pow() {
 }
 
 #[test]
+fn float_division_and_power_normalize_special_results() {
+    let instrs = vec![
+        Instruction::LoadConst {
+            dest: Reg(1),
+            const_idx: ConstIdx(0),
+        },
+        Instruction::LoadConst {
+            dest: Reg(2),
+            const_idx: ConstIdx(1),
+        },
+        Instruction::Div {
+            dest: Reg(3),
+            lhs: Reg(1),
+            rhs: Reg(2),
+        },
+        Instruction::Ret { src: Reg(3) },
+    ];
+    let image = create_test_module(instrs, vec![Constant::Float64(0.0), Constant::Float64(0.0)]);
+    let graph = graph_with_node(galfus_bytecode::BytecodeNode {
+        id: galfus_core::ModuleId::new(0),
+        path: galfus_core::ModulePath::new("test.gfs").unwrap(),
+        semantic_revision: galfus_core::SemanticRevision::new(0),
+        module: image,
+        metadata: None,
+    });
+    let vm = VirtualMachine::new(sync::Arc::new(graph));
+    let mut thread = thread::VmThreadState::new();
+    let Value::Float64(value) = vm
+        .run_function(&mut thread, galfus_core::ModuleId::new(0), FuncIdx(0), vec![])
+        .expect("float division completes")
+    else {
+        panic!("float division must return f64");
+    };
+    assert_eq!(value.to_bits(), galfus_core::CANONICAL_F64_NAN);
+
+    let value = vm
+        .pow_values(Value::Float64(-1.0), Value::Float64(0.5))
+        .expect("float power completes");
+    let Value::Float64(value) = value else {
+        panic!("float power must return f64");
+    };
+    assert_eq!(value.to_bits(), galfus_core::CANONICAL_F64_NAN);
+}
+
+#[test]
+fn float_arithmetic_normalizes_zero_and_nan_results() {
+    let instrs = vec![
+        Instruction::LoadConst {
+            dest: Reg(1),
+            const_idx: ConstIdx(0),
+        },
+        Instruction::LoadConst {
+            dest: Reg(2),
+            const_idx: ConstIdx(1),
+        },
+        Instruction::Mul {
+            dest: Reg(3),
+            lhs: Reg(1),
+            rhs: Reg(2),
+        },
+        Instruction::Ret { src: Reg(3) },
+    ];
+    let image = create_test_module(instrs, vec![Constant::Float64(0.0), Constant::Float64(-1.0)]);
+    let graph = graph_with_node(galfus_bytecode::BytecodeNode {
+        id: galfus_core::ModuleId::new(0),
+        path: galfus_core::ModulePath::new("test.gfs").unwrap(),
+        semantic_revision: galfus_core::SemanticRevision::new(0),
+        module: image,
+        metadata: None,
+    });
+    let vm = VirtualMachine::new(sync::Arc::new(graph));
+    let mut thread = thread::VmThreadState::new();
+    let Value::Float64(value) = vm
+        .run_function(&mut thread, galfus_core::ModuleId::new(0), FuncIdx(0), vec![])
+        .expect("float multiplication completes")
+    else {
+        panic!("float multiplication must return f64");
+    };
+    assert_eq!(value.to_bits(), 0.0f64.to_bits());
+
+    let image = create_test_module(
+        vec![
+            Instruction::LoadConst {
+                dest: Reg(1),
+                const_idx: ConstIdx(0),
+            },
+            Instruction::LoadConst {
+                dest: Reg(2),
+                const_idx: ConstIdx(1),
+            },
+            Instruction::Sub {
+                dest: Reg(3),
+                lhs: Reg(1),
+                rhs: Reg(2),
+            },
+            Instruction::Ret { src: Reg(3) },
+        ],
+        vec![Constant::Float64(f64::INFINITY), Constant::Float64(f64::INFINITY)],
+    );
+    let graph = graph_with_node(galfus_bytecode::BytecodeNode {
+        id: galfus_core::ModuleId::new(0),
+        path: galfus_core::ModulePath::new("test.gfs").unwrap(),
+        semantic_revision: galfus_core::SemanticRevision::new(0),
+        module: image,
+        metadata: None,
+    });
+    let vm = VirtualMachine::new(sync::Arc::new(graph));
+    let mut thread = thread::VmThreadState::new();
+    let Value::Float64(value) = vm
+        .run_function(&mut thread, galfus_core::ModuleId::new(0), FuncIdx(0), vec![])
+        .expect("infinite subtraction completes")
+    else {
+        panic!("infinite subtraction must return f64");
+    };
+    assert_eq!(value.to_bits(), galfus_core::CANONICAL_F64_NAN);
+
+    let value = vm
+        .pow_values(Value::Float64(-1.0), Value::Float64(0.5))
+        .expect("NaN-producing float power completes");
+    let Value::Float64(value) = value else {
+        panic!("float power must return f64");
+    };
+    assert_eq!(value.to_bits(), galfus_core::CANONICAL_F64_NAN);
+}
+
+#[test]
 fn test_neg() {
     let instrs = vec![
         Instruction::LoadConst {

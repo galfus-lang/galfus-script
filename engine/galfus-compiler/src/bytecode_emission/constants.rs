@@ -65,8 +65,8 @@ pub fn get_or_create_constant(ctx: &mut LowerCtx, constant: &MirConstant) -> Con
         MirConstant::Uint16(i) => Constant::Uint16(*i),
         MirConstant::Uint32(i) => Constant::Uint32(*i),
         MirConstant::Uint64(i) => Constant::Uint64(*i),
-        MirConstant::Float32(f) => Constant::Float32(*f),
-        MirConstant::Float64(f) => Constant::Float64(*f),
+        MirConstant::Float32(f) => Constant::Float32(galfus_core::normalize_f32(*f)),
+        MirConstant::Float64(f) => Constant::Float64(galfus_core::normalize_f64(*f)),
         MirConstant::String(s) => Constant::String(s.clone()),
         MirConstant::Function(id) => {
             let func_idx = *ctx.function_map.get(id).unwrap_or_else(|| {

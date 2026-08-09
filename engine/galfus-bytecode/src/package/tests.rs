@@ -1,6 +1,7 @@
 use galfus_contract::{
     AdapterConfig, AdapterFunctionSignature, AdapterModuleDescriptor, AdapterModuleRequirement,
-    BoundaryType, CURRENT_BOUNDARY_ABI_VERSION, CURRENT_PRODUCER_VERSION, ExecutionTarget,
+    BoundaryType, CURRENT_BOUNDARY_ABI_VERSION, CURRENT_NUMERIC_SEMANTICS_VERSION,
+    CURRENT_PRODUCER_VERSION, ExecutionTarget,
 };
 use galfus_core::{ModuleId, ModulePath, SemanticRevision};
 
@@ -90,6 +91,10 @@ fn package_image_owns_its_graph_manifest_and_versions() {
     assert_eq!(
         package.versions().boundary_abi(),
         CURRENT_BOUNDARY_ABI_VERSION
+    );
+    assert_eq!(
+        package.versions().numeric_semantics(),
+        CURRENT_NUMERIC_SEMANTICS_VERSION
     );
 }
 

@@ -332,6 +332,21 @@ impl Orchestrator {
                             operation,
                             args,
                         } => {
+                            let float_arg = |idx: usize| -> Option<f64> {
+                                args.get(idx).and_then(|val| match val {
+                                    BoundaryValue::F64(f) => Some(*f),
+                                    BoundaryValue::F32(f) => Some(*f as f64),
+                                    BoundaryValue::I64(i) => Some(*i as f64),
+                                    BoundaryValue::I32(i) => Some(*i as f64),
+                                    BoundaryValue::I16(i) => Some(*i as f64),
+                                    BoundaryValue::I8(i) => Some(*i as f64),
+                                    BoundaryValue::U64(i) => Some(*i as f64),
+                                    BoundaryValue::U32(i) => Some(*i as f64),
+                                    BoundaryValue::U16(i) => Some(*i as f64),
+                                    BoundaryValue::U8(i) => Some(*i as f64),
+                                    _ => None,
+                                })
+                            };
                             let thread_arg = |index: usize| {
                                 args.get(index).and_then(|value| match value {
                                     BoundaryValue::I64(id) if *id > 0 => {
@@ -458,6 +473,65 @@ impl Orchestrator {
                                             None
                                         }
                                     }
+                                }
+                                "__internal_math_is_nan" => {
+                                    let f = float_arg(0).unwrap_or(0.0);
+                                    Some(Ok(BoundaryValue::Bool(f.is_nan())))
+                                }
+                                "__internal_math_is_finite" => {
+                                    let f = float_arg(0).unwrap_or(0.0);
+                                    Some(Ok(BoundaryValue::Bool(f.is_finite())))
+                                }
+                                "__internal_math_is_infinite" => {
+                                    let f = float_arg(0).unwrap_or(0.0);
+                                    Some(Ok(BoundaryValue::Bool(f.is_infinite())))
+                                }
+                                "__internal_math_sqrt" => {
+                                    let f = float_arg(0).unwrap_or(0.0);
+                                    Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(
+                                        f.sqrt(),
+                                    ))))
+                                }
+                                "__internal_math_hypot" => {
+                                    let x = float_arg(0).unwrap_or(0.0);
+                                    let y = float_arg(1).unwrap_or(0.0);
+                                    Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(
+                                        x.hypot(y),
+                                    ))))
+                                }
+                                "__internal_math_sin" => {
+                                    let f = float_arg(0).unwrap_or(0.0);
+                                    Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(
+                                        f.sin(),
+                                    ))))
+                                }
+                                "__internal_math_cos" => {
+                                    let f = float_arg(0).unwrap_or(0.0);
+                                    Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(
+                                        f.cos(),
+                                    ))))
+                                }
+                                "__internal_math_tan" => {
+                                    let f = float_arg(0).unwrap_or(0.0);
+                                    Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(
+                                        f.tan(),
+                                    ))))
+                                }
+                                "__internal_math_log" => {
+                                    let f = float_arg(0).unwrap_or(0.0);
+                                    Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(f.ln()))))
+                                }
+                                "__internal_math_log2" => {
+                                    let f = float_arg(0).unwrap_or(0.0);
+                                    Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(
+                                        f.log2(),
+                                    ))))
+                                }
+                                "__internal_math_log10" => {
+                                    let f = float_arg(0).unwrap_or(0.0);
+                                    Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(
+                                        f.log10(),
+                                    ))))
                                 }
                                 "__internal_thread_create" => {
                                     let key = args.get(1).and_then(|value| match value {

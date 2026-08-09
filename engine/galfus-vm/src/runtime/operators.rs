@@ -15,8 +15,12 @@ macro_rules! impl_binary_op {
             (Value::Uint16(l), Value::Uint16(r)) => Value::Uint16(l.wrapping_add(r)),
             (Value::Uint32(l), Value::Uint32(r)) => Value::Uint32(l.wrapping_add(r)),
             (Value::Uint64(l), Value::Uint64(r)) => Value::Uint64(l.wrapping_add(r)),
-            (Value::Float32(l), Value::Float32(r)) => Value::Float32(l + r),
-            (Value::Float64(l), Value::Float64(r)) => Value::Float64(l + r),
+            (Value::Float32(l), Value::Float32(r)) => {
+                Value::Float32(galfus_core::normalize_f32(l + r))
+            }
+            (Value::Float64(l), Value::Float64(r)) => {
+                Value::Float64(galfus_core::normalize_f64(l + r))
+            }
             (l, r) => {
                 return Err(VmError::TypeMismatch {
                     expected: "matching numeric types".to_string(),
@@ -38,8 +42,12 @@ macro_rules! impl_binary_op {
             (Value::Uint16(l), Value::Uint16(r)) => Value::Uint16(l.wrapping_sub(r)),
             (Value::Uint32(l), Value::Uint32(r)) => Value::Uint32(l.wrapping_sub(r)),
             (Value::Uint64(l), Value::Uint64(r)) => Value::Uint64(l.wrapping_sub(r)),
-            (Value::Float32(l), Value::Float32(r)) => Value::Float32(l - r),
-            (Value::Float64(l), Value::Float64(r)) => Value::Float64(l - r),
+            (Value::Float32(l), Value::Float32(r)) => {
+                Value::Float32(galfus_core::normalize_f32(l - r))
+            }
+            (Value::Float64(l), Value::Float64(r)) => {
+                Value::Float64(galfus_core::normalize_f64(l - r))
+            }
             (l, r) => {
                 return Err(VmError::TypeMismatch {
                     expected: "matching numeric types".to_string(),
@@ -61,8 +69,12 @@ macro_rules! impl_binary_op {
             (Value::Uint16(l), Value::Uint16(r)) => Value::Uint16(l.wrapping_mul(r)),
             (Value::Uint32(l), Value::Uint32(r)) => Value::Uint32(l.wrapping_mul(r)),
             (Value::Uint64(l), Value::Uint64(r)) => Value::Uint64(l.wrapping_mul(r)),
-            (Value::Float32(l), Value::Float32(r)) => Value::Float32(l * r),
-            (Value::Float64(l), Value::Float64(r)) => Value::Float64(l * r),
+            (Value::Float32(l), Value::Float32(r)) => {
+                Value::Float32(galfus_core::normalize_f32(l * r))
+            }
+            (Value::Float64(l), Value::Float64(r)) => {
+                Value::Float64(galfus_core::normalize_f64(l * r))
+            }
             (l, r) => {
                 return Err(VmError::TypeMismatch {
                     expected: "matching numeric types".to_string(),
@@ -167,16 +179,10 @@ impl VirtualMachine {
                         Value::Uint64(l / r)
                     }
                     (Value::Float32(l), Value::Float32(r)) => {
-                        if r == 0.0 {
-                            return Err(VmError::DivisionByZero);
-                        }
-                        Value::Float32(l / r)
+                        Value::Float32(galfus_core::normalize_f32(l / r))
                     }
                     (Value::Float64(l), Value::Float64(r)) => {
-                        if r == 0.0 {
-                            return Err(VmError::DivisionByZero);
-                        }
-                        Value::Float64(l / r)
+                        Value::Float64(galfus_core::normalize_f64(l / r))
                     }
                     (l, r) => {
                         return Err(VmError::TypeMismatch {
@@ -261,8 +267,8 @@ impl VirtualMachine {
                     Value::Int16(x) => Value::Int16(x.wrapping_neg()),
                     Value::Int32(x) => Value::Int32(x.wrapping_neg()),
                     Value::Int64(x) => Value::Int64(x.wrapping_neg()),
-                    Value::Float32(x) => Value::Float32(-x),
-                    Value::Float64(x) => Value::Float64(-x),
+                    Value::Float32(x) => Value::Float32(galfus_core::normalize_f32(-x)),
+                    Value::Float64(x) => Value::Float64(galfus_core::normalize_f64(-x)),
                     x => {
                         return Err(VmError::TypeMismatch {
                             expected: "signed numeric type".to_string(),

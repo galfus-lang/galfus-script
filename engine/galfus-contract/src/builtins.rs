@@ -1,5 +1,6 @@
 pub const ASYNC_SOURCE: &str = include_str!("../builtins/internals/async.gfs");
 pub const THREAD_SOURCE: &str = include_str!("../builtins/internals/thread.gfs");
+pub const MATH_SOURCE: &str = include_str!("../builtins/internals/math.gfs");
 pub const CONSTRAINTS_SOURCE: &str = include_str!("../builtins/internals/constraints.gfs");
 pub const ITERABLE_SOURCE: &str = include_str!("../builtins/internals/iterable.gfs");
 pub const TEXT_SOURCE: &str = include_str!("../builtins/utilities/text.gfs");
@@ -11,6 +12,7 @@ pub const STD_IO_SOURCE: &str = include_str!("../builtins/bridges/io.gfs");
 pub static INTERNAL_CORE_MODULES: &[(&str, &str)] = &[
     ("std/async", ASYNC_SOURCE),
     ("std/thread", THREAD_SOURCE),
+    ("std/math", MATH_SOURCE),
     ("std/constraints", CONSTRAINTS_SOURCE),
     ("std/iterable", ITERABLE_SOURCE),
 ];
@@ -51,6 +53,7 @@ pub fn std_io_provider_descriptor() -> ProviderDescriptor {
 pub static BUILTIN_MODULES: &[(&str, &str)] = &[
     ("std/async", ASYNC_SOURCE),
     ("std/thread", THREAD_SOURCE),
+    ("std/math", MATH_SOURCE),
     ("std/constraints", CONSTRAINTS_SOURCE),
     ("std/iterable", ITERABLE_SOURCE),
     ("text", TEXT_SOURCE),

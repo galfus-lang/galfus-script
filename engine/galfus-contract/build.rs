@@ -15,6 +15,16 @@ fn main() {
             .as_str()
             .unwrap();
     emit_version("GALFUS_BOUNDARY_ABI_VERSION", boundary_abi_version);
+
+    let numeric_semantics_version =
+        manifest["workspace"]["metadata"]["galfus"]["package-image"]["numeric-semantics-version"]
+            .as_str()
+            .unwrap();
+    emit_version(
+        "GALFUS_NUMERIC_SEMANTICS_VERSION",
+        numeric_semantics_version,
+    );
+
     println!("cargo:rerun-if-env-changed=CARGO_PKG_VERSION");
     emit_version(
         "GALFUS_PRODUCER_VERSION",

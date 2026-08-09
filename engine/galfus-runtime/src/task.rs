@@ -39,10 +39,10 @@ pub(crate) fn decode_from_thread_heap(
         (BytecodeType::Uint32, galfus_vm::VmValue::Uint32(value)) => Ok(BoundaryValue::U32(value)),
         (BytecodeType::Uint64, galfus_vm::VmValue::Uint64(value)) => Ok(BoundaryValue::U64(value)),
         (BytecodeType::Float32, galfus_vm::VmValue::Float32(value)) => {
-            Ok(BoundaryValue::F32(value))
+            Ok(BoundaryValue::F32(galfus_core::normalize_f32(value)))
         }
         (BytecodeType::Float64, galfus_vm::VmValue::Float64(value)) => {
-            Ok(BoundaryValue::F64(value))
+            Ok(BoundaryValue::F64(galfus_core::normalize_f64(value)))
         }
         (
             BytecodeType::Function { .. },
@@ -186,12 +186,12 @@ pub(crate) fn encode_into_thread_heap(
         (BytecodeType::Uint16, BoundaryValue::U16(value)) => Ok(galfus_vm::VmValue::Uint16(value)),
         (BytecodeType::Uint32, BoundaryValue::U32(value)) => Ok(galfus_vm::VmValue::Uint32(value)),
         (BytecodeType::Uint64, BoundaryValue::U64(value)) => Ok(galfus_vm::VmValue::Uint64(value)),
-        (BytecodeType::Float32, BoundaryValue::F32(value)) => {
-            Ok(galfus_vm::VmValue::Float32(value))
-        }
-        (BytecodeType::Float64, BoundaryValue::F64(value)) => {
-            Ok(galfus_vm::VmValue::Float64(value))
-        }
+        (BytecodeType::Float32, BoundaryValue::F32(value)) => Ok(galfus_vm::VmValue::Float32(
+            galfus_core::normalize_f32(value),
+        )),
+        (BytecodeType::Float64, BoundaryValue::F64(value)) => Ok(galfus_vm::VmValue::Float64(
+            galfus_core::normalize_f64(value),
+        )),
         (
             BytecodeType::Function { .. },
             BoundaryValue::Function {
