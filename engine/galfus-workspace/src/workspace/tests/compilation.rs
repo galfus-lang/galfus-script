@@ -529,7 +529,7 @@ fn run_requires_compile_and_executes_the_configured_entry() {
 }
 
 #[test]
-fn run_reports_missing_io_provider_only_when_io_is_executed() {
+fn run_rejects_a_missing_required_io_provider_before_execution() {
     let mut workspace = Workspace::new();
     workspace.set_catalog(io_catalog(galfus_contract::STD_IO_SOURCE));
     workspace
@@ -560,16 +560,14 @@ fn run_reports_missing_io_provider_only_when_io_is_executed() {
     workspace.compile().expect("workspace compiles");
 
     let executor = std::rc::Rc::new(CooperativeDriver::new());
-    let exit_error = Arc::new(Mutex::new(String::new()));
-    let ee = Arc::clone(&exit_error);
-    executor.on_exit(Box::new(move |res| {
-        if let Err(e) = res {
-            *ee.lock().unwrap() = e.to_string();
-        }
-    }));
-    let _ = workspace.run(&[], None, executor);
-    let error = exit_error.lock().unwrap().clone();
-    assert!(error.contains("HostProvider missing"));
+    let error = workspace
+        .run(&[], None, executor)
+        .expect_err("a required provider must be available before execution");
+    assert!(matches!(
+        error,
+        crate::RunBlocked::RuntimeError(message)
+            if message.contains("required provider module `std/io` is unavailable or incompatible")
+    ));
 }
 
 #[test]

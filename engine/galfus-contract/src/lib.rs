@@ -314,6 +314,12 @@ impl AdapterBindings {
         self.modules.get(proxy_module).map(|binding| binding.id)
     }
 
+    pub fn validates(&self, requirement: &AdapterModuleRequirement) -> bool {
+        self.modules
+            .get(requirement.proxy_module.as_str())
+            .is_some_and(|binding| binding.module.descriptor() == requirement.descriptor)
+    }
+
     /// Notifies the owning adapter that a request no longer has an execution owner.
     pub fn cancel(
         &mut self,

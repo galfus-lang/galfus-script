@@ -2,10 +2,11 @@ use super::*;
 use galfus_bytecode::instruction::{ConstIdx, FuncIdx, Instruction, Reg, TypeIdx};
 use galfus_bytecode::{
     BytecodeFunction, BytecodeGraph, BytecodeModule, BytecodeNode, BytecodeType, Constant,
-    ConstantPool, ExportKind, ExportSlot, PackageEntryPoint, PackageImage,
+    ConstantPool, ExportKind, ExportSlot, ImportEdge, PackageEntryPoint, PackageImage,
 };
 use galfus_contract::{
-    AdapterBindings, AdapterModuleBinding, BoundaryValue, CancellationOutcome, ExecutionTarget,
+    AdapterBindings, AdapterModuleBinding, AdapterModuleDescriptor, AdapterModuleRequirement,
+    BoundaryValue, CURRENT_BOUNDARY_ABI_VERSION, CancellationOutcome, ExecutionTarget,
     MessageInjector, RuntimeCapabilities,
 };
 use galfus_core::{HandleId, ModuleId, ModulePath, OpaqueTypeId, SemanticRevision};
@@ -159,17 +160,60 @@ fn adapter_graph() -> (Arc<BytecodeGraph>, ModuleId) {
     };
     let graph = BytecodeGraph::from_modules(
         SemanticRevision::new(0),
-        vec![BytecodeNode {
-            id: module_id,
-            path: ModulePath::new("main.gfs").unwrap(),
-            semantic_revision: SemanticRevision::new(0),
-            module,
-            metadata: None,
+        vec![
+            BytecodeNode {
+                id: module_id,
+                path: ModulePath::new("main.gfs").unwrap(),
+                semantic_revision: SemanticRevision::new(0),
+                module,
+                metadata: None,
+            },
+            BytecodeNode {
+                id: ModuleId::new(2),
+                path: ModulePath::new("graphics.gfp").unwrap(),
+                semantic_revision: SemanticRevision::new(0),
+                module: BytecodeModule {
+                    name: "graphics.gfp".to_string(),
+                    global_count: 0,
+                    constants: ConstantPool::default(),
+                    functions: vec![],
+                    types: vec![],
+                    struct_layouts: vec![],
+                    choice_layouts: vec![],
+                    imports: vec![],
+                    exports: vec![],
+                    init_func_idx: None,
+                },
+                metadata: None,
+            },
+        ],
+        vec![ImportEdge {
+            from: module_id,
+            to: ModuleId::new(2),
         }],
-        vec![],
     )
     .unwrap();
     (Arc::new(graph), module_id)
+}
+
+fn adapter_package(graph: Arc<BytecodeGraph>) -> Arc<PackageImage> {
+    Arc::new(
+        PackageImage::try_new(
+            (*graph).clone(),
+            ExecutionTarget::new("test").expect("valid target"),
+            Some(PackageEntryPoint::new(
+                ModulePath::new("main.gfs").expect("valid module path"),
+                "main",
+            )),
+            vec![AdapterModuleRequirement {
+                proxy_module: "graphics.gfp".to_string(),
+                descriptor: AdapterModuleDescriptor::empty(),
+                boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
+            }],
+            Vec::new(),
+        )
+        .expect("package adapter requirement matches the reachable proxy"),
+    )
 }
 
 fn execution_with_demo_adapter(complete: bool) -> (Execution, Arc<Mutex<DemoAdapterState>>) {
@@ -185,19 +229,7 @@ fn execution_with_demo_adapter(complete: bool) -> (Execution, Arc<Mutex<DemoAdap
             }),
         )
         .expect("adapter binding registers");
-    let package = Arc::new(
-        PackageImage::try_new(
-            (*graph).clone(),
-            ExecutionTarget::new("test").expect("valid target"),
-            Some(PackageEntryPoint::new(
-                ModulePath::new("main.gfs").expect("valid module path"),
-                "main",
-            )),
-            Vec::new(),
-            Vec::new(),
-        )
-        .expect("graph has no adapter proxy modules"),
-    );
+    let package = adapter_package(graph);
     let execution = Runtime::new(
         package,
         RuntimeCapabilities::builder()
@@ -207,6 +239,22 @@ fn execution_with_demo_adapter(complete: bool) -> (Execution, Arc<Mutex<DemoAdap
     .start(&[], Rc::new(CooperativeDriver::new()))
     .unwrap();
     (execution, state)
+}
+
+#[test]
+fn runtime_rejects_a_missing_required_adapter_before_execution() {
+    let (graph, _) = adapter_graph();
+    let result = Runtime::new(
+        adapter_package(graph),
+        RuntimeCapabilities::builder().build(),
+    )
+    .start(&[], Rc::new(CooperativeDriver::new()));
+
+    assert!(matches!(
+        result,
+        Err(RuntimeError::AdapterRequirementUnsatisfied { proxy_module })
+            if proxy_module == "graphics.gfp"
+    ));
 }
 
 #[test]

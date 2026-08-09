@@ -10,7 +10,10 @@ use galfus_bytecode::{
     ConstantPool, ExecutionMetadata, ExportSlot, ImportEdge, ImportSlot, PackageEntryPoint,
     PackageImage,
 };
-use galfus_contract::{ExecutionTarget, Providers, RuntimeCapabilities};
+use galfus_contract::{
+    CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget, ProviderModuleRequirement, Providers,
+    RuntimeCapabilities,
+};
 use galfus_core::{ModuleId, ModulePath, SemanticRevision, SourceId, Span};
 
 struct StartupProvider {
@@ -190,6 +193,32 @@ fn package_with_entry(
     )
 }
 
+fn package_with_required_provider(
+    graph: sync::Arc<BytecodeGraph>,
+    module_id: ModuleId,
+) -> sync::Arc<PackageImage> {
+    let module_path = graph
+        .get(module_id)
+        .expect("entry module exists")
+        .path()
+        .clone();
+    sync::Arc::new(
+        PackageImage::try_new(
+            (*graph).clone(),
+            target(),
+            Some(PackageEntryPoint::new(module_path, "main")),
+            Vec::new(),
+            vec![ProviderModuleRequirement {
+                module_path: "std/io".to_string(),
+                schema_fingerprint: 1,
+                boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
+                exports: Vec::new(),
+            }],
+        )
+        .expect("provider requirement is valid"),
+    )
+}
+
 fn start_with_provider(provider: StartupProvider) -> Execution {
     let (graph, module_id) = startup_graph();
     Runtime::new(
@@ -223,6 +252,22 @@ fn runtime_rejects_an_unsupported_bytecode_format_before_loading_the_entry_modul
             supported: galfus_bytecode::CURRENT_BYTECODE_FORMAT_VERSION,
             actual,
         }) if actual == galfus_bytecode::BytecodeFormatVersion::new(1, 0, 0)
+    ));
+}
+
+#[test]
+fn runtime_rejects_a_missing_required_provider_before_execution() {
+    let (graph, module_id) = startup_graph();
+    let result = Runtime::new(
+        package_with_required_provider(graph, module_id),
+        RuntimeCapabilities::builder().build(),
+    )
+    .start(&[], std::rc::Rc::new(CooperativeDriver::new()));
+
+    assert!(matches!(
+        result,
+        Err(RuntimeError::ProviderRequirementUnsatisfied { module_path })
+            if module_path == "std/io"
     ));
 }
 

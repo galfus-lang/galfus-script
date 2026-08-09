@@ -18,7 +18,9 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync;
 
-use galfus_contract::{BoundaryType, BoundaryValue, RuntimeCapabilities};
+use galfus_contract::{
+    AdapterBindings, BoundaryType, BoundaryValue, Providers, RuntimeCapabilities,
+};
 use galfus_vm::{VirtualMachine, VmPanic, VmValue};
 
 pub use driver::CooperativeDriver;
@@ -42,6 +44,10 @@ pub enum RuntimeError {
     EntryReturnTypeMismatch { name: String },
     #[error("entry arguments require bytecode type `{0}`")]
     MissingArgumentType(&'static str),
+    #[error("required provider module `{module_path}` is unavailable or incompatible")]
+    ProviderRequirementUnsatisfied { module_path: String },
+    #[error("required adapter proxy module `{proxy_module}` is unavailable or incompatible")]
+    AdapterRequirementUnsatisfied { proxy_module: String },
     #[error(transparent)]
     BytecodeFormat(#[from] galfus_bytecode::BytecodeFormatError),
     #[error(transparent)]
@@ -116,6 +122,7 @@ impl Runtime {
         } = self;
         let (providers, adapter_bindings) = capabilities.into_runtime_handles();
         package.graph().validate_format()?;
+        preflight_capabilities(&package, providers.as_ref(), &adapter_bindings)?;
 
         let mut orchestrator = crate::orchestrator::Orchestrator::new();
         let entry = package
@@ -232,6 +239,37 @@ impl Runtime {
             is_initializing,
         ))
     }
+}
+
+fn preflight_capabilities(
+    package: &galfus_bytecode::PackageImage,
+    providers: Option<&sync::Arc<sync::Mutex<Providers>>>,
+    adapter_bindings: &sync::Arc<sync::Mutex<AdapterBindings>>,
+) -> Result<(), RuntimeError> {
+    let bindings = adapter_bindings
+        .lock()
+        .expect("runtime owns the adapter capability table");
+    for requirement in package.adapter_requirements() {
+        if !bindings.validates(requirement) {
+            return Err(RuntimeError::AdapterRequirementUnsatisfied {
+                proxy_module: requirement.proxy_module.clone(),
+            });
+        }
+    }
+    drop(bindings);
+
+    for requirement in package.provider_requirements() {
+        let is_satisfied = providers
+            .and_then(|providers| providers.lock().ok())
+            .is_some_and(|providers| providers.validates(requirement));
+        if !is_satisfied {
+            return Err(RuntimeError::ProviderRequirementUnsatisfied {
+                module_path: requirement.module_path.clone(),
+            });
+        }
+    }
+
+    Ok(())
 }
 
 fn build_entry_args(

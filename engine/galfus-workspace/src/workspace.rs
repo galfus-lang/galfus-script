@@ -890,10 +890,15 @@ impl Workspace {
         graph
             .modules()
             .filter_map(|module| {
+                let provider_path = module
+                    .path()
+                    .as_str()
+                    .strip_suffix(".gfs")
+                    .unwrap_or(module.path().as_str());
                 self.catalog
-                    .provider_schema_fingerprint(module.path().as_str())
+                    .provider_schema_fingerprint(provider_path)
                     .map(|schema_fingerprint| ProviderModuleRequirement {
-                        module_path: module.path().as_str().to_string(),
+                        module_path: provider_path.to_string(),
                         schema_fingerprint,
                         boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
                         exports: self.provider_exports_for(module.path()),
