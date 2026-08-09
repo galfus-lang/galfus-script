@@ -25,7 +25,7 @@ pub struct BufferIoProvider {
 struct BufferIoState {
     input: VecDeque<u8>,
     output: Vec<u8>,
-    pending_read: Option<(usize, u64, Vec<u8>, Arc<dyn MessageInjector>)>,
+    pending_read: Option<(galfus_core::ThreadId, galfus_core::RequestId, Vec<u8>, Arc<dyn MessageInjector>)>,
     #[cfg(feature = "wasm")]
     write_callback: Option<WriteCallback>,
 }
@@ -114,8 +114,8 @@ impl HostProvider for BufferIoProvider {
 
     fn dispatch(
         &mut self,
-        thread_id: usize,
-        request_id: u64,
+        thread_id: galfus_core::ThreadId,
+        request_id: galfus_core::RequestId,
         method: &str,
         args: &[BoundaryValue],
         injector: Arc<dyn MessageInjector>,
@@ -141,9 +141,7 @@ impl HostProvider for BufferIoProvider {
                     if let Some(WriteCallback(callback)) = callback {
                         let value = Uint8Array::from(bytes.as_slice());
                         if let Err(e) = callback.call1(&JsValue::UNDEFINED, &value.into()) {
-                            injector.inject_system_response(
-                                thread_id,
-                                request_id,
+                            injector.inject_system_response(thread_id, request_id,
                                 Err(ExecutionFailure::new(
                                     ExecutionFailureKind::ProviderFailure,
                                     format!("{:?}", e),

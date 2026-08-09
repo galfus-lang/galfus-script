@@ -2,7 +2,7 @@ use super::BlockedQueue;
 use crate::registry::ThreadId;
 
 fn thread_id(value: u64) -> ThreadId {
-    ThreadId::from_raw(value).expect("test thread IDs are non-zero")
+    galfus_core::ThreadId::new(value as u32)
 }
 
 #[test]

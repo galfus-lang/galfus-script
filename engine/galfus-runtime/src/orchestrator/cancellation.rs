@@ -19,7 +19,7 @@ impl Orchestrator {
     pub(super) fn cancel_future_activation(
         &mut self,
         thread_id: crate::registry::ThreadId,
-        future_id: u64,
+        future_id: galfus_core::FutureId,
         activation: Activation,
     ) {
         match activation {
@@ -31,7 +31,7 @@ impl Orchestrator {
                     return;
                 };
                 if let Some(host) = providers.lock().unwrap().host_mut() {
-                    let _outcome = host.cancel(thread_id.raw() as usize, future_id);
+                    let _outcome = host.cancel(thread_id, galfus_core::RequestId::new(future_id.raw()));
                 }
             }
             Activation::Adapter {
@@ -43,8 +43,8 @@ impl Orchestrator {
                     let _outcome = bindings.lock().unwrap().cancel(
                         &proxy_module,
                         &symbol,
-                        thread_id.raw() as usize,
-                        future_id,
+                        thread_id,
+                        galfus_core::RequestId::new(future_id.raw()),
                     );
                 }
             }

@@ -4,13 +4,13 @@ mod tests;
 use crate::queue::{BlockedQueue, RunnableQueue};
 use crate::registry::{MailboxMessage, ThreadId, ThreadRegistry, ThreadState};
 use galfus_vm::thread::VmThreadState;
+use galfus_contract::{ExecutionFailure, ExecutionFailureKind};
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Manages thread lifecycle, scheduling queues, and timers.
 pub struct VirtualKernel {
-    next_thread_id: AtomicU64,
+    next_thread_id: u32,
     registry: ThreadRegistry,
     pub(crate) runnable: RunnableQueue,
     blocked: BlockedQueue,
@@ -19,7 +19,7 @@ pub struct VirtualKernel {
 impl VirtualKernel {
     pub fn new() -> Self {
         Self {
-            next_thread_id: AtomicU64::new(1),
+            next_thread_id: 1,
             registry: ThreadRegistry::new(),
             runnable: RunnableQueue::new(),
             blocked: BlockedQueue::new(),
@@ -27,11 +27,13 @@ impl VirtualKernel {
     }
 
     /// Allocates a new ThreadId and registers the thread as runnable.
-    pub fn spawn(&mut self, thread: VmThreadState, key: Option<String>) -> ThreadId {
-        let raw_id = self.next_thread_id.fetch_add(1, Ordering::Relaxed);
-        let id = ThreadId::from_raw(raw_id).expect("thread id should be non-zero");
+    pub fn spawn(&mut self, thread: VmThreadState, key: Option<String>) -> Result<ThreadId, ExecutionFailure> {
+        let raw_id = self.next_thread_id;
+        self.next_thread_id = self.next_thread_id.checked_add(1)
+            .ok_or_else(|| ExecutionFailure::new(ExecutionFailureKind::IdSpaceExhausted, "thread id space exhausted"))?;
+        let id = ThreadId::new(raw_id);
         self.registry.register(id, thread, key);
-        id
+        Ok(id)
     }
 
     /// Parks a currently running thread without blocking it.
@@ -50,13 +52,14 @@ impl VirtualKernel {
     }
 
     /// Blocks a thread, optionally with a timeout.
-    pub fn block(&mut self, id: ThreadId, thread: VmThreadState, timeout: Option<u64>) {
+    pub fn block(&mut self, id: ThreadId, thread: VmThreadState, timeout: Option<u64>) -> Result<(), ExecutionFailure> {
         self.registry.restore_vm_state(id, thread);
         if let Some(ms) = timeout {
-            self.blocked.block_with_timeout(id, ms);
+            self.blocked.block_with_timeout(id, ms)?;
         } else {
             self.blocked.block(id);
         }
+        Ok(())
     }
 
     /// Unblocks a thread and makes it runnable again.

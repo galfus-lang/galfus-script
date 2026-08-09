@@ -174,7 +174,7 @@ impl VmThreadState {
         }
     }
 
-    pub fn contains_future_handle(&self, future_id: u64) -> bool {
+    pub fn contains_future_handle(&self, future_id: galfus_core::FutureId) -> bool {
         self.call_stack.iter().any(|frame| {
             frame
                 .registers

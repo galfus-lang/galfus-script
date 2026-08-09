@@ -197,10 +197,8 @@ pub struct ExecutionHandle {
 }
 
 impl ExecutionHandle {
-    pub fn cancel_thread(&self, thread_id: usize) {
-        if let Some(thread_id) = crate::registry::ThreadId::from_raw(thread_id as u64) {
-            self.sink.send(RuntimeEvent::CancelThread { thread_id });
-        }
+    pub fn cancel_thread(&self, thread_id: galfus_core::ThreadId) {
+        self.sink.send(RuntimeEvent::CancelThread { thread_id });
     }
 
     pub fn cancel(&self) {
@@ -209,13 +207,11 @@ impl ExecutionHandle {
 
     pub fn resolve_request(
         &self,
-        thread_id: usize,
-        request_id: u64,
+        thread_id: galfus_core::ThreadId,
+        request_id: galfus_core::RequestId,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
-        let Some(thread_id) = crate::registry::ThreadId::from_raw(thread_id as u64) else {
-            return;
-        };
+
         self.sink.send(RuntimeEvent::EffectCompleted {
             thread_id,
             request_id,
@@ -225,13 +221,11 @@ impl ExecutionHandle {
 
     pub fn resolve_future(
         &self,
-        thread_id: usize,
-        future_id: u64,
+        thread_id: galfus_core::ThreadId,
+        future_id: galfus_core::FutureId,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
-        let Some(thread_id) = crate::registry::ThreadId::from_raw(thread_id as u64) else {
-            return;
-        };
+
         self.sink.send(RuntimeEvent::FutureCompleted {
             thread_id,
             future_id,
@@ -243,8 +237,8 @@ impl ExecutionHandle {
 impl galfus_contract::MessageInjector for ExecutionHandle {
     fn inject_system_response(
         &self,
-        thread_id: usize,
-        request_id: u64,
+        thread_id: galfus_core::ThreadId,
+        request_id: galfus_core::RequestId,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
         self.resolve_request(thread_id, request_id, result);
@@ -254,14 +248,14 @@ impl galfus_contract::MessageInjector for ExecutionHandle {
 pub(crate) struct FutureCompletionInjector {
     sink: EventSink,
     owner_thread_id: crate::registry::ThreadId,
-    future_id: u64,
+    future_id: galfus_core::FutureId,
 }
 
 impl FutureCompletionInjector {
     pub(crate) fn new(
         sink: EventSink,
         owner_thread_id: crate::registry::ThreadId,
-        future_id: u64,
+        future_id: galfus_core::FutureId,
     ) -> Self {
         Self {
             sink,
@@ -274,8 +268,8 @@ impl FutureCompletionInjector {
 impl galfus_contract::MessageInjector for FutureCompletionInjector {
     fn inject_system_response(
         &self,
-        _thread_id: usize,
-        _request_id: u64,
+        _thread_id: galfus_core::ThreadId,
+        _request_id: galfus_core::RequestId,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
         self.sink.send(RuntimeEvent::FutureCompleted {

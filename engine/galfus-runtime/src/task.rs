@@ -148,7 +148,7 @@ pub(crate) fn decode_from_thread_heap(
                 })
                 .transpose()?;
             Ok(BoundaryValue::Choice {
-                variant: *variant_idx as usize,
+                variant: *variant_idx as u32,
                 payload,
             })
         }
@@ -272,7 +272,7 @@ pub(crate) fn encode_into_thread_heap(
                 .choice_layouts
                 .get(layout_idx.raw() as usize)
                 .ok_or(BoundaryCodecError::UnsupportedType)?;
-            let variant_layout = layout.variants.get(variant).ok_or_else(mismatch)?;
+            let variant_layout = layout.variants.get(variant as usize).ok_or_else(mismatch)?;
             let payload = match (variant_layout.payload_ty, payload) {
                 (None, None) => galfus_vm::VmValue::Null,
                 (Some(payload_type), Some(payload)) => {
@@ -297,7 +297,7 @@ pub struct RuntimeTask {
     pub thread: Option<galfus_vm::thread::VmThreadState>,
     pub vm: Arc<VirtualMachine>,
     pub events: crate::event::EventSink,
-    pub future_completion: Option<(registry::ThreadId, u64)>,
+    pub future_completion: Option<(registry::ThreadId, galfus_core::FutureId)>,
 }
 
 impl RuntimeTask {
@@ -306,7 +306,7 @@ impl RuntimeTask {
         thread: galfus_vm::thread::VmThreadState,
         vm: Arc<VirtualMachine>,
         events: crate::event::EventSink,
-        future_completion: Option<(registry::ThreadId, u64)>,
+        future_completion: Option<(registry::ThreadId, galfus_core::FutureId)>,
     ) -> Self {
         Self {
             thread_id,
@@ -346,7 +346,7 @@ pub(crate) fn execution_stack(thread: &galfus_vm::thread::VmThreadState) -> Vec<
         .map(|frame| ExecutionFrame {
             module_id: frame.module_id.raw().into(),
             function_id: frame.func_idx.raw().into(),
-            instruction_offset: frame.pc.saturating_sub(1),
+            instruction_offset: frame.pc.saturating_sub(1) as u32,
         })
         .collect()
 }
@@ -369,7 +369,7 @@ fn panic_stack(panic: &galfus_vm::VmPanic) -> Vec<ExecutionFrame> {
         .map(|frame| ExecutionFrame {
             module_id: frame.module_id.raw().into(),
             function_id: frame.func_idx.raw().into(),
-            instruction_offset: frame.instruction_offset,
+            instruction_offset: frame.instruction_offset as u32,
         })
         .collect()
 }
@@ -384,7 +384,7 @@ impl RunnableTask for RuntimeTask {
                 let failure = with_initialization_context(
                     &thread,
                     ExecutionFailure::new(ExecutionFailureKind::VmPanic, e.to_string())
-                        .with_thread_id(self.thread_id.raw())
+                        .with_thread_id(self.thread_id)
                         .with_stack(panic_stack(&e)),
                 );
                 self.events.send(crate::event::RuntimeEvent::Failed {
@@ -429,7 +429,7 @@ impl RunnableTask for RuntimeTask {
                         ExecutionFailureKind::BoundaryCodecFailure,
                         format!("failed to decode thread return value: {e:?}"),
                     )
-                    .with_thread_id(self.thread_id.raw())
+                    .with_thread_id(self.thread_id)
                     .with_module_id(module_id.raw().into())
                     .with_stack(execution_stack(&thread))),
                 };
@@ -456,7 +456,7 @@ impl RunnableTask for RuntimeTask {
                 effect,
                 mut continuation,
             } => {
-                continuation.origin_thread_id = Some(self.thread_id.raw());
+                continuation.origin_thread_id = Some(self.thread_id);
                 self.events.send(crate::event::RuntimeEvent::Syscall {
                     thread_id: self.thread_id,
                     thread,
@@ -469,7 +469,7 @@ impl RunnableTask for RuntimeTask {
                 let err = with_initialization_context(
                     &thread,
                     with_execution_stack(
-                        err.with_thread_id(self.thread_id.raw()),
+                        err.with_thread_id(self.thread_id),
                         execution_stack(&thread),
                     ),
                 );

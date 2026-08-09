@@ -121,7 +121,7 @@ impl Orchestrator {
                             ExecutionFailureKind::InvalidContinuation,
                             "discarded future cannot be awaited",
                         )
-                        .with_thread_id(thread_id.raw())
+                        .with_thread_id(thread_id)
                         .with_future_id(future_id)
                         .with_stack(execution_stack(&thread)),
                     );
@@ -179,7 +179,7 @@ impl Orchestrator {
                                                     "invalid future worker argument: {error:?}"
                                                 ),
                                             )
-                                            .with_thread_id(thread_id.raw())
+                                            .with_thread_id(thread_id)
                                             .with_module_id(act_module_id.raw().into())
                                             .with_stack(execution_stack(&thread)),
                                         );
@@ -205,7 +205,7 @@ impl Orchestrator {
                                         ExecutionFailureKind::VmPanic,
                                         error.to_string(),
                                     )
-                                    .with_thread_id(thread_id.raw())
+                                    .with_thread_id(thread_id)
                                     .with_module_id(act_module_id.raw().into())
                                     .with_stack(execution_stack(&thread)),
                                 );
@@ -213,7 +213,7 @@ impl Orchestrator {
                                 return;
                             }
 
-                            let worker_id = self.kernel.spawn(worker_thread, None);
+                            let worker_id = self.kernel.spawn(worker_thread, None).expect("failed to spawn worker thread");
                             self.future_workers
                                 .insert(worker_id, (thread_id, future_id));
                             let spawned_thread = self.kernel.take_thread(worker_id).unwrap();
@@ -230,7 +230,7 @@ impl Orchestrator {
                                         ExecutionFailureKind::MissingProvider,
                                         "HostProvider missing",
                                     )
-                                    .with_thread_id(thread_id.raw())
+                                    .with_thread_id(thread_id)
                                     .with_future_id(future_id)
                                     .with_stack(execution_stack(&thread)),
                                 );
@@ -245,7 +245,7 @@ impl Orchestrator {
                                             ExecutionFailureKind::MissingProvider,
                                             "HostProvider missing",
                                         )
-                                        .with_thread_id(thread_id.raw())
+                                        .with_thread_id(thread_id)
                                         .with_future_id(future_id)
                                         .with_stack(execution_stack(&thread)),
                                     );
@@ -256,8 +256,8 @@ impl Orchestrator {
                             };
                             let task = ProviderDispatchTask {
                                 providers,
-                                thread_id: thread_id.raw() as usize,
-                                request_id: future_id,
+                                thread_id,
+                                request_id: galfus_core::RequestId::new(future_id.raw()),
                                 name,
                                 args,
                                 injector: Arc::new(FutureCompletionInjector::new(
@@ -286,7 +286,7 @@ impl Orchestrator {
                                         ExecutionFailureKind::MissingAdapter,
                                         "adapter registry missing",
                                     )
-                                    .with_thread_id(thread_id.raw())
+                                    .with_thread_id(thread_id)
                                     .with_future_id(future_id)
                                     .with_stack(execution_stack(&thread)),
                                 );
@@ -299,7 +299,7 @@ impl Orchestrator {
                                         ExecutionFailureKind::MissingAdapter,
                                         "adapter symbol missing",
                                     )
-                                    .with_thread_id(thread_id.raw())
+                                    .with_thread_id(thread_id)
                                     .with_future_id(future_id)
                                     .with_stack(execution_stack(&thread)),
                                 );
@@ -308,8 +308,8 @@ impl Orchestrator {
                             }
                             let task = AdapterDispatchTask {
                                 bindings,
-                                thread_id: thread_id.raw() as usize,
-                                request_id: future_id,
+                                thread_id,
+                                request_id: galfus_core::RequestId::new(future_id.raw()),
                                 module: proxy_module,
                                 symbol,
                                 args,
@@ -350,7 +350,7 @@ impl Orchestrator {
                             let thread_arg = |index: usize| {
                                 args.get(index).and_then(|value| match value {
                                     BoundaryValue::I64(id) if *id > 0 => {
-                                        crate::registry::ThreadId::from_raw(*id as u64)
+                                        Some(crate::registry::ThreadId::new(*id as u32))
                                     }
                                     _ => None,
                                 })
@@ -398,7 +398,7 @@ impl Orchestrator {
                                             {
                                                 mailbox.lock().unwrap().push_back(
                                                     crate::registry::MailboxMessage {
-                                                        sender_id: thread_id.raw(),
+                                                        sender_id: thread_id,
                                                         data: data.clone(),
                                                     },
                                                 );
@@ -442,7 +442,7 @@ impl Orchestrator {
                                     }
                                 }
                                 "__internal_thread_receive" => {
-                                    let sender_id = thread_arg(0).map(|id| id.raw());
+                                    let sender_id = thread_arg(0);
                                     let timeout_ms = args.get(1).and_then(|value| match value {
                                         BoundaryValue::I32(ms) if *ms >= 0 => Some(*ms as u64),
                                         BoundaryValue::I64(ms) if *ms >= 0 => Some(*ms as u64),
@@ -553,7 +553,10 @@ impl Orchestrator {
                                                     module_id: ModuleId::new(*module_id),
                                                     func_idx: FuncIdx(*func_idx),
                                                 });
-                                            self.kernel.spawn(new_thread, key).raw() as i64
+                                            match self.kernel.spawn(new_thread, key) {
+                                                Ok(id) => id.raw() as i64,
+                                                Err(e) => { self.failure = Some(galfus_contract::ExecutionFailure::new(galfus_contract::ExecutionFailureKind::BoundaryCodecFailure, e.to_string()).with_thread_id(thread_id).with_stack(crate::task::execution_stack(&thread))); self.kernel.cancel(thread_id); return; },
+                                            }
                                         }
                                         _ => -1,
                                     };
@@ -675,7 +678,7 @@ impl Orchestrator {
                                                 "unknown internal future activation: {operation}"
                                             ),
                                         )
-                                        .with_thread_id(thread_id.raw())
+                                        .with_thread_id(thread_id)
                                         .with_future_id(future_id)
                                         .with_stack(execution_stack(&thread)),
                                     );
@@ -706,8 +709,14 @@ impl Orchestrator {
                 arg_types,
                 return_type,
             } => {
-                let future_id = self.next_request_id;
-                self.next_request_id += 1;
+                let future_id_raw = self.next_future_id;
+                let Some(next_id) = self.next_future_id.checked_add(1) else {
+                    self.failure = Some(ExecutionFailure::new(ExecutionFailureKind::IdSpaceExhausted, "future id space exhausted").with_stack(execution_stack(&thread)));
+                    self.kernel.cancel(thread_id);
+                    return;
+                };
+                self.next_future_id = next_id;
+                let future_id = galfus_core::FutureId::new(future_id_raw);
 
                 let module = &self
                     .vm
@@ -746,7 +755,7 @@ impl Orchestrator {
                                     ExecutionFailureKind::BoundaryCodecFailure,
                                     format!("invalid future argument: {error:?}"),
                                 )
-                                .with_thread_id(thread_id.raw())
+                                .with_thread_id(thread_id)
                                 .with_module_id(module_id.raw().into())
                                 .with_stack(execution_stack(&thread)),
                             );
@@ -784,8 +793,14 @@ impl Orchestrator {
                 arg_types,
                 return_type,
             } => {
-                let future_id = self.next_request_id;
-                self.next_request_id += 1;
+                let future_id_raw = self.next_future_id;
+                let Some(next_id) = self.next_future_id.checked_add(1) else {
+                    self.failure = Some(ExecutionFailure::new(ExecutionFailureKind::IdSpaceExhausted, "future id space exhausted").with_stack(execution_stack(&thread)));
+                    self.kernel.cancel(thread_id);
+                    return;
+                };
+                self.next_future_id = next_id;
+                let future_id = galfus_core::FutureId::new(future_id_raw);
                 let galfus_vm::VmValue::Function {
                     module_id: target_module_id,
                     func_idx,
@@ -796,7 +811,7 @@ impl Orchestrator {
                             ExecutionFailureKind::InvalidContinuation,
                             "indirect async call requires a function value",
                         )
-                        .with_thread_id(thread_id.raw())
+                        .with_thread_id(thread_id)
                         .with_module_id(module_id.raw().into())
                         .with_stack(execution_stack(&thread)),
                     );
@@ -826,7 +841,7 @@ impl Orchestrator {
                                     ExecutionFailureKind::BoundaryCodecFailure,
                                     format!("invalid indirect future argument: {error:?}"),
                                 )
-                                .with_thread_id(thread_id.raw())
+                                .with_thread_id(thread_id)
                                 .with_module_id(module_id.raw().into())
                                 .with_stack(execution_stack(&thread)),
                             );
@@ -895,7 +910,7 @@ impl Orchestrator {
         continuation: galfus_vm::Continuation,
         module_id: ModuleId,
         return_type: TypeIdx,
-        future_ids: Vec<u64>,
+        future_ids: Vec<galfus_core::FutureId>,
         mode: crate::orchestrator::AggregateMode,
     ) {
         let coordinator_id = self.next_request_id;
@@ -929,7 +944,7 @@ impl Orchestrator {
                         ExecutionFailureKind::InvalidContinuation,
                         "aggregate member has no payload schema",
                     )
-                    .with_thread_id(thread_id.raw())
+                    .with_thread_id(thread_id)
                     .with_future_id(future_id)
                     .with_stack(execution_stack(&thread)),
                 );

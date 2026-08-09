@@ -18,7 +18,7 @@ use std::thread::ThreadId;
 struct DemoAdapterState {
     dispatch_threads: Vec<ThreadId>,
     completion_threads: Vec<ThreadId>,
-    cancellations: Vec<(String, usize, u64)>,
+    cancellations: Vec<(String, galfus_core::ThreadId, galfus_core::RequestId)>,
     releases: Vec<(String, u64)>,
 }
 
@@ -35,8 +35,8 @@ impl AdapterModuleBinding for DemoAdapter {
     fn dispatch(
         &mut self,
         symbol: &str,
-        _thread_id: usize,
-        _request_id: u64,
+        _thread_id: galfus_core::ThreadId,
+        _request_id: galfus_core::RequestId,
         _args: &[BoundaryValue],
         injector: Arc<dyn MessageInjector>,
     ) {
@@ -53,9 +53,7 @@ impl AdapterModuleBinding for DemoAdapter {
                     .unwrap()
                     .completion_threads
                     .push(std::thread::current().id());
-                injector.inject_system_response(
-                    0,
-                    0,
+                injector.inject_system_response(galfus_core::ThreadId::new(0), galfus_core::RequestId::new(0),
                     Ok(BoundaryValue::Handle {
                         type_id: OpaqueTypeId::new("graphics", "Texture").unwrap(),
                         binding_id: None,
@@ -69,7 +67,7 @@ impl AdapterModuleBinding for DemoAdapter {
         assert_eq!(symbol, "acquire");
     }
 
-    fn cancel(&mut self, symbol: &str, thread_id: usize, request_id: u64) -> CancellationOutcome {
+    fn cancel(&mut self, symbol: &str, thread_id: galfus_core::ThreadId, request_id: galfus_core::RequestId) -> CancellationOutcome {
         self.state
             .lock()
             .unwrap()

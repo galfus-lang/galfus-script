@@ -5,9 +5,9 @@ use galfus_vm::thread::VmThreadState;
 #[test]
 fn expired_timers_are_enqueued_in_deterministic_order() {
     let mut kernel = VirtualKernel::new();
-    let first = kernel.spawn(VmThreadState::new(), None);
-    let second = kernel.spawn(VmThreadState::new(), None);
-    let earlier = kernel.spawn(VmThreadState::new(), None);
+    let first = kernel.spawn(VmThreadState::new(), None).unwrap();
+    let second = kernel.spawn(VmThreadState::new(), None).unwrap();
+    let earlier = kernel.spawn(VmThreadState::new(), None).unwrap();
 
     for (thread_id, timeout_ms) in [(first, 10), (second, 10), (earlier, 5)] {
         let thread = kernel
@@ -26,8 +26,8 @@ fn expired_timers_are_enqueued_in_deterministic_order() {
 #[test]
 fn mailbox_wakeups_keep_their_arrival_order() {
     let mut kernel = VirtualKernel::new();
-    let first = kernel.spawn(VmThreadState::new(), None);
-    let second = kernel.spawn(VmThreadState::new(), None);
+    let first = kernel.spawn(VmThreadState::new(), None).unwrap();
+    let second = kernel.spawn(VmThreadState::new(), None).unwrap();
 
     for thread_id in [first, second] {
         let thread = kernel
@@ -43,7 +43,7 @@ fn mailbox_wakeups_keep_their_arrival_order() {
             .lock()
             .unwrap()
             .push_back(MailboxMessage {
-                sender_id: 0,
+                sender_id: galfus_core::ThreadId::new(0),
                 data: vec![thread_id.raw() as u8],
             });
         assert!(kernel.unblock(thread_id));

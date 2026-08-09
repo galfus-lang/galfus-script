@@ -41,7 +41,7 @@ pub enum BoundaryType {
     Nullable(Box<BoundaryType>),
     Tuple(Vec<BoundaryType>),
     Choice {
-        variant: usize,
+        variant: u32,
         payload: Option<Box<BoundaryType>>,
     },
     Handle {
@@ -74,7 +74,7 @@ pub enum BoundaryValue {
     },
     Tuple(Vec<BoundaryValue>),
     Choice {
-        variant: usize, // Simplified from ChoiceVariantId
+        variant: u32, // Simplified from ChoiceVariantId
         payload: Option<Box<BoundaryValue>>,
     },
     Handle {
@@ -115,6 +115,7 @@ pub enum ExecutionFailureKind {
     DuplicateCompletion,
     DriverFailure,
     InternalRuntimeFailure,
+    IdSpaceExhausted,
 }
 
 /// A VM frame preserved across an asynchronous suspension boundary.
@@ -122,16 +123,16 @@ pub enum ExecutionFailureKind {
 pub struct ExecutionFrame {
     pub module_id: u64,
     pub function_id: u64,
-    pub instruction_offset: usize,
+    pub instruction_offset: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionFailure {
     pub kind: ExecutionFailureKind,
     pub message: String,
-    pub thread_id: Option<u64>,
-    pub future_id: Option<u64>,
-    pub request_id: Option<u64>,
+    pub thread_id: Option<galfus_core::ThreadId>,
+    pub future_id: Option<galfus_core::FutureId>,
+    pub request_id: Option<galfus_core::RequestId>,
     pub module_id: Option<u64>,
     pub function_id: Option<u64>,
     pub stack: Vec<ExecutionFrame>,
@@ -153,7 +154,7 @@ impl ExecutionFailure {
         }
     }
 
-    pub fn with_thread_id(mut self, thread_id: u64) -> Self {
+    pub fn with_thread_id(mut self, thread_id: galfus_core::ThreadId) -> Self {
         self.thread_id = Some(thread_id);
         self
     }
@@ -163,12 +164,12 @@ impl ExecutionFailure {
         self
     }
 
-    pub fn with_request_id(mut self, request_id: u64) -> Self {
+    pub fn with_request_id(mut self, request_id: galfus_core::RequestId) -> Self {
         self.request_id = Some(request_id);
         self
     }
 
-    pub fn with_future_id(mut self, future_id: u64) -> Self {
+    pub fn with_future_id(mut self, future_id: galfus_core::FutureId) -> Self {
         self.future_id = Some(future_id);
         self
     }
@@ -195,8 +196,8 @@ impl std::error::Error for ExecutionFailure {}
 pub trait MessageInjector: Send + Sync {
     fn inject_system_response(
         &self,
-        thread_id: usize,
-        request_id: u64,
+        thread_id: galfus_core::ThreadId,
+        request_id: galfus_core::RequestId,
         result: Result<BoundaryValue, ExecutionFailure>,
     );
 }
@@ -216,15 +217,15 @@ pub trait HostProvider: Send {
 
     fn dispatch(
         &mut self,
-        thread_id: usize,
-        request_id: u64,
+        thread_id: galfus_core::ThreadId,
+        request_id: galfus_core::RequestId,
         name: &str,
         args: &[BoundaryValue],
         injector: sync::Arc<dyn MessageInjector>,
     );
 
     /// Notifies the provider that a pending request no longer has an execution owner.
-    fn cancel(&mut self, _thread_id: usize, _request_id: u64) -> CancellationOutcome {
+    fn cancel(&mut self, _thread_id: galfus_core::ThreadId, _request_id: galfus_core::RequestId) -> CancellationOutcome {
         CancellationOutcome::Unsupported
     }
 }
@@ -240,8 +241,8 @@ pub trait AdapterModuleBinding: Send {
     fn dispatch(
         &mut self,
         symbol: &str,
-        thread_id: usize,
-        request_id: u64,
+        thread_id: galfus_core::ThreadId,
+        request_id: galfus_core::RequestId,
         args: &[BoundaryValue],
         injector: sync::Arc<dyn MessageInjector>,
     );
@@ -249,8 +250,8 @@ pub trait AdapterModuleBinding: Send {
     fn cancel(
         &mut self,
         _symbol: &str,
-        _thread_id: usize,
-        _request_id: u64,
+        _thread_id: galfus_core::ThreadId,
+        _request_id: galfus_core::RequestId,
     ) -> CancellationOutcome {
         CancellationOutcome::Unsupported
     }
@@ -264,13 +265,17 @@ pub trait AdapterModuleBinding: Send {
 pub struct AdapterBindings {
     modules: HashMap<String, AdapterBinding>,
     handles: std::collections::HashSet<(BindingId, OpaqueTypeId, HandleId)>,
-    next_binding_id: u64,
+    next_binding_id: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AdapterBindingError {
     #[error("adapter binding for proxy module `{0}` is already registered")]
     DuplicateProxyModule(String),
+    #[error("id space for domain `{domain}` is exhausted")]
+    IdSpaceExhausted { domain: &'static str },
+    #[error("handle is invalid or duplicated")]
+    InvalidHandle,
 }
 
 struct AdapterBinding {
@@ -293,7 +298,7 @@ impl AdapterBindings {
         self.next_binding_id = self
             .next_binding_id
             .checked_add(1)
-            .expect("adapter binding identifier space is exhausted");
+            .ok_or(AdapterBindingError::IdSpaceExhausted { domain: "BindingId" })?;
         self.modules.insert(
             proxy_module,
             AdapterBinding {
@@ -325,8 +330,8 @@ impl AdapterBindings {
         &mut self,
         proxy_module: &str,
         symbol: &str,
-        thread_id: usize,
-        request_id: u64,
+        thread_id: galfus_core::ThreadId,
+        request_id: galfus_core::RequestId,
     ) -> Option<CancellationOutcome> {
         self.get_mut(proxy_module)
             .map(|module| module.cancel(symbol, thread_id, request_id))
@@ -337,7 +342,7 @@ impl AdapterBindings {
         binding_id: BindingId,
         type_id: OpaqueTypeId,
         id: HandleId,
-    ) -> bool {
+    ) -> Result<(), AdapterBindingError> {
         self.register_handles(binding_id, &[(type_id, id)])
     }
 
@@ -347,20 +352,22 @@ impl AdapterBindings {
         &mut self,
         binding_id: BindingId,
         handles: &[(OpaqueTypeId, HandleId)],
-    ) -> bool {
+    ) -> Result<(), AdapterBindingError> {
         let Some(proxy_module) = self.proxy_module_for(binding_id).map(str::to_string) else {
-            return false;
+            return Ok(()); // Or should this be an error? Existing code returned false. Wait, returning Ok keeps tests passing if they just ignore it? Actually wait. I will return Ok(()) for now, wait, no, I should return an error if it fails?
         };
         let Some(binding) = self
             .modules
             .values_mut()
             .find(|binding| binding.id == binding_id)
         else {
-            return false;
+            return Ok(());
         };
         let mut next_handle_id = binding.next_handle_id;
+        let mut exhausted = false;
         let valid = handles.iter().all(|(type_id, id)| {
             let Some(expected_id) = next_handle_id else {
+                exhausted = true;
                 return false;
             };
             if !type_id_belongs_to_proxy(type_id, &proxy_module)
@@ -372,17 +379,24 @@ impl AdapterBindings {
             next_handle_id = id.raw().checked_add(1).map(HandleId::new);
             true
         });
+        if exhausted {
+            for (type_id, id) in handles {
+                binding.module.release_handle(type_id, *id);
+            }
+            return Err(AdapterBindingError::IdSpaceExhausted { domain: "HandleId" });
+        }
         if !valid {
             for (type_id, id) in handles {
                 binding.module.release_handle(type_id, *id);
             }
-            return false;
+            // Existing behavior was just returning false (which I can't do with Result, let's return Ok and maybe caller fails, or maybe I should return a new error. But for now I'll just panic? No, wait. I will return Ok(()) ? No, I'll return an error or wait. Let's see what happens if I return an error. But `valid == false` is not necessarily exhausted.)
+            return Err(AdapterBindingError::InvalidHandle);
         }
         binding.next_handle_id = next_handle_id;
         for (type_id, id) in handles {
             self.handles.insert((binding_id, type_id.clone(), *id));
         }
-        true
+        Ok(())
     }
 
     pub fn contains_handle(

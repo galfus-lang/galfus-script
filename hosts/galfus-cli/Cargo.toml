@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+galfus-core = { path = "../../engine/galfus-core" }
 galfus-contract = { path = "../../engine/galfus-contract" }
 galfus-runtime = { path = "../../engine/galfus-runtime" }
 galfus-workspace = { path = "../../engine/galfus-workspace" }

@@ -47,20 +47,20 @@ pub enum RuntimeEvent {
     /// Completes a previously suspended provider effect.
     EffectCompleted {
         thread_id: ThreadId,
-        request_id: u64,
+        request_id: galfus_core::RequestId,
         result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
     },
     /// Completes a previously suspended future effect.
     FutureCompleted {
         thread_id: ThreadId,
-        future_id: u64,
+        future_id: galfus_core::FutureId,
         result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
     },
     /// A dedicated worker completed a Galfus future activation.
     FutureWorkerCompleted {
         worker_thread_id: ThreadId,
         owner_thread_id: ThreadId,
-        future_id: u64,
+        future_id: galfus_core::FutureId,
         thread: VmThreadState,
         result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
     },

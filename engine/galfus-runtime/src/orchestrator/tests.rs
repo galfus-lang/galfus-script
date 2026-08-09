@@ -19,8 +19,8 @@ impl HostProvider for RecordingProvider {
 
     fn dispatch(
         &mut self,
-        _thread_id: usize,
-        _request_id: u64,
+        _thread_id: galfus_core::ThreadId,
+        _request_id: galfus_core::RequestId,
         _name: &str,
         _args: &[BoundaryValue],
         _injector: Arc<dyn MessageInjector>,
@@ -34,8 +34,8 @@ struct NoopInjector;
 impl MessageInjector for NoopInjector {
     fn inject_system_response(
         &self,
-        _thread_id: usize,
-        _request_id: u64,
+        _thread_id: galfus_core::ThreadId,
+        _request_id: galfus_core::RequestId,
         _result: Result<BoundaryValue, galfus_contract::ExecutionFailure>,
     ) {
     }
@@ -46,8 +46,8 @@ fn provider_dispatch_task(called: Arc<AtomicBool>) -> ProviderDispatchTask {
         providers: Arc::new(Mutex::new(Providers::with_host(Box::new(
             RecordingProvider(called),
         )))),
-        thread_id: 1,
-        request_id: 1,
+        thread_id: galfus_core::ThreadId::new(1),
+        request_id: galfus_core::RequestId::new(1),
         name: "operation".to_string(),
         args: vec![],
         injector: Arc::new(NoopInjector),
@@ -128,7 +128,7 @@ fn cancellation_event_removes_a_queued_thread() {
     let token = orchestrator.main_thread_token();
     let thread_id = {
         let kernel = orchestrator.kernel_mut(token);
-        let thread_id = kernel.spawn(galfus_vm::thread::VmThreadState::new(), None);
+        let thread_id = kernel.spawn(galfus_vm::thread::VmThreadState::new(), None).unwrap();
         let thread = kernel
             .take_thread(thread_id)
             .expect("spawned thread is registered");
@@ -151,7 +151,7 @@ fn execution_cancellation_removes_every_thread_and_returns_a_structured_failure(
     let token = orchestrator.main_thread_token();
     for _ in 0..2 {
         let kernel = orchestrator.kernel_mut(token);
-        let thread_id = kernel.spawn(galfus_vm::thread::VmThreadState::new(), None);
+        let thread_id = kernel.spawn(galfus_vm::thread::VmThreadState::new(), None).unwrap();
         let thread = kernel
             .take_thread(thread_id)
             .expect("spawned thread is registered");
@@ -171,13 +171,14 @@ fn late_provider_completions_after_thread_cancellation_are_ignored() {
     let token = orchestrator.main_thread_token();
     let thread_id = orchestrator
         .kernel_mut(token)
-        .spawn(galfus_vm::thread::VmThreadState::new(), None);
+        .spawn(galfus_vm::thread::VmThreadState::new(), None)
+        .unwrap();
     let sink = orchestrator.sink();
     sink.send(RuntimeEvent::CancelThread { thread_id });
     for _ in 0..2 {
         sink.send(RuntimeEvent::EffectCompleted {
             thread_id,
-            request_id: 1,
+            request_id: galfus_core::RequestId::new(1),
             result: Err(galfus_contract::ExecutionFailure::new(
                 galfus_contract::ExecutionFailureKind::ProviderFailure,
                 "late provider completion",
