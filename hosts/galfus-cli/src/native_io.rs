@@ -85,13 +85,17 @@ impl HostProvider for NativeIoProvider {
                 loop {
                     match handle.read(&mut byte) {
                         Ok(0) if input.is_empty() => {
-                            injector.inject_system_response(thread_id, request_id,
+                            injector.inject_system_response(
+                                thread_id,
+                                request_id,
                                 Ok(BoundaryValue::Bytes(Vec::new())),
                             );
                             return;
                         }
                         Ok(0) => {
-                            injector.inject_system_response(thread_id, request_id,
+                            injector.inject_system_response(
+                                thread_id,
+                                request_id,
                                 Ok(BoundaryValue::Bytes(input)),
                             );
                             return;
@@ -100,14 +104,18 @@ impl HostProvider for NativeIoProvider {
                             input.push(byte[0]);
                             if input.ends_with(&terminator) {
                                 input.truncate(input.len() - terminator.len());
-                                injector.inject_system_response(thread_id, request_id,
+                                injector.inject_system_response(
+                                    thread_id,
+                                    request_id,
                                     Ok(BoundaryValue::Bytes(input)),
                                 );
                                 return;
                             }
                         }
                         Err(error) => {
-                            injector.inject_system_response(thread_id, request_id,
+                            injector.inject_system_response(
+                                thread_id,
+                                request_id,
                                 Err(ExecutionFailure::new(
                                     ExecutionFailureKind::ProviderFailure,
                                     error.to_string(),

@@ -269,14 +269,11 @@ impl Orchestrator {
                                 };
                                 host.affinity(name.as_str())
                             };
-                            let request_id = match self.allocate_request_id(
-                                thread_id,
-                                future_id,
-                                &thread,
-                            ) {
-                                Some(request_id) => request_id,
-                                None => return,
-                            };
+                            let request_id =
+                                match self.allocate_request_id(thread_id, future_id, &thread) {
+                                    Some(request_id) => request_id,
+                                    None => return,
+                                };
                             if let Err(error) = self
                                 .future_registry
                                 .assign_request_id(thread_id, future_id, request_id)
@@ -338,14 +335,11 @@ impl Orchestrator {
                                 self.kernel.cancel(thread_id);
                                 return;
                             }
-                            let request_id = match self.allocate_request_id(
-                                thread_id,
-                                future_id,
-                                &thread,
-                            ) {
-                                Some(request_id) => request_id,
-                                None => return,
-                            };
+                            let request_id =
+                                match self.allocate_request_id(thread_id, future_id, &thread) {
+                                    Some(request_id) => request_id,
+                                    None => return,
+                                };
                             if let Err(error) = self
                                 .future_registry
                                 .assign_request_id(thread_id, future_id, request_id)
@@ -398,9 +392,7 @@ impl Orchestrator {
                             let thread_arg = |index: usize| {
                                 args.get(index).and_then(|value| match value {
                                     BoundaryValue::I64(id) if *id > 0 => {
-                                        u32::try_from(*id)
-                                            .ok()
-                                            .map(crate::registry::ThreadId::new)
+                                        u32::try_from(*id).ok().map(crate::registry::ThreadId::new)
                                     }
                                     _ => None,
                                 })
@@ -605,7 +597,11 @@ impl Orchestrator {
                                                 });
                                             match self.kernel.spawn(new_thread, key) {
                                                 Ok(id) => id.raw() as i64,
-                                                Err(e) => { self.failure = Some(galfus_contract::ExecutionFailure::new(galfus_contract::ExecutionFailureKind::BoundaryCodecFailure, e.to_string()).with_thread_id(thread_id).with_stack(crate::task::execution_stack(&thread))); self.kernel.cancel(thread_id); return; },
+                                                Err(e) => {
+                                                    self.failure = Some(galfus_contract::ExecutionFailure::new(galfus_contract::ExecutionFailureKind::BoundaryCodecFailure, e.to_string()).with_thread_id(thread_id).with_stack(crate::task::execution_stack(&thread)));
+                                                    self.kernel.cancel(thread_id);
+                                                    return;
+                                                }
                                             }
                                         }
                                         _ => -1,

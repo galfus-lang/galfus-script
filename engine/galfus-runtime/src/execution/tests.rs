@@ -50,7 +50,8 @@ fn execution_remains_initializing_until_the_orchestrator_signal() {
     let token = orchestrator.main_thread_token();
     let thread_id = orchestrator
         .kernel_mut(token)
-        .spawn(galfus_vm::thread::VmThreadState::new(), None).unwrap();
+        .spawn(galfus_vm::thread::VmThreadState::new(), None)
+        .unwrap();
     let thread = orchestrator
         .kernel_mut(token)
         .take_thread(thread_id)

@@ -212,9 +212,11 @@ fn orchestrator_id_domains_fail_without_wrapping() {
             .raw(),
         u32::MAX - 1
     );
-    assert!(orchestrator
-        .allocate_request_id(thread_id, galfus_core::FutureId::new(1), &thread)
-        .is_none());
+    assert!(
+        orchestrator
+            .allocate_request_id(thread_id, galfus_core::FutureId::new(1), &thread)
+            .is_none()
+    );
     assert_eq!(
         orchestrator.failure.as_ref().unwrap().kind,
         galfus_contract::ExecutionFailureKind::IdSpaceExhausted
@@ -229,7 +231,11 @@ fn orchestrator_id_domains_fail_without_wrapping() {
             .raw(),
         u32::MAX - 1
     );
-    assert!(orchestrator.allocate_future_id(thread_id, &thread).is_none());
+    assert!(
+        orchestrator
+            .allocate_future_id(thread_id, &thread)
+            .is_none()
+    );
 
     orchestrator.failure = None;
     orchestrator.next_coordinator_id = u32::MAX - 1;
@@ -240,9 +246,11 @@ fn orchestrator_id_domains_fail_without_wrapping() {
             .raw(),
         u32::MAX - 1
     );
-    assert!(orchestrator
-        .allocate_coordinator_id(thread_id, &thread)
-        .is_none());
+    assert!(
+        orchestrator
+            .allocate_coordinator_id(thread_id, &thread)
+            .is_none()
+    );
     assert_eq!(
         orchestrator.failure.as_ref().unwrap().kind,
         galfus_contract::ExecutionFailureKind::IdSpaceExhausted

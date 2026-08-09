@@ -144,7 +144,11 @@ fn adapter_bindings_own_and_release_nominal_handles() {
         .expect("adapter binding registers");
     let type_id = OpaqueTypeId::new("graphics", "Texture").unwrap();
     let handle_id = HandleId::new(1);
-    assert!(bindings.register_handle(binding_id, type_id.clone(), handle_id).is_ok());
+    assert!(
+        bindings
+            .register_handle(binding_id, type_id.clone(), handle_id)
+            .is_ok()
+    );
     assert!(bindings.contains_handle(binding_id, &type_id, handle_id));
     assert!(bindings.release_handle(binding_id, &type_id, handle_id));
     assert!(!bindings.contains_handle(binding_id, &type_id, handle_id));
@@ -164,15 +168,23 @@ fn adapter_handle_batches_are_registered_atomically() {
         )
         .expect("adapter binding registers");
     let type_id = OpaqueTypeId::new("graphics", "Texture").unwrap();
-    assert!(bindings.register_handle(binding_id, type_id.clone(), HandleId::new(1)).is_ok());
+    assert!(
+        bindings
+            .register_handle(binding_id, type_id.clone(), HandleId::new(1))
+            .is_ok()
+    );
 
-    assert!(bindings.register_handles(
-        binding_id,
-        &[
-            (type_id.clone(), HandleId::new(2)),
-            (type_id.clone(), HandleId::new(1))
-        ],
-    ).is_err());
+    assert!(
+        bindings
+            .register_handles(
+                binding_id,
+                &[
+                    (type_id.clone(), HandleId::new(2)),
+                    (type_id.clone(), HandleId::new(1))
+                ],
+            )
+            .is_err()
+    );
     assert!(!bindings.contains_handle(binding_id, &type_id, HandleId::new(2)));
     assert!(bindings.contains_handle(binding_id, &type_id, HandleId::new(1)));
 }
@@ -190,10 +202,22 @@ fn adapter_handle_ids_are_monotonic_and_never_reused() {
         .expect("adapter binding registers");
     let type_id = OpaqueTypeId::new("graphics", "Texture").unwrap();
 
-    assert!(bindings.register_handle(binding_id, type_id.clone(), HandleId::new(1)).is_ok());
+    assert!(
+        bindings
+            .register_handle(binding_id, type_id.clone(), HandleId::new(1))
+            .is_ok()
+    );
     assert!(bindings.release_handle(binding_id, &type_id, HandleId::new(1)));
-    assert!(bindings.register_handle(binding_id, type_id.clone(), HandleId::new(1)).is_err());
-    assert!(bindings.register_handle(binding_id, type_id, HandleId::new(2)).is_ok());
+    assert!(
+        bindings
+            .register_handle(binding_id, type_id.clone(), HandleId::new(1))
+            .is_err()
+    );
+    assert!(
+        bindings
+            .register_handle(binding_id, type_id, HandleId::new(2))
+            .is_ok()
+    );
 }
 
 #[test]
@@ -218,7 +242,11 @@ fn adapter_handles_require_the_binding_that_created_them() {
     let type_id = OpaqueTypeId::new("graphics", "Texture").unwrap();
     let handle_id = HandleId::new(1);
 
-    assert!(bindings.register_handle(first_binding, type_id.clone(), handle_id).is_ok());
+    assert!(
+        bindings
+            .register_handle(first_binding, type_id.clone(), handle_id)
+            .is_ok()
+    );
     assert!(!bindings.release_handle(second_binding, &type_id, handle_id));
     assert!(bindings.contains_handle(first_binding, &type_id, handle_id));
 }
@@ -241,8 +269,16 @@ fn adapter_handle_id_space_stops_after_u32_max() {
         .unwrap()
         .next_handle_id = Some(HandleId::new(u32::MAX));
 
-    assert!(bindings.register_handle(binding_id, type_id.clone(), HandleId::new(u32::MAX)).is_ok());
-    assert!(bindings.register_handle(binding_id, type_id, HandleId::new(u32::MAX)).is_err());
+    assert!(
+        bindings
+            .register_handle(binding_id, type_id.clone(), HandleId::new(u32::MAX))
+            .is_ok()
+    );
+    assert!(
+        bindings
+            .register_handle(binding_id, type_id, HandleId::new(u32::MAX))
+            .is_err()
+    );
 }
 
 #[test]
@@ -310,7 +346,12 @@ impl AdapterModuleBinding for CancellationRecordingAdapter {
     ) {
     }
 
-    fn cancel(&mut self, _symbol: &str, thread_id: galfus_core::ThreadId, request_id: galfus_core::RequestId) -> CancellationOutcome {
+    fn cancel(
+        &mut self,
+        _symbol: &str,
+        thread_id: galfus_core::ThreadId,
+        request_id: galfus_core::RequestId,
+    ) -> CancellationOutcome {
         self.0.store(
             ((thread_id.raw() as u64) << 32) | (request_id.raw() as u64),
             std::sync::atomic::Ordering::Release,
@@ -330,7 +371,12 @@ fn adapter_bindings_route_cancellation_to_the_owning_symbol() {
         )
         .expect("adapter binding registers");
 
-    bindings.cancel("io", "read", galfus_core::ThreadId::new(3), galfus_core::RequestId::new(4));
+    bindings.cancel(
+        "io",
+        "read",
+        galfus_core::ThreadId::new(3),
+        galfus_core::RequestId::new(4),
+    );
 
     assert_eq!(
         cancellation.load(std::sync::atomic::Ordering::Acquire),

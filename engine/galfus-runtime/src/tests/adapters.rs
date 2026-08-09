@@ -53,7 +53,9 @@ impl AdapterModuleBinding for DemoAdapter {
                     .unwrap()
                     .completion_threads
                     .push(std::thread::current().id());
-                injector.inject_system_response(galfus_core::ThreadId::new(0), galfus_core::RequestId::new(0),
+                injector.inject_system_response(
+                    galfus_core::ThreadId::new(0),
+                    galfus_core::RequestId::new(0),
                     Ok(BoundaryValue::Handle {
                         type_id: OpaqueTypeId::new("graphics", "Texture").unwrap(),
                         binding_id: None,
@@ -67,7 +69,12 @@ impl AdapterModuleBinding for DemoAdapter {
         assert_eq!(symbol, "acquire");
     }
 
-    fn cancel(&mut self, symbol: &str, thread_id: galfus_core::ThreadId, request_id: galfus_core::RequestId) -> CancellationOutcome {
+    fn cancel(
+        &mut self,
+        symbol: &str,
+        thread_id: galfus_core::ThreadId,
+        request_id: galfus_core::RequestId,
+    ) -> CancellationOutcome {
         self.state
             .lock()
             .unwrap()

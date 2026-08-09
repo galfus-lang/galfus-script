@@ -45,6 +45,9 @@ fn timer_id_exhaustion_keeps_the_existing_queue_state() {
     queue.block_with_timeout(first, 10).unwrap();
     let error = queue.block_with_timeout(second, 10).unwrap_err();
 
-    assert_eq!(error.kind, galfus_contract::ExecutionFailureKind::IdSpaceExhausted);
+    assert_eq!(
+        error.kind,
+        galfus_contract::ExecutionFailureKind::IdSpaceExhausted
+    );
     assert_eq!(queue.tick_timeouts(10), vec![first]);
 }

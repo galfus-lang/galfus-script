@@ -225,7 +225,11 @@ pub trait HostProvider: Send {
     );
 
     /// Notifies the provider that a pending request no longer has an execution owner.
-    fn cancel(&mut self, _thread_id: galfus_core::ThreadId, _request_id: galfus_core::RequestId) -> CancellationOutcome {
+    fn cancel(
+        &mut self,
+        _thread_id: galfus_core::ThreadId,
+        _request_id: galfus_core::RequestId,
+    ) -> CancellationOutcome {
         CancellationOutcome::Unsupported
     }
 }
@@ -295,10 +299,12 @@ impl AdapterBindings {
             return Err(AdapterBindingError::DuplicateProxyModule(proxy_module));
         }
         let id = BindingId::new(self.next_binding_id);
-        self.next_binding_id = self
-            .next_binding_id
-            .checked_add(1)
-            .ok_or(AdapterBindingError::IdSpaceExhausted { domain: "BindingId" })?;
+        self.next_binding_id =
+            self.next_binding_id
+                .checked_add(1)
+                .ok_or(AdapterBindingError::IdSpaceExhausted {
+                    domain: "BindingId",
+                })?;
         self.modules.insert(
             proxy_module,
             AdapterBinding {

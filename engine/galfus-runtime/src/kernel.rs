@@ -3,8 +3,8 @@ mod tests;
 
 use crate::queue::{BlockedQueue, RunnableQueue};
 use crate::registry::{MailboxMessage, ThreadId, ThreadRegistry, ThreadState};
-use galfus_vm::thread::VmThreadState;
 use galfus_contract::{ExecutionFailure, ExecutionFailureKind};
+use galfus_vm::thread::VmThreadState;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
@@ -27,10 +27,18 @@ impl VirtualKernel {
     }
 
     /// Allocates a new ThreadId and registers the thread as runnable.
-    pub fn spawn(&mut self, thread: VmThreadState, key: Option<String>) -> Result<ThreadId, ExecutionFailure> {
+    pub fn spawn(
+        &mut self,
+        thread: VmThreadState,
+        key: Option<String>,
+    ) -> Result<ThreadId, ExecutionFailure> {
         let raw_id = self.next_thread_id;
-        self.next_thread_id = self.next_thread_id.checked_add(1)
-            .ok_or_else(|| ExecutionFailure::new(ExecutionFailureKind::IdSpaceExhausted, "thread id space exhausted"))?;
+        self.next_thread_id = self.next_thread_id.checked_add(1).ok_or_else(|| {
+            ExecutionFailure::new(
+                ExecutionFailureKind::IdSpaceExhausted,
+                "thread id space exhausted",
+            )
+        })?;
         let id = ThreadId::new(raw_id);
         self.registry.register(id, thread, key);
         Ok(id)
@@ -52,7 +60,12 @@ impl VirtualKernel {
     }
 
     /// Blocks a thread, optionally with a timeout.
-    pub fn block(&mut self, id: ThreadId, thread: VmThreadState, timeout: Option<u64>) -> Result<(), ExecutionFailure> {
+    pub fn block(
+        &mut self,
+        id: ThreadId,
+        thread: VmThreadState,
+        timeout: Option<u64>,
+    ) -> Result<(), ExecutionFailure> {
         self.registry.restore_vm_state(id, thread);
         if let Some(ms) = timeout {
             self.blocked.block_with_timeout(id, ms)?;

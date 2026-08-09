@@ -3,7 +3,6 @@ use galfus_vm::thread::VmThreadState;
 
 #[test]
 fn thread_ids_are_executor_owned_and_non_zero() {
-    
     assert_ne!(galfus_core::ThreadId::new(1), galfus_core::ThreadId::new(2));
 }
 

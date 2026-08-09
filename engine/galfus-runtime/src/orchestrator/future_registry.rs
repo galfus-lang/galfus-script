@@ -211,14 +211,14 @@ impl FutureRegistry {
                 *active_request_id = Some(request_id);
                 Ok(())
             }
-            Activation::GalfusFunction { .. } | Activation::Internal { .. } => Err(
-                ExecutionFailure::new(
+            Activation::GalfusFunction { .. } | Activation::Internal { .. } => {
+                Err(ExecutionFailure::new(
                     galfus_contract::ExecutionFailureKind::InvalidContinuation,
                     "future activation does not dispatch an external request",
                 )
                 .with_thread_id(owner_thread_id)
-                .with_future_id(future_id),
-            ),
+                .with_future_id(future_id))
+            }
         }
     }
 
@@ -268,7 +268,10 @@ impl FutureRegistry {
         self.discard_inner(owner_thread_id, future_id, true)
     }
 
-    pub fn discard_all_for_owner(&mut self, owner_thread_id: ThreadId) -> Vec<(galfus_core::FutureId, Activation)> {
+    pub fn discard_all_for_owner(
+        &mut self,
+        owner_thread_id: ThreadId,
+    ) -> Vec<(galfus_core::FutureId, Activation)> {
         self.records
             .iter_mut()
             .filter_map(|((owner, future_id), record)| {
@@ -430,7 +433,11 @@ impl FutureRegistry {
     }
 
     #[cfg(test)]
-    pub fn get(&self, thread_id: ThreadId, future_id: galfus_core::FutureId) -> Option<&FutureRecord> {
+    pub fn get(
+        &self,
+        thread_id: ThreadId,
+        future_id: galfus_core::FutureId,
+    ) -> Option<&FutureRecord> {
         self.records.get(&(thread_id, future_id))
     }
 }

@@ -2,8 +2,8 @@
 mod tests;
 
 use crate::registry::ThreadId;
-use galfus_core::TimerId;
 use galfus_contract::{ExecutionFailure, ExecutionFailureKind};
+use galfus_core::TimerId;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 pub struct RunnableQueue {
@@ -79,10 +79,17 @@ impl BlockedQueue {
         self.blocked.insert(id);
     }
 
-    pub fn block_with_timeout(&mut self, id: ThreadId, timeout_ms: u64) -> Result<(), ExecutionFailure> {
+    pub fn block_with_timeout(
+        &mut self,
+        id: ThreadId,
+        timeout_ms: u64,
+    ) -> Result<(), ExecutionFailure> {
         let raw_timer_id = self.next_timer_id;
         let next_timer_id = self.next_timer_id.checked_add(1).ok_or_else(|| {
-            ExecutionFailure::new(ExecutionFailureKind::IdSpaceExhausted, "timer id space exhausted")
+            ExecutionFailure::new(
+                ExecutionFailureKind::IdSpaceExhausted,
+                "timer id space exhausted",
+            )
         })?;
         let timer = TimerEntry {
             deadline_ms: self.clock_ms.saturating_add(timeout_ms),

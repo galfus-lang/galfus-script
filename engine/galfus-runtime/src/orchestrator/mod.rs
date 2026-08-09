@@ -525,8 +525,8 @@ impl Orchestrator {
                     galfus_contract::AdapterBindingError::IdSpaceExhausted { .. } => {
                         ExecutionFailureKind::IdSpaceExhausted
                     }
-                    galfus_contract::AdapterBindingError::DuplicateProxyModule(_) |
-                    galfus_contract::AdapterBindingError::InvalidHandle => {
+                    galfus_contract::AdapterBindingError::DuplicateProxyModule(_)
+                    | galfus_contract::AdapterBindingError::InvalidHandle => {
                         ExecutionFailureKind::BoundaryCodecFailure
                     }
                 };

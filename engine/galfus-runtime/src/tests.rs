@@ -19,7 +19,13 @@ use galfus_core::{ModuleId, ModulePath, SemanticRevision, SourceId, Span};
 struct StartupProvider {
     calls: sync::Arc<sync::Mutex<Vec<String>>>,
     pending: sync::Arc<
-        sync::Mutex<Option<(galfus_core::ThreadId, galfus_core::RequestId, sync::Arc<dyn galfus_contract::MessageInjector>)>>,
+        sync::Mutex<
+            Option<(
+                galfus_core::ThreadId,
+                galfus_core::RequestId,
+                sync::Arc<dyn galfus_contract::MessageInjector>,
+            )>,
+        >,
     >,
     fail_initializer: bool,
 }

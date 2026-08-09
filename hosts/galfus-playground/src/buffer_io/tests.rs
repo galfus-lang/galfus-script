@@ -2,7 +2,14 @@ use super::*;
 use std::sync::{Arc, Mutex};
 
 struct MockInjector {
-    response: Arc<Mutex<Option<(galfus_core::RequestId, Result<BoundaryValue, ExecutionFailure>)>>>,
+    response: Arc<
+        Mutex<
+            Option<(
+                galfus_core::RequestId,
+                Result<BoundaryValue, ExecutionFailure>,
+            )>,
+        >,
+    >,
 }
 
 impl MessageInjector for MockInjector {
@@ -25,7 +32,13 @@ fn call_dispatch(
     let injector = Arc::new(MockInjector {
         response: Arc::clone(&response),
     });
-    provider.dispatch(galfus_core::ThreadId::new(0), galfus_core::RequestId::new(1), method, args, injector);
+    provider.dispatch(
+        galfus_core::ThreadId::new(0),
+        galfus_core::RequestId::new(1),
+        method,
+        args,
+        injector,
+    );
     response
         .lock()
         .unwrap()
@@ -109,7 +122,10 @@ fn pending_reads_preserve_the_provider_request_id() {
 
     assert_eq!(
         response.lock().unwrap().take(),
-        Some((galfus_core::RequestId::new(42), Ok(BoundaryValue::Bytes(b"value".to_vec()))))
+        Some((
+            galfus_core::RequestId::new(42),
+            Ok(BoundaryValue::Bytes(b"value".to_vec()))
+        ))
     );
 }
 

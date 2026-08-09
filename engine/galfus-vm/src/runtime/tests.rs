@@ -110,9 +110,15 @@ fn provider_continuation_rejects_a_result_that_violates_its_declared_type() {
     vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![])
         .expect("function is valid");
 
-    let continuation = Continuation::for_provider(Reg(0), module_id, TypeIdx(0)).with_origin(galfus_core::ThreadId::new(1));
+    let continuation = Continuation::for_provider(Reg(0), module_id, TypeIdx(0))
+        .with_origin(galfus_core::ThreadId::new(1));
     let error = vm
-        .resume(galfus_core::ThreadId::new(1), &mut thread, continuation.clone(), Value::Bool(true))
+        .resume(
+            galfus_core::ThreadId::new(1),
+            &mut thread,
+            continuation.clone(),
+            Value::Bool(true),
+        )
         .expect_err("bool does not satisfy the declared int64 result type");
     assert_eq!(
         error.kind,
@@ -120,7 +126,12 @@ fn provider_continuation_rejects_a_result_that_violates_its_declared_type() {
     );
 
     let duplicate = vm
-        .resume(galfus_core::ThreadId::new(1), &mut thread, continuation, Value::Int64(1))
+        .resume(
+            galfus_core::ThreadId::new(1),
+            &mut thread,
+            continuation,
+            Value::Int64(1),
+        )
         .expect_err("a failed resume attempt consumes the continuation");
     assert_eq!(
         duplicate.kind,
@@ -174,8 +185,13 @@ fn await_future_suspends_and_resumes_through_a_vm_owned_continuation() {
     assert_eq!(effect_module_id, module_id);
     assert_eq!(return_type, TypeIdx(0));
 
-    vm.resume(galfus_core::ThreadId::new(1), &mut thread, continuation.with_origin(galfus_core::ThreadId::new(1)), Value::Int64(7))
-        .expect("future result resumes the continuation");
+    vm.resume(
+        galfus_core::ThreadId::new(1),
+        &mut thread,
+        continuation.with_origin(galfus_core::ThreadId::new(1)),
+        Value::Int64(7),
+    )
+    .expect("future result resumes the continuation");
     assert!(matches!(
         vm.execute_with_budget(&mut thread, 1),
         Ok(VmStep::Return {
@@ -216,8 +232,13 @@ fn dropping_the_last_future_handle_notifies_the_orchestrator() {
         panic!("last future handle must notify the runtime");
     };
     assert_eq!(future_id, galfus_core::FutureId::new(7));
-    vm.resume(galfus_core::ThreadId::new(1), &mut thread, continuation.with_origin(galfus_core::ThreadId::new(1)), Value::Null)
-        .expect("drop continuation resumes");
+    vm.resume(
+        galfus_core::ThreadId::new(1),
+        &mut thread,
+        continuation.with_origin(galfus_core::ThreadId::new(1)),
+        Value::Null,
+    )
+    .expect("drop continuation resumes");
 }
 
 #[test]

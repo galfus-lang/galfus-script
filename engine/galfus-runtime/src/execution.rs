@@ -211,7 +211,6 @@ impl ExecutionHandle {
         request_id: galfus_core::RequestId,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
-
         self.sink.send(RuntimeEvent::EffectCompleted {
             thread_id,
             request_id,
@@ -225,7 +224,6 @@ impl ExecutionHandle {
         future_id: galfus_core::FutureId,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
-
         self.sink.send(RuntimeEvent::FutureCompleted {
             thread_id,
             future_id,

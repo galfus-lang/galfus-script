@@ -41,13 +41,19 @@ fn resolved_future_keeps_its_cached_result_for_later_awaits() {
     let mut registry = FutureRegistry::new();
     registry
         .create(
-            owner(), galfus_core::FutureId::new(7), Some(TypeIdx(3)),
+            owner(),
+            galfus_core::FutureId::new(7),
+            Some(TypeIdx(3)),
             Some(ModuleId::new(1)),
             activation(),
         )
         .unwrap();
     registry
-        .complete(owner(), galfus_core::FutureId::new(7), Ok(BoundaryValue::I32(42)))
+        .complete(
+            owner(),
+            galfus_core::FutureId::new(7),
+            Ok(BoundaryValue::I32(42)),
+        )
         .unwrap();
 
     assert!(matches!(
@@ -58,7 +64,9 @@ fn resolved_future_keeps_its_cached_result_for_later_awaits() {
         })
     ));
     assert!(matches!(
-        registry.get(owner(), galfus_core::FutureId::new(7)).map(|record| &record.state),
+        registry
+            .get(owner(), galfus_core::FutureId::new(7))
+            .map(|record| &record.state),
         Some(FutureState::Resolved(Ok(BoundaryValue::I32(42))))
     ));
 }
@@ -67,24 +75,43 @@ fn resolved_future_keeps_its_cached_result_for_later_awaits() {
 fn created_future_is_discarded_without_starting_its_activation() {
     let mut registry = FutureRegistry::new();
     registry
-        .create(owner(), galfus_core::FutureId::new(7), None, None, activation())
+        .create(
+            owner(),
+            galfus_core::FutureId::new(7),
+            None,
+            None,
+            activation(),
+        )
         .unwrap();
-    registry.discard(owner(), galfus_core::FutureId::new(7)).unwrap();
+    registry
+        .discard(owner(), galfus_core::FutureId::new(7))
+        .unwrap();
 
     assert!(matches!(
         registry.take_activation_for_start(owner(), galfus_core::FutureId::new(7)),
         Err(_)
     ));
-    assert!(matches!(registry.add_waiter(owner(), galfus_core::FutureId::new(7), waiter()), Err(_)));
+    assert!(matches!(
+        registry.add_waiter(owner(), galfus_core::FutureId::new(7), waiter()),
+        Err(_)
+    ));
 }
 
 #[test]
 fn running_future_is_discarded_and_exposes_its_activation_for_cancellation() {
     let mut registry = FutureRegistry::new();
     registry
-        .create(owner(), galfus_core::FutureId::new(7), None, None, activation())
+        .create(
+            owner(),
+            galfus_core::FutureId::new(7),
+            None,
+            None,
+            activation(),
+        )
         .unwrap();
-    registry.take_activation_for_start(owner(), galfus_core::FutureId::new(7)).unwrap();
+    registry
+        .take_activation_for_start(owner(), galfus_core::FutureId::new(7))
+        .unwrap();
 
     let disp = registry.discard(owner(), galfus_core::FutureId::new(7));
     // Record is removed, but we can verify it was returned
@@ -100,19 +127,35 @@ fn running_future_is_discarded_and_exposes_its_activation_for_cancellation() {
 fn duplicate_completion_is_rejected_without_replacing_the_cache() {
     let mut registry = FutureRegistry::new();
     registry
-        .create(owner(), galfus_core::FutureId::new(7), None, None, activation())
+        .create(
+            owner(),
+            galfus_core::FutureId::new(7),
+            None,
+            None,
+            activation(),
+        )
         .unwrap();
     registry
-        .complete(owner(), galfus_core::FutureId::new(7), Ok(BoundaryValue::I32(1)))
+        .complete(
+            owner(),
+            galfus_core::FutureId::new(7),
+            Ok(BoundaryValue::I32(1)),
+        )
         .unwrap();
 
     assert!(
         registry
-            .complete(owner(), galfus_core::FutureId::new(7), Ok(BoundaryValue::I32(2)))
+            .complete(
+                owner(),
+                galfus_core::FutureId::new(7),
+                Ok(BoundaryValue::I32(2))
+            )
             .is_err()
     );
     assert!(matches!(
-        registry.get(owner(), galfus_core::FutureId::new(7)).map(|record| &record.state),
+        registry
+            .get(owner(), galfus_core::FutureId::new(7))
+            .map(|record| &record.state),
         Some(FutureState::Resolved(Ok(BoundaryValue::I32(1))))
     ));
 }
@@ -121,23 +164,45 @@ fn duplicate_completion_is_rejected_without_replacing_the_cache() {
 fn discarded_future_cannot_be_completed_later() {
     let mut registry = FutureRegistry::new();
     registry
-        .create(owner(), galfus_core::FutureId::new(7), None, None, activation())
+        .create(
+            owner(),
+            galfus_core::FutureId::new(7),
+            None,
+            None,
+            activation(),
+        )
         .unwrap();
-    registry.discard(owner(), galfus_core::FutureId::new(7)).unwrap();
+    registry
+        .discard(owner(), galfus_core::FutureId::new(7))
+        .unwrap();
 
     assert!(
         registry
-            .complete(owner(), galfus_core::FutureId::new(7), Ok(BoundaryValue::I32(42)))
+            .complete(
+                owner(),
+                galfus_core::FutureId::new(7),
+                Ok(BoundaryValue::I32(42))
+            )
             .is_err()
     );
-    assert!(registry.get(owner(), galfus_core::FutureId::new(7)).is_none());
+    assert!(
+        registry
+            .get(owner(), galfus_core::FutureId::new(7))
+            .is_none()
+    );
 }
 
 #[test]
 fn completion_drains_all_registered_waiters_once() {
     let mut registry = FutureRegistry::new();
     registry
-        .create(owner(), galfus_core::FutureId::new(7), None, None, activation())
+        .create(
+            owner(),
+            galfus_core::FutureId::new(7),
+            None,
+            None,
+            activation(),
+        )
         .unwrap();
     assert!(matches!(
         registry.add_waiter(owner(), galfus_core::FutureId::new(7), waiter()),
@@ -149,7 +214,11 @@ fn completion_drains_all_registered_waiters_once() {
     ));
 
     let waiters = registry
-        .complete(owner(), galfus_core::FutureId::new(7), Ok(BoundaryValue::I32(42)))
+        .complete(
+            owner(),
+            galfus_core::FutureId::new(7),
+            Ok(BoundaryValue::I32(42)),
+        )
         .unwrap();
     assert_eq!(waiters.len(), 2);
     assert!(matches!(
@@ -165,15 +234,31 @@ fn completion_drains_all_registered_waiters_once() {
 fn duplicate_ids_and_foreign_owners_are_rejected() {
     let mut registry = FutureRegistry::new();
     registry
-        .create(owner(), galfus_core::FutureId::new(7), None, None, activation())
+        .create(
+            owner(),
+            galfus_core::FutureId::new(7),
+            None,
+            None,
+            activation(),
+        )
         .unwrap();
 
     assert!(
         registry
-            .create(owner(), galfus_core::FutureId::new(7), None, None, activation())
+            .create(
+                owner(),
+                galfus_core::FutureId::new(7),
+                None,
+                None,
+                activation()
+            )
             .is_err()
     );
-    assert!(registry.add_waiter(foreign_owner(), galfus_core::FutureId::new(7), waiter()).is_err());
+    assert!(
+        registry
+            .add_waiter(foreign_owner(), galfus_core::FutureId::new(7), waiter())
+            .is_err()
+    );
     assert!(
         registry
             .take_activation_for_start(foreign_owner(), galfus_core::FutureId::new(7))
@@ -185,27 +270,55 @@ fn duplicate_ids_and_foreign_owners_are_rejected() {
 fn dropping_its_final_handle_removes_its_registry_record() {
     let mut registry = FutureRegistry::new();
     registry
-        .create(owner(), galfus_core::FutureId::new(7), None, None, activation())
+        .create(
+            owner(),
+            galfus_core::FutureId::new(7),
+            None,
+            None,
+            activation(),
+        )
         .unwrap();
     registry
-        .complete(owner(), galfus_core::FutureId::new(7), Ok(BoundaryValue::I32(42)))
+        .complete(
+            owner(),
+            galfus_core::FutureId::new(7),
+            Ok(BoundaryValue::I32(42)),
+        )
         .unwrap();
 
-    let _ = registry.discard(owner(), galfus_core::FutureId::new(7)).unwrap();
+    let _ = registry
+        .discard(owner(), galfus_core::FutureId::new(7))
+        .unwrap();
 
     // In Phase 1, discarding a resolved future should remove it from the registry.
-    assert!(registry.get(owner(), galfus_core::FutureId::new(7)).is_none());
+    assert!(
+        registry
+            .get(owner(), galfus_core::FutureId::new(7))
+            .is_none()
+    );
 }
 
 #[test]
 fn late_completion_after_discard_is_ignored_and_recorded_deterministically() {
     let mut registry = FutureRegistry::new();
     registry
-        .create(owner(), galfus_core::FutureId::new(7), None, None, activation())
+        .create(
+            owner(),
+            galfus_core::FutureId::new(7),
+            None,
+            None,
+            activation(),
+        )
         .unwrap();
-    registry.discard(owner(), galfus_core::FutureId::new(7)).unwrap();
+    registry
+        .discard(owner(), galfus_core::FutureId::new(7))
+        .unwrap();
 
-    let err = match registry.complete(owner(), galfus_core::FutureId::new(7), Ok(BoundaryValue::I32(42))) {
+    let err = match registry.complete(
+        owner(),
+        galfus_core::FutureId::new(7),
+        Ok(BoundaryValue::I32(42)),
+    ) {
         Err(e) => e,
         Ok(_) => panic!("Expected error"),
     };
@@ -217,7 +330,9 @@ fn late_completion_after_discard_is_ignored_and_recorded_deterministically() {
 
     // The state should remain Discarded or a tombstone variant (to be implemented in Phase 1)
     assert!(matches!(
-        registry.get(owner(), galfus_core::FutureId::new(7)).map(|record| &record.state),
+        registry
+            .get(owner(), galfus_core::FutureId::new(7))
+            .map(|record| &record.state),
         Some(FutureState::Discarded) | None
     ));
 }
