@@ -4,7 +4,7 @@ use galfus_bytecode::{
     BytecodeType, ChoiceLayout, ChoiceLayoutIdx, ChoiceVariantLayout, FieldLayout, OwnershipKind,
     StructLayout, StructLayoutIdx,
 };
-use galfus_core::{SymbolId, TypeId};
+use galfus_core::{OpaqueTypeId, SymbolId, TypeId};
 use galfus_frontend::{PrimitiveType, SymbolKind, SyntaxNodeKind, TypeKind};
 use std::collections::HashSet;
 
@@ -57,7 +57,10 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: TypeId) -> TypeIdx {
                             .unwrap_or("")
                             .to_string();
                         let proxy_name = ctx.proxy_name.as_ref().unwrap();
-                        BytecodeType::AdapterHandle(format!("{}::{}", proxy_name, name))
+                        BytecodeType::AdapterHandle(
+                            OpaqueTypeId::new(proxy_name.clone(), name)
+                                .expect("adapter proxy types have a module path and name"),
+                        )
                     } else {
                         let layout_idx = get_or_create_struct_layout(ctx, *symbol);
                         BytecodeType::Struct(layout_idx)

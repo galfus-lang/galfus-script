@@ -2,13 +2,14 @@ use super::*;
 use galfus_bytecode::instruction::{ConstIdx, FuncIdx, Instruction, Reg, TypeIdx};
 use galfus_bytecode::{
     BytecodeFunction, BytecodeGraph, BytecodeModule, BytecodeNode, BytecodeType, Constant,
-    ConstantPool, ExportKind, ExportSlot, PackageEntryPoint, PackageImage,
+    ConstantPool, ExportKind, ExportSlot, ImportEdge, PackageEntryPoint, PackageImage,
 };
 use galfus_contract::{
-    AdapterBindings, AdapterModuleBinding, BoundaryValue, CancellationOutcome, ExecutionTarget,
-    MessageInjector,
+    AdapterBindings, AdapterModuleBinding, AdapterModuleDescriptor, AdapterModuleRequirement,
+    BoundaryValue, CURRENT_BOUNDARY_ABI_VERSION, CancellationOutcome, ExecutionTarget,
+    MessageInjector, RuntimeCapabilities,
 };
-use galfus_core::{ModuleId, ModulePath, SemanticRevision};
+use galfus_core::{HandleId, ModuleId, ModulePath, OpaqueTypeId, SemanticRevision};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
@@ -27,6 +28,10 @@ struct DemoAdapter {
 }
 
 impl AdapterModuleBinding for DemoAdapter {
+    fn descriptor(&self) -> galfus_contract::AdapterModuleDescriptor {
+        galfus_contract::AdapterModuleDescriptor::empty()
+    }
+
     fn dispatch(
         &mut self,
         symbol: &str,
@@ -52,9 +57,9 @@ impl AdapterModuleBinding for DemoAdapter {
                     0,
                     0,
                     Ok(BoundaryValue::Handle {
-                        proxy_module: None,
-                        kind: "graphics::Texture".to_string(),
-                        id: 7,
+                        type_id: OpaqueTypeId::new("graphics", "Texture").unwrap(),
+                        binding_id: None,
+                        id: HandleId::new(1),
                     }),
                 );
             })
@@ -73,12 +78,12 @@ impl AdapterModuleBinding for DemoAdapter {
         CancellationOutcome::Confirmed
     }
 
-    fn release_handle(&mut self, kind: &str, id: u64) {
+    fn release_handle(&mut self, type_id: &OpaqueTypeId, id: HandleId) {
         self.state
             .lock()
             .unwrap()
             .releases
-            .push((kind.to_string(), id));
+            .push((type_id.name().to_string(), u64::from(id.raw())));
     }
 }
 
@@ -138,7 +143,7 @@ fn adapter_graph() -> (Arc<BytecodeGraph>, ModuleId) {
             },
         ],
         types: vec![
-            BytecodeType::AdapterHandle("graphics::Texture".to_string()),
+            BytecodeType::AdapterHandle(OpaqueTypeId::new("graphics", "Texture").unwrap()),
             BytecodeType::Int32,
             BytecodeType::Uint8,
             BytecodeType::Array(TypeIdx(2)),
@@ -155,31 +160,44 @@ fn adapter_graph() -> (Arc<BytecodeGraph>, ModuleId) {
     };
     let graph = BytecodeGraph::from_modules(
         SemanticRevision::new(0),
-        vec![BytecodeNode {
-            id: module_id,
-            path: ModulePath::new("main.gfs").unwrap(),
-            semantic_revision: SemanticRevision::new(0),
-            module,
-            metadata: None,
+        vec![
+            BytecodeNode {
+                id: module_id,
+                path: ModulePath::new("main.gfs").unwrap(),
+                semantic_revision: SemanticRevision::new(0),
+                module,
+                metadata: None,
+            },
+            BytecodeNode {
+                id: ModuleId::new(2),
+                path: ModulePath::new("graphics.gfp").unwrap(),
+                semantic_revision: SemanticRevision::new(0),
+                module: BytecodeModule {
+                    name: "graphics.gfp".to_string(),
+                    global_count: 0,
+                    constants: ConstantPool::default(),
+                    functions: vec![],
+                    types: vec![],
+                    struct_layouts: vec![],
+                    choice_layouts: vec![],
+                    imports: vec![],
+                    exports: vec![],
+                    init_func_idx: None,
+                },
+                metadata: None,
+            },
+        ],
+        vec![ImportEdge {
+            from: module_id,
+            to: ModuleId::new(2),
         }],
-        vec![],
     )
     .unwrap();
     (Arc::new(graph), module_id)
 }
 
-fn execution_with_demo_adapter(complete: bool) -> (Execution, Arc<Mutex<DemoAdapterState>>) {
-    let (graph, _) = adapter_graph();
-    let state = Arc::new(Mutex::new(DemoAdapterState::default()));
-    let mut bindings = AdapterBindings::default();
-    bindings.register_module(
-        "graphics.gfp",
-        Box::new(DemoAdapter {
-            state: Arc::clone(&state),
-            complete,
-        }),
-    );
-    let package = Arc::new(
+fn adapter_package(graph: Arc<BytecodeGraph>) -> Arc<PackageImage> {
+    Arc::new(
         PackageImage::try_new(
             (*graph).clone(),
             ExecutionTarget::new("test").expect("valid target"),
@@ -187,16 +205,56 @@ fn execution_with_demo_adapter(complete: bool) -> (Execution, Arc<Mutex<DemoAdap
                 ModulePath::new("main.gfs").expect("valid module path"),
                 "main",
             )),
-            Vec::new(),
+            vec![AdapterModuleRequirement {
+                proxy_module: "graphics.gfp".to_string(),
+                descriptor: AdapterModuleDescriptor::empty(),
+                boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
+            }],
             Vec::new(),
         )
-        .expect("graph has no adapter proxy modules"),
-    );
-    let execution = Runtime::new(package, None)
-        .with_adapter_bindings(bindings)
-        .start(&[], Rc::new(CooperativeDriver::new()))
-        .unwrap();
+        .expect("package adapter requirement matches the reachable proxy"),
+    )
+}
+
+fn execution_with_demo_adapter(complete: bool) -> (Execution, Arc<Mutex<DemoAdapterState>>) {
+    let (graph, _) = adapter_graph();
+    let state = Arc::new(Mutex::new(DemoAdapterState::default()));
+    let mut bindings = AdapterBindings::default();
+    bindings
+        .register_module(
+            "graphics.gfp",
+            Box::new(DemoAdapter {
+                state: Arc::clone(&state),
+                complete,
+            }),
+        )
+        .expect("adapter binding registers");
+    let package = adapter_package(graph);
+    let execution = Runtime::new(
+        package,
+        RuntimeCapabilities::builder()
+            .with_adapter_bindings(bindings)
+            .build(),
+    )
+    .start(&[], Rc::new(CooperativeDriver::new()))
+    .unwrap();
     (execution, state)
+}
+
+#[test]
+fn runtime_rejects_a_missing_required_adapter_before_execution() {
+    let (graph, _) = adapter_graph();
+    let result = Runtime::new(
+        adapter_package(graph),
+        RuntimeCapabilities::builder().build(),
+    )
+    .start(&[], Rc::new(CooperativeDriver::new()));
+
+    assert!(matches!(
+        result,
+        Err(RuntimeError::AdapterRequirementUnsatisfied { proxy_module })
+            if proxy_module == "graphics.gfp"
+    ));
 }
 
 #[test]
@@ -209,7 +267,7 @@ fn demo_adapter_completes_from_a_worker_and_releases_its_handle_once() {
     assert_eq!(state.dispatch_threads, vec![main_thread]);
     assert_eq!(state.completion_threads.len(), 1);
     assert_ne!(state.completion_threads[0], main_thread);
-    assert_eq!(state.releases, vec![("graphics::Texture".to_string(), 7)]);
+    assert_eq!(state.releases, vec![("Texture".to_string(), 1)]);
 }
 
 #[test]

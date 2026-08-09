@@ -18,7 +18,9 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync;
 
-use galfus_contract::{AdapterBindings, BoundaryType, BoundaryValue, Providers};
+use galfus_contract::{
+    AdapterBindings, BoundaryType, BoundaryValue, Providers, RuntimeCapabilities,
+};
 use galfus_vm::{VirtualMachine, VmPanic, VmValue};
 
 pub use driver::CooperativeDriver;
@@ -42,6 +44,10 @@ pub enum RuntimeError {
     EntryReturnTypeMismatch { name: String },
     #[error("entry arguments require bytecode type `{0}`")]
     MissingArgumentType(&'static str),
+    #[error("required provider module `{module_path}` is unavailable or incompatible")]
+    ProviderRequirementUnsatisfied { module_path: String },
+    #[error("required adapter proxy module `{proxy_module}` is unavailable or incompatible")]
+    AdapterRequirementUnsatisfied { proxy_module: String },
     #[error(transparent)]
     BytecodeFormat(#[from] galfus_bytecode::BytecodeFormatError),
     #[error(transparent)]
@@ -90,25 +96,18 @@ impl EntryAbi {
 /// A single execution composed from one package image and optional host providers.
 pub struct Runtime {
     package: sync::Arc<galfus_bytecode::PackageImage>,
-    providers: Option<sync::Arc<sync::Mutex<Providers>>>,
-    adapter_bindings: Option<sync::Arc<sync::Mutex<AdapterBindings>>>,
+    capabilities: RuntimeCapabilities,
 }
 
 impl Runtime {
     pub fn new(
         package: sync::Arc<galfus_bytecode::PackageImage>,
-        providers: Option<Providers>,
+        capabilities: RuntimeCapabilities,
     ) -> Self {
         Self {
             package,
-            providers: providers.map(|p| sync::Arc::new(sync::Mutex::new(p))),
-            adapter_bindings: None,
+            capabilities,
         }
-    }
-
-    pub fn with_adapter_bindings(mut self, bindings: AdapterBindings) -> Self {
-        self.adapter_bindings = Some(sync::Arc::new(sync::Mutex::new(bindings)));
-        self
     }
 
     /// Starts a persistent execution from the package entry point.
@@ -117,14 +116,19 @@ impl Runtime {
         args: &[Vec<u8>],
         driver: Rc<dyn galfus_contract::KernelDriver>,
     ) -> Result<Execution, RuntimeError> {
-        self.package.graph().validate_format()?;
+        let Runtime {
+            package,
+            capabilities,
+        } = self;
+        let (providers, adapter_bindings) = capabilities.into_runtime_handles();
+        package.graph().validate_format()?;
+        preflight_capabilities(&package, providers.as_ref(), &adapter_bindings)?;
 
         let mut orchestrator = crate::orchestrator::Orchestrator::new();
-        let entry = self
-            .package
+        let entry = package
             .entry_point()
             .ok_or(RuntimeError::MissingPackageEntry)?;
-        let graph = sync::Arc::new(self.package.graph().clone());
+        let graph = sync::Arc::new(package.graph().clone());
         let module_id = graph
             .modules()
             .find(|module| module.path() == entry.module_path())
@@ -164,7 +168,7 @@ impl Runtime {
         }
 
         let mut thread = galfus_vm::thread::VmThreadState::new();
-        let vm = VirtualMachine::new(graph.clone()).with_provider_handle(self.providers.clone());
+        let vm = VirtualMachine::new(graph.clone()).with_provider_handle(providers);
 
         let mut initializers = VecDeque::new();
         for initialized_module_id in graph.initialization_order(module_id)? {
@@ -219,7 +223,7 @@ impl Runtime {
         let vm = sync::Arc::new(vm);
 
         orchestrator.set_vm(vm);
-        orchestrator.set_adapter_bindings(self.adapter_bindings.clone());
+        orchestrator.set_adapter_bindings(Some(adapter_bindings));
         orchestrator.set_driver(driver.clone());
         orchestrator
             .kernel_mut(token)
@@ -235,6 +239,37 @@ impl Runtime {
             is_initializing,
         ))
     }
+}
+
+fn preflight_capabilities(
+    package: &galfus_bytecode::PackageImage,
+    providers: Option<&sync::Arc<sync::Mutex<Providers>>>,
+    adapter_bindings: &sync::Arc<sync::Mutex<AdapterBindings>>,
+) -> Result<(), RuntimeError> {
+    let bindings = adapter_bindings
+        .lock()
+        .expect("runtime owns the adapter capability table");
+    for requirement in package.adapter_requirements() {
+        if !bindings.validates(requirement) {
+            return Err(RuntimeError::AdapterRequirementUnsatisfied {
+                proxy_module: requirement.proxy_module.clone(),
+            });
+        }
+    }
+    drop(bindings);
+
+    for requirement in package.provider_requirements() {
+        let is_satisfied = providers
+            .and_then(|providers| providers.lock().ok())
+            .is_some_and(|providers| providers.validates(requirement));
+        if !is_satisfied {
+            return Err(RuntimeError::ProviderRequirementUnsatisfied {
+                module_path: requirement.module_path.clone(),
+            });
+        }
+    }
+
+    Ok(())
 }
 
 fn build_entry_args(

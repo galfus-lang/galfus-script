@@ -13,6 +13,10 @@ use std::thread;
 struct RecordingProvider(Arc<AtomicBool>);
 
 impl HostProvider for RecordingProvider {
+    fn descriptor(&self) -> galfus_contract::ProviderDescriptor {
+        galfus_contract::ProviderDescriptor::default()
+    }
+
     fn dispatch(
         &mut self,
         _thread_id: usize,

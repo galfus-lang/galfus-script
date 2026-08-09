@@ -54,15 +54,15 @@ pub(crate) fn decode_from_thread_heap(
             module_id: module_id.raw(),
             func_idx: func_idx.raw(),
         }),
-        (BytecodeType::AdapterHandle(kind), galfus_vm::VmValue::Object(reference)) => {
+        (BytecodeType::AdapterHandle(type_id), galfus_vm::VmValue::Object(reference)) => {
             match heap.get_object(reference) {
                 Ok(galfus_vm::HeapObject::AdapterHandle {
-                    proxy_module,
-                    kind: actual,
+                    binding_id,
+                    type_id: actual,
                     id,
-                }) if actual == kind => Ok(BoundaryValue::Handle {
-                    proxy_module: Some(proxy_module.clone()),
-                    kind: kind.clone(),
+                }) if actual == type_id => Ok(BoundaryValue::Handle {
+                    type_id: type_id.clone(),
+                    binding_id: Some(*binding_id),
                     id: *id,
                 }),
                 _ => Err(mismatch()),
@@ -203,16 +203,16 @@ pub(crate) fn encode_into_thread_heap(
             func_idx: galfus_bytecode::instruction::FuncIdx(func_idx),
         }),
         (
-            BytecodeType::AdapterHandle(kind),
+            BytecodeType::AdapterHandle(type_id),
             BoundaryValue::Handle {
-                proxy_module,
-                kind: actual,
+                type_id: actual,
+                binding_id: Some(binding_id),
                 id,
             },
-        ) if kind == &actual => Ok(galfus_vm::VmValue::Object(heap.alloc(
+        ) if type_id == &actual => Ok(galfus_vm::VmValue::Object(heap.alloc(
             galfus_vm::HeapObject::AdapterHandle {
-                proxy_module: proxy_module.clone().unwrap_or_default(),
-                kind: actual,
+                binding_id,
+                type_id: actual,
                 id,
             },
         ))),

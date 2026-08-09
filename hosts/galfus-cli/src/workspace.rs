@@ -6,7 +6,7 @@ use std::sync;
 
 use crate::native_io::NativeIoProvider;
 use anyhow::{Context, Result, bail};
-use galfus_contract::Providers;
+use galfus_contract::{Providers, RuntimeCapabilities};
 use galfus_runtime::{CooperativeDriver, Runtime};
 use galfus_workspace::{LoadResult, Workspace};
 use std::path::Path;
@@ -84,9 +84,11 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
 
     let mut execution = Runtime::new(
         sync::Arc::clone(&compile_report.package),
-        Some(Providers::with_host(Box::new(NativeIoProvider))),
+        RuntimeCapabilities::builder()
+            .with_providers(Providers::with_host(Box::new(NativeIoProvider)))
+            .with_adapter_bindings(bindings)
+            .build(),
     )
-    .with_adapter_bindings(bindings)
     .start(args.as_slice(), executor.clone())
     .map_err(|error| anyhow::anyhow!("package execution failed: {error}"))?;
     let _result = execution

@@ -82,7 +82,11 @@ pub struct VmThreadState {
     pub initializing_module: Option<ModuleId>,
     /// Adapter handles detached by graph release. The runtime owns dispatching
     /// their adapter release notifications on the main thread.
-    pub pending_adapter_handle_drops: Vec<(String, String, u64)>,
+    pub pending_adapter_handle_drops: Vec<(
+        galfus_core::BindingId,
+        galfus_core::OpaqueTypeId,
+        galfus_core::HandleId,
+    )>,
 }
 
 impl Default for VmThreadState {
@@ -117,16 +121,22 @@ impl VmThreadState {
         self.module_states.entry(module_id).or_default().initialized = true;
     }
 
-    pub fn extract_all_adapter_handles(&mut self) -> Vec<(String, String, u64)> {
+    pub fn extract_all_adapter_handles(
+        &mut self,
+    ) -> Vec<(
+        galfus_core::BindingId,
+        galfus_core::OpaqueTypeId,
+        galfus_core::HandleId,
+    )> {
         let mut extracted = std::mem::take(&mut self.pending_adapter_handle_drops);
         for obj in self.heap.objects.iter_mut() {
             if let Some(crate::runtime::HeapObject::AdapterHandle {
-                proxy_module,
-                kind,
+                binding_id,
+                type_id,
                 id,
             }) = obj
             {
-                extracted.push((proxy_module.clone(), kind.clone(), *id));
+                extracted.push((*binding_id, type_id.clone(), *id));
                 *obj = None;
             }
         }

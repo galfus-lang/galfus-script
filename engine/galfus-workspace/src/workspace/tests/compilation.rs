@@ -529,7 +529,7 @@ fn run_requires_compile_and_executes_the_configured_entry() {
 }
 
 #[test]
-fn run_reports_missing_io_provider_only_when_io_is_executed() {
+fn run_rejects_a_missing_required_io_provider_before_execution() {
     let mut workspace = Workspace::new();
     workspace.set_catalog(io_catalog(galfus_contract::STD_IO_SOURCE));
     workspace
@@ -560,16 +560,14 @@ fn run_reports_missing_io_provider_only_when_io_is_executed() {
     workspace.compile().expect("workspace compiles");
 
     let executor = std::rc::Rc::new(CooperativeDriver::new());
-    let exit_error = Arc::new(Mutex::new(String::new()));
-    let ee = Arc::clone(&exit_error);
-    executor.on_exit(Box::new(move |res| {
-        if let Err(e) = res {
-            *ee.lock().unwrap() = e.to_string();
-        }
-    }));
-    let _ = workspace.run(&[], None, executor);
-    let error = exit_error.lock().unwrap().clone();
-    assert!(error.contains("HostProvider missing"));
+    let error = workspace
+        .run(&[], None, executor)
+        .expect_err("a required provider must be available before execution");
+    assert!(matches!(
+        error,
+        crate::RunBlocked::RuntimeError(message)
+            if message.contains("required provider module `std/io` is unavailable or incompatible")
+    ));
 }
 
 #[test]
@@ -905,13 +903,13 @@ export fn(async) close(window: Window): null
     assert_eq!(
         alpha_exports[0].return_type,
         galfus_contract::BoundaryType::Handle {
-            kind: "alpha::Window".to_string(),
+            type_id: galfus_core::OpaqueTypeId::new("alpha", "Window").unwrap(),
         }
     );
     assert_eq!(
         beta_exports[1].parameter_types,
         vec![galfus_contract::BoundaryType::Handle {
-            kind: "beta::Window".to_string(),
+            type_id: galfus_core::OpaqueTypeId::new("beta", "Window").unwrap(),
         }]
     );
     let report = workspace.compile().expect("workspace compiles");
@@ -921,11 +919,21 @@ export fn(async) close(window: Window): null
         .modules()
         .flat_map(|module| module.module().types.iter())
         .filter_map(|ty| match ty {
-            galfus_bytecode::BytecodeType::AdapterHandle(kind) => Some(kind.as_str()),
+            galfus_bytecode::BytecodeType::AdapterHandle(type_id) => Some(type_id),
             _ => None,
         })
         .collect::<Vec<_>>();
 
-    assert!(handles.contains(&"alpha::Window"), "{handles:?}");
-    assert!(handles.contains(&"beta::Window"), "{handles:?}");
+    assert!(
+        handles
+            .iter()
+            .any(|type_id| **type_id == galfus_core::OpaqueTypeId::new("alpha", "Window").unwrap()),
+        "{handles:?}"
+    );
+    assert!(
+        handles
+            .iter()
+            .any(|type_id| **type_id == galfus_core::OpaqueTypeId::new("beta", "Window").unwrap()),
+        "{handles:?}"
+    );
 }

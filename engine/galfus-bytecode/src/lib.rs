@@ -63,7 +63,7 @@ pub enum BytecodeType {
     Uint64,
     Float32,
     Float64,
-    AdapterHandle(String),
+    AdapterHandle(galfus_core::OpaqueTypeId),
     Struct(StructLayoutIdx),
     Array(TypeIdx),
     Nullable(TypeIdx),
@@ -196,9 +196,9 @@ impl BytecodeModule {
             Some(BytecodeType::Float32) => Ok(BoundaryType::F32),
             Some(BytecodeType::Float64) => Ok(BoundaryType::F64),
             Some(BytecodeType::Function { .. }) => Ok(BoundaryType::Function),
-            Some(BytecodeType::AdapterHandle(kind)) => {
-                Ok(BoundaryType::Handle { kind: kind.clone() })
-            }
+            Some(BytecodeType::AdapterHandle(type_id)) => Ok(BoundaryType::Handle {
+                type_id: type_id.clone(),
+            }),
             Some(BytecodeType::Array(element)) => {
                 Ok(BoundaryType::Array(Box::new(self.boundary_type(*element)?)))
             }

@@ -108,6 +108,10 @@ impl BufferIoProvider {
 }
 
 impl HostProvider for BufferIoProvider {
+    fn descriptor(&self) -> galfus_contract::ProviderDescriptor {
+        galfus_contract::std_io_provider_descriptor()
+    }
+
     fn dispatch(
         &mut self,
         thread_id: usize,

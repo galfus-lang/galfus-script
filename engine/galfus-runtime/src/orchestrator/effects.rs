@@ -41,8 +41,8 @@ impl Orchestrator {
                 );
             }
             galfus_vm::VmEffect::AdapterHandleDropped {
-                proxy_module,
-                kind,
+                binding_id,
+                type_id,
                 id,
             } => {
                 if let Some(bindings) = &self.adapter_bindings {
@@ -52,7 +52,7 @@ impl Orchestrator {
                     bindings
                         .lock()
                         .unwrap()
-                        .release_handle(&proxy_module, &kind, id);
+                        .release_handle(binding_id, &type_id, id);
                 }
                 self.resume_or_fail_front(
                     thread_id,

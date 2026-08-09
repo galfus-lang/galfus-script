@@ -49,12 +49,16 @@ impl AdapterModuleLoader for MockLoader {
 
         // assert that config was passed completely
         assert!(requirement.descriptor.config.contains_key("test_key"));
-        Ok(Box::new(MockBoundModule))
+        Ok(Box::new(MockBoundModule(requirement.descriptor.clone())))
     }
 }
 
-struct MockBoundModule;
+struct MockBoundModule(AdapterModuleDescriptor);
 impl AdapterModuleBinding for MockBoundModule {
+    fn descriptor(&self) -> AdapterModuleDescriptor {
+        self.0.clone()
+    }
+
     fn dispatch(
         &mut self,
         _symbol: &str,
@@ -72,6 +76,28 @@ impl AdapterModuleBinding for MockBoundModule {
         _request_id: u64,
     ) -> CancellationOutcome {
         CancellationOutcome::Unsupported
+    }
+}
+
+struct DescriptorMismatchLoader;
+
+impl AdapterModuleLoader for DescriptorMismatchLoader {
+    fn load_artifact(
+        &self,
+        _selected_target: &SelectedAdapterTarget,
+        _context: &AdapterLoadContext,
+    ) -> Result<Vec<u8>, AdapterLoadError> {
+        Ok(b"mock artifact".to_vec())
+    }
+
+    fn load_module(
+        &self,
+        _requirement: &AdapterModuleRequirement,
+        _selected_target: &SelectedAdapterTarget,
+        _artifact: VerifiedAdapterArtifact,
+        _context: &AdapterLoadContext,
+    ) -> Result<Box<dyn AdapterModuleBinding>, AdapterLoadError> {
+        Ok(Box::new(MockBoundModule(AdapterModuleDescriptor::empty())))
     }
 }
 
@@ -335,5 +361,19 @@ fn preflight_rejects_an_adapter_artifact_with_wrong_content() {
     assert!(matches!(
         error,
         PreflightError::ArtifactIntegrityFailed { .. }
+    ));
+}
+
+#[test]
+fn preflight_rejects_a_binding_with_a_different_descriptor() {
+    let mut preflight = AdapterBindingPreflight::new();
+    preflight
+        .register_loader("test-adapter", Box::new(DescriptorMismatchLoader))
+        .unwrap();
+    let package = create_package(vec![create_requirement("proxy", "test-adapter")]);
+
+    assert!(matches!(
+        preflight.bind_package(&package, &create_context()),
+        Err(PreflightError::DescriptorMismatch { proxy_module }) if proxy_module == "proxy.gfp"
     ));
 }

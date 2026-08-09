@@ -17,7 +17,7 @@ use galfus_bytecode::instruction::{
 };
 use galfus_bytecode::{BytecodeGraph, BytecodeType, Constant, OwnershipKind};
 use galfus_contract::Providers;
-use galfus_core::ModuleId;
+use galfus_core::{BindingId, HandleId, ModuleId, OpaqueTypeId};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -87,9 +87,9 @@ pub enum VmEffect {
         future_id: u64,
     },
     AdapterHandleDropped {
-        proxy_module: String,
-        kind: String,
-        id: u64,
+        binding_id: BindingId,
+        type_id: OpaqueTypeId,
+        id: HandleId,
     },
     FutureWaitAll {
         future_ids: Vec<u64>,
@@ -174,9 +174,9 @@ pub enum HeapObject {
         payload: Value,
     },
     AdapterHandle {
-        proxy_module: String,
-        kind: String,
-        id: u64,
+        binding_id: BindingId,
+        type_id: OpaqueTypeId,
+        id: HandleId,
     },
 }
 
@@ -337,9 +337,9 @@ impl VirtualMachine {
                     None => matches!(payload, Value::Null),
                 }
             }
-            (BytecodeType::AdapterHandle(kind), Value::Object(reference)) => matches!(
+            (BytecodeType::AdapterHandle(type_id), Value::Object(reference)) => matches!(
                 thread.heap.get_object(reference),
-                Ok(HeapObject::AdapterHandle { kind: actual, .. }) if actual == kind
+                Ok(HeapObject::AdapterHandle { type_id: actual, .. }) if actual == type_id
             ),
             _ => false,
         }
@@ -523,11 +523,11 @@ impl VirtualMachine {
     pub fn step(&self, thread: &mut thread::VmThreadState) -> Result<VmStep, VmError> {
         self.validate_graph_format()?;
 
-        if let Some((proxy_module, kind, id)) = thread.pending_adapter_handle_drops.pop() {
+        if let Some((binding_id, type_id, id)) = thread.pending_adapter_handle_drops.pop() {
             return Ok(VmStep::Suspend {
                 effect: VmEffect::AdapterHandleDropped {
-                    proxy_module,
-                    kind,
+                    binding_id,
+                    type_id,
                     id,
                 },
                 continuation: Continuation::new(None),

@@ -6,6 +6,7 @@ use galfus_bytecode::{
     BytecodeModule, BytecodeType, ChoiceLayout, ChoiceVariantLayout, ConstantPool,
 };
 use galfus_contract::{BoundaryType, BoundaryValue};
+use galfus_core::{BindingId, HandleId, OpaqueTypeId};
 use galfus_vm::{HeapObject, VmValue};
 
 #[test]
@@ -229,12 +230,13 @@ fn codec_encodes_a_choice_with_its_declared_variant_payload() {
 
 #[test]
 fn codec_round_trips_nominal_adapter_handles() {
-    let module = module(vec![BytecodeType::AdapterHandle("file".to_string())]);
+    let type_id = OpaqueTypeId::new("file", "File").unwrap();
+    let module = module(vec![BytecodeType::AdapterHandle(type_id.clone())]);
     let mut heap = galfus_vm::thread::PrivateHeap::new();
     let value = BoundaryValue::Handle {
-        proxy_module: Some("".to_string()),
-        kind: "file".to_string(),
-        id: 9,
+        type_id,
+        binding_id: Some(BindingId::new(1)),
+        id: HandleId::new(9),
     };
 
     let encoded = encode_into_thread_heap(
@@ -279,15 +281,17 @@ fn codec_round_trips_function_references() {
 
 #[test]
 fn codec_rejects_adapter_handles_with_the_wrong_kind() {
-    let module = module(vec![BytecodeType::AdapterHandle("file".to_string())]);
+    let module = module(vec![BytecodeType::AdapterHandle(
+        OpaqueTypeId::new("file", "File").unwrap(),
+    )]);
     let mut heap = galfus_vm::thread::PrivateHeap::new();
     assert!(
         encode_into_thread_heap(
             &mut heap,
             BoundaryValue::Handle {
-                proxy_module: Some("".to_string()),
-                kind: "socket".to_string(),
-                id: 9
+                type_id: OpaqueTypeId::new("socket", "Socket").unwrap(),
+                binding_id: Some(BindingId::new(1)),
+                id: HandleId::new(9),
             },
             TypeIdx(0),
             galfus_core::ModuleId::new(1),
