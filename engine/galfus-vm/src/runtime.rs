@@ -370,12 +370,34 @@ impl VirtualMachine {
         self
     }
 
+    pub fn get_module(
+        &self,
+        module_id: galfus_core::ModuleId,
+    ) -> Result<&galfus_bytecode::BytecodeModule, VmError> {
+        self.graph
+            .get(module_id)
+            .map(|node| &node.module)
+            .ok_or(VmError::ModuleNotFound { module_id })
+    }
+
+    pub fn get_function(
+        &self,
+        module_id: galfus_core::ModuleId,
+        func_idx: FuncIdx,
+    ) -> Result<&galfus_bytecode::BytecodeFunction, VmError> {
+        let module = self.get_module(module_id)?;
+        module
+            .functions
+            .get(func_idx.raw() as usize)
+            .ok_or(VmError::FunctionOutOfBounds { index: func_idx })
+    }
+
     pub fn current_image(
         &self,
         thread: &thread::VmThreadState,
     ) -> Result<&galfus_bytecode::BytecodeModule, VmError> {
         let frame = thread.call_stack.last().ok_or(VmError::EmptyCallStack)?;
-        Ok(&self.graph.get(frame.module_id).unwrap().module)
+        self.get_module(frame.module_id)
     }
 
     pub fn prepare_function(
@@ -390,14 +412,11 @@ impl VirtualMachine {
             stack_trace: vec![],
         })?;
 
-        if (func_idx.raw() as usize) >= self.graph.get(module_id).unwrap().module.functions.len() {
-            return Err(VmPanic {
-                error: VmError::FunctionOutOfBounds { index: func_idx },
-                stack_trace: vec![],
-            });
-        }
+        let func = self.get_function(module_id, func_idx).map_err(|error| VmPanic {
+            error,
+            stack_trace: vec![],
+        })?;
 
-        let func = &self.graph.get(module_id).unwrap().module.functions[func_idx.raw() as usize];
         if args.len() != func.param_count as usize {
             return Err(VmPanic {
                 error: VmError::TypeMismatch {
@@ -439,14 +458,11 @@ impl VirtualMachine {
             stack_trace: vec![],
         })?;
 
-        if (func_idx.raw() as usize) >= self.graph.get(module_id).unwrap().module.functions.len() {
-            return Err(VmPanic {
-                error: VmError::FunctionOutOfBounds { index: func_idx },
-                stack_trace: vec![],
-            });
-        }
+        let func = self.get_function(module_id, func_idx).map_err(|error| VmPanic {
+            error,
+            stack_trace: vec![],
+        })?;
 
-        let func = &self.graph.get(module_id).unwrap().module.functions[func_idx.raw() as usize];
         if args.len() != func.param_count as usize {
             return Err(VmPanic {
                 error: VmError::TypeMismatch {

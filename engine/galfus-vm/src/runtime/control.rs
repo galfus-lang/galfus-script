@@ -79,7 +79,7 @@ impl VirtualMachine {
             } => {
                 let frame = thread.call_stack.last().ok_or(VmError::EmptyCallStack)?;
                 let current_module_id = frame.module_id;
-                let current_image = &self.graph.get(current_module_id).unwrap().module;
+                let current_image = self.get_module(current_module_id)?;
 
                 let (target_module_id, target_func_idx) =
                     if (func_idx.raw() as usize) < current_image.functions.len() {
@@ -101,7 +101,7 @@ impl VirtualMachine {
                         (import.module_id, func)
                     };
 
-                let target_image = &self.graph.get(target_module_id).unwrap().module;
+                let target_image = self.get_module(target_module_id)?;
                 let callee = target_image
                     .functions
                     .get(target_func_idx.raw() as usize)
@@ -147,8 +147,7 @@ impl VirtualMachine {
             } => {
                 // Resolve method name from constant pool.
                 let method_name = match self
-                    .current_image(thread)
-                    .unwrap()
+                    .current_image(thread)?
                     .constants
                     .constants
                     .get(name_const.raw() as usize)
@@ -187,10 +186,7 @@ impl VirtualMachine {
                             layout_idx,
                             ..
                         } => self
-                            .graph
-                            .get(*module_id)
-                            .unwrap()
-                            .module
+                            .get_module(*module_id)?
                             .struct_layouts
                             .get(layout_idx.raw() as usize)
                             .map(|layout| (*module_id, layout.name.clone())),
@@ -222,12 +218,12 @@ impl VirtualMachine {
                     }
                 };
 
-                let current_module_id = thread.call_stack.last().unwrap().module_id;
+                let current_module_id = thread.call_stack.last().ok_or(VmError::EmptyCallStack)?.module_id;
                 let resolution_module_id = receiver_layout
                     .as_ref()
                     .map(|(module_id, _)| *module_id)
                     .unwrap_or(current_module_id);
-                let resolution_image = &self.graph.get(resolution_module_id).unwrap().module;
+                let resolution_image = self.get_module(resolution_module_id)?;
 
                 // 1. Search in the receiver's module, or the current module for primitives.
                 if let Some(qualified_name) = &qualified_name
@@ -256,7 +252,7 @@ impl VirtualMachine {
                             galfus_bytecode::graph_resolver::ResolvedImportKind::Function(f) => *f,
                             _ => continue,
                         };
-                        let target_image = &self.graph.get(imp.module_id).unwrap().module;
+                        let target_image = self.get_module(imp.module_id)?;
                         let target_func = &target_image.functions[target_func_idx.raw() as usize];
                         let matched = if let Some(qualified_name) = &qualified_name {
                             check_name(&target_func.name, qualified_name, true)
@@ -284,7 +280,7 @@ impl VirtualMachine {
                                 ) => *f,
                                 _ => continue,
                             };
-                            let target_image = &self.graph.get(imp.module_id).unwrap().module;
+                            let Ok(target_image) = self.get_module(imp.module_id) else { continue; };
                             available.push(
                                 target_image.functions[target_func_idx.raw() as usize]
                                     .name
@@ -304,7 +300,7 @@ impl VirtualMachine {
                     }
                 })?;
 
-                let target_image = &self.graph.get(target_module_id).unwrap().module;
+                let target_image = self.get_module(target_module_id)?;
                 let callee = &target_image.functions[target_func_idx.raw() as usize];
 
                 if arg_count > callee.param_count {
@@ -358,7 +354,7 @@ impl VirtualMachine {
                     }
                 };
 
-                let current_image = &self.graph.get(target_module_id).unwrap().module;
+                let current_image = self.get_module(target_module_id)?;
 
                 let (target_module_id, target_func_idx) =
                     if (func_idx.raw() as usize) < current_image.functions.len() {
@@ -380,7 +376,7 @@ impl VirtualMachine {
                         (import.module_id, func)
                     };
 
-                let target_image = &self.graph.get(target_module_id).unwrap().module;
+                let target_image = self.get_module(target_module_id)?;
                 let callee = target_image
                     .functions
                     .get(target_func_idx.raw() as usize)
@@ -466,8 +462,7 @@ impl VirtualMachine {
             }
             Instruction::Panic { const_idx } => {
                 let constant = self
-                    .current_image(thread)
-                    .unwrap()
+                    .current_image(thread)?
                     .constants
                     .constants
                     .get(const_idx.raw() as usize)
@@ -503,10 +498,7 @@ impl VirtualMachine {
                 fields,
             } => {
                 let Some(layout) = self
-                    .graph
-                    .get(*module_id)
-                    .unwrap()
-                    .module
+                    .get_module(*module_id)?
                     .struct_layouts
                     .get(layout_idx.raw() as usize)
                 else {

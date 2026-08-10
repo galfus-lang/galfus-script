@@ -114,9 +114,8 @@ impl VirtualMachine {
         val: &Value,
         expected_ty: TypeIdx,
     ) -> bool {
-        let ty = match self
-            .current_image(thread)
-            .unwrap()
+        let Ok(image) = self.current_image(thread) else { return false; };
+        let ty = match image
             .types
             .get(expected_ty.raw() as usize)
         {
@@ -189,17 +188,14 @@ impl VirtualMachine {
                         return true;
                     }
 
-                    let Some(actual_layout) = self
-                        .current_image(thread)
-                        .unwrap()
+                    let Ok(image) = self.current_image(thread) else { return false; };
+                    let Some(actual_layout) = image
                         .choice_layouts
                         .get(layout_idx.raw() as usize)
                     else {
                         return false;
                     };
-                    let Some(expected_layout) = self
-                        .current_image(thread)
-                        .unwrap()
+                    let Some(expected_layout) = image
                         .choice_layouts
                         .get(expected_choice_idx.raw() as usize)
                     else {
@@ -222,8 +218,8 @@ impl VirtualMachine {
             (Value::Object(obj_ref), BytecodeType::Constraint(expected_constraint)) => {
                 if let Ok(HeapObject::Struct { layout_idx, .. }) = thread.heap.get_object(*obj_ref)
                 {
-                    self.current_image(thread)
-                        .unwrap()
+                    let Ok(image) = self.current_image(thread) else { return false; };
+                    image
                         .struct_layouts
                         .get(layout_idx.raw() as usize)
                         .is_some_and(|layout| layout.constraints.contains(expected_constraint))
@@ -258,17 +254,14 @@ impl VirtualMachine {
             return true;
         }
 
-        let Some(actual_ty) = self
-            .current_image(thread)
-            .unwrap()
+        let Ok(image) = self.current_image(thread) else { return false; };
+        let Some(actual_ty) = image
             .types
             .get(actual.raw() as usize)
         else {
             return false;
         };
-        let Some(expected_ty) = self
-            .current_image(thread)
-            .unwrap()
+        let Some(expected_ty) = image
             .types
             .get(expected.raw() as usize)
         else {

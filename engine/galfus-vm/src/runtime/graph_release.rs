@@ -48,12 +48,9 @@ impl VirtualMachine {
                         fields,
                     } => {
                         if let Some(layout) = self
-                            .graph
-                            .get(*module_id)
-                            .unwrap()
-                            .module
-                            .struct_layouts
-                            .get(layout_idx.raw() as usize)
+                            .get_module(*module_id)
+                            .ok()
+                            .and_then(|m| m.struct_layouts.get(layout_idx.raw() as usize))
                         {
                             for (i, field_val) in fields.iter().enumerate() {
                                 if let Value::Object(target_ref) = field_val {
@@ -139,12 +136,9 @@ impl VirtualMachine {
             {
                 let layout_idx_val = *layout_idx;
                 if let Some(layout) = self
-                    .graph
-                    .get(*module_id)
-                    .unwrap()
-                    .module
-                    .struct_layouts
-                    .get(layout_idx_val.raw() as usize)
+                    .get_module(*module_id)
+                    .ok()
+                    .and_then(|m| m.struct_layouts.get(layout_idx_val.raw() as usize))
                 {
                     for (i, field_val) in fields.iter_mut().enumerate() {
                         if let Value::Object(target_ref) = field_val {

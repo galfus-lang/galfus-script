@@ -13,21 +13,19 @@ impl VirtualMachine {
             // Category D: Heaps, Structs & Collections
             Instruction::AllocLocal { dest, type_idx } => {
                 let ty = self
-                    .current_image(thread)
-                    .unwrap()
+                    .current_image(thread)?
                     .types
                     .get(type_idx.raw() as usize)
                     .ok_or(VmError::TypeOutOfBounds { index: type_idx })?;
                 if let BytecodeType::Struct(layout_idx) = ty {
                     let layout = self
-                        .current_image(thread)
-                        .unwrap()
+                        .current_image(thread)?
                         .struct_layouts
                         .get(layout_idx.raw() as usize)
                         .ok_or(VmError::TypeOutOfBounds { index: type_idx })?;
                     let fields = vec![Value::Null; layout.fields.len()];
                     let obj_ref = thread.heap.alloc(HeapObject::Struct {
-                        module_id: thread.call_stack.last().unwrap().module_id,
+                        module_id: thread.call_stack.last().ok_or(VmError::EmptyCallStack)?.module_id,
                         layout_idx: *layout_idx,
                         fields,
                     });
@@ -94,8 +92,7 @@ impl VirtualMachine {
                 len_reg,
             } => {
                 let ty = self
-                    .current_image(thread)
-                    .unwrap()
+                    .current_image(thread)?
                     .types
                     .get(type_idx.raw() as usize)
                     .ok_or(VmError::TypeOutOfBounds { index: type_idx })?;
@@ -238,8 +235,7 @@ impl VirtualMachine {
                 count,
             } => {
                 let ty = self
-                    .current_image(thread)
-                    .unwrap()
+                    .current_image(thread)?
                     .types
                     .get(type_idx.raw() as usize)
                     .ok_or(VmError::TypeOutOfBounds { index: type_idx })?;
@@ -271,15 +267,14 @@ impl VirtualMachine {
                 payload,
             } => {
                 let ty = self
-                    .current_image(thread)
-                    .unwrap()
+                    .current_image(thread)?
                     .types
                     .get(type_idx.raw() as usize)
                     .ok_or(VmError::TypeOutOfBounds { index: type_idx })?;
                 if let BytecodeType::Choice(layout_idx) = ty {
                     let payload_val = thread.read_reg(payload)?;
                     let obj_ref = thread.heap.alloc(HeapObject::Choice {
-                        module_id: thread.call_stack.last().unwrap().module_id,
+                        module_id: thread.call_stack.last().ok_or(VmError::EmptyCallStack)?.module_id,
                         layout_idx: *layout_idx,
                         variant_idx,
                         payload: payload_val,
@@ -366,10 +361,7 @@ impl VirtualMachine {
                     fields,
                 } => {
                     let layout = self
-                        .graph
-                        .get(*module_id)
-                        .unwrap()
-                        .module
+                        .get_module(*module_id)?
                         .struct_layouts
                         .get(layout_idx.raw() as usize)
                         .ok_or(VmError::TypeMismatch {
@@ -657,8 +649,7 @@ impl VirtualMachine {
         type_idx: TypeIdx,
     ) -> Result<Value, VmError> {
         let ty = self
-            .current_image(thread)
-            .unwrap()
+            .current_image(thread)?
             .types
             .get(type_idx.raw() as usize)
             .ok_or(VmError::TypeOutOfBounds { index: type_idx })?;

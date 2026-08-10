@@ -150,7 +150,12 @@ impl Execution {
         loop {
             match self.poll(100)? {
                 ExecutorStepResult::Completed(_) => {
-                    return self.result.clone().unwrap_or(Ok(BoundaryValue::Null));
+                    return self.result.clone().unwrap_or_else(|| {
+                        Err(ExecutionFailure::new(
+                            ExecutionFailureKind::InternalRuntimeFailure,
+                            "execution completed without yielding a result",
+                        ))
+                    });
                 }
                 ExecutorStepResult::Blocked { .. } => {
                     if !self.sink.has_pending() {

@@ -55,6 +55,8 @@ pub enum RuntimeError {
     BytecodeFormat(#[from] galfus_bytecode::BytecodeFormatError),
     #[error(transparent)]
     GraphResolution(#[from] galfus_bytecode::GraphResolutionError),
+    #[error(transparent)]
+    GraphValidation(#[from] galfus_bytecode::BytecodeGraphValidationErrors),
     #[error("{0}")]
     VmPanic(#[from] VmPanic),
 }
@@ -125,6 +127,7 @@ impl Runtime {
         } = self;
         let (providers, adapter_bindings) = capabilities.into_runtime_handles();
         package.graph().validate_format()?;
+        package.graph().validate()?;
         validate_numeric_semantics(package.versions().numeric_semantics())
             .map_err(RuntimeError::NumericSemantics)?;
         preflight_capabilities(&package, providers.as_ref(), &adapter_bindings)?;
