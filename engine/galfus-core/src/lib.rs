@@ -1,4 +1,5 @@
 pub mod diagnostic;
+pub mod id_manager;
 pub mod ids;
 pub mod numeric;
 pub mod path;
@@ -7,6 +8,7 @@ pub mod span;
 pub mod version;
 
 pub use diagnostic::*;
+pub use id_manager::*;
 pub use ids::*;
 pub use numeric::*;
 pub use path::*;

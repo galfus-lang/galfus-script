@@ -14,6 +14,7 @@ use crate::task::{RuntimeTask, execution_stack, with_execution_stack};
 use galfus_contract::{
     BoundaryValue, ExecutionFailure, ExecutionFailureKind, KernelDriver, KernelTask,
 };
+use galfus_core::{RequestId, FutureId, CoordinatorId};
 use galfus_vm::VirtualMachine;
 use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
@@ -116,9 +117,9 @@ pub(crate) struct Orchestrator {
     pub(crate) failure: Option<galfus_contract::ExecutionFailure>,
     pending_continuations: HashMap<PendingKey, PendingContinuation>,
     startup_plans: HashMap<crate::registry::ThreadId, StartupPlan>,
-    next_request_id: u32,
-    next_future_id: u32,
-    next_coordinator_id: u32,
+    request_id_manager: galfus_core::id_manager::IdManager<RequestId>,
+    future_id_manager: galfus_core::id_manager::IdManager<FutureId>,
+    coordinator_id_manager: galfus_core::id_manager::IdManager<CoordinatorId>,
     adapter_bindings: Option<Arc<std::sync::Mutex<galfus_contract::AdapterBindings>>>,
     initialization_complete: Arc<AtomicBool>,
     shutting_down: bool,
@@ -172,9 +173,9 @@ impl Orchestrator {
             failure: None,
             pending_continuations: HashMap::new(),
             startup_plans: HashMap::new(),
-            next_request_id: 1,
-            next_future_id: 1,
-            next_coordinator_id: 1,
+            request_id_manager: galfus_core::id_manager::IdManager::new(1),
+            future_id_manager: galfus_core::id_manager::IdManager::new(1),
+            coordinator_id_manager: galfus_core::id_manager::IdManager::new(1),
             adapter_bindings: None,
             initialization_complete: Arc::new(AtomicBool::new(true)),
             shutting_down: false,

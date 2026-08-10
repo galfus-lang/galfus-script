@@ -56,7 +56,7 @@ fn mailbox_wakeups_keep_their_arrival_order() {
 #[test]
 fn thread_id_exhaustion_does_not_register_a_partial_thread() {
     let mut kernel = VirtualKernel::new();
-    kernel.next_thread_id = u32::MAX - 1;
+    kernel.thread_id_manager.set_next_id_for_test(u32::MAX - 1);
 
     assert_eq!(
         kernel.spawn(VmThreadState::new(), None).unwrap().raw(),

@@ -13,6 +13,11 @@ impl ModuleId {
     }
 }
 
+impl crate::id_manager::RawId for ModuleId {
+    fn new(raw: u32) -> Self { Self(raw) }
+    fn raw(&self) -> u32 { self.0 }
+}
+
 /// Nominal identity of an opaque type exported by one adapter proxy module.
 #[derive(
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -57,6 +62,11 @@ impl BindingId {
     }
 }
 
+impl crate::id_manager::RawId for BindingId {
+    fn new(raw: u32) -> Self { Self(raw) }
+    fn raw(&self) -> u32 { self.0 }
+}
+
 /// Identifies a unique thread of execution within the virtual kernel.
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -71,6 +81,11 @@ impl ThreadId {
     pub const fn raw(self) -> u32 {
         self.0
     }
+}
+
+impl crate::id_manager::RawId for ThreadId {
+    fn new(raw: u32) -> Self { Self(raw) }
+    fn raw(&self) -> u32 { self.0 }
 }
 
 /// Identifies a pending external request dispatched to a host provider or adapter.
@@ -89,6 +104,11 @@ impl RequestId {
     }
 }
 
+impl crate::id_manager::RawId for RequestId {
+    fn new(raw: u32) -> Self { Self(raw) }
+    fn raw(&self) -> u32 { self.0 }
+}
+
 /// Identifies an asynchronous future managed by the Orchestrator.
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -103,6 +123,11 @@ impl FutureId {
     pub const fn raw(self) -> u32 {
         self.0
     }
+}
+
+impl crate::id_manager::RawId for FutureId {
+    fn new(raw: u32) -> Self { Self(raw) }
+    fn raw(&self) -> u32 { self.0 }
 }
 
 /// Identifies an active timeout in the BlockedQueue.
@@ -121,6 +146,11 @@ impl TimerId {
     }
 }
 
+impl crate::id_manager::RawId for TimerId {
+    fn new(raw: u32) -> Self { Self(raw) }
+    fn raw(&self) -> u32 { self.0 }
+}
+
 /// Identifies one aggregate future wait within an Orchestrator.
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -135,6 +165,11 @@ impl CoordinatorId {
     pub const fn raw(self) -> u32 {
         self.0
     }
+}
+
+impl crate::id_manager::RawId for CoordinatorId {
+    fn new(raw: u32) -> Self { Self(raw) }
+    fn raw(&self) -> u32 { self.0 }
 }
 
 /// Public, non-reusable resource identity within one adapter binding.
@@ -153,6 +188,11 @@ impl HandleId {
     }
 }
 
+impl crate::id_manager::RawId for HandleId {
+    fn new(raw: u32) -> Self { Self(raw) }
+    fn raw(&self) -> u32 { self.0 }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceId(u32);
 
@@ -164,6 +204,11 @@ impl SourceId {
     pub const fn raw(&self) -> u32 {
         self.0
     }
+}
+
+impl crate::id_manager::RawId for SourceId {
+    fn new(raw: u32) -> Self { Self(raw) }
+    fn raw(&self) -> u32 { self.0 }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

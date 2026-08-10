@@ -1047,8 +1047,9 @@ impl Orchestrator {
         future_id: galfus_core::FutureId,
         thread: &galfus_vm::thread::VmThreadState,
     ) -> Option<galfus_core::RequestId> {
-        let raw_id = self.next_request_id;
-        let Some(next_request_id) = self.next_request_id.checked_add(1) else {
+        if let Some(id) = self.request_id_manager.try_allocate() {
+            Some(id)
+        } else {
             self.failure = Some(
                 ExecutionFailure::new(
                     ExecutionFailureKind::IdSpaceExhausted,
@@ -1059,10 +1060,8 @@ impl Orchestrator {
                 .with_stack(execution_stack(thread)),
             );
             self.kernel.cancel(thread_id);
-            return None;
-        };
-        self.next_request_id = next_request_id;
-        Some(galfus_core::RequestId::new(raw_id))
+            None
+        }
     }
 
     pub(super) fn allocate_future_id(
@@ -1070,8 +1069,9 @@ impl Orchestrator {
         thread_id: crate::registry::ThreadId,
         thread: &galfus_vm::thread::VmThreadState,
     ) -> Option<galfus_core::FutureId> {
-        let raw_id = self.next_future_id;
-        let Some(next_future_id) = self.next_future_id.checked_add(1) else {
+        if let Some(id) = self.future_id_manager.try_allocate() {
+            Some(id)
+        } else {
             self.failure = Some(
                 ExecutionFailure::new(
                     ExecutionFailureKind::IdSpaceExhausted,
@@ -1081,10 +1081,8 @@ impl Orchestrator {
                 .with_stack(execution_stack(thread)),
             );
             self.kernel.cancel(thread_id);
-            return None;
-        };
-        self.next_future_id = next_future_id;
-        Some(galfus_core::FutureId::new(raw_id))
+            None
+        }
     }
 
     pub(super) fn allocate_coordinator_id(
@@ -1092,8 +1090,9 @@ impl Orchestrator {
         thread_id: crate::registry::ThreadId,
         thread: &galfus_vm::thread::VmThreadState,
     ) -> Option<galfus_core::CoordinatorId> {
-        let raw_id = self.next_coordinator_id;
-        let Some(next_coordinator_id) = self.next_coordinator_id.checked_add(1) else {
+        if let Some(id) = self.coordinator_id_manager.try_allocate() {
+            Some(id)
+        } else {
             self.failure = Some(
                 ExecutionFailure::new(
                     ExecutionFailureKind::IdSpaceExhausted,
@@ -1103,10 +1102,8 @@ impl Orchestrator {
                 .with_stack(execution_stack(thread)),
             );
             self.kernel.cancel(thread_id);
-            return None;
-        };
-        self.next_coordinator_id = next_coordinator_id;
-        Some(galfus_core::CoordinatorId::new(raw_id))
+            None
+        }
     }
 
     fn future_activation(
