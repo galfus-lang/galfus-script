@@ -14,7 +14,7 @@ use crate::task::{RuntimeTask, execution_stack, with_execution_stack};
 use galfus_contract::{
     BoundaryValue, ExecutionFailure, ExecutionFailureKind, KernelDriver, KernelTask,
 };
-use galfus_core::{RequestId, FutureId, CoordinatorId};
+use galfus_core::{CoordinatorId, FutureId, RequestId};
 use galfus_vm::VirtualMachine;
 use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;

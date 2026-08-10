@@ -204,7 +204,9 @@ fn orchestrator_id_domains_fail_without_wrapping() {
     let thread_id = galfus_core::ThreadId::new(1);
     let thread = galfus_vm::thread::VmThreadState::new();
 
-    orchestrator.request_id_manager.set_next_id_for_test(u32::MAX - 1);
+    orchestrator
+        .request_id_manager
+        .set_next_id_for_test(u32::MAX - 1);
     assert_eq!(
         orchestrator
             .allocate_request_id(thread_id, galfus_core::FutureId::new(1), &thread)
@@ -223,7 +225,9 @@ fn orchestrator_id_domains_fail_without_wrapping() {
     );
 
     orchestrator.failure = None;
-    orchestrator.future_id_manager.set_next_id_for_test(u32::MAX - 1);
+    orchestrator
+        .future_id_manager
+        .set_next_id_for_test(u32::MAX - 1);
     assert_eq!(
         orchestrator
             .allocate_future_id(thread_id, &thread)
@@ -238,7 +242,9 @@ fn orchestrator_id_domains_fail_without_wrapping() {
     );
 
     orchestrator.failure = None;
-    orchestrator.coordinator_id_manager.set_next_id_for_test(u32::MAX - 1);
+    orchestrator
+        .coordinator_id_manager
+        .set_next_id_for_test(u32::MAX - 1);
     assert_eq!(
         orchestrator
             .allocate_coordinator_id(thread_id, &thread)

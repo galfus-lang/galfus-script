@@ -28,7 +28,7 @@ fn reuses_freed_ids() {
     let _id3 = manager.allocate();
 
     manager.free(id2);
-    
+
     // It should pop the last freed ID
     assert_eq!(manager.allocate(), TestId(2));
     // Then continue sequence
