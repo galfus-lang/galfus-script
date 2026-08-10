@@ -416,12 +416,15 @@ impl RunnableTask for RuntimeTask {
                     });
                     return ThreadResult::Completed(Ok(galfus_contract::BoundaryValue::I32(0)));
                 }
-                let module = &self
-                    .vm
-                    .graph
-                    .get(module_id)
-                    .expect("returned module is loaded")
-                    .module;
+                let module = match self.vm.graph.get(module_id) {
+                    Some(node) => &node.module,
+                    None => {
+                        return ThreadResult::Completed(Err(ExecutionFailure::new(
+                            ExecutionFailureKind::InternalRuntimeFailure,
+                            format!("module {} missing during return decoding", module_id.raw()),
+                        )));
+                    }
+                };
                 let result = match decode_from_thread_heap(&thread.heap, value, return_type, module)
                 {
                     Ok(value) => Ok(value),

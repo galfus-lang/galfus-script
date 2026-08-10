@@ -412,10 +412,12 @@ impl VirtualMachine {
             stack_trace: vec![],
         })?;
 
-        let func = self.get_function(module_id, func_idx).map_err(|error| VmPanic {
-            error,
-            stack_trace: vec![],
-        })?;
+        let func = self
+            .get_function(module_id, func_idx)
+            .map_err(|error| VmPanic {
+                error,
+                stack_trace: vec![],
+            })?;
 
         if args.len() != func.param_count as usize {
             return Err(VmPanic {
@@ -458,10 +460,12 @@ impl VirtualMachine {
             stack_trace: vec![],
         })?;
 
-        let func = self.get_function(module_id, func_idx).map_err(|error| VmPanic {
-            error,
-            stack_trace: vec![],
-        })?;
+        let func = self
+            .get_function(module_id, func_idx)
+            .map_err(|error| VmPanic {
+                error,
+                stack_trace: vec![],
+            })?;
 
         if args.len() != func.param_count as usize {
             return Err(VmPanic {
@@ -554,8 +558,7 @@ impl VirtualMachine {
                 .call_stack
                 .last_mut()
                 .ok_or(VmError::EmptyCallStack)?;
-            let func = &self.graph.get(frame.module_id).unwrap().module.functions
-                [frame.func_idx.raw() as usize];
+            let func = self.get_function(frame.module_id, frame.func_idx)?;
             if frame.pc >= func.instructions.len() {
                 return Err(VmError::InstructionPointerOutOfBounds { pc: frame.pc });
             }

@@ -25,7 +25,11 @@ impl VirtualMachine {
                         .ok_or(VmError::TypeOutOfBounds { index: type_idx })?;
                     let fields = vec![Value::Null; layout.fields.len()];
                     let obj_ref = thread.heap.alloc(HeapObject::Struct {
-                        module_id: thread.call_stack.last().ok_or(VmError::EmptyCallStack)?.module_id,
+                        module_id: thread
+                            .call_stack
+                            .last()
+                            .ok_or(VmError::EmptyCallStack)?
+                            .module_id,
                         layout_idx: *layout_idx,
                         fields,
                     });
@@ -274,7 +278,11 @@ impl VirtualMachine {
                 if let BytecodeType::Choice(layout_idx) = ty {
                     let payload_val = thread.read_reg(payload)?;
                     let obj_ref = thread.heap.alloc(HeapObject::Choice {
-                        module_id: thread.call_stack.last().ok_or(VmError::EmptyCallStack)?.module_id,
+                        module_id: thread
+                            .call_stack
+                            .last()
+                            .ok_or(VmError::EmptyCallStack)?
+                            .module_id,
                         layout_idx: *layout_idx,
                         variant_idx,
                         payload: payload_val,
@@ -430,10 +438,7 @@ impl VirtualMachine {
                     fields,
                 } => {
                     let layout = self
-                        .graph
-                        .get(module_id)
-                        .unwrap()
-                        .module
+                        .get_module(module_id)?
                         .struct_layouts
                         .get(layout_idx.raw() as usize)
                         .ok_or(VmError::TypeMismatch {
@@ -511,10 +516,7 @@ impl VirtualMachine {
                     fields,
                 } => {
                     let layout = self
-                        .graph
-                        .get(module_id)
-                        .unwrap()
-                        .module
+                        .get_module(module_id)?
                         .struct_layouts
                         .get(layout_idx.raw() as usize)
                         .ok_or(VmError::TypeMismatch {

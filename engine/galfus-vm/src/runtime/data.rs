@@ -12,8 +12,7 @@ impl VirtualMachine {
             // Category A: Data Movement & Constants
             Instruction::LoadConst { dest, const_idx } => {
                 let constant = self
-                    .current_image(thread)
-                    .unwrap()
+                    .current_image(thread)?
                     .constants
                     .constants
                     .get(const_idx.raw() as usize)
@@ -108,7 +107,10 @@ impl VirtualMachine {
         Ok(VmStep::Continue)
     }
 
-    pub(super) fn uint8_type_idx(&self, thread: &thread::VmThreadState) -> Result<TypeIdx, VmError> {
+    pub(super) fn uint8_type_idx(
+        &self,
+        thread: &thread::VmThreadState,
+    ) -> Result<TypeIdx, VmError> {
         self.current_image(thread)?
             .types
             .iter()

@@ -157,7 +157,7 @@ impl VirtualMachine {
                     .last()
                     .ok_or(VmError::EmptyCallStack)?
                     .module_id;
-                let current_image = &self.graph.get(module_id).unwrap().module;
+                let current_image = self.get_module(module_id)?;
                 let (target_module_id, func_idx) =
                     if (func_idx.raw() as usize) < current_image.functions.len() {
                         (module_id, func_idx)

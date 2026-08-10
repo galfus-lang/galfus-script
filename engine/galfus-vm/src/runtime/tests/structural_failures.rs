@@ -55,3 +55,61 @@ fn call_to_missing_function_returns_function_out_of_bounds_error() {
         result
     );
 }
+
+#[test]
+fn create_future_for_missing_module_returns_module_not_found_error() {
+    let graph = BytecodeGraph::new();
+    let vm = VirtualMachine::new(sync::Arc::new(graph));
+    let mut thread = crate::thread::VmThreadState::new();
+
+    thread.call_stack.push(crate::CallFrame {
+        module_id: ModuleId::new(99),
+        func_idx: FuncIdx(0),
+        pc: 0,
+        return_dest: None,
+        registers: vec![],
+    });
+
+    let step = vm.execute_system_instruction(
+        &mut thread,
+        Instruction::CreateFuture {
+            dest: Reg(0),
+            func: FuncIdx(0),
+            args_start: Reg(0),
+            arg_count: 0,
+            arg_types: vec![],
+            return_type: galfus_bytecode::TypeIdx(0),
+        },
+    );
+    assert!(
+        matches!(
+            step,
+            Err(VmError::ModuleNotFound { module_id: m_id }) if m_id == ModuleId::new(99)
+        ),
+        "Expected ModuleNotFound"
+    );
+}
+
+#[test]
+fn ret_from_missing_module_returns_module_not_found_error() {
+    let graph = BytecodeGraph::new();
+    let vm = VirtualMachine::new(sync::Arc::new(graph));
+    let mut thread = crate::thread::VmThreadState::new();
+
+    thread.call_stack.push(crate::CallFrame {
+        module_id: ModuleId::new(99),
+        func_idx: FuncIdx(0),
+        pc: 0,
+        return_dest: None,
+        registers: vec![],
+    });
+
+    let step = vm.execute_control_instruction(&mut thread, Instruction::RetNull);
+    assert!(
+        matches!(
+            step,
+            Err(VmError::ModuleNotFound { module_id: m_id }) if m_id == ModuleId::new(99)
+        ),
+        "Expected ModuleNotFound"
+    );
+}
