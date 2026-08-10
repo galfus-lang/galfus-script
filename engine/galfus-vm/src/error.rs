@@ -75,6 +75,9 @@ pub enum VmError {
 
     #[error("Choice layout index {index:?} is out of bounds")]
     ChoiceLayoutOutOfBounds { index: ChoiceLayoutIdx },
+
+    #[error("Object ID counter exhausted")]
+    IdCounterExhausted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

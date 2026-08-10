@@ -35,7 +35,7 @@ impl VirtualMachine {
                             element_ty,
                             elements: s.bytes().map(Value::Uint8).collect(),
                         };
-                        Value::Object(thread.heap.alloc(obj))
+                        Value::Object(thread.heap.alloc(obj)?)
                     }
                     Constant::Bytes(b) => {
                         let element_ty = self.uint8_type_idx(thread)?;
@@ -43,7 +43,7 @@ impl VirtualMachine {
                             element_ty,
                             elements: b.iter().map(|&x| Value::Uint8(x)).collect(),
                         };
-                        Value::Object(thread.heap.alloc(obj))
+                        Value::Object(thread.heap.alloc(obj)?)
                     }
                     Constant::Function(func_idx) => {
                         let module_id = thread

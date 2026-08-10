@@ -672,7 +672,7 @@ impl Orchestrator {
                                                                                             .map(galfus_vm::VmValue::Uint8)
                                                                                             .collect(),
                                                                                     },
-                                                                                ),
+                                                                                ).map_err(|_| ())?,
                                                                             ),
                                                                         ),
                                                                         _ => Err(()),
@@ -684,7 +684,7 @@ impl Orchestrator {
                                                                             element_ty: bytes_type,
                                                                             elements: arrays,
                                                                         },
-                                                                    ),
+                                                                    ).map_err(|_| ())?,
                                                                 ))
                                                             },
                                                         )

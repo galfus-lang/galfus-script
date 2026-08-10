@@ -439,13 +439,11 @@ fn fieldless_struct_allocations_keep_distinct_object_identity() {
     };
     let allocated = thread
         .heap
-        .objects
-        .iter()
-        .enumerate()
-        .filter_map(|(index, object)| object.as_ref().map(|_| index))
+        .iter_live_objects()
+        .map(|(obj_ref, _)| obj_ref)
         .collect::<Vec<_>>();
 
     assert_eq!(allocated.len(), 2);
-    assert!(allocated.contains(&returned_ref.raw()));
+    assert!(allocated.contains(&returned_ref));
     assert_ne!(allocated[0], allocated[1]);
 }

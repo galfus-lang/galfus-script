@@ -118,10 +118,10 @@ pub enum VmStep {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct VmObjectRef(pub usize);
+pub struct VmObjectRef(pub u64);
 
 impl VmObjectRef {
-    pub const fn raw(&self) -> usize {
+    pub const fn raw(&self) -> u64 {
         self.0
     }
 }
@@ -189,6 +189,34 @@ pub struct VmContext {
 pub struct RuntimeModuleState {
     pub globals: Vec<VmValue>,
     pub initialized: bool,
+}
+
+pub trait VisitRoots {
+    fn visit_roots(&self, visitor: &mut impl FnMut(VmObjectRef));
+}
+
+impl VisitRoots for VmValue {
+    fn visit_roots(&self, visitor: &mut impl FnMut(VmObjectRef)) {
+        if let VmValue::Object(obj_ref) = self {
+            visitor(*obj_ref);
+        }
+    }
+}
+
+impl VisitRoots for CallFrame {
+    fn visit_roots(&self, visitor: &mut impl FnMut(VmObjectRef)) {
+        for reg in &self.registers {
+            reg.visit_roots(visitor);
+        }
+    }
+}
+
+impl VisitRoots for RuntimeModuleState {
+    fn visit_roots(&self, visitor: &mut impl FnMut(VmObjectRef)) {
+        for global in &self.globals {
+            global.visit_roots(visitor);
+        }
+    }
 }
 
 impl VmContext {
@@ -631,7 +659,7 @@ impl VirtualMachine {
         };
 
         if matches!(step, VmStep::Continue) {
-            self.release_unreachable_if_needed(thread, release_instruction);
+            self.release_unreachable_if_needed(thread, release_instruction)?;
         }
 
         Ok(step)
@@ -658,12 +686,13 @@ impl VirtualMachine {
         &self,
         thread: &mut thread::VmThreadState,
         instr: Instruction,
-    ) {
+    ) -> Result<(), VmError> {
         if matches!(instr, Instruction::Drop { .. })
-            || thread.heap.allocations_since_release >= RELEASE_ALLOCATION_THRESHOLD
+            || thread.heap.allocations_since_release() >= RELEASE_ALLOCATION_THRESHOLD
         {
-            let released_handles = self.release_unreachable(thread);
+            let released_handles = self.release_unreachable(thread)?;
             thread.pending_adapter_handle_drops.extend(released_handles);
         }
+        Ok(())
     }
 }

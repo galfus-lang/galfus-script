@@ -88,6 +88,7 @@ pub enum BoundaryValue {
 pub enum BoundaryCodecError {
     TypeMismatch { expected: String, found: String },
     UnsupportedType,
+    HeapExhausted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,6 +109,7 @@ pub enum ExecutionFailureKind {
     AdapterLoadFailure,
     AdapterCallFailure,
     BoundaryCodecFailure,
+    HeapExhausted,
     InitializationFailure,
     Timeout,
     Cancelled,
