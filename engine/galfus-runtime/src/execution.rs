@@ -104,8 +104,12 @@ impl Execution {
                     }
                 }
                 ThreadResult::Completed(res) => {
+                    self.state = match res {
+                        Ok(_) => ExecutionState::Completed,
+                        Err(_) => ExecutionState::Failed,
+                    };
                     self.result = Some(res);
-                    self.state = ExecutionState::Completed;
+                    self.orchestrator = None;
                 }
                 ThreadResult::Blocked { .. } => {
                     self.state = ExecutionState::Waiting;
@@ -146,7 +150,7 @@ impl Execution {
         }
     }
 
-    pub fn run_to_completion(&mut self) -> Result<BoundaryValue, ExecutionFailure> {
+    pub fn run_sync_to_completion(&mut self) -> Result<BoundaryValue, ExecutionFailure> {
         loop {
             match self.poll(100)? {
                 ExecutorStepResult::Completed(_) => {

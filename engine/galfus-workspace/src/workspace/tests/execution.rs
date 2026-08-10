@@ -34,15 +34,10 @@ fn run_passes_read_terminator_to_the_io_provider() {
         terminator: Arc::clone(&terminator),
     }));
     let executor = std::rc::Rc::new(CooperativeDriver::new());
-    let exit_code = Arc::new(Mutex::new(0));
-    let ec = Arc::clone(&exit_code);
-    executor.on_exit(Box::new(move |res| {
-        *ec.lock().unwrap() = res.unwrap();
-    }));
-    workspace
+    let code = workspace
         .run(&[], Some(providers), executor)
         .expect("entry executes");
-    assert_eq!(*exit_code.lock().unwrap(), 0);
+    assert_eq!(code, galfus_contract::BoundaryValue::I32(0));
     assert_eq!(*terminator.lock().expect("terminator state"), b"!");
 }
 
@@ -87,13 +82,8 @@ fn run_specializes_nested_generic_types_across_modules() {
     assert!(check.is_valid, "check diagnostics: {:?}", check.diagnostics);
     workspace.compile().expect("workspace compiles");
     let executor = std::rc::Rc::new(CooperativeDriver::new());
-    let exit_code = Arc::new(Mutex::new(0));
-    let ec = Arc::clone(&exit_code);
-    executor.on_exit(Box::new(move |res| {
-        *ec.lock().unwrap() = res.unwrap();
-    }));
-    workspace.run(&[], None, executor).expect("entry executes");
-    assert_eq!(*exit_code.lock().unwrap(), 42);
+    let code = workspace.run(&[], None, executor).expect("entry executes");
+    assert_eq!(code, galfus_contract::BoundaryValue::I32(42));
 }
 
 #[test]
@@ -139,13 +129,8 @@ fn run_specializes_explicit_imported_generic_typeof_parameter() {
     assert!(check.is_valid, "check diagnostics: {:?}", check.diagnostics);
     workspace.compile().expect("workspace compiles");
     let executor = std::rc::Rc::new(CooperativeDriver::new());
-    let exit_code = Arc::new(Mutex::new(0));
-    let ec = Arc::clone(&exit_code);
-    executor.on_exit(Box::new(move |res| {
-        *ec.lock().unwrap() = res.unwrap();
-    }));
-    workspace.run(&[], None, executor).expect("entry executes");
-    assert_eq!(*exit_code.lock().unwrap(), 42);
+    let code = workspace.run(&[], None, executor).expect("entry executes");
+    assert_eq!(code, galfus_contract::BoundaryValue::I32(42));
 }
 
 #[test]
@@ -180,13 +165,8 @@ fn run_specializes_generic_anchored_range_iterator_methods() {
     assert!(check.is_valid, "check diagnostics: {:?}", check.diagnostics);
     workspace.compile().expect("workspace compiles");
     let executor = std::rc::Rc::new(CooperativeDriver::new());
-    let exit_code = Arc::new(Mutex::new(0));
-    let ec = Arc::clone(&exit_code);
-    executor.on_exit(Box::new(move |res| {
-        *ec.lock().unwrap() = res.unwrap();
-    }));
-    workspace.run(&[], None, executor).expect("entry executes");
-    assert_eq!(*exit_code.lock().unwrap(), 20);
+    let code = workspace.run(&[], None, executor).expect("entry executes");
+    assert_eq!(code, galfus_contract::BoundaryValue::I32(20));
 }
 
 #[test]
@@ -224,13 +204,8 @@ fn run_synchronizes_the_runtime_module_graph() {
         .find(|image| image.path().as_str() == "helper.gfs")
         .expect("helper image");
     let executor = std::rc::Rc::new(CooperativeDriver::new());
-    let exit_code = Arc::new(Mutex::new(0));
-    let ec = Arc::clone(&exit_code);
-    executor.on_exit(Box::new(move |res| {
-        *ec.lock().unwrap() = res.unwrap();
-    }));
-    workspace.run(&[], None, executor).expect("entry executes");
-    assert_eq!(*exit_code.lock().unwrap(), 1);
+    let code = workspace.run(&[], None, executor).expect("entry executes");
+    assert_eq!(code, galfus_contract::BoundaryValue::I32(1));
 
     assert!(matches!(
         workspace.remove_module("helper.gfs"),
@@ -245,11 +220,42 @@ fn run_synchronizes_the_runtime_module_graph() {
     assert!(workspace.check().is_valid);
     workspace.compile().expect("workspace recompiles");
     let executor2 = std::rc::Rc::new(CooperativeDriver::new());
-    let exit_code2 = Arc::new(Mutex::new(0));
-    let ec2 = Arc::clone(&exit_code2);
-    executor2.on_exit(Box::new(move |res| {
-        *ec2.lock().unwrap() = res.unwrap();
-    }));
-    workspace.run(&[], None, executor2).expect("entry executes");
-    assert_eq!(*exit_code2.lock().unwrap(), 0);
+    let code2 = workspace.run(&[], None, executor2).expect("entry executes");
+    assert_eq!(code2, galfus_contract::BoundaryValue::I32(0));
+}
+
+#[test]
+fn run_propagates_runtime_start_error_on_entry_signature_mismatch() {
+    let mut workspace = Workspace::new();
+    workspace
+        .load_config(
+            br#"
+            [module]
+            name = "bad-entry"
+            target = "app"
+            entry = "main.gfs"
+            "#,
+        )
+        .expect("valid configuration");
+    workspace
+        .load_module(
+            "main.gfs",
+            br#"
+            export fn main(): i32 {
+                return 0
+            }
+            "#,
+        )
+        .expect("valid entry module");
+
+    assert!(workspace.check().is_valid);
+    workspace.compile().expect("workspace compiles");
+
+    let executor = std::rc::Rc::new(CooperativeDriver::new());
+    let result = workspace.run(&[], None, executor);
+
+    assert!(matches!(
+        result,
+        Err(crate::state::WorkspaceRunError::RuntimeStart(galfus_runtime::RuntimeError::EntryArityMismatch { .. }))
+    ));
 }

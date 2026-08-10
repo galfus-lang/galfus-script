@@ -267,7 +267,10 @@ fn demo_adapter_completes_from_a_worker_and_releases_its_handle_once() {
     let main_thread = std::thread::current().id();
     let (mut execution, state) = execution_with_demo_adapter(true);
 
-    assert_eq!(execution.run_to_completion(), Ok(BoundaryValue::I32(0)));
+    assert_eq!(
+        execution.run_sync_to_completion(),
+        Ok(BoundaryValue::I32(0))
+    );
     let state = state.lock().unwrap();
     assert_eq!(state.dispatch_threads, vec![main_thread]);
     assert_eq!(state.completion_threads.len(), 1);

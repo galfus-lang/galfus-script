@@ -112,7 +112,7 @@ impl Playground {
                 executor.clone(),
             )
             .map_err(|error| anyhow::anyhow!("playground execution failed: {error:?}"))?;
-        match execution.run_to_completion()? {
+        match execution.run_sync_to_completion()? {
             galfus_contract::BoundaryValue::I32(code) => Ok(code),
             _ => Ok(0),
         }

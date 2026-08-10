@@ -42,13 +42,7 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
         .iter()
         .map(|argument| argument.as_bytes().to_vec())
         .collect::<Vec<_>>();
-    use galfus_contract::KernelDriver;
     let executor = std::rc::Rc::new(CooperativeDriver::new());
-    let exit_code = sync::Arc::new(sync::Mutex::new(0));
-    let ec = sync::Arc::clone(&exit_code);
-    executor.on_exit(Box::new(move |res| {
-        *ec.lock().unwrap() = res.unwrap();
-    }));
 
     let preflight = galfus_workspace::AdapterBindingPreflight::new();
     // Note: CLI doesn't currently register external loaders, but it should run the preflight
@@ -91,11 +85,14 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
     )
     .start(args.as_slice(), executor.clone())
     .map_err(|error| anyhow::anyhow!("package execution failed: {error}"))?;
-    let _result = execution
-        .run_to_completion()
+    let result = execution
+        .run_sync_to_completion()
         .map_err(|error| anyhow::anyhow!("package execution failed: {error}"))?;
 
-    let code = *exit_code.lock().unwrap();
+    let code = match result {
+        galfus_contract::BoundaryValue::I32(c) => c,
+        _ => 0,
+    };
     Ok(code)
 }
 

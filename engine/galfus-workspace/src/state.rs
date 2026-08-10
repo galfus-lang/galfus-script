@@ -60,8 +60,17 @@ pub enum RunBlocked {
     CompileRequired,
     /// The configured entry module is not in the compiled graph.
     EntryModuleMissing,
-    /// The runtime rejected loading, linking, or executing the compiled graph.
-    RuntimeError(String),
+}
+
+/// Reason why `Workspace::run()` failed.
+#[derive(Debug)]
+pub enum WorkspaceRunError {
+    /// The execution could not be started due to missing dependencies or uncompiled state.
+    Blocked(RunBlocked),
+    /// The execution failed to initialize due to runtime rejection (e.g. panic or missing export).
+    RuntimeStart(galfus_runtime::RuntimeError),
+    /// The execution started but failed with an error.
+    ExecutionFailed(galfus_contract::ExecutionFailure),
 }
 
 pub struct SourceState {

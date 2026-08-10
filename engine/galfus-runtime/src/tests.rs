@@ -372,7 +372,7 @@ fn pending_initializer_delays_entry_until_its_completion() {
     );
 
     assert_eq!(
-        execution.run_to_completion(),
+        execution.run_sync_to_completion(),
         Ok(galfus_contract::BoundaryValue::I32(42))
     );
     assert_eq!(execution.status(), ExecutionState::Completed);
@@ -393,7 +393,7 @@ fn initializer_failure_preserves_the_provider_failure_as_its_cause() {
     });
 
     let error = execution
-        .run_to_completion()
+        .run_sync_to_completion()
         .expect_err("initializer failure stops startup");
     assert_eq!(
         error.kind,
@@ -607,7 +607,7 @@ fn run_initializes_dependencies_before_the_entry_module() {
     .start(&[], executor.clone())
     .expect("entry execution succeeds");
 
-    let exit_code = match task.run_to_completion() {
+    let exit_code = match task.run_sync_to_completion() {
         Ok(galfus_contract::BoundaryValue::I32(code)) => code,
         _ => panic!("Expected i32 exit code"),
     };

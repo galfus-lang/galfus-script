@@ -488,7 +488,7 @@ fn run_requires_compile_and_executes_the_configured_entry() {
     let mut workspace = Workspace::new();
     assert!(matches!(
         workspace.run(&[], None, std::rc::Rc::new(CooperativeDriver::new())),
-        Err(RunBlocked::CompileRequired)
+        Err(crate::state::WorkspaceRunError::Blocked(RunBlocked::CompileRequired))
     ));
 
     workspace
@@ -565,8 +565,8 @@ fn run_rejects_a_missing_required_io_provider_before_execution() {
         .expect_err("a required provider must be available before execution");
     assert!(matches!(
         error,
-        crate::RunBlocked::RuntimeError(message)
-            if message.contains("required provider module `std/io` is unavailable or incompatible")
+        crate::state::WorkspaceRunError::RuntimeStart(galfus_runtime::RuntimeError::ProviderRequirementUnsatisfied { module_path })
+            if module_path == "std/io"
     ));
 }
 

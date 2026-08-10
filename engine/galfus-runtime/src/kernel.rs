@@ -108,10 +108,6 @@ impl VirtualKernel {
         self.registry.active_count()
     }
 
-    pub fn get_exit_code(&self, id: ThreadId) -> Option<i32> {
-        self.registry.get_exit_code(id)
-    }
-
     #[cfg(test)]
     pub fn runnable_count(&self) -> usize {
         self.runnable.len()

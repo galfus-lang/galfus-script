@@ -10,7 +10,7 @@ use galfus_contract::{
 /// Runs Galfus tasks cooperatively on the calling host thread.
 pub struct CooperativeDriver {
     queue: Mutex<VecDeque<KernelTask>>,
-    exit_code: sync::Mutex<i32>,
+    exit_result: sync::Mutex<Option<Result<i32, ExecutionFailure>>>,
     exit_callback: Mutex<Option<Box<dyn Fn(Result<i32, ExecutionFailure>) + Send + Sync>>>,
 }
 
@@ -18,7 +18,7 @@ impl CooperativeDriver {
     pub fn new() -> Self {
         Self {
             queue: Mutex::new(VecDeque::new()),
-            exit_code: sync::Mutex::new(0),
+            exit_result: sync::Mutex::new(None),
             exit_callback: Mutex::new(None),
         }
     }
@@ -65,19 +65,23 @@ impl KernelDriver for CooperativeDriver {
                     };
                 }
                 ThreadResult::Completed(res) => {
-                    if let Ok(galfus_contract::BoundaryValue::I32(code)) = res {
-                        *self.exit_code.lock().unwrap() = code;
-                    }
+                    let outcome = match res {
+                        Ok(galfus_contract::BoundaryValue::I32(code)) => Ok(code),
+                        Ok(_) => Ok(0),
+                        Err(e) => Err(e),
+                    };
+                    *self.exit_result.lock().unwrap() = Some(outcome);
                 }
             }
         }
-        let code = *self.exit_code.lock().unwrap();
+        let outcome = self.exit_result.lock().unwrap().take().unwrap_or(Ok(0));
         if let Some(callback) = self.exit_callback.lock().unwrap().take() {
-            callback(Ok(code));
+            callback(outcome);
         }
     }
 
     fn complete(&self, result: Result<i32, ExecutionFailure>) {
+        *self.exit_result.lock().unwrap() = Some(result.clone());
         if let Some(callback) = self.exit_callback.lock().unwrap().take() {
             callback(result);
         }
@@ -106,12 +110,16 @@ impl KernelDriver for CooperativeDriver {
                 }
             }
             ThreadResult::Completed(res) => {
-                let code = if let Ok(galfus_contract::BoundaryValue::I32(c)) = res {
-                    c
-                } else {
-                    0
+                let outcome = match res {
+                    Ok(galfus_contract::BoundaryValue::I32(c)) => Ok(c),
+                    Ok(_) => Ok(0),
+                    Err(e) => Err(e),
                 };
-                *self.exit_code.lock().unwrap() = code;
+                let code = match &outcome {
+                    Ok(c) => *c,
+                    Err(_) => 0,
+                };
+                *self.exit_result.lock().unwrap() = Some(outcome);
                 let is_empty = self.queue.lock().unwrap().is_empty();
                 if is_empty {
                     ExecutorStepResult::Completed(code)
@@ -126,5 +134,42 @@ impl KernelDriver for CooperativeDriver {
 impl Default for CooperativeDriver {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use galfus_contract::ExecutionFailureKind;
+    use std::sync::Arc;
+
+    #[test]
+    fn complete_stores_and_calls_callback_with_error() {
+        let driver = CooperativeDriver::new();
+        let callback_called = Arc::new(Mutex::new(false));
+        let callback_called_clone = Arc::clone(&callback_called);
+
+        driver.on_exit(Box::new(move |result| {
+            assert!(result.is_err());
+            let error = result.unwrap_err();
+            assert_eq!(error.kind, ExecutionFailureKind::VmPanic);
+            *callback_called_clone.lock().unwrap() = true;
+        }));
+
+        driver.complete(Err(ExecutionFailure::new(
+            ExecutionFailureKind::VmPanic,
+            "test error",
+        )));
+
+        assert!(*callback_called.lock().unwrap());
+
+        let stored = driver.exit_result.lock().unwrap().clone();
+        assert!(stored.is_some());
+        let stored_result = stored.unwrap();
+        assert!(stored_result.is_err());
+        assert_eq!(
+            stored_result.unwrap_err().kind,
+            ExecutionFailureKind::VmPanic
+        );
     }
 }

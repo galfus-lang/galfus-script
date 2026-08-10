@@ -1025,13 +1025,18 @@ impl Orchestrator {
         }
 
         if self.kernel.active_count() == 0 {
-            let code = self
+            let result = self
                 .root_thread_id
-                .and_then(|id| self.kernel.get_exit_code(id))
-                .unwrap_or(0);
-            return galfus_contract::ThreadResult::Completed(Ok(
-                galfus_contract::BoundaryValue::I32(code),
-            ));
+                .and_then(|id| self.kernel.state(id))
+                .and_then(|state| state.exit_reason());
+
+            return match result {
+                Some(Ok(value)) => galfus_contract::ThreadResult::Completed(Ok(value)),
+                Some(Err(error)) => galfus_contract::ThreadResult::Completed(Err(error)),
+                None => galfus_contract::ThreadResult::Completed(Ok(
+                    galfus_contract::BoundaryValue::I32(0),
+                )),
+            };
         }
 
         galfus_contract::ThreadResult::Discarded
