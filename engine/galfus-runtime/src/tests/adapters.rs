@@ -36,7 +36,7 @@ impl AdapterModuleBinding for DemoAdapter {
         &mut self,
         symbol: &str,
         _thread_id: galfus_core::ThreadId,
-        _request_id: galfus_core::RequestId,
+        _request_lease: galfus_core::RequestLease,
         _args: &[BoundaryValue],
         injector: Arc<dyn MessageInjector>,
     ) {
@@ -55,7 +55,7 @@ impl AdapterModuleBinding for DemoAdapter {
                     .push(std::thread::current().id());
                 injector.inject_system_response(
                     galfus_core::ThreadId::new(0),
-                    galfus_core::RequestId::new(0),
+                    galfus_core::RequestLease::new(galfus_core::RequestId::new(0), 1),
                     Ok(BoundaryValue::Handle {
                         type_id: OpaqueTypeId::new("graphics", "Texture").unwrap(),
                         binding_id: None,
@@ -73,13 +73,13 @@ impl AdapterModuleBinding for DemoAdapter {
         &mut self,
         symbol: &str,
         thread_id: galfus_core::ThreadId,
-        request_id: galfus_core::RequestId,
+        request_lease: galfus_core::RequestLease,
     ) -> CancellationOutcome {
-        self.state
-            .lock()
-            .unwrap()
-            .cancellations
-            .push((symbol.to_string(), thread_id, request_id));
+        self.state.lock().unwrap().cancellations.push((
+            symbol.to_string(),
+            thread_id,
+            request_lease.id,
+        ));
         CancellationOutcome::Confirmed
     }
 

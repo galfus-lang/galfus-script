@@ -166,8 +166,8 @@ impl ExecutionFailure {
         self
     }
 
-    pub fn with_request_id(mut self, request_id: galfus_core::RequestId) -> Self {
-        self.request_id = Some(request_id);
+    pub fn with_request_lease(mut self, request_lease: galfus_core::RequestLease) -> Self {
+        self.request_id = Some(request_lease.id);
         self
     }
 
@@ -199,7 +199,7 @@ pub trait MessageInjector: Send + Sync {
     fn inject_system_response(
         &self,
         thread_id: galfus_core::ThreadId,
-        request_id: galfus_core::RequestId,
+        request_lease: galfus_core::RequestLease,
         result: Result<BoundaryValue, ExecutionFailure>,
     );
 }
@@ -220,7 +220,7 @@ pub trait HostProvider: Send {
     fn dispatch(
         &mut self,
         thread_id: galfus_core::ThreadId,
-        request_id: galfus_core::RequestId,
+        request_lease: galfus_core::RequestLease,
         name: &str,
         args: &[BoundaryValue],
         injector: sync::Arc<dyn MessageInjector>,
@@ -230,7 +230,7 @@ pub trait HostProvider: Send {
     fn cancel(
         &mut self,
         _thread_id: galfus_core::ThreadId,
-        _request_id: galfus_core::RequestId,
+        _request_lease: galfus_core::RequestLease,
     ) -> CancellationOutcome {
         CancellationOutcome::Unsupported
     }
@@ -248,7 +248,7 @@ pub trait AdapterModuleBinding: Send {
         &mut self,
         symbol: &str,
         thread_id: galfus_core::ThreadId,
-        request_id: galfus_core::RequestId,
+        request_lease: galfus_core::RequestLease,
         args: &[BoundaryValue],
         injector: sync::Arc<dyn MessageInjector>,
     );
@@ -257,7 +257,7 @@ pub trait AdapterModuleBinding: Send {
         &mut self,
         _symbol: &str,
         _thread_id: galfus_core::ThreadId,
-        _request_id: galfus_core::RequestId,
+        _request_lease: galfus_core::RequestLease,
     ) -> CancellationOutcome {
         CancellationOutcome::Unsupported
     }
@@ -271,7 +271,7 @@ pub trait AdapterModuleBinding: Send {
 pub struct AdapterBindings {
     modules: HashMap<String, AdapterBinding>,
     handles: std::collections::HashSet<(BindingId, OpaqueTypeId, HandleId)>,
-    next_binding_id: u32,
+    binding_id_manager: galfus_core::id_manager::IdManager<BindingId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -282,6 +282,8 @@ pub enum AdapterBindingError {
     IdSpaceExhausted { domain: &'static str },
     #[error("handle is invalid or duplicated")]
     InvalidHandle,
+    #[error("cannot remove binding with active handles")]
+    HandlesStillActive,
 }
 
 struct AdapterBinding {
@@ -300,13 +302,11 @@ impl AdapterBindings {
         if self.modules.contains_key(&proxy_module) {
             return Err(AdapterBindingError::DuplicateProxyModule(proxy_module));
         }
-        let id = BindingId::new(self.next_binding_id);
-        self.next_binding_id =
-            self.next_binding_id
-                .checked_add(1)
-                .ok_or(AdapterBindingError::IdSpaceExhausted {
-                    domain: "BindingId",
-                })?;
+        let id = self.binding_id_manager.try_allocate().ok_or(
+            AdapterBindingError::IdSpaceExhausted {
+                domain: "BindingId",
+            },
+        )?;
         self.modules.insert(
             proxy_module,
             AdapterBinding {
@@ -316,6 +316,20 @@ impl AdapterBindings {
             },
         );
         Ok(id)
+    }
+
+    pub fn remove_binding(&mut self, proxy_module: &str) -> Result<(), AdapterBindingError> {
+        let Some(binding) = self.modules.get(proxy_module) else {
+            return Ok(());
+        };
+        let id = binding.id;
+        let has_handles = self.handles.iter().any(|(b_id, _, _)| *b_id == id);
+        if has_handles {
+            return Err(AdapterBindingError::HandlesStillActive);
+        }
+        self.modules.remove(proxy_module);
+        self.binding_id_manager.free(id);
+        Ok(())
     }
 
     pub fn get_mut(&mut self, proxy_module: &str) -> Option<&mut (dyn AdapterModuleBinding + '_)> {
@@ -339,10 +353,10 @@ impl AdapterBindings {
         proxy_module: &str,
         symbol: &str,
         thread_id: galfus_core::ThreadId,
-        request_id: galfus_core::RequestId,
+        request_lease: galfus_core::RequestLease,
     ) -> Option<CancellationOutcome> {
         self.get_mut(proxy_module)
-            .map(|module| module.cancel(symbol, thread_id, request_id))
+            .map(|module| module.cancel(symbol, thread_id, request_lease))
     }
 
     pub fn register_handle(

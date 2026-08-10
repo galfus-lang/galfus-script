@@ -22,7 +22,7 @@ struct StartupProvider {
         sync::Mutex<
             Option<(
                 galfus_core::ThreadId,
-                galfus_core::RequestId,
+                galfus_core::RequestLease,
                 sync::Arc<dyn galfus_contract::MessageInjector>,
             )>,
         >,
@@ -42,7 +42,7 @@ impl galfus_contract::HostProvider for StartupProvider {
     fn dispatch(
         &mut self,
         thread_id: galfus_core::ThreadId,
-        request_id: galfus_core::RequestId,
+        request_lease: galfus_core::RequestLease,
         name: &str,
         _args: &[galfus_contract::BoundaryValue],
         injector: sync::Arc<dyn galfus_contract::MessageInjector>,
@@ -51,18 +51,18 @@ impl galfus_contract::HostProvider for StartupProvider {
         if name == "initialize" && self.fail_initializer {
             injector.inject_system_response(
                 thread_id,
-                request_id,
+                request_lease,
                 Err(galfus_contract::ExecutionFailure::new(
                     galfus_contract::ExecutionFailureKind::ProviderFailure,
                     "initializer rejected",
                 )),
             );
         } else if name == "initialize" {
-            *self.pending.lock().unwrap() = Some((thread_id, request_id, injector));
+            *self.pending.lock().unwrap() = Some((thread_id, request_lease, injector));
         } else {
             injector.inject_system_response(
                 thread_id,
-                request_id,
+                request_lease,
                 Ok(galfus_contract::BoundaryValue::Null),
             );
         }
@@ -351,14 +351,14 @@ fn pending_initializer_delays_entry_until_its_completion() {
         execution.poll(100).expect("startup polling succeeds");
     }
     assert_eq!(*calls.lock().unwrap(), vec!["initialize"]);
-    let (thread_id, request_id, injector) = pending
+    let (thread_id, request_lease, injector) = pending
         .lock()
         .unwrap()
         .take()
         .expect("initializer is pending");
     injector.inject_system_response(
         galfus_core::ThreadId::new(thread_id.raw() + 1),
-        request_id,
+        request_lease,
         Ok(galfus_contract::BoundaryValue::Null),
     );
     execution
@@ -367,7 +367,7 @@ fn pending_initializer_delays_entry_until_its_completion() {
     assert_eq!(*calls.lock().unwrap(), vec!["initialize"]);
     injector.inject_system_response(
         thread_id,
-        request_id,
+        request_lease,
         Ok(galfus_contract::BoundaryValue::Null),
     );
 
@@ -530,14 +530,14 @@ fn run_initializes_dependencies_before_the_entry_module() {
         fn dispatch(
             &mut self,
             thread_id: galfus_core::ThreadId,
-            request_id: galfus_core::RequestId,
+            request_lease: galfus_core::RequestLease,
             _name: &str,
             _args: &[galfus_contract::BoundaryValue],
             injector: sync::Arc<dyn galfus_contract::MessageInjector>,
         ) {
             injector.inject_system_response(
                 thread_id,
-                request_id,
+                request_lease,
                 Ok(galfus_contract::BoundaryValue::Null),
             );
         }

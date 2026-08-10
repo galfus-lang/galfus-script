@@ -47,20 +47,20 @@ pub enum RuntimeEvent {
     /// Completes a previously suspended provider effect.
     EffectCompleted {
         thread_id: ThreadId,
-        request_id: galfus_core::RequestId,
+        request_lease: galfus_core::RequestLease,
         result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
     },
     /// Completes a previously suspended future effect.
     FutureCompleted {
         thread_id: ThreadId,
-        future_id: galfus_core::FutureId,
+        future_lease: galfus_core::FutureLease,
         result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
     },
     /// A dedicated worker completed a Galfus future activation.
     FutureWorkerCompleted {
         worker_thread_id: ThreadId,
         owner_thread_id: ThreadId,
-        future_id: galfus_core::FutureId,
+        future_lease: galfus_core::FutureLease,
         thread: VmThreadState,
         result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
     },
@@ -95,7 +95,10 @@ impl EventSink {
 
     pub fn send(&self, event: RuntimeEvent) {
         let _send_guard = self.send_lock.lock().unwrap();
-        let event_id = self.next_event_id.fetch_add(1, Ordering::Relaxed);
+        let event_id = self
+            .next_event_id
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .expect("event id space exhausted");
         self.pending.fetch_add(1, Ordering::Release);
         if self.sender.send((event_id, event)).is_err() {
             self.pending.fetch_sub(1, Ordering::Release);

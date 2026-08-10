@@ -20,7 +20,7 @@ impl HostProvider for RecordingProvider {
     fn dispatch(
         &mut self,
         _thread_id: galfus_core::ThreadId,
-        _request_id: galfus_core::RequestId,
+        _request_lease: galfus_core::RequestLease,
         _name: &str,
         _args: &[BoundaryValue],
         _injector: Arc<dyn MessageInjector>,
@@ -35,7 +35,7 @@ impl MessageInjector for NoopInjector {
     fn inject_system_response(
         &self,
         _thread_id: galfus_core::ThreadId,
-        _request_id: galfus_core::RequestId,
+        _request_lease: galfus_core::RequestLease,
         _result: Result<BoundaryValue, galfus_contract::ExecutionFailure>,
     ) {
     }
@@ -47,7 +47,7 @@ fn provider_dispatch_task(called: Arc<AtomicBool>) -> ProviderDispatchTask {
             RecordingProvider(called),
         )))),
         thread_id: galfus_core::ThreadId::new(1),
-        request_id: galfus_core::RequestId::new(1),
+        request_lease: galfus_core::RequestLease::new(galfus_core::RequestId::new(1), 1),
         name: "operation".to_string(),
         args: vec![],
         injector: Arc::new(NoopInjector),
@@ -182,7 +182,7 @@ fn late_provider_completions_after_thread_cancellation_are_ignored() {
     for _ in 0..2 {
         sink.send(RuntimeEvent::EffectCompleted {
             thread_id,
-            request_id: galfus_core::RequestId::new(1),
+            request_lease: galfus_core::RequestLease::new(galfus_core::RequestId::new(1), 0),
             result: Err(galfus_contract::ExecutionFailure::new(
                 galfus_contract::ExecutionFailureKind::ProviderFailure,
                 "late provider completion",
@@ -204,19 +204,26 @@ fn orchestrator_id_domains_fail_without_wrapping() {
     let thread_id = galfus_core::ThreadId::new(1);
     let thread = galfus_vm::thread::VmThreadState::new();
 
+    assert!(
+        orchestrator
+            .allocate_request_lease(thread_id, galfus_core::FutureId::new(1), &thread)
+            .is_some()
+    );
+
     orchestrator
         .request_id_manager
-        .set_next_id_for_test(u32::MAX - 1);
+        .set_next_id_for_test(u32::MAX);
     assert_eq!(
         orchestrator
-            .allocate_request_id(thread_id, galfus_core::FutureId::new(1), &thread)
+            .allocate_request_lease(thread_id, galfus_core::FutureId::new(1), &thread)
             .unwrap()
+            .id
             .raw(),
-        u32::MAX - 1
+        u32::MAX
     );
     assert!(
         orchestrator
-            .allocate_request_id(thread_id, galfus_core::FutureId::new(1), &thread)
+            .allocate_request_lease(thread_id, galfus_core::FutureId::new(1), &thread)
             .is_none()
     );
     assert_eq!(
@@ -227,30 +234,31 @@ fn orchestrator_id_domains_fail_without_wrapping() {
     orchestrator.failure = None;
     orchestrator
         .future_id_manager
-        .set_next_id_for_test(u32::MAX - 1);
+        .set_next_id_for_test(u32::MAX);
     assert_eq!(
         orchestrator
-            .allocate_future_id(thread_id, &thread)
+            .allocate_future_lease(thread_id, &thread)
             .unwrap()
+            .id
             .raw(),
-        u32::MAX - 1
+        u32::MAX
     );
     assert!(
         orchestrator
-            .allocate_future_id(thread_id, &thread)
+            .allocate_future_lease(thread_id, &thread)
             .is_none()
     );
 
     orchestrator.failure = None;
     orchestrator
         .coordinator_id_manager
-        .set_next_id_for_test(u32::MAX - 1);
+        .set_next_id_for_test(u32::MAX);
     assert_eq!(
         orchestrator
             .allocate_coordinator_id(thread_id, &thread)
             .unwrap()
             .raw(),
-        u32::MAX - 1
+        u32::MAX
     );
     assert!(
         orchestrator
@@ -261,4 +269,39 @@ fn orchestrator_id_domains_fail_without_wrapping() {
         orchestrator.failure.as_ref().unwrap().kind,
         galfus_contract::ExecutionFailureKind::IdSpaceExhausted
     );
+}
+
+#[test]
+fn generations_prevent_reuse_collisions() {
+    let mut orchestrator = Orchestrator::new();
+    let thread_id = galfus_core::ThreadId::new(1);
+    let thread = galfus_vm::thread::VmThreadState::new();
+
+    // Allocate first time
+    let lease1 = orchestrator
+        .allocate_request_lease(thread_id, galfus_core::FutureId::new(1), &thread)
+        .unwrap();
+    assert_eq!(lease1.generation, 1);
+
+    // Free the ID manually for test
+    orchestrator.request_id_manager.free(lease1.id);
+
+    // Allocate again, should get same ID but higher generation
+    let lease2 = orchestrator
+        .allocate_request_lease(thread_id, galfus_core::FutureId::new(1), &thread)
+        .unwrap();
+    assert_eq!(lease1.id, lease2.id);
+    assert_eq!(lease2.generation, 2);
+
+    // Complete using the old lease, should be ignored
+    let sink = orchestrator.sink();
+    sink.send(RuntimeEvent::EffectCompleted {
+        thread_id,
+        request_lease: lease1,
+        result: Ok(galfus_contract::BoundaryValue::Null),
+    });
+
+    let token = orchestrator.main_thread_token();
+    orchestrator.process_events(token);
+    assert_eq!(orchestrator.late_completion_count(), 0); // ignored because generation mismatch
 }

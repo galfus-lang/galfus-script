@@ -306,7 +306,7 @@ pub struct RuntimeTask {
     pub thread: Option<galfus_vm::thread::VmThreadState>,
     pub vm: Arc<VirtualMachine>,
     pub events: crate::event::EventSink,
-    pub future_completion: Option<(registry::ThreadId, galfus_core::FutureId)>,
+    pub future_completion: Option<(registry::ThreadId, galfus_core::FutureLease)>,
 }
 
 impl RuntimeTask {
@@ -315,7 +315,7 @@ impl RuntimeTask {
         thread: galfus_vm::thread::VmThreadState,
         vm: Arc<VirtualMachine>,
         events: crate::event::EventSink,
-        future_completion: Option<(registry::ThreadId, galfus_core::FutureId)>,
+        future_completion: Option<(registry::ThreadId, galfus_core::FutureLease)>,
     ) -> Self {
         Self {
             thread_id,
@@ -446,12 +446,12 @@ impl RunnableTask for RuntimeTask {
                     .with_stack(execution_stack(&thread))),
                 };
 
-                if let Some((owner_thread_id, future_id)) = self.future_completion {
+                if let Some((owner_thread_id, future_lease)) = self.future_completion {
                     self.events
                         .send(crate::event::RuntimeEvent::FutureWorkerCompleted {
                             worker_thread_id: self.thread_id,
                             owner_thread_id,
-                            future_id,
+                            future_lease,
                             thread,
                             result: result.clone(),
                         });

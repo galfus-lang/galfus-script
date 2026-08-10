@@ -63,7 +63,7 @@ impl AdapterModuleBinding for MockBoundModule {
         &mut self,
         _symbol: &str,
         _thread_id: galfus_core::ThreadId,
-        _request_id: galfus_core::RequestId,
+        _request_lease: galfus_core::RequestLease,
         _args: &[BoundaryValue],
         _injector: std::sync::Arc<dyn MessageInjector>,
     ) {
@@ -73,7 +73,7 @@ impl AdapterModuleBinding for MockBoundModule {
         &mut self,
         _symbol: &str,
         _thread_id: galfus_core::ThreadId,
-        _request_id: galfus_core::RequestId,
+        _request_lease: galfus_core::RequestLease,
     ) -> CancellationOutcome {
         CancellationOutcome::Unsupported
     }

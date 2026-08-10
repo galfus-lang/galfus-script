@@ -125,6 +125,21 @@ impl crate::id_manager::RawId for RequestId {
     }
 }
 
+/// A generational lease combining a recyclable RequestId with its generation.
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct RequestLease {
+    pub id: RequestId,
+    pub generation: u64,
+}
+
+impl RequestLease {
+    pub const fn new(id: RequestId, generation: u64) -> Self {
+        Self { id, generation }
+    }
+}
+
 /// Identifies an asynchronous future managed by the Orchestrator.
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -147,6 +162,21 @@ impl crate::id_manager::RawId for FutureId {
     }
     fn raw(&self) -> u32 {
         self.0
+    }
+}
+
+/// A generational lease combining a recyclable FutureId with its generation.
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct FutureLease {
+    pub id: FutureId,
+    pub generation: u64,
+}
+
+impl FutureLease {
+    pub const fn new(id: FutureId, generation: u64) -> Self {
+        Self { id, generation }
     }
 }
 

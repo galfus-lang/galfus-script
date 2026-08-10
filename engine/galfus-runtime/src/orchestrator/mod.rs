@@ -118,7 +118,9 @@ pub(crate) struct Orchestrator {
     pending_continuations: HashMap<PendingKey, PendingContinuation>,
     startup_plans: HashMap<crate::registry::ThreadId, StartupPlan>,
     request_id_manager: galfus_core::id_manager::IdManager<RequestId>,
+    request_generations: HashMap<u32, u64>,
     future_id_manager: galfus_core::id_manager::IdManager<FutureId>,
+    future_generations: HashMap<u32, u64>,
     coordinator_id_manager: galfus_core::id_manager::IdManager<CoordinatorId>,
     adapter_bindings: Option<Arc<std::sync::Mutex<galfus_contract::AdapterBindings>>>,
     initialization_complete: Arc<AtomicBool>,
@@ -126,9 +128,11 @@ pub(crate) struct Orchestrator {
     late_completions: VecDeque<LateCompletion>,
     root_thread_id: Option<crate::registry::ThreadId>,
     future_workers:
-        HashMap<crate::registry::ThreadId, (crate::registry::ThreadId, galfus_core::FutureId)>,
-    thread_exit_waits:
-        HashMap<crate::registry::ThreadId, Vec<(crate::registry::ThreadId, galfus_core::FutureId)>>,
+        HashMap<crate::registry::ThreadId, (crate::registry::ThreadId, galfus_core::FutureLease)>,
+    thread_exit_waits: HashMap<
+        crate::registry::ThreadId,
+        Vec<(crate::registry::ThreadId, galfus_core::FutureLease)>,
+    >,
     mailbox_future_waits: HashMap<crate::registry::ThreadId, Vec<MailboxFutureWait>>,
     virtual_time_ms: u64,
     pub(crate) future_registry: FutureRegistry,
@@ -153,10 +157,10 @@ pub(crate) struct AggregateCoordinator {
 
 #[derive(Clone, Copy)]
 pub(crate) struct MailboxFutureWait {
-    owner_thread_id: crate::registry::ThreadId,
-    future_id: galfus_core::FutureId,
-    sender_id: Option<crate::registry::ThreadId>,
-    deadline_ms: Option<u64>,
+    pub waiting_thread_id: crate::registry::ThreadId,
+    pub future_lease: galfus_core::FutureLease,
+    pub sender_id: Option<crate::registry::ThreadId>,
+    pub deadline_ms: Option<u64>,
 }
 
 impl Orchestrator {
@@ -174,7 +178,9 @@ impl Orchestrator {
             pending_continuations: HashMap::new(),
             startup_plans: HashMap::new(),
             request_id_manager: galfus_core::id_manager::IdManager::new(1),
+            request_generations: HashMap::new(),
             future_id_manager: galfus_core::id_manager::IdManager::new(1),
+            future_generations: HashMap::new(),
             coordinator_id_manager: galfus_core::id_manager::IdManager::new(1),
             adapter_bindings: None,
             initialization_complete: Arc::new(AtomicBool::new(true)),
@@ -364,6 +370,9 @@ impl Orchestrator {
             return;
         }
         self.resume_pending(thread_id, pending, result, key);
+        if let PendingKey::Request(request_id) = key {
+            self.request_id_manager.free(request_id);
+        }
     }
 
     fn resume_pending(
@@ -391,7 +400,15 @@ impl Orchestrator {
             .expect("VM is configured before execution")
             .clone();
         let with_pending_id = |failure: ExecutionFailure| match key {
-            PendingKey::Request(request_id) => failure.with_request_id(request_id),
+            PendingKey::Request(request_id) => {
+                failure.with_request_lease(galfus_core::RequestLease::new(
+                    request_id,
+                    self.request_generations
+                        .get(&request_id.raw())
+                        .copied()
+                        .unwrap_or(0),
+                ))
+            }
             PendingKey::Future(future_id) => failure.with_future_id(future_id),
             PendingKey::Coordinator(_) => failure,
         };
@@ -527,7 +544,8 @@ impl Orchestrator {
                         ExecutionFailureKind::IdSpaceExhausted
                     }
                     galfus_contract::AdapterBindingError::DuplicateProxyModule(_)
-                    | galfus_contract::AdapterBindingError::InvalidHandle => {
+                    | galfus_contract::AdapterBindingError::InvalidHandle
+                    | galfus_contract::AdapterBindingError::HandlesStillActive => {
                         ExecutionFailureKind::BoundaryCodecFailure
                     }
                 };
@@ -577,16 +595,22 @@ impl Orchestrator {
         owner_thread_id: crate::registry::ThreadId,
         future_id: galfus_core::FutureId,
     ) {
+        let generation = self
+            .future_generations
+            .get(&future_id.raw())
+            .copied()
+            .unwrap_or(0);
+        let future_lease = galfus_core::FutureLease::new(future_id, generation);
         self.thread_exit_waits
             .entry(target_thread_id)
             .or_default()
-            .push((owner_thread_id, future_id));
+            .push((owner_thread_id, future_lease));
     }
 
     pub(super) fn register_mailbox_future_wait(
         &mut self,
+        thread_id: crate::registry::ThreadId,
         target_thread_id: crate::registry::ThreadId,
-        owner_thread_id: crate::registry::ThreadId,
         future_id: galfus_core::FutureId,
         sender_id: Option<crate::registry::ThreadId>,
         timeout_ms: Option<u64>,
@@ -595,8 +619,14 @@ impl Orchestrator {
             .entry(target_thread_id)
             .or_default()
             .push(MailboxFutureWait {
-                owner_thread_id,
-                future_id,
+                waiting_thread_id: thread_id,
+                future_lease: galfus_core::FutureLease::new(
+                    future_id,
+                    self.future_generations
+                        .get(&future_id.raw())
+                        .copied()
+                        .unwrap_or(0),
+                ),
                 sender_id,
                 deadline_ms: timeout_ms.map(|timeout| self.virtual_time_ms.saturating_add(timeout)),
             });
@@ -644,8 +674,8 @@ impl Orchestrator {
                 self.mailbox_future_waits.remove(&target_thread_id);
             }
             self.complete_future(
-                wait.owner_thread_id,
-                wait.future_id,
+                wait.waiting_thread_id,
+                wait.future_lease.id,
                 Ok(BoundaryValue::Bytes(message.data)),
             );
         }
@@ -670,8 +700,8 @@ impl Orchestrator {
         });
         for wait in expired {
             self.complete_future(
-                wait.owner_thread_id,
-                wait.future_id,
+                wait.waiting_thread_id,
+                wait.future_lease.id,
                 Ok(BoundaryValue::Null),
             );
         }
@@ -684,7 +714,7 @@ impl Orchestrator {
     ) {
         self.mailbox_future_waits.retain(|_, waits| {
             waits.retain(|wait| {
-                wait.owner_thread_id != owner_thread_id || wait.future_id != future_id
+                wait.waiting_thread_id != owner_thread_id || wait.future_lease.id != future_id
             });
             !waits.is_empty()
         });
@@ -734,6 +764,7 @@ impl Orchestrator {
         let Some(coordinator) = self.aggregate_coordinators.remove(&coordinator_id) else {
             return;
         };
+        self.coordinator_id_manager.free(coordinator_id);
         if matches!(coordinator.mode, AggregateMode::Race) {
             for future_id in coordinator.future_ids {
                 let disposition = self
@@ -746,6 +777,7 @@ impl Orchestrator {
                         activation,
                     );
                 }
+                self.future_id_manager.free(future_id);
             }
         }
         self.resume_pending(
@@ -812,12 +844,14 @@ impl Orchestrator {
                 } => {
                     self.teardown_thread_handles(&mut thread);
                     self.kernel.mark_exited(thread_id, thread, result.clone());
-                    let waiters = self
-                        .thread_exit_waits
-                        .remove(&thread_id)
-                        .unwrap_or_default();
-                    for (owner_thread_id, future_id) in waiters {
-                        self.complete_future(owner_thread_id, future_id, result.clone());
+                    if let Some(waiters) = self.thread_exit_waits.remove(&thread_id) {
+                        for (owner_thread_id, future_lease) in waiters {
+                            self.sink.send(RuntimeEvent::FutureCompleted {
+                                thread_id: owner_thread_id,
+                                future_lease,
+                                result: result.clone(),
+                            });
+                        }
                     }
                 }
                 RuntimeEvent::Initialized {
@@ -836,18 +870,42 @@ impl Orchestrator {
                 }
                 RuntimeEvent::EffectCompleted {
                     thread_id,
-                    request_id,
+                    request_lease,
                     result,
-                } => self.complete_pending(thread_id, PendingKey::Request(request_id), result),
+                } => {
+                    if request_lease.generation
+                        == self
+                            .request_generations
+                            .get(&request_lease.id.raw())
+                            .copied()
+                            .unwrap_or(0)
+                    {
+                        self.complete_pending(
+                            thread_id,
+                            PendingKey::Request(request_lease.id),
+                            result,
+                        )
+                    }
+                }
                 RuntimeEvent::FutureCompleted {
                     thread_id,
-                    future_id,
+                    future_lease,
                     result,
-                } => self.complete_future(thread_id, future_id, result),
+                } => {
+                    if future_lease.generation
+                        == self
+                            .future_generations
+                            .get(&future_lease.id.raw())
+                            .copied()
+                            .unwrap_or(0)
+                    {
+                        self.complete_future(thread_id, future_lease.id, result)
+                    }
+                }
                 RuntimeEvent::FutureWorkerCompleted {
                     worker_thread_id,
                     owner_thread_id,
-                    future_id,
+                    future_lease,
                     mut thread,
                     result,
                 } => {
@@ -855,7 +913,15 @@ impl Orchestrator {
                     self.teardown_thread_handles(&mut thread);
                     self.kernel
                         .mark_exited(worker_thread_id, thread, result.clone());
-                    self.complete_future(owner_thread_id, future_id, result);
+                    if future_lease.generation
+                        == self
+                            .future_generations
+                            .get(&future_lease.id.raw())
+                            .copied()
+                            .unwrap_or(0)
+                    {
+                        self.complete_future(owner_thread_id, future_lease.id, result);
+                    }
                 }
                 RuntimeEvent::Tick { delta_ms } => {
                     self.kernel.tick(delta_ms);

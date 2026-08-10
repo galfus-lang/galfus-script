@@ -213,12 +213,12 @@ impl ExecutionHandle {
     pub fn resolve_request(
         &self,
         thread_id: galfus_core::ThreadId,
-        request_id: galfus_core::RequestId,
+        request_lease: galfus_core::RequestLease,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
         self.sink.send(RuntimeEvent::EffectCompleted {
             thread_id,
-            request_id,
+            request_lease,
             result,
         });
     }
@@ -226,12 +226,12 @@ impl ExecutionHandle {
     pub fn resolve_future(
         &self,
         thread_id: galfus_core::ThreadId,
-        future_id: galfus_core::FutureId,
+        future_lease: galfus_core::FutureLease,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
         self.sink.send(RuntimeEvent::FutureCompleted {
             thread_id,
-            future_id,
+            future_lease,
             result,
         });
     }
@@ -241,29 +241,29 @@ impl galfus_contract::MessageInjector for ExecutionHandle {
     fn inject_system_response(
         &self,
         thread_id: galfus_core::ThreadId,
-        request_id: galfus_core::RequestId,
+        request_lease: galfus_core::RequestLease,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
-        self.resolve_request(thread_id, request_id, result);
+        self.resolve_request(thread_id, request_lease, result);
     }
 }
 
 pub(crate) struct FutureCompletionInjector {
     sink: EventSink,
     owner_thread_id: crate::registry::ThreadId,
-    future_id: galfus_core::FutureId,
+    future_lease: galfus_core::FutureLease,
 }
 
 impl FutureCompletionInjector {
     pub(crate) fn new(
         sink: EventSink,
         owner_thread_id: crate::registry::ThreadId,
-        future_id: galfus_core::FutureId,
+        future_lease: galfus_core::FutureLease,
     ) -> Self {
         Self {
             sink,
             owner_thread_id,
-            future_id,
+            future_lease,
         }
     }
 }
@@ -272,12 +272,12 @@ impl galfus_contract::MessageInjector for FutureCompletionInjector {
     fn inject_system_response(
         &self,
         _thread_id: galfus_core::ThreadId,
-        _request_id: galfus_core::RequestId,
+        _request_lease: galfus_core::RequestLease,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
         self.sink.send(RuntimeEvent::FutureCompleted {
             thread_id: self.owner_thread_id,
-            future_id: self.future_id,
+            future_lease: self.future_lease,
             result,
         });
     }
