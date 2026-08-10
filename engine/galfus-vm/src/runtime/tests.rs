@@ -3,6 +3,7 @@ mod io_and_arrays;
 mod module_state;
 mod objects_and_types;
 mod ownership;
+mod structural_failures;
 
 use super::*;
 use galfus_bytecode::BytecodeModule;

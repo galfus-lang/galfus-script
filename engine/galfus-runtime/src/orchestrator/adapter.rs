@@ -10,7 +10,7 @@ use std::sync::{
 pub(crate) struct ProviderDispatchTask {
     pub(crate) providers: Arc<std::sync::Mutex<galfus_contract::Providers>>,
     pub(crate) thread_id: galfus_core::ThreadId,
-    pub(crate) request_id: galfus_core::RequestId,
+    pub(crate) request_lease: galfus_core::RequestLease,
     pub(crate) name: String,
     pub(crate) args: Vec<BoundaryValue>,
     pub(crate) injector: Arc<dyn MessageInjector>,
@@ -20,7 +20,7 @@ pub(crate) struct ProviderDispatchTask {
 pub(crate) struct AdapterDispatchTask {
     pub(crate) bindings: Arc<std::sync::Mutex<galfus_contract::AdapterBindings>>,
     pub(crate) thread_id: galfus_core::ThreadId,
-    pub(crate) request_id: galfus_core::RequestId,
+    pub(crate) request_lease: galfus_core::RequestLease,
     pub(crate) module: String,
     pub(crate) symbol: String,
     pub(crate) args: Vec<BoundaryValue>,
@@ -37,7 +37,7 @@ impl RunnableTask for AdapterDispatchTask {
         let Some(module) = bindings.get_mut(&self.module) else {
             self.injector.inject_system_response(
                 self.thread_id,
-                self.request_id,
+                self.request_lease,
                 Err(ExecutionFailure::new(
                     ExecutionFailureKind::MissingAdapter,
                     "adapter symbol missing",
@@ -48,7 +48,7 @@ impl RunnableTask for AdapterDispatchTask {
         module.dispatch(
             self.symbol.as_str(),
             self.thread_id,
-            self.request_id,
+            self.request_lease,
             &self.args,
             self.injector.clone(),
         );
@@ -79,18 +79,18 @@ impl RunnableTask for ProviderDispatchTask {
         let Some(host) = providers.host_mut() else {
             self.injector.inject_system_response(
                 self.thread_id,
-                self.request_id,
+                self.request_lease,
                 Err(ExecutionFailure::new(
                     ExecutionFailureKind::MissingProvider,
                     "HostProvider missing while dispatching request",
                 )
-                .with_request_id(self.request_id)),
+                .with_request_lease(self.request_lease)),
             );
             return ThreadResult::Discarded;
         };
         host.dispatch(
             self.thread_id,
-            self.request_id,
+            self.request_lease,
             self.name.as_str(),
             self.args.as_slice(),
             self.injector.clone(),

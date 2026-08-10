@@ -14,7 +14,7 @@ impl VirtualMachine {
                 let value = thread.read_reg(reg)?;
                 thread.write_reg(reg, Value::Null)?;
                 if let Value::Future(future_id) = value {
-                    let released_handles = self.release_unreachable(thread);
+                    let released_handles = self.release_unreachable(thread)?;
                     thread.pending_adapter_handle_drops.extend(released_handles);
                     if !thread.contains_future_handle(future_id) {
                         return Ok(VmStep::Suspend {
@@ -157,7 +157,7 @@ impl VirtualMachine {
                     .last()
                     .ok_or(VmError::EmptyCallStack)?
                     .module_id;
-                let current_image = &self.graph.get(module_id).unwrap().module;
+                let current_image = self.get_module(module_id)?;
                 let (target_module_id, func_idx) =
                     if (func_idx.raw() as usize) < current_image.functions.len() {
                         (module_id, func_idx)

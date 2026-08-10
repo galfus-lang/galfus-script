@@ -39,7 +39,10 @@ fn execution_transitions_from_created_to_running_and_preserves_completion() {
     ));
     assert_eq!(execution.status(), ExecutionState::Completed);
     assert_eq!(execution.result(), Some(&Ok(BoundaryValue::I32(0))));
-    assert_eq!(execution.run_to_completion(), Ok(BoundaryValue::I32(0)));
+    assert_eq!(
+        execution.run_sync_to_completion(),
+        Ok(BoundaryValue::I32(0))
+    );
     assert_eq!(execution.result(), Some(&Ok(BoundaryValue::I32(0))));
 }
 
@@ -100,4 +103,45 @@ fn cancellation_transitions_the_execution_to_cancelled() {
     };
     assert_eq!(error.kind, ExecutionFailureKind::Cancelled);
     assert_eq!(execution.status(), ExecutionState::Cancelled);
+}
+
+#[test]
+fn execution_drops_orchestrator_and_sets_failed_state_on_error() {
+    let mut orchestrator = Orchestrator::new();
+    let token = orchestrator.main_thread_token();
+    let thread_id = orchestrator
+        .kernel_mut(token)
+        .spawn(galfus_vm::thread::VmThreadState::new(), None)
+        .unwrap();
+    orchestrator.set_root_thread(thread_id);
+    let thread = orchestrator
+        .kernel_mut(token)
+        .take_thread(thread_id)
+        .unwrap();
+    orchestrator.kernel_mut(token).mark_exited(
+        thread_id,
+        thread,
+        Err(ExecutionFailure::new(
+            ExecutionFailureKind::VmPanic,
+            "test panic",
+        )),
+    );
+    let sink = orchestrator.sink();
+    let mut execution = Execution::new(
+        orchestrator,
+        Rc::new(IdleDriver),
+        sink,
+        Arc::new(AtomicBool::new(true)),
+        false,
+    );
+    assert_eq!(execution.status(), ExecutionState::Created);
+    let error = match execution.poll(1) {
+        Err(e) => e,
+        Ok(_) => panic!("execution must fail"),
+    };
+    assert_eq!(error.kind, ExecutionFailureKind::VmPanic);
+    assert_eq!(execution.status(), ExecutionState::Failed);
+    // orchestrator should be dropped. Since it is Option<Orchestrator>, it should be None.
+    // wait, we can't easily assert on `execution.orchestrator` because it's private and we might not be in the same exact scope, but wait, `execution.rs` and `execution/tests.rs` are in `execution` module.
+    assert!(execution.orchestrator.is_none());
 }

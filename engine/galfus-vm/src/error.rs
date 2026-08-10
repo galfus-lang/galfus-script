@@ -5,7 +5,9 @@ use std::error;
 use std::fmt;
 
 use galfus_bytecode::BytecodeFormatError;
-use galfus_bytecode::instruction::{ConstIdx, FieldIdx, FuncIdx, Reg, TypeIdx};
+use galfus_bytecode::instruction::{
+    ChoiceLayoutIdx, ConstIdx, FieldIdx, FuncIdx, GlobalIdx, Reg, StructLayoutIdx, TypeIdx,
+};
 use thiserror::Error;
 
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
@@ -61,6 +63,21 @@ pub enum VmError {
 
     #[error("Invalid bytecode module")]
     InvalidModule,
+
+    #[error("Module {module_id:?} not found in graph")]
+    ModuleNotFound { module_id: galfus_core::ModuleId },
+
+    #[error("Global index {index:?} is out of bounds")]
+    GlobalOutOfBounds { index: GlobalIdx },
+
+    #[error("Struct layout index {index:?} is out of bounds")]
+    StructLayoutOutOfBounds { index: StructLayoutIdx },
+
+    #[error("Choice layout index {index:?} is out of bounds")]
+    ChoiceLayoutOutOfBounds { index: ChoiceLayoutIdx },
+
+    #[error("Object ID counter exhausted")]
+    IdCounterExhausted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

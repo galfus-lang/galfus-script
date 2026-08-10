@@ -209,13 +209,14 @@ pub(crate) fn encode_into_thread_heap(
                 binding_id: Some(binding_id),
                 id,
             },
-        ) if type_id == &actual => Ok(galfus_vm::VmValue::Object(heap.alloc(
-            galfus_vm::HeapObject::AdapterHandle {
+        ) if type_id == &actual => Ok(galfus_vm::VmValue::Object(
+            heap.alloc(galfus_vm::HeapObject::AdapterHandle {
                 binding_id,
                 type_id: actual,
                 id,
-            },
-        ))),
+            })
+            .map_err(|_| BoundaryCodecError::HeapExhausted)?,
+        )),
         (BytecodeType::Array(element_type), BoundaryValue::Bytes(bytes))
             if matches!(
                 module.types.get(element_type.raw() as usize),
@@ -223,10 +224,12 @@ pub(crate) fn encode_into_thread_heap(
             ) =>
         {
             let elements = bytes.into_iter().map(galfus_vm::VmValue::Uint8).collect();
-            let reference = heap.alloc(galfus_vm::HeapObject::Array {
-                element_ty: *element_type,
-                elements,
-            });
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Array {
+                    element_ty: *element_type,
+                    elements,
+                })
+                .map_err(|_| BoundaryCodecError::HeapExhausted)?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
         (
@@ -245,10 +248,12 @@ pub(crate) fn encode_into_thread_heap(
                     encode_into_thread_heap(heap, element, *element_type, module_id, module)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let reference = heap.alloc(galfus_vm::HeapObject::Array {
-                element_ty: *element_type,
-                elements,
-            });
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Array {
+                    element_ty: *element_type,
+                    elements,
+                })
+                .map_err(|_| BoundaryCodecError::HeapExhausted)?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
         (BytecodeType::Nullable(_), BoundaryValue::Null) => Ok(galfus_vm::VmValue::Null),
@@ -264,7 +269,9 @@ pub(crate) fn encode_into_thread_heap(
                 .zip(element_types)
                 .map(|(element, ty)| encode_into_thread_heap(heap, element, *ty, module_id, module))
                 .collect::<Result<Vec<_>, _>>()?;
-            let reference = heap.alloc(galfus_vm::HeapObject::Tuple { elements });
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Tuple { elements })
+                .map_err(|_| BoundaryCodecError::HeapExhausted)?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
         (BytecodeType::Choice(layout_idx), BoundaryValue::Choice { variant, payload }) => {
@@ -280,12 +287,14 @@ pub(crate) fn encode_into_thread_heap(
                 }
                 _ => return Err(mismatch()),
             };
-            let reference = heap.alloc(galfus_vm::HeapObject::Choice {
-                module_id,
-                layout_idx: *layout_idx,
-                variant_idx: variant as u16,
-                payload,
-            });
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Choice {
+                    module_id,
+                    layout_idx: *layout_idx,
+                    variant_idx: variant as u16,
+                    payload,
+                })
+                .map_err(|_| BoundaryCodecError::HeapExhausted)?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
         _ => Err(mismatch()),
@@ -297,7 +306,7 @@ pub struct RuntimeTask {
     pub thread: Option<galfus_vm::thread::VmThreadState>,
     pub vm: Arc<VirtualMachine>,
     pub events: crate::event::EventSink,
-    pub future_completion: Option<(registry::ThreadId, galfus_core::FutureId)>,
+    pub future_completion: Option<(registry::ThreadId, galfus_core::FutureLease)>,
 }
 
 impl RuntimeTask {
@@ -306,7 +315,7 @@ impl RuntimeTask {
         thread: galfus_vm::thread::VmThreadState,
         vm: Arc<VirtualMachine>,
         events: crate::event::EventSink,
-        future_completion: Option<(registry::ThreadId, galfus_core::FutureId)>,
+        future_completion: Option<(registry::ThreadId, galfus_core::FutureLease)>,
     ) -> Self {
         Self {
             thread_id,
@@ -416,12 +425,15 @@ impl RunnableTask for RuntimeTask {
                     });
                     return ThreadResult::Completed(Ok(galfus_contract::BoundaryValue::I32(0)));
                 }
-                let module = &self
-                    .vm
-                    .graph
-                    .get(module_id)
-                    .expect("returned module is loaded")
-                    .module;
+                let module = match self.vm.graph.get(module_id) {
+                    Some(node) => &node.module,
+                    None => {
+                        return ThreadResult::Completed(Err(ExecutionFailure::new(
+                            ExecutionFailureKind::InternalRuntimeFailure,
+                            format!("module {} missing during return decoding", module_id.raw()),
+                        )));
+                    }
+                };
                 let result = match decode_from_thread_heap(&thread.heap, value, return_type, module)
                 {
                     Ok(value) => Ok(value),
@@ -434,12 +446,12 @@ impl RunnableTask for RuntimeTask {
                     .with_stack(execution_stack(&thread))),
                 };
 
-                if let Some((owner_thread_id, future_id)) = self.future_completion {
+                if let Some((owner_thread_id, future_lease)) = self.future_completion {
                     self.events
                         .send(crate::event::RuntimeEvent::FutureWorkerCompleted {
                             worker_thread_id: self.thread_id,
                             owner_thread_id,
-                            future_id,
+                            future_lease,
                             thread,
                             result: result.clone(),
                         });

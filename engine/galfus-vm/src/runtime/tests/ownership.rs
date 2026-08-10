@@ -98,18 +98,21 @@ fn test_ownership_deterministic_release() {
         other => panic!("expected struct, got {:?}", other),
     };
 
-    assert!(thread.heap.objects[node1_ref.raw()].is_some());
-    assert!(thread.heap.objects[node2_ref.raw()].is_some());
+    assert!(thread.heap.get_object(node1_ref).is_ok());
+    assert!(thread.heap.get_object(node2_ref).is_ok());
 
-    let handle_ref = thread.heap.alloc(HeapObject::AdapterHandle {
-        binding_id: BindingId::new(1),
-        type_id: OpaqueTypeId::new("graphics", "Texture").unwrap(),
-        id: HandleId::new(42),
-    });
-    let released_handles = vm.release_unreachable(&mut thread);
-    assert!(thread.heap.objects[node1_ref.raw()].is_none());
-    assert!(thread.heap.objects[node2_ref.raw()].is_none());
-    assert!(thread.heap.objects[handle_ref.raw()].is_none());
+    let handle_ref = thread
+        .heap
+        .alloc(HeapObject::AdapterHandle {
+            binding_id: BindingId::new(1),
+            type_id: OpaqueTypeId::new("graphics", "Texture").unwrap(),
+            id: HandleId::new(42),
+        })
+        .unwrap();
+    let released_handles = vm.release_unreachable(&mut thread).unwrap();
+    assert!(thread.heap.get_object(node1_ref).is_err());
+    assert!(thread.heap.get_object(node2_ref).is_err());
+    assert!(thread.heap.get_object(handle_ref).is_err());
     assert_eq!(
         released_handles,
         vec![(
@@ -221,14 +224,14 @@ fn test_ownership_cycle_release() {
         other => panic!("expected tuple, got {:?}", other),
     };
 
-    assert!(thread.heap.objects[node1_ref.raw()].is_some());
-    assert!(thread.heap.objects[node2_ref.raw()].is_some());
-    assert!(thread.heap.objects[tuple_ref.raw()].is_some());
+    assert!(thread.heap.get_object(node1_ref).is_ok());
+    assert!(thread.heap.get_object(node2_ref).is_ok());
+    assert!(thread.heap.get_object(tuple_ref).is_ok());
 
-    vm.release_unreachable(&mut thread);
-    assert!(thread.heap.objects[node1_ref.raw()].is_none());
-    assert!(thread.heap.objects[node2_ref.raw()].is_none());
-    assert!(thread.heap.objects[tuple_ref.raw()].is_none());
+    vm.release_unreachable(&mut thread).unwrap();
+    assert!(thread.heap.get_object(node1_ref).is_err());
+    assert!(thread.heap.get_object(node2_ref).is_err());
+    assert!(thread.heap.get_object(tuple_ref).is_err());
 }
 
 #[test]
@@ -319,7 +322,7 @@ fn test_ownership_weak_invalidation() {
         other => panic!("expected object, got {:?}", other),
     };
 
-    assert!(thread.heap.objects[node2_ref.raw()].is_some());
+    assert!(thread.heap.get_object(node2_ref).is_ok());
 
     let node2 = thread.heap.get_object(node2_ref).unwrap();
     match node2 {
@@ -328,4 +331,155 @@ fn test_ownership_weak_invalidation() {
         }
         other => panic!("expected struct, got {:?}", other),
     }
+}
+
+#[test]
+fn test_obsolete_reference_returns_invalid_object() {
+    let mut thread = thread::VmThreadState::new();
+    let obj_ref = thread
+        .heap
+        .alloc(HeapObject::Tuple { elements: vec![] })
+        .unwrap();
+    thread.heap.free_object(obj_ref).unwrap();
+
+    // Allocate again to reuse slot
+    let new_ref = thread
+        .heap
+        .alloc(HeapObject::Tuple { elements: vec![] })
+        .unwrap();
+    assert_ne!(obj_ref, new_ref);
+
+    let err = thread.heap.get_object(obj_ref).unwrap_err();
+    assert_eq!(err, VmError::InvalidObjectReference);
+}
+
+#[test]
+fn test_alloc_returns_id_exhausted() {
+    let mut thread = thread::VmThreadState::new();
+    thread.heap.exhaust_id_counter();
+    let err = thread
+        .heap
+        .alloc(HeapObject::Tuple { elements: vec![] })
+        .unwrap_err();
+    assert_eq!(err, VmError::IdCounterExhausted);
+}
+
+#[test]
+fn test_gc_fails_on_invalid_reference() {
+    let mut thread = thread::VmThreadState::new();
+    let graph = graph_with_node(galfus_bytecode::BytecodeNode {
+        id: galfus_core::ModuleId::new(0),
+        path: galfus_core::ModulePath::new("test.gfs").unwrap(),
+        semantic_revision: galfus_core::SemanticRevision::new(0),
+        module: galfus_bytecode::BytecodeModule {
+            name: "test".to_string(),
+            global_count: 0,
+            constants: galfus_bytecode::ConstantPool { constants: vec![] },
+            types: vec![],
+            functions: vec![],
+            struct_layouts: vec![],
+            choice_layouts: vec![],
+            imports: vec![],
+            exports: vec![],
+            init_func_idx: None,
+        },
+        metadata: None,
+    });
+    let vm = VirtualMachine::new(std::sync::Arc::new(graph));
+
+    thread.module_states.insert(
+        galfus_core::ModuleId::new(0),
+        crate::runtime::RuntimeModuleState {
+            globals: vec![Value::Object(crate::runtime::VmObjectRef(999))],
+            initialized: true,
+        },
+    );
+
+    let err = vm.release_unreachable(&mut thread).unwrap_err();
+    assert_eq!(err, VmError::InvalidObjectReference);
+}
+
+#[test]
+fn test_deterministic_order_of_released_handles() {
+    let mut thread = thread::VmThreadState::new();
+    let graph = graph_with_node(galfus_bytecode::BytecodeNode {
+        id: galfus_core::ModuleId::new(0),
+        path: galfus_core::ModulePath::new("test.gfs").unwrap(),
+        semantic_revision: galfus_core::SemanticRevision::new(0),
+        module: galfus_bytecode::BytecodeModule {
+            name: "test".to_string(),
+            global_count: 0,
+            constants: galfus_bytecode::ConstantPool { constants: vec![] },
+            types: vec![],
+            functions: vec![],
+            struct_layouts: vec![],
+            choice_layouts: vec![],
+            imports: vec![],
+            exports: vec![],
+            init_func_idx: None,
+        },
+        metadata: None,
+    });
+    let vm = VirtualMachine::new(std::sync::Arc::new(graph));
+
+    let _h1 = thread
+        .heap
+        .alloc(HeapObject::AdapterHandle {
+            binding_id: galfus_core::BindingId::new(1),
+            type_id: galfus_core::OpaqueTypeId::new("graphics", "Texture").unwrap(),
+            id: galfus_core::HandleId::new(10),
+        })
+        .unwrap();
+    let _h2 = thread
+        .heap
+        .alloc(HeapObject::AdapterHandle {
+            binding_id: galfus_core::BindingId::new(1),
+            type_id: galfus_core::OpaqueTypeId::new("graphics", "Texture").unwrap(),
+            id: galfus_core::HandleId::new(20),
+        })
+        .unwrap();
+
+    let released = vm.release_unreachable(&mut thread).unwrap();
+    assert_eq!(released.len(), 2);
+    assert_eq!(released[0].2, galfus_core::HandleId::new(10));
+    assert_eq!(released[1].2, galfus_core::HandleId::new(20));
+}
+
+#[test]
+fn test_visit_roots_includes_entry_func_and_system_response() {
+    let mut thread = thread::VmThreadState::new();
+    let graph = graph_with_node(galfus_bytecode::BytecodeNode {
+        id: galfus_core::ModuleId::new(0),
+        path: galfus_core::ModulePath::new("test.gfs").unwrap(),
+        semantic_revision: galfus_core::SemanticRevision::new(0),
+        module: galfus_bytecode::BytecodeModule {
+            name: "test".to_string(),
+            global_count: 0,
+            constants: galfus_bytecode::ConstantPool { constants: vec![] },
+            types: vec![],
+            functions: vec![],
+            struct_layouts: vec![],
+            choice_layouts: vec![],
+            imports: vec![],
+            exports: vec![],
+            init_func_idx: None,
+        },
+        metadata: None,
+    });
+    let vm = VirtualMachine::new(std::sync::Arc::new(graph));
+
+    let h1 = thread
+        .heap
+        .alloc(HeapObject::Tuple { elements: vec![] })
+        .unwrap();
+    let h2 = thread
+        .heap
+        .alloc(HeapObject::Tuple { elements: vec![] })
+        .unwrap();
+
+    thread.entry_func = Some(Value::Object(h1));
+    thread.system_response = Some(Value::Object(h2));
+
+    let released = vm.release_unreachable(&mut thread).unwrap();
+    assert_eq!(released.len(), 0);
 }

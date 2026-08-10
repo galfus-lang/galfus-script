@@ -16,10 +16,10 @@ impl MessageInjector for MockInjector {
     fn inject_system_response(
         &self,
         _thread_id: galfus_core::ThreadId,
-        request_id: galfus_core::RequestId,
+        request_lease: galfus_core::RequestLease,
         response: Result<BoundaryValue, ExecutionFailure>,
     ) {
-        *self.response.lock().unwrap() = Some((request_id, response));
+        *self.response.lock().unwrap() = Some((request_lease.id, response));
     }
 }
 
@@ -34,7 +34,7 @@ fn call_dispatch(
     });
     provider.dispatch(
         galfus_core::ThreadId::new(0),
-        galfus_core::RequestId::new(1),
+        galfus_core::RequestLease::new(galfus_core::RequestId::new(1), 1),
         method,
         args,
         injector,
@@ -113,7 +113,7 @@ fn pending_reads_preserve_the_provider_request_id() {
 
     provider.dispatch(
         galfus_core::ThreadId::new(7),
-        galfus_core::RequestId::new(42),
+        galfus_core::RequestLease::new(galfus_core::RequestId::new(42), 1),
         "read",
         &[BoundaryValue::Bytes(b"\n".to_vec())],
         injector,

@@ -104,8 +104,12 @@ impl Execution {
                     }
                 }
                 ThreadResult::Completed(res) => {
+                    self.state = match res {
+                        Ok(_) => ExecutionState::Completed,
+                        Err(_) => ExecutionState::Failed,
+                    };
                     self.result = Some(res);
-                    self.state = ExecutionState::Completed;
+                    self.orchestrator = None;
                 }
                 ThreadResult::Blocked { .. } => {
                     self.state = ExecutionState::Waiting;
@@ -146,11 +150,16 @@ impl Execution {
         }
     }
 
-    pub fn run_to_completion(&mut self) -> Result<BoundaryValue, ExecutionFailure> {
+    pub fn run_sync_to_completion(&mut self) -> Result<BoundaryValue, ExecutionFailure> {
         loop {
             match self.poll(100)? {
                 ExecutorStepResult::Completed(_) => {
-                    return self.result.clone().unwrap_or(Ok(BoundaryValue::Null));
+                    return self.result.clone().unwrap_or_else(|| {
+                        Err(ExecutionFailure::new(
+                            ExecutionFailureKind::InternalRuntimeFailure,
+                            "execution completed without yielding a result",
+                        ))
+                    });
                 }
                 ExecutorStepResult::Blocked { .. } => {
                     if !self.sink.has_pending() {
@@ -208,12 +217,12 @@ impl ExecutionHandle {
     pub fn resolve_request(
         &self,
         thread_id: galfus_core::ThreadId,
-        request_id: galfus_core::RequestId,
+        request_lease: galfus_core::RequestLease,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
         self.sink.send(RuntimeEvent::EffectCompleted {
             thread_id,
-            request_id,
+            request_lease,
             result,
         });
     }
@@ -221,12 +230,12 @@ impl ExecutionHandle {
     pub fn resolve_future(
         &self,
         thread_id: galfus_core::ThreadId,
-        future_id: galfus_core::FutureId,
+        future_lease: galfus_core::FutureLease,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
         self.sink.send(RuntimeEvent::FutureCompleted {
             thread_id,
-            future_id,
+            future_lease,
             result,
         });
     }
@@ -236,29 +245,29 @@ impl galfus_contract::MessageInjector for ExecutionHandle {
     fn inject_system_response(
         &self,
         thread_id: galfus_core::ThreadId,
-        request_id: galfus_core::RequestId,
+        request_lease: galfus_core::RequestLease,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
-        self.resolve_request(thread_id, request_id, result);
+        self.resolve_request(thread_id, request_lease, result);
     }
 }
 
 pub(crate) struct FutureCompletionInjector {
     sink: EventSink,
     owner_thread_id: crate::registry::ThreadId,
-    future_id: galfus_core::FutureId,
+    future_lease: galfus_core::FutureLease,
 }
 
 impl FutureCompletionInjector {
     pub(crate) fn new(
         sink: EventSink,
         owner_thread_id: crate::registry::ThreadId,
-        future_id: galfus_core::FutureId,
+        future_lease: galfus_core::FutureLease,
     ) -> Self {
         Self {
             sink,
             owner_thread_id,
-            future_id,
+            future_lease,
         }
     }
 }
@@ -267,12 +276,12 @@ impl galfus_contract::MessageInjector for FutureCompletionInjector {
     fn inject_system_response(
         &self,
         _thread_id: galfus_core::ThreadId,
-        _request_id: galfus_core::RequestId,
+        _request_lease: galfus_core::RequestLease,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
         self.sink.send(RuntimeEvent::FutureCompleted {
             thread_id: self.owner_thread_id,
-            future_id: self.future_id,
+            future_lease: self.future_lease,
             result,
         });
     }

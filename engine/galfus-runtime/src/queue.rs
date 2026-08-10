@@ -51,7 +51,7 @@ impl Default for RunnableQueue {
 pub struct BlockedQueue {
     blocked: HashSet<ThreadId>,
     clock_ms: u64,
-    next_timer_id: u32,
+    timer_id_manager: galfus_core::id_manager::IdManager<TimerId>,
     timers: BTreeSet<TimerEntry>,
     active_timers: HashMap<ThreadId, TimerEntry>,
 }
@@ -68,7 +68,7 @@ impl BlockedQueue {
         Self {
             blocked: HashSet::new(),
             clock_ms: 0,
-            next_timer_id: 1,
+            timer_id_manager: galfus_core::id_manager::IdManager::new(1),
             timers: BTreeSet::new(),
             active_timers: HashMap::new(),
         }
@@ -84,8 +84,7 @@ impl BlockedQueue {
         id: ThreadId,
         timeout_ms: u64,
     ) -> Result<(), ExecutionFailure> {
-        let raw_timer_id = self.next_timer_id;
-        let next_timer_id = self.next_timer_id.checked_add(1).ok_or_else(|| {
+        let timer_id = self.timer_id_manager.try_allocate().ok_or_else(|| {
             ExecutionFailure::new(
                 ExecutionFailureKind::IdSpaceExhausted,
                 "timer id space exhausted",
@@ -93,10 +92,9 @@ impl BlockedQueue {
         })?;
         let timer = TimerEntry {
             deadline_ms: self.clock_ms.saturating_add(timeout_ms),
-            timer_id: TimerId::new(raw_timer_id),
+            timer_id,
             thread_id: id,
         };
-        self.next_timer_id = next_timer_id;
         self.remove_timer(id);
         self.blocked.insert(id);
         self.timers.insert(timer);
@@ -117,6 +115,7 @@ impl BlockedQueue {
     fn remove_timer(&mut self, id: ThreadId) {
         if let Some(timer) = self.active_timers.remove(&id) {
             self.timers.remove(&timer);
+            self.timer_id_manager.free(timer.timer_id);
         }
     }
 
@@ -136,6 +135,7 @@ impl BlockedQueue {
                 continue;
             }
             self.active_timers.remove(&thread_id);
+            self.timer_id_manager.free(timer.timer_id);
             if self.blocked.remove(&thread_id) {
                 woke_up.push(thread_id);
             }

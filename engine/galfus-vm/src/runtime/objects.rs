@@ -13,24 +13,26 @@ impl VirtualMachine {
             // Category D: Heaps, Structs & Collections
             Instruction::AllocLocal { dest, type_idx } => {
                 let ty = self
-                    .current_image(thread)
-                    .unwrap()
+                    .current_image(thread)?
                     .types
                     .get(type_idx.raw() as usize)
                     .ok_or(VmError::TypeOutOfBounds { index: type_idx })?;
                 if let BytecodeType::Struct(layout_idx) = ty {
                     let layout = self
-                        .current_image(thread)
-                        .unwrap()
+                        .current_image(thread)?
                         .struct_layouts
                         .get(layout_idx.raw() as usize)
                         .ok_or(VmError::TypeOutOfBounds { index: type_idx })?;
                     let fields = vec![Value::Null; layout.fields.len()];
                     let obj_ref = thread.heap.alloc(HeapObject::Struct {
-                        module_id: thread.call_stack.last().unwrap().module_id,
+                        module_id: thread
+                            .call_stack
+                            .last()
+                            .ok_or(VmError::EmptyCallStack)?
+                            .module_id,
                         layout_idx: *layout_idx,
                         fields,
-                    });
+                    })?;
                     thread.write_reg(dest, Value::Object(obj_ref))?;
                 } else {
                     return Err(VmError::TypeMismatch {
@@ -94,8 +96,7 @@ impl VirtualMachine {
                 len_reg,
             } => {
                 let ty = self
-                    .current_image(thread)
-                    .unwrap()
+                    .current_image(thread)?
                     .types
                     .get(type_idx.raw() as usize)
                     .ok_or(VmError::TypeOutOfBounds { index: type_idx })?;
@@ -130,7 +131,7 @@ impl VirtualMachine {
                 let obj_ref = thread.heap.alloc(HeapObject::Array {
                     element_ty,
                     elements,
-                });
+                })?;
                 thread.write_reg(dest, Value::Object(obj_ref))?;
             }
             Instruction::LoadIndex { dest, arr, idx } => {
@@ -238,8 +239,7 @@ impl VirtualMachine {
                 count,
             } => {
                 let ty = self
-                    .current_image(thread)
-                    .unwrap()
+                    .current_image(thread)?
                     .types
                     .get(type_idx.raw() as usize)
                     .ok_or(VmError::TypeOutOfBounds { index: type_idx })?;
@@ -255,7 +255,7 @@ impl VirtualMachine {
                         let src_reg = Reg(start.raw() + i as u16);
                         elements.push(thread.read_reg(src_reg)?);
                     }
-                    let obj_ref = thread.heap.alloc(HeapObject::Tuple { elements });
+                    let obj_ref = thread.heap.alloc(HeapObject::Tuple { elements })?;
                     thread.write_reg(dest, Value::Object(obj_ref))?;
                 } else {
                     return Err(VmError::TypeMismatch {
@@ -271,19 +271,22 @@ impl VirtualMachine {
                 payload,
             } => {
                 let ty = self
-                    .current_image(thread)
-                    .unwrap()
+                    .current_image(thread)?
                     .types
                     .get(type_idx.raw() as usize)
                     .ok_or(VmError::TypeOutOfBounds { index: type_idx })?;
                 if let BytecodeType::Choice(layout_idx) = ty {
                     let payload_val = thread.read_reg(payload)?;
                     let obj_ref = thread.heap.alloc(HeapObject::Choice {
-                        module_id: thread.call_stack.last().unwrap().module_id,
+                        module_id: thread
+                            .call_stack
+                            .last()
+                            .ok_or(VmError::EmptyCallStack)?
+                            .module_id,
                         layout_idx: *layout_idx,
                         variant_idx,
                         payload: payload_val,
-                    });
+                    })?;
                     thread.write_reg(dest, Value::Object(obj_ref))?;
                 } else {
                     return Err(VmError::TypeMismatch {
@@ -336,7 +339,7 @@ impl VirtualMachine {
         self.fill_copy_placeholders(thread, &strong_closure, &copied)?;
 
         copied
-            .get(&obj_ref.raw())
+            .get(obj_ref)
             .copied()
             .map(Value::Object)
             .ok_or_else(|| VmError::TypeMismatch {
@@ -349,11 +352,11 @@ impl VirtualMachine {
         &self,
         thread: &thread::VmThreadState,
         root_ref: ObjectRef,
-    ) -> Result<HashSet<usize>, VmError> {
+    ) -> Result<HashSet<VmObjectRef>, VmError> {
         let mut closure = HashSet::new();
         let mut pending = VecDeque::new();
 
-        closure.insert(root_ref.raw());
+        closure.insert(root_ref);
         pending.push_back(root_ref);
 
         while let Some(obj_ref) = pending.pop_front() {
@@ -366,10 +369,7 @@ impl VirtualMachine {
                     fields,
                 } => {
                     let layout = self
-                        .graph
-                        .get(*module_id)
-                        .unwrap()
-                        .module
+                        .get_module(*module_id)?
                         .struct_layouts
                         .get(layout_idx.raw() as usize)
                         .ok_or(VmError::TypeMismatch {
@@ -406,13 +406,13 @@ impl VirtualMachine {
         &self,
         thread: &thread::VmThreadState,
         value: &Value,
-        closure: &mut HashSet<usize>,
+        closure: &mut HashSet<VmObjectRef>,
         pending: &mut VecDeque<ObjectRef>,
     ) -> Result<(), VmError> {
         if let Value::Object(obj_ref) = value {
             thread.heap.get_object(*obj_ref)?;
 
-            if closure.insert(obj_ref.raw()) {
+            if closure.insert(*obj_ref) {
                 pending.push_back(*obj_ref);
             }
         }
@@ -423,12 +423,11 @@ impl VirtualMachine {
     fn allocate_copy_placeholders(
         &self,
         thread: &mut thread::VmThreadState,
-        strong_closure: &HashSet<usize>,
-    ) -> Result<HashMap<usize, ObjectRef>, VmError> {
+        strong_closure: &HashSet<VmObjectRef>,
+    ) -> Result<HashMap<VmObjectRef, ObjectRef>, VmError> {
         let mut copied = HashMap::new();
 
-        for &old_raw in strong_closure {
-            let old_ref = VmObjectRef(old_raw);
+        for &old_ref in strong_closure {
             let object = thread.heap.get_object(old_ref)?.clone();
 
             let placeholder = match object {
@@ -438,10 +437,7 @@ impl VirtualMachine {
                     fields,
                 } => {
                     let layout = self
-                        .graph
-                        .get(module_id)
-                        .unwrap()
-                        .module
+                        .get_module(module_id)?
                         .struct_layouts
                         .get(layout_idx.raw() as usize)
                         .ok_or(VmError::TypeMismatch {
@@ -491,8 +487,8 @@ impl VirtualMachine {
                 },
             };
 
-            let copied_ref = thread.heap.alloc(placeholder);
-            copied.insert(old_raw, copied_ref);
+            let copied_ref = thread.heap.alloc(placeholder)?;
+            copied.insert(old_ref, copied_ref);
         }
 
         Ok(copied)
@@ -501,12 +497,11 @@ impl VirtualMachine {
     fn fill_copy_placeholders(
         &self,
         thread: &mut thread::VmThreadState,
-        strong_closure: &HashSet<usize>,
-        copied: &HashMap<usize, ObjectRef>,
+        strong_closure: &HashSet<VmObjectRef>,
+        copied: &HashMap<VmObjectRef, ObjectRef>,
     ) -> Result<(), VmError> {
-        for &old_raw in strong_closure {
-            let old_ref = VmObjectRef(old_raw);
-            let copied_ref = *copied.get(&old_raw).ok_or_else(|| VmError::TypeMismatch {
+        for &old_ref in strong_closure {
+            let copied_ref = *copied.get(&old_ref).ok_or_else(|| VmError::TypeMismatch {
                 expected: "copied object".to_string(),
                 found: format!("{:?}", old_ref),
             })?;
@@ -519,10 +514,7 @@ impl VirtualMachine {
                     fields,
                 } => {
                     let layout = self
-                        .graph
-                        .get(module_id)
-                        .unwrap()
-                        .module
+                        .get_module(module_id)?
                         .struct_layouts
                         .get(layout_idx.raw() as usize)
                         .ok_or(VmError::TypeMismatch {
@@ -622,13 +614,13 @@ impl VirtualMachine {
         &self,
         _thread: &thread::VmThreadState,
         value: &Value,
-        copied: &HashMap<usize, ObjectRef>,
+        copied: &HashMap<VmObjectRef, ObjectRef>,
     ) -> Result<Value, VmError> {
         let Value::Object(obj_ref) = value else {
             return Ok(value.clone());
         };
 
-        if let Some(copied_ref) = copied.get(&obj_ref.raw()) {
+        if let Some(copied_ref) = copied.get(&obj_ref) {
             return Ok(Value::Object(*copied_ref));
         }
 
@@ -638,13 +630,13 @@ impl VirtualMachine {
         })
     }
 
-    fn copy_weak_value(&self, value: &Value, copied: &HashMap<usize, ObjectRef>) -> Value {
+    fn copy_weak_value(&self, value: &Value, copied: &HashMap<VmObjectRef, ObjectRef>) -> Value {
         let Value::Object(obj_ref) = value else {
             return value.clone();
         };
 
         copied
-            .get(&obj_ref.raw())
+            .get(&obj_ref)
             .copied()
             .map(Value::Object)
             .unwrap_or(Value::Null)
@@ -657,8 +649,7 @@ impl VirtualMachine {
         type_idx: TypeIdx,
     ) -> Result<Value, VmError> {
         let ty = self
-            .current_image(thread)
-            .unwrap()
+            .current_image(thread)?
             .types
             .get(type_idx.raw() as usize)
             .ok_or(VmError::TypeOutOfBounds { index: type_idx })?;

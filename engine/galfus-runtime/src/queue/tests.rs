@@ -40,7 +40,7 @@ fn timer_id_exhaustion_keeps_the_existing_queue_state() {
     let mut queue = BlockedQueue::new();
     let first = thread_id(1);
     let second = thread_id(2);
-    queue.next_timer_id = u32::MAX - 1;
+    queue.timer_id_manager.set_next_id_for_test(u32::MAX);
 
     queue.block_with_timeout(first, 10).unwrap();
     let error = queue.block_with_timeout(second, 10).unwrap_err();
@@ -50,4 +50,20 @@ fn timer_id_exhaustion_keeps_the_existing_queue_state() {
         galfus_contract::ExecutionFailureKind::IdSpaceExhausted
     );
     assert_eq!(queue.tick_timeouts(10), vec![first]);
+}
+
+#[test]
+fn expired_timer_id_is_reused() {
+    let mut queue = BlockedQueue::new();
+    let first = thread_id(1);
+    let second = thread_id(2);
+
+    queue.block_with_timeout(first, 1).unwrap();
+    queue.tick_timeouts(1);
+    queue.block_with_timeout(second, 1).unwrap();
+
+    assert_eq!(
+        queue.active_timers.get(&second).unwrap().timer_id,
+        galfus_core::TimerId::new(1)
+    );
 }

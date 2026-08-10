@@ -16,7 +16,7 @@ impl HostProvider for TerminatorIo {
     fn dispatch(
         &mut self,
         thread_id: galfus_core::ThreadId,
-        request_id: galfus_core::RequestId,
+        request_lease: galfus_core::RequestLease,
         method: &str,
         args: &[BoundaryValue],
         injector: Arc<dyn MessageInjector>,
@@ -40,11 +40,11 @@ impl HostProvider for TerminatorIo {
             }
             injector.inject_system_response(
                 thread_id,
-                request_id,
+                request_lease,
                 Ok(BoundaryValue::Bytes(Vec::new())),
             );
         } else {
-            injector.inject_system_response(thread_id, request_id, Ok(BoundaryValue::Null));
+            injector.inject_system_response(thread_id, request_lease, Ok(BoundaryValue::Null));
         }
     }
 }

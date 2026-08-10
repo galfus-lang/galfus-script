@@ -3,15 +3,17 @@ use crate::runtime;
 
 use crate::error::VmError;
 use crate::runtime::Value;
-use crate::runtime::{CallFrame, HeapObject, RuntimeModuleState, VmObjectRef};
+use crate::runtime::{CallFrame, HeapObject, RuntimeModuleState, VisitRoots, VmObjectRef};
 use galfus_bytecode::instruction::Reg;
 use galfus_core::ModuleId;
 use std::collections::HashMap;
 
 pub struct PrivateHeap {
-    pub objects: Vec<Option<HeapObject>>,
-    pub free_slots: Vec<usize>,
-    pub allocations_since_release: usize,
+    objects: Vec<Option<(VmObjectRef, HeapObject)>>,
+    free_slots: Vec<usize>,
+    allocations_since_release: usize,
+    next_id: u64,
+    object_to_slot: HashMap<VmObjectRef, usize>,
 }
 
 impl Default for PrivateHeap {
@@ -26,50 +28,126 @@ impl PrivateHeap {
             objects: Vec::new(),
             free_slots: Vec::new(),
             allocations_since_release: 0,
+            next_id: 1,
+            object_to_slot: HashMap::new(),
         }
     }
 
-    pub fn alloc(&mut self, obj: HeapObject) -> VmObjectRef {
+    pub fn alloc(&mut self, obj: HeapObject) -> Result<VmObjectRef, VmError> {
         self.allocations_since_release += 1;
 
-        if let Some(idx) = self.free_slots.pop() {
-            self.objects[idx] = Some(obj);
-            VmObjectRef(idx)
+        let id = self.next_id;
+        self.next_id = self
+            .next_id
+            .checked_add(1)
+            .ok_or(VmError::IdCounterExhausted)?;
+        let obj_ref = VmObjectRef(id);
+
+        let idx = if let Some(idx) = self.free_slots.pop() {
+            idx
         } else {
             let idx = self.objects.len();
-            self.objects.push(Some(obj));
-            VmObjectRef(idx)
-        }
+            self.objects.push(None);
+            idx
+        };
+
+        self.objects[idx] = Some((obj_ref, obj));
+        self.object_to_slot.insert(obj_ref, idx);
+
+        Ok(obj_ref)
+    }
+
+    #[cfg(test)]
+    pub fn exhaust_id_counter(&mut self) {
+        self.next_id = u64::MAX;
     }
 
     pub fn get_object(&self, obj_ref: VmObjectRef) -> Result<&HeapObject, VmError> {
-        let idx = obj_ref.raw();
-        if idx < self.objects.len()
-            && let Some(ref obj) = self.objects[idx]
-        {
+        let idx = *self
+            .object_to_slot
+            .get(&obj_ref)
+            .ok_or(VmError::InvalidObjectReference)?;
+        if let Some((_, ref obj)) = self.objects[idx] {
             return Ok(obj);
         }
         Err(VmError::InvalidObjectReference)
     }
 
     pub fn get_object_mut(&mut self, obj_ref: VmObjectRef) -> Result<&mut HeapObject, VmError> {
-        let idx = obj_ref.raw();
-        if idx < self.objects.len()
-            && let Some(ref mut obj) = self.objects[idx]
-        {
+        let idx = *self
+            .object_to_slot
+            .get(&obj_ref)
+            .ok_or(VmError::InvalidObjectReference)?;
+        if let Some((_, ref mut obj)) = self.objects[idx] {
             return Ok(obj);
         }
         Err(VmError::InvalidObjectReference)
     }
 
     pub fn free_object(&mut self, obj_ref: VmObjectRef) -> Result<(), VmError> {
-        let idx = obj_ref.raw();
-        if idx < self.objects.len() && self.objects[idx].is_some() {
-            self.objects[idx] = None;
-            self.free_slots.push(idx);
-            return Ok(());
+        let idx = self
+            .object_to_slot
+            .remove(&obj_ref)
+            .ok_or(VmError::InvalidObjectReference)?;
+        self.objects[idx] = None;
+        self.free_slots.push(idx);
+        Ok(())
+    }
+
+    pub fn allocations_since_release(&self) -> usize {
+        self.allocations_since_release
+    }
+
+    pub fn reset_allocations_since_release(&mut self) {
+        self.allocations_since_release = 0;
+    }
+
+    pub fn iter_live_objects(&self) -> impl Iterator<Item = (VmObjectRef, &HeapObject)> {
+        self.objects
+            .iter()
+            .filter_map(|slot| slot.as_ref().map(|(r, o)| (*r, o)))
+    }
+
+    pub fn iter_live_objects_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (VmObjectRef, &mut HeapObject)> {
+        self.objects
+            .iter_mut()
+            .filter_map(|slot| slot.as_mut().map(|(r, o)| (*r, o)))
+    }
+
+    pub fn extract_adapter_handles(
+        &mut self,
+    ) -> Vec<(
+        galfus_core::BindingId,
+        galfus_core::OpaqueTypeId,
+        galfus_core::HandleId,
+    )> {
+        let mut extracted = Vec::new();
+        let mut to_free = Vec::new();
+
+        for (idx, slot) in self.objects.iter_mut().enumerate() {
+            if let Some((
+                obj_ref,
+                crate::runtime::HeapObject::AdapterHandle {
+                    binding_id,
+                    type_id,
+                    id,
+                },
+            )) = slot
+            {
+                extracted.push((*binding_id, type_id.clone(), *id));
+                to_free.push((*obj_ref, idx));
+            }
         }
-        Err(VmError::InvalidObjectReference)
+
+        for (obj_ref, idx) in to_free {
+            self.objects[idx] = None;
+            self.object_to_slot.remove(&obj_ref);
+            self.free_slots.push(idx);
+        }
+
+        extracted
     }
 }
 
@@ -129,17 +207,7 @@ impl VmThreadState {
         galfus_core::HandleId,
     )> {
         let mut extracted = std::mem::take(&mut self.pending_adapter_handle_drops);
-        for obj in self.heap.objects.iter_mut() {
-            if let Some(crate::runtime::HeapObject::AdapterHandle {
-                binding_id,
-                type_id,
-                id,
-            }) = obj
-            {
-                extracted.push((*binding_id, type_id.clone(), *id));
-                *obj = None;
-            }
-        }
+        extracted.extend(self.heap.extract_adapter_handles());
         extracted
     }
 
@@ -187,10 +255,8 @@ impl VmThreadState {
                 .any(|value| matches!(value, Value::Future(id) if *id == future_id))
         }) || self
             .heap
-            .objects
-            .iter()
-            .flatten()
-            .any(|object| match object {
+            .iter_live_objects()
+            .any(|(_, object)| match object {
                 HeapObject::Struct { fields, .. } | HeapObject::Tuple { elements: fields } => {
                     fields
                         .iter()
@@ -204,5 +270,22 @@ impl VmThreadState {
                 }
                 HeapObject::AdapterHandle { .. } => false,
             })
+    }
+}
+
+impl VisitRoots for VmThreadState {
+    fn visit_roots(&self, visitor: &mut impl FnMut(VmObjectRef)) {
+        for state in self.module_states.values() {
+            state.visit_roots(visitor);
+        }
+        for frame in &self.call_stack {
+            frame.visit_roots(visitor);
+        }
+        if let Some(ref response) = self.system_response {
+            response.visit_roots(visitor);
+        }
+        if let Some(ref entry) = self.entry_func {
+            entry.visit_roots(visitor);
+        }
     }
 }

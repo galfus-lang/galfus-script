@@ -34,7 +34,15 @@ impl Orchestrator {
                     return;
                 };
                 if let Some(host) = providers.lock().unwrap().host_mut() {
-                    let _outcome = host.cancel(thread_id, request_id);
+                    let generation = self
+                        .request_generations
+                        .get(&request_id.raw())
+                        .copied()
+                        .unwrap_or(0);
+                    let _outcome = host.cancel(
+                        thread_id,
+                        galfus_core::RequestLease::new(request_id, generation),
+                    );
                 }
             }
             Activation::Provider {
@@ -47,11 +55,16 @@ impl Orchestrator {
                 ..
             } => {
                 if let Some(bindings) = &self.adapter_bindings {
+                    let generation = self
+                        .request_generations
+                        .get(&request_id.raw())
+                        .copied()
+                        .unwrap_or(0);
                     let _outcome = bindings.lock().unwrap().cancel(
                         &proxy_module,
                         &symbol,
                         thread_id,
-                        request_id,
+                        galfus_core::RequestLease::new(request_id, generation),
                     );
                 }
             }
@@ -62,8 +75,8 @@ impl Orchestrator {
                 let workers = self
                     .future_workers
                     .iter()
-                    .filter_map(|(&worker_id, &(owner_id, id))| {
-                        (owner_id == thread_id && id == future_id).then_some(worker_id)
+                    .filter_map(|(&worker_id, &(owner_id, future_lease))| {
+                        (owner_id == thread_id && future_lease.id == future_id).then_some(worker_id)
                     })
                     .collect::<Vec<_>>();
                 for worker_id in workers {
@@ -87,6 +100,9 @@ impl Orchestrator {
                 continue;
             };
             pending.active.store(false, Ordering::Release);
+            if let super::pending::PendingKey::Request(request_id) = key {
+                self.request_id_manager.free(request_id);
+            }
             match pending.operation {
                 PendingOperation::Future | PendingOperation::AggregateMember { .. } => {}
             }

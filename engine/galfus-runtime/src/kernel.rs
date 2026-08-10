@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 /// Manages thread lifecycle, scheduling queues, and timers.
 pub struct VirtualKernel {
-    next_thread_id: u32,
+    thread_id_manager: galfus_core::id_manager::IdManager<ThreadId>,
     registry: ThreadRegistry,
     pub(crate) runnable: RunnableQueue,
     blocked: BlockedQueue,
@@ -19,7 +19,7 @@ pub struct VirtualKernel {
 impl VirtualKernel {
     pub fn new() -> Self {
         Self {
-            next_thread_id: 1,
+            thread_id_manager: galfus_core::id_manager::IdManager::new(1),
             registry: ThreadRegistry::new(),
             runnable: RunnableQueue::new(),
             blocked: BlockedQueue::new(),
@@ -32,14 +32,12 @@ impl VirtualKernel {
         thread: VmThreadState,
         key: Option<String>,
     ) -> Result<ThreadId, ExecutionFailure> {
-        let raw_id = self.next_thread_id;
-        self.next_thread_id = self.next_thread_id.checked_add(1).ok_or_else(|| {
+        let id = self.thread_id_manager.try_allocate().ok_or_else(|| {
             ExecutionFailure::new(
                 ExecutionFailureKind::IdSpaceExhausted,
                 "thread id space exhausted",
             )
         })?;
-        let id = ThreadId::new(raw_id);
         self.registry.register(id, thread, key);
         Ok(id)
     }
@@ -89,7 +87,11 @@ impl VirtualKernel {
     pub fn cancel(&mut self, id: ThreadId) -> bool {
         self.runnable.remove(id);
         self.blocked.remove(id);
-        self.registry.cancel(id)
+        let removed = self.registry.cancel(id);
+        if removed {
+            self.thread_id_manager.free(id);
+        }
+        removed
     }
 
     /// Returns the next runnable ThreadId.
@@ -104,10 +106,6 @@ impl VirtualKernel {
 
     pub fn active_count(&self) -> usize {
         self.registry.active_count()
-    }
-
-    pub fn get_exit_code(&self, id: ThreadId) -> Option<i32> {
-        self.registry.get_exit_code(id)
     }
 
     #[cfg(test)]

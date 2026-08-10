@@ -97,8 +97,13 @@ fn codec_preserves_the_declared_type_of_an_empty_array() {
         elements: vec![],
     });
 
-    let value = decode_from_thread_heap(&heap, VmValue::Object(reference), TypeIdx(1), &module)
-        .expect("empty array decodes with its declared element type");
+    let value = decode_from_thread_heap(
+        &heap,
+        VmValue::Object(reference.unwrap()),
+        TypeIdx(1),
+        &module,
+    )
+    .expect("empty array decodes with its declared element type");
 
     assert_eq!(
         value,

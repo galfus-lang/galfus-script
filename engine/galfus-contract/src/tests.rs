@@ -18,7 +18,7 @@ impl AdapterModuleBinding for DummyAdapter {
         &mut self,
         _symbol: &str,
         _thread_id: galfus_core::ThreadId,
-        _request_id: galfus_core::RequestId,
+        _request_lease: galfus_core::RequestLease,
         _args: &[BoundaryValue],
         _injector: Arc<dyn MessageInjector>,
     ) {
@@ -37,7 +37,7 @@ impl HostProvider for DummyHost {
     fn dispatch(
         &mut self,
         _thread_id: galfus_core::ThreadId,
-        _request_id: galfus_core::RequestId,
+        _request_lease: galfus_core::RequestLease,
         _method: &str,
         _args: &[BoundaryValue],
         _injector: Arc<dyn MessageInjector>,
@@ -54,7 +54,7 @@ impl HostProvider for IoHost {
     fn dispatch(
         &mut self,
         _thread_id: galfus_core::ThreadId,
-        _request_id: galfus_core::RequestId,
+        _request_lease: galfus_core::RequestLease,
         _method: &str,
         _args: &[BoundaryValue],
         _injector: Arc<dyn MessageInjector>,
@@ -284,7 +284,7 @@ fn adapter_handle_id_space_stops_after_u32_max() {
 #[test]
 fn adapter_binding_id_space_stops_without_registering_a_module() {
     let mut bindings = AdapterBindings::default();
-    bindings.next_binding_id = u32::MAX - 1;
+    bindings.binding_id_manager.set_next_id_for_test(u32::MAX);
     let releases = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
     assert_eq!(
@@ -292,7 +292,7 @@ fn adapter_binding_id_space_stops_without_registering_a_module() {
             .register_module("first.gfp", Box::new(DummyAdapter(releases.clone())))
             .unwrap()
             .raw(),
-        u32::MAX - 1
+        u32::MAX
     );
     let error = bindings
         .register_module("second.gfp", Box::new(DummyAdapter(releases)))
@@ -340,7 +340,7 @@ impl AdapterModuleBinding for CancellationRecordingAdapter {
         &mut self,
         _symbol: &str,
         _thread_id: galfus_core::ThreadId,
-        _request_id: galfus_core::RequestId,
+        _request_lease: galfus_core::RequestLease,
         _args: &[BoundaryValue],
         _injector: std::sync::Arc<dyn MessageInjector>,
     ) {
@@ -350,10 +350,10 @@ impl AdapterModuleBinding for CancellationRecordingAdapter {
         &mut self,
         _symbol: &str,
         thread_id: galfus_core::ThreadId,
-        request_id: galfus_core::RequestId,
+        request_lease: galfus_core::RequestLease,
     ) -> CancellationOutcome {
         self.0.store(
-            ((thread_id.raw() as u64) << 32) | (request_id.raw() as u64),
+            ((thread_id.raw() as u64) << 32) | (request_lease.id.raw() as u64),
             std::sync::atomic::Ordering::Release,
         );
         CancellationOutcome::Confirmed
@@ -375,7 +375,7 @@ fn adapter_bindings_route_cancellation_to_the_owning_symbol() {
         "io",
         "read",
         galfus_core::ThreadId::new(3),
-        galfus_core::RequestId::new(4),
+        galfus_core::RequestLease::new(galfus_core::RequestId::new(4), 1),
     );
 
     assert_eq!(

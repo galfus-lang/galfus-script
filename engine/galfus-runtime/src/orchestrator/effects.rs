@@ -33,6 +33,7 @@ impl Orchestrator {
                 {
                     self.cancel_future_activation(thread_id, future_id, activation);
                 }
+                self.future_id_manager.free(future_id);
                 self.resume_or_fail_front(
                     thread_id,
                     thread,
@@ -228,8 +229,19 @@ impl Orchestrator {
                                     return;
                                 }
                             };
-                            self.future_workers
-                                .insert(worker_id, (thread_id, future_id));
+                            self.future_workers.insert(
+                                worker_id,
+                                (
+                                    thread_id,
+                                    galfus_core::FutureLease::new(
+                                        future_id,
+                                        self.future_generations
+                                            .get(&future_id.raw())
+                                            .copied()
+                                            .unwrap_or(0),
+                                    ),
+                                ),
+                            );
                             let spawned_thread = self.kernel.take_thread(worker_id).unwrap();
                             self.kernel.enqueue_runnable(worker_id, spawned_thread);
                         }
@@ -269,15 +281,16 @@ impl Orchestrator {
                                 };
                                 host.affinity(name.as_str())
                             };
-                            let request_id =
-                                match self.allocate_request_id(thread_id, future_id, &thread) {
-                                    Some(request_id) => request_id,
+                            let request_lease =
+                                match self.allocate_request_lease(thread_id, future_id, &thread) {
+                                    Some(lease) => lease,
                                     None => return,
                                 };
-                            if let Err(error) = self
-                                .future_registry
-                                .assign_request_id(thread_id, future_id, request_id)
-                            {
+                            if let Err(error) = self.future_registry.assign_request_id(
+                                thread_id,
+                                future_id,
+                                request_lease.id,
+                            ) {
                                 self.failure = Some(error.with_stack(execution_stack(&thread)));
                                 self.kernel.cancel(thread_id);
                                 return;
@@ -285,13 +298,19 @@ impl Orchestrator {
                             let task = ProviderDispatchTask {
                                 providers,
                                 thread_id,
-                                request_id,
+                                request_lease,
                                 name,
                                 args,
                                 injector: Arc::new(FutureCompletionInjector::new(
                                     self.sink.clone(),
                                     thread_id,
-                                    future_id,
+                                    galfus_core::FutureLease::new(
+                                        future_id,
+                                        self.future_generations
+                                            .get(&future_id.raw())
+                                            .copied()
+                                            .unwrap_or(0),
+                                    ),
                                 )),
                                 active: self
                                     .future_registry
@@ -335,15 +354,16 @@ impl Orchestrator {
                                 self.kernel.cancel(thread_id);
                                 return;
                             }
-                            let request_id =
-                                match self.allocate_request_id(thread_id, future_id, &thread) {
-                                    Some(request_id) => request_id,
+                            let request_lease =
+                                match self.allocate_request_lease(thread_id, future_id, &thread) {
+                                    Some(lease) => lease,
                                     None => return,
                                 };
-                            if let Err(error) = self
-                                .future_registry
-                                .assign_request_id(thread_id, future_id, request_id)
-                            {
+                            if let Err(error) = self.future_registry.assign_request_id(
+                                thread_id,
+                                future_id,
+                                request_lease.id,
+                            ) {
                                 self.failure = Some(error.with_stack(execution_stack(&thread)));
                                 self.kernel.cancel(thread_id);
                                 return;
@@ -351,14 +371,20 @@ impl Orchestrator {
                             let task = AdapterDispatchTask {
                                 bindings,
                                 thread_id,
-                                request_id,
+                                request_lease,
                                 module: proxy_module,
                                 symbol,
                                 args,
                                 injector: Arc::new(FutureCompletionInjector::new(
                                     self.sink.clone(),
                                     thread_id,
-                                    future_id,
+                                    galfus_core::FutureLease::new(
+                                        future_id,
+                                        self.future_generations
+                                            .get(&future_id.raw())
+                                            .copied()
+                                            .unwrap_or(0),
+                                    ),
                                 )),
                                 active: self
                                     .future_registry
@@ -672,7 +698,7 @@ impl Orchestrator {
                                                                                             .map(galfus_vm::VmValue::Uint8)
                                                                                             .collect(),
                                                                                     },
-                                                                                ),
+                                                                                ).map_err(|_| ())?,
                                                                             ),
                                                                         ),
                                                                         _ => Err(()),
@@ -684,7 +710,7 @@ impl Orchestrator {
                                                                             element_ty: bytes_type,
                                                                             elements: arrays,
                                                                         },
-                                                                    ),
+                                                                    ).map_err(|_| ())?,
                                                                 ))
                                                             },
                                                         )
@@ -759,9 +785,10 @@ impl Orchestrator {
                 arg_types,
                 return_type,
             } => {
-                let Some(future_id) = self.allocate_future_id(thread_id, &thread) else {
+                let Some(future_lease) = self.allocate_future_lease(thread_id, &thread) else {
                     return;
                 };
+                let future_id = future_lease.id;
 
                 let module = &self
                     .vm
@@ -838,9 +865,10 @@ impl Orchestrator {
                 arg_types,
                 return_type,
             } => {
-                let Some(future_id) = self.allocate_future_id(thread_id, &thread) else {
+                let Some(future_lease) = self.allocate_future_lease(thread_id, &thread) else {
                     return;
                 };
+                let future_id = future_lease.id;
                 let galfus_vm::VmValue::Function {
                     module_id: target_module_id,
                     func_idx,
@@ -1041,14 +1069,20 @@ impl Orchestrator {
         }
     }
 
-    pub(super) fn allocate_request_id(
+    pub(super) fn allocate_request_lease(
         &mut self,
         thread_id: crate::registry::ThreadId,
         future_id: galfus_core::FutureId,
         thread: &galfus_vm::thread::VmThreadState,
-    ) -> Option<galfus_core::RequestId> {
-        let raw_id = self.next_request_id;
-        let Some(next_request_id) = self.next_request_id.checked_add(1) else {
+    ) -> Option<galfus_core::RequestLease> {
+        if let Some(id) = self.request_id_manager.try_allocate() {
+            let gen_val = self
+                .request_generations
+                .entry(id.raw())
+                .and_modify(|g| *g = g.wrapping_add(1))
+                .or_insert(1);
+            Some(galfus_core::RequestLease::new(id, *gen_val))
+        } else {
             self.failure = Some(
                 ExecutionFailure::new(
                     ExecutionFailureKind::IdSpaceExhausted,
@@ -1059,19 +1093,23 @@ impl Orchestrator {
                 .with_stack(execution_stack(thread)),
             );
             self.kernel.cancel(thread_id);
-            return None;
-        };
-        self.next_request_id = next_request_id;
-        Some(galfus_core::RequestId::new(raw_id))
+            None
+        }
     }
 
-    pub(super) fn allocate_future_id(
+    pub(super) fn allocate_future_lease(
         &mut self,
         thread_id: crate::registry::ThreadId,
         thread: &galfus_vm::thread::VmThreadState,
-    ) -> Option<galfus_core::FutureId> {
-        let raw_id = self.next_future_id;
-        let Some(next_future_id) = self.next_future_id.checked_add(1) else {
+    ) -> Option<galfus_core::FutureLease> {
+        if let Some(id) = self.future_id_manager.try_allocate() {
+            let gen_val = self
+                .future_generations
+                .entry(id.raw())
+                .and_modify(|g| *g = g.wrapping_add(1))
+                .or_insert(1);
+            Some(galfus_core::FutureLease::new(id, *gen_val))
+        } else {
             self.failure = Some(
                 ExecutionFailure::new(
                     ExecutionFailureKind::IdSpaceExhausted,
@@ -1081,10 +1119,8 @@ impl Orchestrator {
                 .with_stack(execution_stack(thread)),
             );
             self.kernel.cancel(thread_id);
-            return None;
-        };
-        self.next_future_id = next_future_id;
-        Some(galfus_core::FutureId::new(raw_id))
+            None
+        }
     }
 
     pub(super) fn allocate_coordinator_id(
@@ -1092,8 +1128,9 @@ impl Orchestrator {
         thread_id: crate::registry::ThreadId,
         thread: &galfus_vm::thread::VmThreadState,
     ) -> Option<galfus_core::CoordinatorId> {
-        let raw_id = self.next_coordinator_id;
-        let Some(next_coordinator_id) = self.next_coordinator_id.checked_add(1) else {
+        if let Some(id) = self.coordinator_id_manager.try_allocate() {
+            Some(id)
+        } else {
             self.failure = Some(
                 ExecutionFailure::new(
                     ExecutionFailureKind::IdSpaceExhausted,
@@ -1103,10 +1140,8 @@ impl Orchestrator {
                 .with_stack(execution_stack(thread)),
             );
             self.kernel.cancel(thread_id);
-            return None;
-        };
-        self.next_coordinator_id = next_coordinator_id;
-        Some(galfus_core::CoordinatorId::new(raw_id))
+            None
+        }
     }
 
     fn future_activation(

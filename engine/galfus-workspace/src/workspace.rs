@@ -25,7 +25,7 @@ use galfus_frontend::modules::{
 use galfus_frontend::{
     PrimitiveType, ResolutionLayer, StringTable, SymbolKind, TypeKind, TypeTable,
 };
-use galfus_runtime::{Execution, Runtime, RuntimeError, format_panic};
+use galfus_runtime::{Execution, Runtime};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -974,10 +974,14 @@ impl Workspace {
         args: &[Vec<u8>],
         providers: Option<Providers>,
         driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
-    ) -> Result<Execution, RunBlocked> {
+    ) -> Result<Execution, crate::state::WorkspaceRunError> {
         let package = match &self.bytecode_state.compile_state {
             CompileState::Ready { package, .. } => Arc::clone(package),
-            _ => return Err(RunBlocked::CompileRequired),
+            _ => {
+                return Err(crate::state::WorkspaceRunError::Blocked(
+                    RunBlocked::CompileRequired,
+                ));
+            }
         };
         Runtime::new(
             Arc::clone(&package),
@@ -988,13 +992,7 @@ impl Workspace {
                 .build(),
         )
         .start(args, driver.clone())
-        .map_err(|error| {
-            if let RuntimeError::VmPanic(panic) = &error {
-                RunBlocked::RuntimeError(format_panic(package.graph(), panic))
-            } else {
-                RunBlocked::RuntimeError(error.to_string())
-            }
-        })
+        .map_err(crate::state::WorkspaceRunError::RuntimeStart)
     }
 
     pub fn start_execution_with_bindings(
@@ -1003,10 +1001,14 @@ impl Workspace {
         providers: Option<Providers>,
         bindings: galfus_contract::AdapterBindings,
         driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
-    ) -> Result<Execution, RunBlocked> {
+    ) -> Result<Execution, crate::state::WorkspaceRunError> {
         let package = match &self.bytecode_state.compile_state {
             CompileState::Ready { package, .. } => Arc::clone(package),
-            _ => return Err(RunBlocked::CompileRequired),
+            _ => {
+                return Err(crate::state::WorkspaceRunError::Blocked(
+                    RunBlocked::CompileRequired,
+                ));
+            }
         };
         Runtime::new(
             Arc::clone(&package),
@@ -1018,13 +1020,7 @@ impl Workspace {
                 .build(),
         )
         .start(args, driver.clone())
-        .map_err(|error| {
-            if let RuntimeError::VmPanic(panic) = &error {
-                RunBlocked::RuntimeError(format_panic(package.graph(), panic))
-            } else {
-                RunBlocked::RuntimeError(error.to_string())
-            }
-        })
+        .map_err(crate::state::WorkspaceRunError::RuntimeStart)
     }
 
     /// Compatibility helper that drives the returned execution through the supplied driver.
@@ -1033,10 +1029,11 @@ impl Workspace {
         args: &[Vec<u8>],
         providers: Option<Providers>,
         driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
-    ) -> Result<(), RunBlocked> {
+    ) -> Result<galfus_contract::BoundaryValue, crate::state::WorkspaceRunError> {
         let mut execution = self.start_execution(args, providers, driver)?;
-        let _result = execution.run_to_completion();
-        Ok(())
+        execution
+            .run_sync_to_completion()
+            .map_err(crate::state::WorkspaceRunError::ExecutionFailed)
     }
 
     pub fn run_with_bindings(
@@ -1045,10 +1042,11 @@ impl Workspace {
         providers: Option<Providers>,
         bindings: galfus_contract::AdapterBindings,
         driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
-    ) -> Result<(), RunBlocked> {
+    ) -> Result<galfus_contract::BoundaryValue, crate::state::WorkspaceRunError> {
         let mut execution =
             self.start_execution_with_bindings(args, providers, bindings, driver)?;
-        let _result = execution.run_to_completion();
-        Ok(())
+        execution
+            .run_sync_to_completion()
+            .map_err(crate::state::WorkspaceRunError::ExecutionFailed)
     }
 }

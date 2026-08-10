@@ -118,10 +118,10 @@ pub enum VmStep {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct VmObjectRef(pub usize);
+pub struct VmObjectRef(pub u64);
 
 impl VmObjectRef {
-    pub const fn raw(&self) -> usize {
+    pub const fn raw(&self) -> u64 {
         self.0
     }
 }
@@ -189,6 +189,34 @@ pub struct VmContext {
 pub struct RuntimeModuleState {
     pub globals: Vec<VmValue>,
     pub initialized: bool,
+}
+
+pub trait VisitRoots {
+    fn visit_roots(&self, visitor: &mut impl FnMut(VmObjectRef));
+}
+
+impl VisitRoots for VmValue {
+    fn visit_roots(&self, visitor: &mut impl FnMut(VmObjectRef)) {
+        if let VmValue::Object(obj_ref) = self {
+            visitor(*obj_ref);
+        }
+    }
+}
+
+impl VisitRoots for CallFrame {
+    fn visit_roots(&self, visitor: &mut impl FnMut(VmObjectRef)) {
+        for reg in &self.registers {
+            reg.visit_roots(visitor);
+        }
+    }
+}
+
+impl VisitRoots for RuntimeModuleState {
+    fn visit_roots(&self, visitor: &mut impl FnMut(VmObjectRef)) {
+        for global in &self.globals {
+            global.visit_roots(visitor);
+        }
+    }
 }
 
 impl VmContext {
@@ -370,12 +398,34 @@ impl VirtualMachine {
         self
     }
 
+    pub fn get_module(
+        &self,
+        module_id: galfus_core::ModuleId,
+    ) -> Result<&galfus_bytecode::BytecodeModule, VmError> {
+        self.graph
+            .get(module_id)
+            .map(|node| &node.module)
+            .ok_or(VmError::ModuleNotFound { module_id })
+    }
+
+    pub fn get_function(
+        &self,
+        module_id: galfus_core::ModuleId,
+        func_idx: FuncIdx,
+    ) -> Result<&galfus_bytecode::BytecodeFunction, VmError> {
+        let module = self.get_module(module_id)?;
+        module
+            .functions
+            .get(func_idx.raw() as usize)
+            .ok_or(VmError::FunctionOutOfBounds { index: func_idx })
+    }
+
     pub fn current_image(
         &self,
         thread: &thread::VmThreadState,
     ) -> Result<&galfus_bytecode::BytecodeModule, VmError> {
         let frame = thread.call_stack.last().ok_or(VmError::EmptyCallStack)?;
-        Ok(&self.graph.get(frame.module_id).unwrap().module)
+        self.get_module(frame.module_id)
     }
 
     pub fn prepare_function(
@@ -390,14 +440,13 @@ impl VirtualMachine {
             stack_trace: vec![],
         })?;
 
-        if (func_idx.raw() as usize) >= self.graph.get(module_id).unwrap().module.functions.len() {
-            return Err(VmPanic {
-                error: VmError::FunctionOutOfBounds { index: func_idx },
+        let func = self
+            .get_function(module_id, func_idx)
+            .map_err(|error| VmPanic {
+                error,
                 stack_trace: vec![],
-            });
-        }
+            })?;
 
-        let func = &self.graph.get(module_id).unwrap().module.functions[func_idx.raw() as usize];
         if args.len() != func.param_count as usize {
             return Err(VmPanic {
                 error: VmError::TypeMismatch {
@@ -439,14 +488,13 @@ impl VirtualMachine {
             stack_trace: vec![],
         })?;
 
-        if (func_idx.raw() as usize) >= self.graph.get(module_id).unwrap().module.functions.len() {
-            return Err(VmPanic {
-                error: VmError::FunctionOutOfBounds { index: func_idx },
+        let func = self
+            .get_function(module_id, func_idx)
+            .map_err(|error| VmPanic {
+                error,
                 stack_trace: vec![],
-            });
-        }
+            })?;
 
-        let func = &self.graph.get(module_id).unwrap().module.functions[func_idx.raw() as usize];
         if args.len() != func.param_count as usize {
             return Err(VmPanic {
                 error: VmError::TypeMismatch {
@@ -538,8 +586,7 @@ impl VirtualMachine {
                 .call_stack
                 .last_mut()
                 .ok_or(VmError::EmptyCallStack)?;
-            let func = &self.graph.get(frame.module_id).unwrap().module.functions
-                [frame.func_idx.raw() as usize];
+            let func = self.get_function(frame.module_id, frame.func_idx)?;
             if frame.pc >= func.instructions.len() {
                 return Err(VmError::InstructionPointerOutOfBounds { pc: frame.pc });
             }
@@ -612,7 +659,7 @@ impl VirtualMachine {
         };
 
         if matches!(step, VmStep::Continue) {
-            self.release_unreachable_if_needed(thread, release_instruction);
+            self.release_unreachable_if_needed(thread, release_instruction)?;
         }
 
         Ok(step)
@@ -639,12 +686,13 @@ impl VirtualMachine {
         &self,
         thread: &mut thread::VmThreadState,
         instr: Instruction,
-    ) {
+    ) -> Result<(), VmError> {
         if matches!(instr, Instruction::Drop { .. })
-            || thread.heap.allocations_since_release >= RELEASE_ALLOCATION_THRESHOLD
+            || thread.heap.allocations_since_release() >= RELEASE_ALLOCATION_THRESHOLD
         {
-            let released_handles = self.release_unreachable(thread);
+            let released_handles = self.release_unreachable(thread)?;
             thread.pending_adapter_handle_drops.extend(released_handles);
         }
+        Ok(())
     }
 }

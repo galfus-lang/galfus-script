@@ -27,7 +27,7 @@ struct BufferIoState {
     output: Vec<u8>,
     pending_read: Option<(
         galfus_core::ThreadId,
-        galfus_core::RequestId,
+        galfus_core::RequestLease,
         Vec<u8>,
         Arc<dyn MessageInjector>,
     )>,
@@ -81,7 +81,7 @@ impl BufferIoProvider {
         let mut state = self.state.lock().expect("buffer I/O state");
         state.input.extend(bytes);
 
-        if let Some((thread_id, request_id, terminator, injector)) = state.pending_read.take() {
+        if let Some((thread_id, request_lease, terminator, injector)) = state.pending_read.take() {
             let mut input = Vec::new();
             let mut found = false;
             for &byte in state.input.iter() {
@@ -97,11 +97,11 @@ impl BufferIoProvider {
                 input.truncate(len - terminator.len());
                 injector.inject_system_response(
                     thread_id,
-                    request_id,
+                    request_lease,
                     Ok(BoundaryValue::Bytes(input)),
                 );
             } else {
-                state.pending_read = Some((thread_id, request_id, terminator, injector));
+                state.pending_read = Some((thread_id, request_lease, terminator, injector));
             }
         }
     }
@@ -120,7 +120,7 @@ impl HostProvider for BufferIoProvider {
     fn dispatch(
         &mut self,
         thread_id: galfus_core::ThreadId,
-        request_id: galfus_core::RequestId,
+        request_lease: galfus_core::RequestLease,
         method: &str,
         args: &[BoundaryValue],
         injector: Arc<dyn MessageInjector>,
@@ -148,7 +148,7 @@ impl HostProvider for BufferIoProvider {
                         if let Err(e) = callback.call1(&JsValue::UNDEFINED, &value.into()) {
                             injector.inject_system_response(
                                 thread_id,
-                                request_id,
+                                request_lease,
                                 Err(ExecutionFailure::new(
                                     ExecutionFailureKind::ProviderFailure,
                                     format!("{:?}", e),
@@ -157,11 +157,15 @@ impl HostProvider for BufferIoProvider {
                             return;
                         }
                     }
-                    injector.inject_system_response(thread_id, request_id, Ok(BoundaryValue::Null));
+                    injector.inject_system_response(
+                        thread_id,
+                        request_lease,
+                        Ok(BoundaryValue::Null),
+                    );
                 } else {
                     injector.inject_system_response(
                         thread_id,
-                        request_id,
+                        request_lease,
                         Err(ExecutionFailure::new(
                             ExecutionFailureKind::ProviderFailure,
                             "Invalid arguments for write".to_string(),
@@ -175,7 +179,7 @@ impl HostProvider for BufferIoProvider {
                 } else {
                     injector.inject_system_response(
                         thread_id,
-                        request_id,
+                        request_lease,
                         Err(ExecutionFailure::new(
                             ExecutionFailureKind::ProviderFailure,
                             "Invalid arguments for read".to_string(),
@@ -187,7 +191,7 @@ impl HostProvider for BufferIoProvider {
                 if terminator.is_empty() {
                     injector.inject_system_response(
                         thread_id,
-                        request_id,
+                        request_lease,
                         Err(ExecutionFailure::new(
                             ExecutionFailureKind::ProviderFailure,
                             "input terminator must not be empty".to_string(),
@@ -213,17 +217,17 @@ impl HostProvider for BufferIoProvider {
                     input.truncate(len - terminator.len());
                     injector.inject_system_response(
                         thread_id,
-                        request_id,
+                        request_lease,
                         Ok(BoundaryValue::Bytes(input)),
                     );
                 } else {
-                    state.pending_read = Some((thread_id, request_id, terminator, injector));
+                    state.pending_read = Some((thread_id, request_lease, terminator, injector));
                 }
             }
             _ => {
                 injector.inject_system_response(
                     thread_id,
-                    request_id,
+                    request_lease,
                     Err(ExecutionFailure::new(
                         ExecutionFailureKind::ProviderFailure,
                         format!("Method {} not found", method),

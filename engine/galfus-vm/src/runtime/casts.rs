@@ -10,8 +10,7 @@ impl VirtualMachine {
         target_ty: TypeIdx,
     ) -> Result<Value, VmError> {
         let ty = self
-            .current_image(thread)
-            .unwrap()
+            .current_image(thread)?
             .types
             .get(target_ty.raw() as usize)
             .ok_or(VmError::TypeOutOfBounds { index: target_ty })?;

@@ -13,6 +13,15 @@ impl ModuleId {
     }
 }
 
+impl crate::id_manager::RawId for ModuleId {
+    fn new(raw: u32) -> Self {
+        Self(raw)
+    }
+    fn raw(&self) -> u32 {
+        self.0
+    }
+}
+
 /// Nominal identity of an opaque type exported by one adapter proxy module.
 #[derive(
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -57,6 +66,15 @@ impl BindingId {
     }
 }
 
+impl crate::id_manager::RawId for BindingId {
+    fn new(raw: u32) -> Self {
+        Self(raw)
+    }
+    fn raw(&self) -> u32 {
+        self.0
+    }
+}
+
 /// Identifies a unique thread of execution within the virtual kernel.
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -69,6 +87,15 @@ impl ThreadId {
     }
 
     pub const fn raw(self) -> u32 {
+        self.0
+    }
+}
+
+impl crate::id_manager::RawId for ThreadId {
+    fn new(raw: u32) -> Self {
+        Self(raw)
+    }
+    fn raw(&self) -> u32 {
         self.0
     }
 }
@@ -89,6 +116,30 @@ impl RequestId {
     }
 }
 
+impl crate::id_manager::RawId for RequestId {
+    fn new(raw: u32) -> Self {
+        Self(raw)
+    }
+    fn raw(&self) -> u32 {
+        self.0
+    }
+}
+
+/// A generational lease combining a recyclable RequestId with its generation.
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct RequestLease {
+    pub id: RequestId,
+    pub generation: u32,
+}
+
+impl RequestLease {
+    pub const fn new(id: RequestId, generation: u32) -> Self {
+        Self { id, generation }
+    }
+}
+
 /// Identifies an asynchronous future managed by the Orchestrator.
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -105,6 +156,30 @@ impl FutureId {
     }
 }
 
+impl crate::id_manager::RawId for FutureId {
+    fn new(raw: u32) -> Self {
+        Self(raw)
+    }
+    fn raw(&self) -> u32 {
+        self.0
+    }
+}
+
+/// A generational lease combining a recyclable FutureId with its generation.
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct FutureLease {
+    pub id: FutureId,
+    pub generation: u32,
+}
+
+impl FutureLease {
+    pub const fn new(id: FutureId, generation: u32) -> Self {
+        Self { id, generation }
+    }
+}
+
 /// Identifies an active timeout in the BlockedQueue.
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -117,6 +192,15 @@ impl TimerId {
     }
 
     pub const fn raw(self) -> u32 {
+        self.0
+    }
+}
+
+impl crate::id_manager::RawId for TimerId {
+    fn new(raw: u32) -> Self {
+        Self(raw)
+    }
+    fn raw(&self) -> u32 {
         self.0
     }
 }
@@ -137,6 +221,15 @@ impl CoordinatorId {
     }
 }
 
+impl crate::id_manager::RawId for CoordinatorId {
+    fn new(raw: u32) -> Self {
+        Self(raw)
+    }
+    fn raw(&self) -> u32 {
+        self.0
+    }
+}
+
 /// Public, non-reusable resource identity within one adapter binding.
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -153,6 +246,15 @@ impl HandleId {
     }
 }
 
+impl crate::id_manager::RawId for HandleId {
+    fn new(raw: u32) -> Self {
+        Self(raw)
+    }
+    fn raw(&self) -> u32 {
+        self.0
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceId(u32);
 
@@ -162,6 +264,15 @@ impl SourceId {
     }
 
     pub const fn raw(&self) -> u32 {
+        self.0
+    }
+}
+
+impl crate::id_manager::RawId for SourceId {
+    fn new(raw: u32) -> Self {
+        Self(raw)
+    }
+    fn raw(&self) -> u32 {
         self.0
     }
 }
