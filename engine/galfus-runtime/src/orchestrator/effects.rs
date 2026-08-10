@@ -1079,7 +1079,7 @@ impl Orchestrator {
             let gen_val = self
                 .request_generations
                 .entry(id.raw())
-                .and_modify(|g| *g += 1)
+                .and_modify(|g| *g = g.wrapping_add(1))
                 .or_insert(1);
             Some(galfus_core::RequestLease::new(id, *gen_val))
         } else {
@@ -1106,7 +1106,7 @@ impl Orchestrator {
             let gen_val = self
                 .future_generations
                 .entry(id.raw())
-                .and_modify(|g| *g += 1)
+                .and_modify(|g| *g = g.wrapping_add(1))
                 .or_insert(1);
             Some(galfus_core::FutureLease::new(id, *gen_val))
         } else {

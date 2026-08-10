@@ -131,11 +131,11 @@ impl crate::id_manager::RawId for RequestId {
 )]
 pub struct RequestLease {
     pub id: RequestId,
-    pub generation: u64,
+    pub generation: u32,
 }
 
 impl RequestLease {
-    pub const fn new(id: RequestId, generation: u64) -> Self {
+    pub const fn new(id: RequestId, generation: u32) -> Self {
         Self { id, generation }
     }
 }
@@ -171,11 +171,11 @@ impl crate::id_manager::RawId for FutureId {
 )]
 pub struct FutureLease {
     pub id: FutureId,
-    pub generation: u64,
+    pub generation: u32,
 }
 
 impl FutureLease {
-    pub const fn new(id: FutureId, generation: u64) -> Self {
+    pub const fn new(id: FutureId, generation: u32) -> Self {
         Self { id, generation }
     }
 }
