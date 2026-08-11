@@ -5,6 +5,8 @@ import { buildHostPackages } from './hosts/build';
 import { buildPlayground } from './playground/build';
 import { setupExtension } from './setup/extension';
 
+import { setVersion } from './github/set-version';
+
 const program = new Command();
 program
   .name('galfus-scripts')
@@ -15,8 +17,8 @@ const playground = program
   .command('playground')
   .description('Playground development and distribution commands');
 const hosts = program.command('hosts').description('Host binaries build and release commands');
+const github = program.command('github').description('GitHub Actions integration commands');
 const check = program.command('check').description('Repository validation commands');
-
 
 setup
   .command('extension')
@@ -39,6 +41,12 @@ hosts
   .option('-t, --target <target>', 'Cargo target triple (e.g., x86_64-unknown-linux-gnu)')
   .option('-p, --profile <profile>', 'Build profile (debug, fastest, minimal)', 'debug')
   .action(buildHostPackages);
+
+github
+  .command('set-version')
+  .description('Set workspace version and Github Action outputs based on the current branch')
+  .option('--component <name>', 'Component to deploy')
+  .action(setVersion);
 
 check
   .command('dependencies')

@@ -1,0 +1,145 @@
+name: Build and Release Hosts
+
+on:
+  push:
+    branches:
+      - stable/v*
+      - alpha/v*
+      - beta/v*
+      - next/v*
+      - latest/v*
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hosts-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.alias }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            alias: linux-x64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            alias: linux-arm64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            alias: macos-x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            alias: macos-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            alias: windows-x64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install script dependencies
+        working-directory: scripts
+        run: bun install --frozen-lockfile
+
+      - name: Apply version from release branch
+        id: version
+        working-directory: scripts
+        run: bun cmd github set-version --component hosts
+
+      - name: Update Cargo lockfile
+        run: cargo generate-lockfile
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install AArch64 GCC (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+
+      - name: Setup Cargo Target (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          mkdir -p .cargo
+          echo "[target.aarch64-unknown-linux-gnu]" >> .cargo/config.toml
+          echo "linker = \"aarch64-linux-gnu-gcc\"" >> .cargo/config.toml
+
+      - name: Build Host (Debug)
+        run: bun cmd hosts build -t ${{ matrix.alias }} -p debug
+
+      - name: Build Host (Fastest)
+        run: bun cmd hosts build -t ${{ matrix.alias }} -p fastest
+
+      - name: Build Host (Minimal)
+        run: bun cmd hosts build -t ${{ matrix.alias }} -p minimal
+
+      - name: Build CLI
+        run: cargo build --release -p galfus-cli --target ${{ matrix.target }}
+
+      - name: Prepare CLI Artifact
+        shell: bash
+        run: |
+          EXT=""
+          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
+            EXT=".exe"
+          fi
+          cp target/${{ matrix.target }}/release/galfus-cli$EXT build/galfus-cli-${{ matrix.alias }}$EXT
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: galfus-hosts-${{ matrix.alias }}
+          path: build/*
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install script dependencies
+        working-directory: scripts
+        run: bun install --frozen-lockfile
+
+      - name: Apply version from release branch
+        id: version
+        working-directory: scripts
+        run: bun cmd github set-version --component hosts
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: galfus-hosts-*
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Release ${{ steps.version.outputs.version }}
+          files: artifacts/*
+          draft: false
+          prerelease: ${{ !startsWith(github.ref_name, 'stable/') }}
