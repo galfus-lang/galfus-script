@@ -32,13 +32,25 @@ impl VirtualKernel {
         thread: VmThreadState,
         key: Option<String>,
     ) -> Result<ThreadId, ExecutionFailure> {
+        if !self.registry.key_is_available(key.as_deref()) {
+            return Err(ExecutionFailure::new(
+                ExecutionFailureKind::DuplicateThreadKey,
+                format!(
+                    "thread key '{}' is already registered",
+                    key.as_deref().unwrap_or_default()
+                ),
+            ));
+        }
         let id = self.thread_id_manager.try_allocate().ok_or_else(|| {
             ExecutionFailure::new(
                 ExecutionFailureKind::IdSpaceExhausted,
                 "thread id space exhausted",
             )
         })?;
-        self.registry.register(id, thread, key);
+        if let Err(error) = self.registry.register(id, thread, key) {
+            self.thread_id_manager.free(id);
+            return Err(error);
+        }
         Ok(id)
     }
 

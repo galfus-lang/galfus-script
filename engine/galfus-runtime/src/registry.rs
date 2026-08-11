@@ -59,12 +59,28 @@ impl ThreadRegistry {
         }
     }
 
-    pub fn register(&mut self, id: ThreadId, thread: VmThreadState, key: Option<String>) {
-        self.park(id, thread, key);
+    pub fn register(
+        &mut self,
+        id: ThreadId,
+        thread: VmThreadState,
+        key: Option<String>,
+    ) -> Result<(), galfus_contract::ExecutionFailure> {
+        self.park(id, thread, key)
     }
 
-    pub fn park(&mut self, id: ThreadId, thread: VmThreadState, key: Option<String>) {
+    pub fn park(
+        &mut self,
+        id: ThreadId,
+        thread: VmThreadState,
+        key: Option<String>,
+    ) -> Result<(), galfus_contract::ExecutionFailure> {
         if let Some(ref k) = key {
+            if self.keys.contains_key(k) {
+                return Err(galfus_contract::ExecutionFailure::new(
+                    galfus_contract::ExecutionFailureKind::DuplicateThreadKey,
+                    format!("thread key '{k}' is already registered"),
+                ));
+            }
             self.keys.insert(k.clone(), id);
         }
         self.tcbs.insert(
@@ -77,6 +93,11 @@ impl ThreadRegistry {
                 vm_state: Some(thread),
             },
         );
+        Ok(())
+    }
+
+    pub fn key_is_available(&self, key: Option<&str>) -> bool {
+        key.is_none_or(|key| !self.keys.contains_key(key))
     }
 
     pub fn get_mailbox(&self, id: ThreadId) -> Option<Arc<Mutex<VecDeque<MailboxMessage>>>> {

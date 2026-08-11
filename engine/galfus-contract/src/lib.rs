@@ -114,6 +114,7 @@ pub enum ExecutionFailureKind {
     Timeout,
     Cancelled,
     InvalidContinuation,
+    DuplicateThreadKey,
     DuplicateCompletion,
     DriverFailure,
     InternalRuntimeFailure,

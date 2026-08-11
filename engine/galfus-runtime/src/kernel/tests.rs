@@ -70,3 +70,26 @@ fn thread_id_exhaustion_does_not_register_a_partial_thread() {
     );
     assert_eq!(kernel.active_count(), 1);
 }
+
+#[test]
+fn duplicate_thread_key_does_not_consume_an_id_and_can_be_reused_after_cancellation() {
+    let mut kernel = VirtualKernel::new();
+    let first = kernel
+        .spawn(VmThreadState::new(), Some("worker".to_string()))
+        .unwrap();
+
+    let error = kernel
+        .spawn(VmThreadState::new(), Some("worker".to_string()))
+        .unwrap_err();
+    assert_eq!(
+        error.kind,
+        galfus_contract::ExecutionFailureKind::DuplicateThreadKey
+    );
+    assert_eq!(kernel.active_count(), 1);
+
+    assert!(kernel.cancel(first));
+    let reused = kernel
+        .spawn(VmThreadState::new(), Some("worker".to_string()))
+        .unwrap();
+    assert_eq!(reused, first);
+}
