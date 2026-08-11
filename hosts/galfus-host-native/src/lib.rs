@@ -1,3 +1,5 @@
+pub mod driver;
+pub mod providers;
 use galfus_bytecode::PackageImage;
 use galfus_contract::{Providers, AdapterBindings, KernelDriver, ExecutionFailure};
 use std::rc::Rc;

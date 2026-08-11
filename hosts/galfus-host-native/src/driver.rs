@@ -1,0 +1,135 @@
+use crossbeam_channel::{unbounded, Receiver, Sender};
+use galfus_contract::{
+    ExecutionFailure, ExecutorStepResult, KernelDriver, KernelTask, RunnableTask, TaskAffinity, ThreadResult,
+};
+use std::sync::Mutex;
+use std::thread;
+
+pub struct NativeDriver {
+    main_queue_tx: Sender<KernelTask>,
+    main_queue_rx: Receiver<KernelTask>,
+
+    worker_queue_tx: Sender<Box<dyn RunnableTask + Send>>,
+    worker_queue_rx: Receiver<Box<dyn RunnableTask + Send>>,
+
+    exit_callback: Mutex<Option<Box<dyn Fn(Result<i32, ExecutionFailure>) + Send + Sync>>>,
+}
+
+impl NativeDriver {
+    pub fn new() -> Self {
+        let (main_tx, main_rx) = unbounded();
+        let (worker_tx, worker_rx) = unbounded::<Box<dyn RunnableTask + Send>>();
+
+        // Use available logical cores, defaulting to 4 if detection fails.
+        let num_workers = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
+
+        for _ in 0..num_workers {
+            let rx = worker_rx.clone();
+            
+            thread::spawn(move || {
+                // Background worker loop
+                while let Ok(task) = rx.recv() {
+                    let _ = task.run(100);
+                }
+            });
+        }
+
+        Self {
+            main_queue_tx: main_tx,
+            main_queue_rx: main_rx,
+            worker_queue_tx: worker_tx,
+            worker_queue_rx: worker_rx,
+            exit_callback: Mutex::new(None),
+        }
+    }
+
+    fn run_main_task(task: Box<dyn RunnableTask>) -> Option<ExecutorStepResult> {
+        let result = task.run(100); // budget arbitrária
+
+        match result {
+            ThreadResult::Discarded => Some(ExecutorStepResult::Running),
+            ThreadResult::Blocked { timeout } => Some(ExecutorStepResult::Blocked { timeout }),
+            ThreadResult::Completed(res) => {
+                let code = if let Ok(galfus_contract::BoundaryValue::I32(c)) = res {
+                    c
+                } else {
+                    0
+                };
+                Some(ExecutorStepResult::Completed(code))
+            }
+        }
+    }
+}
+
+impl KernelDriver for NativeDriver {
+    fn dispatch(&self, task: KernelTask) {
+        match task {
+            KernelTask::Main(t) => {
+                let _ = self.main_queue_tx.send(KernelTask::Main(t));
+            }
+            KernelTask::Any(t) => {
+                let _ = self.worker_queue_tx.send(t);
+            }
+        }
+    }
+
+    fn dispatch_front(&self, task: KernelTask) {
+        // Crossbeam's unbounded doesn't natively support LIFO/push_front. 
+        // For the MVP, we route it directly as a normal dispatch. 
+        self.dispatch(task);
+    }
+
+    fn on_exit(&self, callback: Box<dyn Fn(Result<i32, ExecutionFailure>) + Send + Sync>) {
+        *self.exit_callback.lock().unwrap() = Some(callback);
+    }
+
+    fn complete(&self, result: Result<i32, ExecutionFailure>) {
+        if let Some(cb) = self.exit_callback.lock().unwrap().take() {
+            cb(result);
+        }
+    }
+
+    fn run(&self) {
+        loop {
+            match self.step() {
+                ExecutorStepResult::Running => continue,
+                ExecutorStepResult::Blocked { timeout } => {
+                    // Se não há tarefas na Main, bloqueamos a Main esperando um evento chegar
+                    let recv_result = if let Some(t) = timeout {
+                        self.main_queue_rx.recv_timeout(t).ok()
+                    } else {
+                        self.main_queue_rx.recv().ok()
+                    };
+
+                    if let Some(task) = recv_result {
+                        self.dispatch(task); // Re-injeta para ser pego pelo `step()` na proxima iteração
+                    }
+                }
+                ExecutorStepResult::Completed(_) => break,
+            }
+        }
+    }
+
+    fn step(&self) -> ExecutorStepResult {
+        // O `step` do driver tenta processar tarefas apenas da Main (já que Any está em background)
+        if let Ok(task) = self.main_queue_rx.try_recv() {
+            if let KernelTask::Main(t) = task {
+                if let Some(res) = Self::run_main_task(t) {
+                    return res;
+                }
+            }
+            return ExecutorStepResult::Running;
+        }
+
+        // Se a Main está vazia, o orchestrator está idle. Reporta block.
+        ExecutorStepResult::Blocked { timeout: None }
+    }
+}
+
+impl Default for NativeDriver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
