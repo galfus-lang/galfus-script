@@ -329,6 +329,7 @@ impl Orchestrator {
                                         .expect("event sink is configured before execution")
                                         .clone(),
                                     thread_id,
+                                    request_lease,
                                     galfus_core::FutureLease::new(
                                         future_id,
                                         self.future_generations
@@ -422,6 +423,7 @@ impl Orchestrator {
                                         .expect("event sink is configured before execution")
                                         .clone(),
                                     thread_id,
+                                    request_lease,
                                     galfus_core::FutureLease::new(
                                         future_id,
                                         self.future_generations

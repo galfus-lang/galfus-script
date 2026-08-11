@@ -35,8 +35,8 @@ impl AdapterModuleBinding for DemoAdapter {
     fn dispatch(
         &mut self,
         symbol: &str,
-        _thread_id: galfus_core::ThreadId,
-        _request_lease: galfus_core::RequestLease,
+        thread_id: galfus_core::ThreadId,
+        request_lease: galfus_core::RequestLease,
         _args: &[BoundaryValue],
         injector: Arc<dyn MessageInjector>,
     ) {
@@ -53,9 +53,9 @@ impl AdapterModuleBinding for DemoAdapter {
                     .unwrap()
                     .completion_threads
                     .push(std::thread::current().id());
-                injector.inject_system_response(
-                    galfus_core::ThreadId::new(0),
-                    galfus_core::RequestLease::new(galfus_core::RequestId::new(0), 1),
+                let _ = injector.inject_system_response(
+                    thread_id,
+                    request_lease,
                     Ok(BoundaryValue::Handle {
                         type_id: OpaqueTypeId::new("graphics", "Texture").unwrap(),
                         binding_id: None,

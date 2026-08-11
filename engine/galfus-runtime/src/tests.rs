@@ -356,20 +356,25 @@ fn pending_initializer_delays_entry_until_its_completion() {
         .unwrap()
         .take()
         .expect("initializer is pending");
-    injector.inject_system_response(
-        galfus_core::ThreadId::new(thread_id.raw() + 1),
-        request_lease,
-        Ok(galfus_contract::BoundaryValue::Null),
+    assert_eq!(
+        injector.inject_system_response(
+            galfus_core::ThreadId::new(thread_id.raw() + 1),
+            request_lease,
+            Ok(galfus_contract::BoundaryValue::Null),
+        ),
+        Err(galfus_contract::MessageInjectionError::HostProtocolViolation)
     );
     execution
         .poll(100)
         .expect("cross-thread completion is ignored safely");
     assert_eq!(*calls.lock().unwrap(), vec!["initialize"]);
-    injector.inject_system_response(
-        thread_id,
-        request_lease,
-        Ok(galfus_contract::BoundaryValue::Null),
-    );
+    injector
+        .inject_system_response(
+            thread_id,
+            request_lease,
+            Ok(galfus_contract::BoundaryValue::Null),
+        )
+        .expect("matching completion is accepted");
 
     assert_eq!(
         execution.run_sync_to_completion(),

@@ -39,7 +39,8 @@ impl MessageInjector for NoopInjector {
         _thread_id: galfus_core::ThreadId,
         _request_lease: galfus_core::RequestLease,
         _result: Result<BoundaryValue, galfus_contract::ExecutionFailure>,
-    ) {
+    ) -> Result<(), galfus_contract::MessageInjectionError> {
+        Ok(())
     }
 }
 
@@ -51,10 +52,11 @@ impl MessageInjector for FailureInjector {
         _thread_id: galfus_core::ThreadId,
         _request_lease: galfus_core::RequestLease,
         result: Result<BoundaryValue, ExecutionFailure>,
-    ) {
+    ) -> Result<(), galfus_contract::MessageInjectionError> {
         if let Err(failure) = result {
             self.0.lock().unwrap().push(failure);
         }
+        Ok(())
     }
 }
 

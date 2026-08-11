@@ -129,6 +129,7 @@ pub enum ExecutionFailureKind {
     InvalidContinuation,
     DuplicateThreadKey,
     DuplicateCompletion,
+    HostProtocolViolation,
     DriverFailure,
     InternalRuntimeFailure,
     IdSpaceExhausted,
@@ -209,13 +210,21 @@ impl std::fmt::Display for ExecutionFailure {
 
 impl std::error::Error for ExecutionFailure {}
 
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum MessageInjectionError {
+    #[error("host protocol violation: completion IDs do not match the dispatched request")]
+    HostProtocolViolation,
+    #[error("execution is closed and cannot receive the completion")]
+    ExecutionClosed,
+}
+
 pub trait MessageInjector: Send + Sync {
     fn inject_system_response(
         &self,
         thread_id: galfus_core::ThreadId,
         request_lease: galfus_core::RequestLease,
         result: Result<BoundaryValue, ExecutionFailure>,
-    );
+    ) -> Result<(), MessageInjectionError>;
 }
 
 pub trait HostProvider: Send {

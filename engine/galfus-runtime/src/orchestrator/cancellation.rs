@@ -50,10 +50,11 @@ impl Orchestrator {
                         .get(&request_id.raw())
                         .copied()
                         .unwrap_or(0);
-                    let _outcome = host.cancel(
+                    let outcome = host.cancel(
                         thread_id,
                         galfus_core::RequestLease::new(request_id, generation),
                     );
+                    self.cancellation_report.record(outcome);
                     if let Ok(mut providers) = providers.lock() {
                         providers.restore_host(host);
                     }
@@ -80,11 +81,12 @@ impl Orchestrator {
                         Err(_) => None,
                     };
                     if let Some(mut module) = module {
-                        let _outcome = module.cancel(
+                        let outcome = module.cancel(
                             &symbol,
                             thread_id,
                             galfus_core::RequestLease::new(request_id, generation),
                         );
+                        self.cancellation_report.record(outcome);
                         if let Ok(mut bindings) = bindings.lock() {
                             let _ = bindings.restore_module(&proxy_module, module);
                         }

@@ -46,6 +46,39 @@ pub enum ExecutionState {
 pub struct ShutdownReport {
     pub result: Result<BoundaryValue, ExecutionFailure>,
     pub adapter_close: AdapterBindingsCloseReport,
+    pub cancellations: CancellationReport,
+    pub completions: CompletionMetrics,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CancellationReport {
+    pub confirmed: usize,
+    pub best_effort: usize,
+    pub unsupported: usize,
+    pub already_completed: usize,
+}
+
+impl CancellationReport {
+    pub(crate) fn record(&mut self, outcome: galfus_contract::CancellationOutcome) {
+        match outcome {
+            galfus_contract::CancellationOutcome::Confirmed => self.confirmed += 1,
+            galfus_contract::CancellationOutcome::BestEffort => self.best_effort += 1,
+            galfus_contract::CancellationOutcome::Unsupported => self.unsupported += 1,
+            galfus_contract::CancellationOutcome::AlreadyCompleted => self.already_completed += 1,
+        }
+    }
+
+    pub fn has_unconfirmed(&self) -> bool {
+        self.best_effort != 0 || self.unsupported != 0
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CompletionMetrics {
+    pub accepted: usize,
+    pub duplicate: usize,
+    pub late_after_cancel: usize,
+    pub unknown_request: usize,
 }
 impl Execution {
     pub(crate) fn new(
@@ -94,7 +127,7 @@ impl Execution {
 
     /// Advances virtual time; the change is applied by the execution owner on poll.
     pub fn tick_timeouts(&self, delta_ms: u64) {
-        self.event_sink.submit(RuntimeEvent::Tick { delta_ms });
+        let _ = self.event_sink.submit(RuntimeEvent::Tick { delta_ms });
     }
 
     pub fn poll(&mut self, budget: usize) -> Result<ExecutorStepResult, ExecutionFailure> {
@@ -213,12 +246,24 @@ impl Execution {
             return;
         }
         self.state = ExecutionState::Closing;
-        let adapter_close = self
-            .orchestrator
-            .take()
-            .map_or_else(AdapterBindingsCloseReport::default, |mut orchestrator| {
-                orchestrator.shutdown()
-            });
+        let (adapter_close, orchestrator_cancellation_report, orchestrator_completion_metrics) =
+            self.orchestrator.take().map_or_else(
+                || {
+                    (
+                        AdapterBindingsCloseReport::default(),
+                        CancellationReport::default(),
+                        CompletionMetrics::default(),
+                    )
+                },
+                |mut orchestrator| {
+                    let adapter_close = orchestrator.shutdown();
+                    (
+                        adapter_close,
+                        orchestrator.cancellation_report().clone(),
+                        orchestrator.completion_metrics().clone(),
+                    )
+                },
+            );
         let result = if adapter_close.is_complete() {
             result
         } else {
@@ -238,6 +283,8 @@ impl Execution {
         self.shutdown_report = Some(ShutdownReport {
             result,
             adapter_close,
+            cancellations: orchestrator_cancellation_report,
+            completions: orchestrator_completion_metrics,
         });
         self.state = ExecutionState::Closed;
     }
@@ -279,11 +326,11 @@ pub struct ExecutionHandle {
 
 impl ExecutionHandle {
     pub fn cancel_thread(&self, thread_id: galfus_core::ThreadId) {
-        self.sink.submit(RuntimeEvent::CancelThread { thread_id });
+        let _ = self.sink.submit(RuntimeEvent::CancelThread { thread_id });
     }
 
     pub fn cancel(&self) {
-        self.sink.submit(RuntimeEvent::CancelExecution);
+        let _ = self.sink.submit(RuntimeEvent::CancelExecution);
     }
 
     pub fn resolve_request(
@@ -291,12 +338,14 @@ impl ExecutionHandle {
         thread_id: galfus_core::ThreadId,
         request_lease: galfus_core::RequestLease,
         result: Result<BoundaryValue, ExecutionFailure>,
-    ) {
-        self.sink.submit(RuntimeEvent::EffectCompleted {
-            thread_id,
-            request_lease,
-            result,
-        });
+    ) -> Result<(), galfus_contract::MessageInjectionError> {
+        self.sink
+            .submit(RuntimeEvent::EffectCompleted {
+                thread_id,
+                request_lease,
+                result,
+            })
+            .map_err(|_| galfus_contract::MessageInjectionError::ExecutionClosed)
     }
 
     pub fn resolve_future(
@@ -304,12 +353,14 @@ impl ExecutionHandle {
         thread_id: galfus_core::ThreadId,
         future_lease: galfus_core::FutureLease,
         result: Result<BoundaryValue, ExecutionFailure>,
-    ) {
-        self.sink.submit(RuntimeEvent::FutureCompleted {
-            thread_id,
-            future_lease,
-            result,
-        });
+    ) -> Result<(), galfus_contract::MessageInjectionError> {
+        self.sink
+            .submit(RuntimeEvent::FutureCompleted {
+                thread_id,
+                future_lease,
+                result,
+            })
+            .map_err(|_| galfus_contract::MessageInjectionError::ExecutionClosed)
     }
 }
 
@@ -319,14 +370,15 @@ impl galfus_contract::MessageInjector for ExecutionHandle {
         thread_id: galfus_core::ThreadId,
         request_lease: galfus_core::RequestLease,
         result: Result<BoundaryValue, ExecutionFailure>,
-    ) {
-        self.resolve_request(thread_id, request_lease, result);
+    ) -> Result<(), galfus_contract::MessageInjectionError> {
+        self.resolve_request(thread_id, request_lease, result)
     }
 }
 
 pub(crate) struct FutureCompletionInjector {
     sink: std::sync::Arc<dyn RuntimeEventSink>,
     owner_thread_id: crate::registry::ThreadId,
+    request_lease: galfus_core::RequestLease,
     future_lease: galfus_core::FutureLease,
 }
 
@@ -334,11 +386,13 @@ impl FutureCompletionInjector {
     pub(crate) fn new(
         sink: std::sync::Arc<dyn RuntimeEventSink>,
         owner_thread_id: crate::registry::ThreadId,
+        request_lease: galfus_core::RequestLease,
         future_lease: galfus_core::FutureLease,
     ) -> Self {
         Self {
             sink,
             owner_thread_id,
+            request_lease,
             future_lease,
         }
     }
@@ -347,14 +401,19 @@ impl FutureCompletionInjector {
 impl galfus_contract::MessageInjector for FutureCompletionInjector {
     fn inject_system_response(
         &self,
-        _thread_id: galfus_core::ThreadId,
-        _request_lease: galfus_core::RequestLease,
+        thread_id: galfus_core::ThreadId,
+        request_lease: galfus_core::RequestLease,
         result: Result<BoundaryValue, ExecutionFailure>,
-    ) {
-        self.sink.submit(RuntimeEvent::FutureCompleted {
-            thread_id: self.owner_thread_id,
-            future_lease: self.future_lease,
-            result,
-        });
+    ) -> Result<(), galfus_contract::MessageInjectionError> {
+        if thread_id != self.owner_thread_id || request_lease != self.request_lease {
+            return Err(galfus_contract::MessageInjectionError::HostProtocolViolation);
+        }
+        self.sink
+            .submit(RuntimeEvent::FutureCompleted {
+                thread_id: self.owner_thread_id,
+                future_lease: self.future_lease,
+                result,
+            })
+            .map_err(|_| galfus_contract::MessageInjectionError::ExecutionClosed)
     }
 }

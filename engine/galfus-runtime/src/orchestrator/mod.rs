@@ -10,6 +10,7 @@ pub(crate) mod startup;
 
 use crate::driver::{ExecutionDriver, RuntimeEventSink};
 use crate::event::{EventSequence, RuntimeEvent};
+use crate::execution::{CancellationReport, CompletionMetrics};
 use crate::kernel::VirtualKernel;
 use crate::task::{RuntimeTask, execution_stack, with_execution_stack};
 use galfus_contract::{
@@ -104,6 +105,8 @@ pub(crate) struct Orchestrator {
     initialization_complete: Arc<AtomicBool>,
     shutting_down: bool,
     shutdown_report: Option<AdapterBindingsCloseReport>,
+    cancellation_report: CancellationReport,
+    completion_metrics: CompletionMetrics,
     late_completions: VecDeque<LateCompletion>,
     root_thread_id: Option<crate::registry::ThreadId>,
     future_workers:
@@ -170,6 +173,8 @@ impl Orchestrator {
             initialization_complete: Arc::new(AtomicBool::new(true)),
             shutting_down: false,
             shutdown_report: None,
+            cancellation_report: CancellationReport::default(),
+            completion_metrics: CompletionMetrics::default(),
             late_completions: VecDeque::new(),
             root_thread_id: None,
             future_workers: HashMap::new(),
@@ -226,6 +231,14 @@ impl Orchestrator {
 
     pub(crate) fn initialization_complete(&self) -> Arc<AtomicBool> {
         self.initialization_complete.clone()
+    }
+
+    pub(crate) fn cancellation_report(&self) -> &CancellationReport {
+        &self.cancellation_report
+    }
+
+    pub(crate) fn completion_metrics(&self) -> &CompletionMetrics {
+        &self.completion_metrics
     }
 
     pub(crate) fn set_startup_plan(
@@ -337,15 +350,18 @@ impl Orchestrator {
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
         let Some(pending) = self.pending_continuations.remove(&key) else {
+            self.completion_metrics.unknown_request += 1;
             self.record_late_completion(thread_id, key);
             return;
         };
         if pending.thread_id != thread_id {
             self.pending_continuations.insert(key, pending);
+            self.completion_metrics.unknown_request += 1;
             self.record_late_completion(thread_id, key);
             return;
         }
         self.resume_pending(thread_id, pending, result, key);
+        self.completion_metrics.accepted += 1;
         if let PendingKey::Request(request_id) = key {
             self.request_id_manager.free(request_id);
         }
@@ -505,11 +521,11 @@ impl Orchestrator {
             Ok(waiters) => waiters,
             Err(error) => {
                 if error.kind == ExecutionFailureKind::DuplicateCompletion {
+                    self.completion_metrics.duplicate += 1;
                     self.record_late_completion(thread_id, PendingKey::Future(future_id));
                     return;
                 }
-                self.failure = Some(error);
-                self.cancel_and_teardown_thread(thread_id);
+                self.completion_metrics.unknown_request += 1;
                 return;
             }
         };
@@ -546,6 +562,7 @@ impl Orchestrator {
                 PendingKey::Future(future_id),
             );
         }
+        self.completion_metrics.accepted += 1;
     }
 
     fn register_adapter_handles(
@@ -920,6 +937,8 @@ impl Orchestrator {
                         .unwrap_or(0)
                 {
                     self.complete_pending(thread_id, PendingKey::Request(request_lease.id), result)
+                } else {
+                    self.completion_metrics.late_after_cancel += 1;
                 }
             }
             RuntimeEvent::FutureCompleted {
@@ -935,6 +954,8 @@ impl Orchestrator {
                         .unwrap_or(0)
                 {
                     self.complete_future(thread_id, future_lease.id, result)
+                } else {
+                    self.completion_metrics.late_after_cancel += 1;
                 }
             }
             RuntimeEvent::FutureWorkerCompleted {

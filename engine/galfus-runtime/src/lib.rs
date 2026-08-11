@@ -26,7 +26,10 @@ use galfus_contract::{
 use galfus_vm::{VirtualMachine, VmPanic, VmValue};
 
 pub use driver::CooperativeDriver;
-pub use execution::{Execution, ExecutionHandle, ExecutionState};
+pub use execution::{
+    CancellationReport, CompletionMetrics, Execution, ExecutionHandle, ExecutionState,
+    ShutdownReport,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
