@@ -213,22 +213,21 @@ impl Runtime {
                 None
             };
 
-        let token = orchestrator.main_thread_token();
-        let main_thread_id = orchestrator
-            .kernel_mut(token)
+        let root_thread_id = orchestrator
+            .kernel_mut()
             .spawn(thread, None)
-            .expect("failed to spawn main thread");
-        orchestrator.set_root_thread(main_thread_id);
+            .expect("failed to spawn root thread");
+        orchestrator.set_root_thread(root_thread_id);
 
         let is_initializing = startup_plan.is_some();
         if let Some(startup_plan) = startup_plan {
-            orchestrator.set_startup_plan(main_thread_id, startup_plan);
+            orchestrator.set_startup_plan(root_thread_id, startup_plan);
         }
 
-        let _ = orchestrator.kernel_mut(token).mark_running(main_thread_id);
-        let main_thread = orchestrator
-            .kernel_mut(token)
-            .take_thread(main_thread_id)
+        let _ = orchestrator.kernel_mut().mark_running(root_thread_id);
+        let root_thread = orchestrator
+            .kernel_mut()
+            .take_thread(root_thread_id)
             .unwrap();
 
         let vm = sync::Arc::new(vm);
@@ -237,8 +236,8 @@ impl Runtime {
         orchestrator.set_adapter_bindings(Some(adapter_bindings));
         orchestrator.set_driver(driver.clone());
         orchestrator
-            .kernel_mut(token)
-            .enqueue_runnable(main_thread_id, main_thread);
+            .kernel_mut()
+            .enqueue_runnable(root_thread_id, root_thread);
 
         let sink = orchestrator.sink();
         let initialization_complete = orchestrator.initialization_complete();

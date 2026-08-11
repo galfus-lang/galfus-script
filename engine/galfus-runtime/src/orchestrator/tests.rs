@@ -8,7 +8,6 @@ use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
-use std::thread;
 
 struct RecordingProvider(Arc<AtomicBool>);
 
@@ -83,51 +82,23 @@ fn cancelled_provider_dispatch_tasks_do_not_start_adapter_work() {
 }
 
 #[test]
-#[should_panic(expected = "main-thread token used from another thread")]
-fn main_thread_tokens_reject_a_different_thread_binding() {
-    let other_thread_id = thread::spawn(|| thread::current().id())
-        .join()
-        .expect("thread identity is available");
-    let token = MainThreadToken {
-        thread_id: other_thread_id,
-        _marker: std::marker::PhantomData,
-    };
-
-    token.assert_current();
-}
-
-#[test]
-#[should_panic(expected = "orchestrator accessed from a non-main thread")]
-fn orchestrator_rejects_a_different_thread_binding() {
-    let other_thread_id = thread::spawn(|| thread::current().id())
-        .join()
-        .expect("thread identity is available");
-    let mut orchestrator = Orchestrator::new();
-    orchestrator.main_thread_id = other_thread_id;
-
-    let _ = orchestrator.main_thread_token();
-}
-
-#[test]
-fn spawned_event_is_registered_and_queued_on_the_main_thread() {
+fn spawned_event_is_registered_and_queued_by_the_execution_owner() {
     let mut orchestrator = Orchestrator::new();
     orchestrator.sink().send(RuntimeEvent::ThreadSpawned {
         thread: galfus_vm::thread::VmThreadState::new(),
     });
 
-    let token = orchestrator.main_thread_token();
-    orchestrator.process_events(token);
+    orchestrator.process_events();
 
-    assert_eq!(orchestrator.kernel(token).active_count(), 1);
-    assert_eq!(orchestrator.kernel(token).runnable_count(), 1);
+    assert_eq!(orchestrator.kernel().active_count(), 1);
+    assert_eq!(orchestrator.kernel().runnable_count(), 1);
 }
 
 #[test]
 fn cancellation_event_removes_a_queued_thread() {
     let mut orchestrator = Orchestrator::new();
-    let token = orchestrator.main_thread_token();
     let thread_id = {
-        let kernel = orchestrator.kernel_mut(token);
+        let kernel = orchestrator.kernel_mut();
         let thread_id = kernel
             .spawn(galfus_vm::thread::VmThreadState::new(), None)
             .unwrap();
@@ -141,18 +112,17 @@ fn cancellation_event_removes_a_queued_thread() {
         .sink()
         .send(RuntimeEvent::CancelThread { thread_id });
 
-    orchestrator.process_events(token);
+    orchestrator.process_events();
 
-    assert_eq!(orchestrator.kernel(token).active_count(), 0);
-    assert_eq!(orchestrator.kernel(token).runnable_count(), 0);
+    assert_eq!(orchestrator.kernel().active_count(), 0);
+    assert_eq!(orchestrator.kernel().runnable_count(), 0);
 }
 
 #[test]
 fn execution_cancellation_removes_every_thread_and_returns_a_structured_failure() {
     let mut orchestrator = Orchestrator::new();
-    let token = orchestrator.main_thread_token();
     for _ in 0..2 {
-        let kernel = orchestrator.kernel_mut(token);
+        let kernel = orchestrator.kernel_mut();
         let thread_id = kernel
             .spawn(galfus_vm::thread::VmThreadState::new(), None)
             .unwrap();
@@ -172,9 +142,8 @@ fn execution_cancellation_removes_every_thread_and_returns_a_structured_failure(
 #[test]
 fn late_provider_completions_after_thread_cancellation_are_ignored() {
     let mut orchestrator = Orchestrator::new();
-    let token = orchestrator.main_thread_token();
     let thread_id = orchestrator
-        .kernel_mut(token)
+        .kernel_mut()
         .spawn(galfus_vm::thread::VmThreadState::new(), None)
         .unwrap();
     let sink = orchestrator.sink();
@@ -190,9 +159,9 @@ fn late_provider_completions_after_thread_cancellation_are_ignored() {
         });
     }
 
-    orchestrator.process_events(token);
+    orchestrator.process_events();
 
-    assert_eq!(orchestrator.kernel(token).active_count(), 0);
+    assert_eq!(orchestrator.kernel().active_count(), 0);
     assert!(orchestrator.failure.is_none());
     assert!(orchestrator.pending_continuations.is_empty());
     assert_eq!(orchestrator.late_completion_count(), 2);
@@ -301,7 +270,6 @@ fn generations_prevent_reuse_collisions() {
         result: Ok(galfus_contract::BoundaryValue::Null),
     });
 
-    let token = orchestrator.main_thread_token();
-    orchestrator.process_events(token);
+    orchestrator.process_events();
     assert_eq!(orchestrator.late_completion_count(), 0); // ignored because generation mismatch
 }

@@ -24,7 +24,6 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc,
 };
-use std::thread::{self, ThreadId};
 
 use future_registry::FutureRegistry;
 use pending::{
@@ -82,37 +81,12 @@ fn stamp_adapter_handles(
     }
 }
 
-/// Proof that orchestration runs on its bound host main thread.
-#[derive(Clone, Copy)]
-pub(crate) struct MainThreadToken {
-    thread_id: ThreadId,
-    _marker: PhantomData<*mut ()>,
-}
-
-impl MainThreadToken {
-    fn new() -> Self {
-        Self {
-            thread_id: thread::current().id(),
-            _marker: PhantomData,
-        }
-    }
-
-    fn assert_current(self) {
-        assert_eq!(
-            self.thread_id,
-            thread::current().id(),
-            "main-thread token used from another thread"
-        );
-    }
-}
-
 pub(crate) struct Orchestrator {
     kernel: VirtualKernel,
     receiver: mpsc::Receiver<(u64, RuntimeEvent)>,
     sink: EventSink,
     driver: Option<Rc<dyn KernelDriver>>,
     vm: Option<Arc<VirtualMachine>>,
-    main_thread_id: ThreadId,
     /// Keeps orchestration state owned by exactly one execution lane.
     _not_send_sync: PhantomData<Rc<()>>,
     pub(crate) failure: Option<galfus_contract::ExecutionFailure>,
@@ -173,7 +147,6 @@ impl Orchestrator {
             sink: EventSink::new(sender),
             driver: None,
             vm: None,
-            main_thread_id: thread::current().id(),
             _not_send_sync: PhantomData,
             failure: None,
             pending_continuations: HashMap::new(),
@@ -199,30 +172,14 @@ impl Orchestrator {
     }
 
     pub(crate) fn set_root_thread(&mut self, thread_id: crate::registry::ThreadId) {
-        self.assert_main_thread();
         self.root_thread_id = Some(thread_id);
     }
 
-    pub(crate) fn main_thread_token(&self) -> MainThreadToken {
-        self.assert_main_thread();
-        MainThreadToken::new()
-    }
-
-    fn assert_main_thread(&self) {
-        assert_eq!(
-            self.main_thread_id,
-            thread::current().id(),
-            "orchestrator accessed from a non-main thread"
-        );
-    }
-
     pub(crate) fn set_driver(&mut self, driver: Rc<dyn KernelDriver>) {
-        self.assert_main_thread();
         self.driver = Some(driver);
     }
 
     pub(crate) fn set_vm(&mut self, vm: Arc<VirtualMachine>) {
-        self.assert_main_thread();
         self.vm = Some(vm);
     }
 
@@ -230,20 +187,15 @@ impl Orchestrator {
         &mut self,
         bindings: Option<Arc<std::sync::Mutex<galfus_contract::AdapterBindings>>>,
     ) {
-        self.assert_main_thread();
         self.adapter_bindings = bindings;
     }
 
-    pub(crate) fn kernel_mut(&mut self, token: MainThreadToken) -> &mut VirtualKernel {
-        token.assert_current();
-        self.assert_main_thread();
+    pub(crate) fn kernel_mut(&mut self) -> &mut VirtualKernel {
         &mut self.kernel
     }
 
     #[cfg(test)]
-    pub(crate) fn kernel(&self, token: MainThreadToken) -> &VirtualKernel {
-        token.assert_current();
-        self.assert_main_thread();
+    pub(crate) fn kernel(&self) -> &VirtualKernel {
         &self.kernel
     }
 
@@ -260,7 +212,6 @@ impl Orchestrator {
         thread_id: crate::registry::ThreadId,
         plan: StartupPlan,
     ) {
-        self.assert_main_thread();
         self.initialization_complete.store(false, Ordering::Release);
         self.startup_plans.insert(thread_id, plan);
     }
@@ -790,9 +741,7 @@ impl Orchestrator {
     }
 
     /// Dispatches all currently runnable threads from the VirtualKernel to the driver.
-    pub(crate) fn dispatch_runnables(&mut self, token: MainThreadToken) {
-        token.assert_current();
-        self.assert_main_thread();
+    pub(crate) fn dispatch_runnables(&mut self) {
         while let Some((thread_id, is_front)) = self.kernel.next_runnable_detailed() {
             if let Some(thread) = self.kernel.take_thread(thread_id) {
                 self.kernel.mark_running(thread_id);
@@ -816,9 +765,7 @@ impl Orchestrator {
     }
 
     /// Processes all pending events in the queue without blocking.
-    pub(crate) fn process_events(&mut self, token: MainThreadToken) {
-        token.assert_current();
-        self.assert_main_thread();
+    pub(crate) fn process_events(&mut self) {
         while let Ok((_event_id, event)) = self.receiver.try_recv() {
             self.sink.mark_received();
             match event {
@@ -1016,9 +963,8 @@ impl Orchestrator {
 
 impl Orchestrator {
     pub(crate) fn step(&mut self, _budget: usize) -> galfus_contract::ThreadResult {
-        let token = self.main_thread_token();
-        self.process_events(token);
-        self.dispatch_runnables(token);
+        self.process_events();
+        self.dispatch_runnables();
 
         if self.failure.is_some() {
             return galfus_contract::ThreadResult::Discarded;

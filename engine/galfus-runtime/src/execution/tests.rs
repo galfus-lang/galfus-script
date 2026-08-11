@@ -50,17 +50,13 @@ fn execution_transitions_from_created_to_running_and_preserves_completion() {
 fn execution_remains_initializing_until_the_orchestrator_signal() {
     let initialization_complete = Arc::new(AtomicBool::new(false));
     let mut orchestrator = Orchestrator::new();
-    let token = orchestrator.main_thread_token();
     let thread_id = orchestrator
-        .kernel_mut(token)
+        .kernel_mut()
         .spawn(galfus_vm::thread::VmThreadState::new(), None)
         .unwrap();
-    let thread = orchestrator
-        .kernel_mut(token)
-        .take_thread(thread_id)
-        .unwrap();
+    let thread = orchestrator.kernel_mut().take_thread(thread_id).unwrap();
     orchestrator
-        .kernel_mut(token)
+        .kernel_mut()
         .enqueue_runnable(thread_id, thread);
 
     let driver = Rc::new(IdleDriver);
@@ -108,17 +104,13 @@ fn cancellation_transitions_the_execution_to_cancelled() {
 #[test]
 fn execution_drops_orchestrator_and_sets_failed_state_on_error() {
     let mut orchestrator = Orchestrator::new();
-    let token = orchestrator.main_thread_token();
     let thread_id = orchestrator
-        .kernel_mut(token)
+        .kernel_mut()
         .spawn(galfus_vm::thread::VmThreadState::new(), None)
         .unwrap();
     orchestrator.set_root_thread(thread_id);
-    let thread = orchestrator
-        .kernel_mut(token)
-        .take_thread(thread_id)
-        .unwrap();
-    orchestrator.kernel_mut(token).mark_exited(
+    let thread = orchestrator.kernel_mut().take_thread(thread_id).unwrap();
+    orchestrator.kernel_mut().mark_exited(
         thread_id,
         thread,
         Err(ExecutionFailure::new(
