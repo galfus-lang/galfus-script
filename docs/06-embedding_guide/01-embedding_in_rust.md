@@ -98,16 +98,16 @@ struct Host;
 impl HostProvider for Host {
     fn dispatch(
         &mut self,
-        thread_id: usize,
-        request_id: u64,
+        thread_id: galfus_core::ThreadId,
+        request_lease: galfus_core::RequestLease,
         name: &str,
         _args: &[BoundaryValue],
         injector: Arc<dyn MessageInjector>,
     ) {
         if name == "answer" {
-            injector.inject_system_response(
+            let _ = injector.inject_system_response(
                 thread_id,
-                request_id,
+                request_lease,
                 Ok(BoundaryValue::I32(42)),
             );
         }
@@ -128,7 +128,7 @@ Host providers default to main-thread affinity (`TaskAffinity::Main`). Override 
 let handle = execution.handle();
 handle.cancel();
 // Or from a host callback:
-// handle.resolve_request(thread_id, request_id, Ok(BoundaryValue::Null));
+// handle.resolve_request(thread_id, request_lease, Ok(BoundaryValue::Null));
 ```
 
 ## Error handling

@@ -9,7 +9,7 @@ This document defines the architecture, design, and key structures of the Galfus
 Based on the compiler requirements and design goals, the MIR is specified as:
 
 1. **SSA (Static Single Assignment) with Block Parameters**: Every virtual register is assigned exactly once. Merging control flow uses block parameters (arguments passed to blocks) rather than traditional $\phi$ (phi) nodes, which simplifies liveness calculations.
-2. **Structured Control Flow**: Instead of an entirely flattened Control Flow Graph (CFG) of raw jumps, the MIR retains hierarchical blocks (`Block`, `If`, `Loop`). This preserves lexical scope boundaries, making lifetime analysis for the Owner Graph direct and precise.
+2. **Flattened Control Flow Graph (CFG)**: Instead of maintaining hierarchical AST-like structures (`If`, `Loop`), the MIR body is lowered into a flattened list of `BasicBlock`s connected by explicit `Jump` and `Branch` terminators.
 3. **Implicit Owner Graph Integration**: The MIR focuses on pure computation and generic `Drop(x)` statements where lifetimes end. The VM and the bytecode generator infer ownership graph updates (anchors, edges, weak links) for values allocated in the current thread's private heap.
 
 ---
@@ -23,11 +23,11 @@ graph TD
     MirModule --> MirFunction
     MirFunction --> Sign["Signature & Return Type"]
     MirFunction --> Locals["Locals / Virtual Registers (Typed)"]
-    MirFunction --> Body["Structured Body (Hierarchical Scopes)"]
-    Body --> MirScope
-    MirScope --> Block["Block / If / Loop"]
-    Block --> Insts["SSA Instructions (No branch)"]
-    Block --> Term["Terminator / Control Transition"]
+    MirFunction --> Blocks["Basic Blocks (CFG)"]
+    Blocks --> BasicBlock
+    BasicBlock --> Params["Block Parameters (LocalDecls)"]
+    BasicBlock --> Insts["SSA Instructions (No branch)"]
+    BasicBlock --> Term["Terminator (Jump, Branch, Return)"]
 ```
 
 ### 2.1 Virtual Registers (Locals)
@@ -35,41 +35,26 @@ graph TD
 All values (including parameters, local variables, and intermediate results) are stored in typed, immutable virtual registers (`LocalId`).
 
 - Each local has a unique name/ID (e.g. `_0`, `_1`).
-- Re-assignments in the source code are lowered to new virtual registers.
+- Re-assignments in the source code are lowered to new virtual registers, preserving SSA form.
 
 ---
 
 ## 3. Structural Control Flow & Scope Definitions
 
-Instead of raw basic blocks with arbitrary jumps, the MIR body is structured into nested execution scopes and structured blocks.
+The MIR body is structured into a flattened graph of `BasicBlock`s. 
 
 ```rust
-pub enum MirBody {
-    /// A sequential list of instructions ending with a terminator
-    BasicBlock(BasicBlock),
-    /// A nested block of scopes with local bindings
-    Block {
-        locals: Vec<LocalDecl>,
-        statements: Vec<MirBody>,
-    },
-    /// An if-else structure preserving scope
-    If {
-        cond: Operand,
-        then_branch: Box<MirBody>,
-        else_branch: Option<Box<MirBody>>,
-    },
-    /// A loop structure preserving loop scope
-    Loop {
-        body: Box<MirBody>,
-    },
+pub struct BasicBlock {
+    pub id: BlockId,
+    pub parameters: Vec<LocalDecl>,
+    pub instructions: Vec<(Instruction, Option<galfus_core::Span>)>,
+    pub terminator: (Terminator, Option<galfus_core::Span>),
 }
 ```
 
 ### 3.1 Block Parameters
 
-To merge values at join points (such as the end of an `if-else` block returning a value), blocks can define parameters:
-
-- A `Block` can accept values, which are bound to new SSA virtual registers when entering that block.
+To merge values at join points (such as the end of an `if-else` block returning a value), blocks define parameters. A jump/branch terminator supplies the values for these parameters, which are bound to new SSA virtual registers when entering the block.
 
 ---
 
@@ -81,6 +66,8 @@ To merge values at join points (such as the end of an `if-else` block returning 
 pub enum Operand {
     /// A literal constant (e.g. 10, true, "text", null)
     Constant(Constant),
+    /// A reference to a constant pool index
+    ConstRef(usize),
     /// A virtual register
     Local(LocalId),
 }
@@ -88,62 +75,42 @@ pub enum Operand {
 
 ### 4.2 RValues (Right-Hand Side Expressions)
 
-An `RValue` is a single computational step, always assigned to a virtual register.
+An `RValue` is a single computational step, usually assigned to a virtual register.
 
 ```rust
 pub enum RValue {
-    /// Read an operand
     Use(Operand),
-    /// Unary operator
-    UnaryOp(UnaryOperatorKind, Operand),
-    /// Binary operator
-    BinaryOp(BinaryOperatorKind, Operand, Operand),
-    /// Cast to another type
+    UnaryOp(MirUnaryOp, Operand),
+    BinaryOp(MirBinaryOp, Operand, Operand),
     Cast(Operand, TypeId),
-    /// Deep copy value
     Copy(Operand),
-
-    /// Instantiate structures in the current thread's private heap
-    NewStruct {
-        struct_type: TypeId,
-        fields: Vec<Operand>,
-    },
-    /// Data-initialized array creation from array literal elements: `[a, b, c]`
+    
+    // Allocations
+    NewStruct { struct_type: TypeId, fields: Vec<Operand> },
     NewArray(TypeId, Vec<Operand>),
-    /// Dynamic data-initialized array creation with spreads: `[a, ...b, c]`
     NewArrayDynamic(TypeId, Vec<ArrayLiteralElement>),
-    /// Zero-initialised allocation: `new([T], size)`
-    NewArrayZeroed {
-        array_type: TypeId,
-        element_type: TypeId,
-        size: Operand,
-    },
-    /// Create tuple: `(a, b)`
+    NewArrayZeroed { array_type: TypeId, element_type: TypeId, size: usize },
+    NewArrayZeroedDynamic { array_type: TypeId, element_type: TypeId, length: Operand },
     NewTuple(TypeId, Vec<Operand>),
-
-    /// Read field of a struct
+    
+    // Access & Check
     MemberAccess(Operand, String),
-    /// Read element by index: `arr[idx]`
     ArrayIndex(Operand, Operand),
-    /// Construct choice variant
     Choice(TypeId, String, Option<Operand>),
-    /// Dynamic type/variant check
+    ChoiceVariantIs(Operand, SymbolId),
     Instanceof(Operand, TypeId),
-    /// Load global variable
     LoadGlobal(String),
-    /// Get length of array, string, or tuple
     Len(Operand),
-}
-
-pub enum ArrayLiteralElement {
-    Single(Operand),
-    Spread(Operand),
+    
+    // Futures
+    CreateFuture { func: FunctionId, args: Vec<Operand>, is_external: bool },
+    CreateIndirectFuture { func: Operand, args: Vec<Operand> },
 }
 ```
 
 ### 4.3 Instructions & Terminators
 
-An instruction is non-branching:
+An instruction is a statement-level action or a state assignment. Wait/yield states (like Await) are also instructions in the MIR, as they do not diverge control flow from the perspective of the CFG.
 
 ```rust
 pub enum Instruction {
@@ -151,26 +118,40 @@ pub enum Instruction {
     Assign(LocalId, RValue),
     /// Explicitly end the lifetime of an SSA register (triggers drop in the VM)
     Drop(LocalId),
+    
+    // Side-effects
+    StoreGlobal(String, Operand),
+    StoreIndex { arr: Operand, idx: Operand, val: Operand },
+    StoreField { obj: Operand, field_name: String, val: Operand },
+    
+    // Synchronous calls
+    Call { func: FunctionId, args: Vec<Operand>, destination: LocalId, is_external: bool },
+    IndirectCall { func: Operand, args: Vec<Operand>, destination: LocalId },
+    ConstraintCall { method_name: String, obj: Operand, args: Vec<Operand>, destination: LocalId },
+    
+    // Asynchronous waits
+    Await { future: Operand, destination: LocalId },
+    AwaitAll { futures: Vec<Operand>, destination: LocalId },
+    AwaitRace { futures: Vec<Operand>, destination: LocalId },
 }
 ```
 
-A terminator completes a sequence of instructions within a structured block:
+A terminator completes a `BasicBlock` and dictates where control flow goes next:
 
 ```rust
 pub enum Terminator {
-    /// Return from the current function
     Return(Option<Operand>),
-    /// Exit a loop or block
-    Break,
-    /// Jump to the next iteration of a loop
-    Continue,
-    /// Call a function/method
-    Call {
-        func: FunctionId,
+    Jump {
+        target: BlockId,
         args: Vec<Operand>,
-        destination: LocalId,
     },
-    /// Abort execution with a message
+    Branch {
+        cond: Operand,
+        true_block: BlockId,
+        true_args: Vec<Operand>,
+        false_block: BlockId,
+        false_args: Vec<Operand>,
+    },
     Panic(String),
 }
 ```

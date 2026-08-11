@@ -41,31 +41,44 @@ pub struct DatabaseBinding {
 }
 
 impl AdapterModuleBinding for DatabaseBinding {
+    fn descriptor(&self) -> galfus_contract::AdapterModuleDescriptor {
+        galfus_contract::AdapterModuleDescriptor {
+            module_path: "db_adapter".into(),
+            schema_fingerprint: 0,
+            boundary_abi: galfus_contract::CURRENT_BOUNDARY_ABI_VERSION,
+            exports: vec![],
+        }
+    }
+
     fn dispatch(
         &mut self,
-        _kind: &str,
-        thread_id: usize,
-        request_id: u64,
-        name: &str,
-        _args: &[BoundaryValue],
+        symbol: &str,
+        thread_id: galfus_core::ThreadId,
+        request_lease: galfus_core::RequestLease,
+        args: &[BoundaryValue],
         injector: Arc<dyn MessageInjector>,
     ) {
-        if name == "fetch_user" {
+        if symbol == "fetch_user" {
             println!("Fetching user from table: {}", self.table_name);
             
             // Return dummy data
-            injector.inject_system_response(thread_id, request_id, Ok(BoundaryValue::I64(42)));
+            let _ = injector.inject_system_response(thread_id, request_lease, Ok(BoundaryValue::I64(42)));
         } else {
-            injector.inject_system_response(
+            let _ = injector.inject_system_response(
                 thread_id, 
-                request_id, 
+                request_lease, 
                 Err(ExecutionFailure::AdapterError("Method not found".into()))
             );
         }
     }
 
-    fn release_handle(&mut self, _kind: &str, _id: u64) {
-        // Cleanup if Galfus drops a handle
+    fn cancel(
+        &mut self,
+        _symbol: &str,
+        _thread_id: galfus_core::ThreadId,
+        _request_lease: galfus_core::RequestLease,
+    ) -> galfus_contract::CancellationOutcome {
+        galfus_contract::CancellationOutcome::Unsupported
     }
 }
 ```

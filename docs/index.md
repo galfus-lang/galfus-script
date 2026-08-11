@@ -68,6 +68,8 @@ Welcome to the official documentation. Choose a topic below to get started.
 
 - [Galfus VM Bytecode and Opcode Specification](./04-runtime_and_vm/01-vm_opcodes_reference.md)
 
+- [Numerical Semantics and Determinism](./04-runtime_and_vm/02-numerical_semantics.md)
+
 
 
 ## 05-Adapters And Builtins

@@ -54,3 +54,8 @@ opt-level = 3
 lto = true
 codegen-units = 1
 strip = "symbols"
+
+[profile.release-min]
+inherits = "release"
+opt-level = "z"
+panic = "abort"
