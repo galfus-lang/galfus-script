@@ -1,12 +1,23 @@
 use super::*;
 use crate::orchestrator::Orchestrator;
-use galfus_contract::{ExecutorStepResult, KernelTask};
+use crate::driver::{ExecutionDriver, NativeEventBridge, RuntimeEventSink};
+use galfus_contract::{ExecutorStepResult, KernelDriver, KernelTask};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
 
-struct IdleDriver;
+struct IdleDriver {
+    events: Arc<NativeEventBridge>,
+}
+
+impl IdleDriver {
+    fn new() -> Self {
+        Self {
+            events: Arc::new(NativeEventBridge::new()),
+        }
+    }
+}
 
 impl KernelDriver for IdleDriver {
     fn dispatch(&self, _task: KernelTask) {}
@@ -20,14 +31,26 @@ impl KernelDriver for IdleDriver {
     }
 }
 
+impl ExecutionDriver for IdleDriver {
+    fn event_sink(&self) -> Arc<dyn RuntimeEventSink> {
+        self.events.clone()
+    }
+
+    fn drain_events(&self) -> Vec<(crate::event::EventSequence, crate::event::RuntimeEvent)> {
+        self.events.drain()
+    }
+
+    fn has_pending_events(&self) -> bool {
+        self.events.has_pending()
+    }
+}
+
 #[test]
 fn execution_transitions_from_created_to_running_and_preserves_completion() {
     let orchestrator = Orchestrator::new();
-    let sink = orchestrator.sink();
     let mut execution = Execution::new(
         orchestrator,
-        Rc::new(IdleDriver),
-        sink,
+        Rc::new(IdleDriver::new()),
         Arc::new(AtomicBool::new(true)),
         false,
     );
@@ -59,15 +82,13 @@ fn execution_remains_initializing_until_the_orchestrator_signal() {
         .kernel_mut()
         .enqueue_runnable(thread_id, thread);
 
-    let driver = Rc::new(IdleDriver);
+    let driver = Rc::new(IdleDriver::new());
     orchestrator.set_vm(Arc::new(galfus_vm::VirtualMachine::new(Default::default())));
     orchestrator.set_driver(driver.clone());
 
-    let sink = orchestrator.sink();
     let mut execution = Execution::new(
         orchestrator,
         driver,
-        sink,
         initialization_complete.clone(),
         true,
     );
@@ -82,11 +103,9 @@ fn execution_remains_initializing_until_the_orchestrator_signal() {
 #[test]
 fn cancellation_transitions_the_execution_to_cancelled() {
     let orchestrator = Orchestrator::new();
-    let sink = orchestrator.sink();
     let mut execution = Execution::new(
         orchestrator,
-        Rc::new(IdleDriver),
-        sink,
+        Rc::new(IdleDriver::new()),
         Arc::new(AtomicBool::new(true)),
         false,
     );
@@ -118,11 +137,9 @@ fn execution_drops_orchestrator_and_sets_failed_state_on_error() {
             "test panic",
         )),
     );
-    let sink = orchestrator.sink();
     let mut execution = Execution::new(
         orchestrator,
-        Rc::new(IdleDriver),
-        sink,
+        Rc::new(IdleDriver::new()),
         Arc::new(AtomicBool::new(true)),
         false,
     );

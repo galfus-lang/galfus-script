@@ -302,7 +302,10 @@ impl Orchestrator {
                                 name,
                                 args,
                                 injector: Arc::new(FutureCompletionInjector::new(
-                                    self.sink.clone(),
+                                    self.event_sink
+                                        .as_ref()
+                                        .expect("event sink is configured before execution")
+                                        .clone(),
                                     thread_id,
                                     galfus_core::FutureLease::new(
                                         future_id,
@@ -376,7 +379,10 @@ impl Orchestrator {
                                 symbol,
                                 args,
                                 injector: Arc::new(FutureCompletionInjector::new(
-                                    self.sink.clone(),
+                                    self.event_sink
+                                        .as_ref()
+                                        .expect("event sink is configured before execution")
+                                        .clone(),
                                     thread_id,
                                     galfus_core::FutureLease::new(
                                         future_id,
@@ -734,6 +740,7 @@ impl Orchestrator {
                                         };
                                         if prepared.is_ok() {
                                             self.kernel.enqueue_runnable(target_id, target_thread);
+                                            self.kernel.mark_running(target_id);
                                             true
                                         } else {
                                             self.kernel.park_running(target_id, target_thread);

@@ -84,7 +84,7 @@ fn cancelled_provider_dispatch_tasks_do_not_start_adapter_work() {
 #[test]
 fn spawned_event_is_registered_and_queued_by_the_execution_owner() {
     let mut orchestrator = Orchestrator::new();
-    orchestrator.sink().send(RuntimeEvent::ThreadSpawned {
+    orchestrator.submit_event(RuntimeEvent::ThreadSpawned {
         thread: galfus_vm::thread::VmThreadState::new(),
     });
 
@@ -108,9 +108,7 @@ fn cancellation_event_removes_a_queued_thread() {
         kernel.enqueue_runnable(thread_id, thread);
         thread_id
     };
-    orchestrator
-        .sink()
-        .send(RuntimeEvent::CancelThread { thread_id });
+    orchestrator.submit_event(RuntimeEvent::CancelThread { thread_id });
 
     orchestrator.process_events();
 
@@ -131,7 +129,7 @@ fn execution_cancellation_removes_every_thread_and_returns_a_structured_failure(
             .expect("spawned thread is registered");
         kernel.enqueue_runnable(thread_id, thread);
     }
-    orchestrator.sink().send(RuntimeEvent::CancelExecution);
+    orchestrator.submit_event(RuntimeEvent::CancelExecution);
 
     match orchestrator.step(100) {
         galfus_contract::ThreadResult::Discarded => {}
@@ -146,10 +144,9 @@ fn late_provider_completions_after_thread_cancellation_are_ignored() {
         .kernel_mut()
         .spawn(galfus_vm::thread::VmThreadState::new(), None)
         .unwrap();
-    let sink = orchestrator.sink();
-    sink.send(RuntimeEvent::CancelThread { thread_id });
+    orchestrator.submit_event(RuntimeEvent::CancelThread { thread_id });
     for _ in 0..2 {
-        sink.send(RuntimeEvent::EffectCompleted {
+        orchestrator.submit_event(RuntimeEvent::EffectCompleted {
             thread_id,
             request_lease: galfus_core::RequestLease::new(galfus_core::RequestId::new(1), 0),
             result: Err(galfus_contract::ExecutionFailure::new(
@@ -263,8 +260,7 @@ fn generations_prevent_reuse_collisions() {
     assert_eq!(lease2.generation, 2);
 
     // Complete using the old lease, should be ignored
-    let sink = orchestrator.sink();
-    sink.send(RuntimeEvent::EffectCompleted {
+    orchestrator.submit_event(RuntimeEvent::EffectCompleted {
         thread_id,
         request_lease: lease1,
         result: Ok(galfus_contract::BoundaryValue::Null),

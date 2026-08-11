@@ -8,21 +8,21 @@ pub(crate) mod future_registry;
 pub(crate) mod pending;
 pub(crate) mod startup;
 
-use crate::event::{EventSink, RuntimeEvent};
+use crate::driver::{ExecutionDriver, RuntimeEventSink};
+use crate::event::{EventSequence, RuntimeEvent};
 use crate::kernel::VirtualKernel;
 use crate::task::{RuntimeTask, execution_stack, with_execution_stack};
 use galfus_contract::{
-    BoundaryValue, ExecutionFailure, ExecutionFailureKind, KernelDriver, KernelTask,
+    BoundaryValue, ExecutionFailure, ExecutionFailureKind, KernelTask,
 };
 use galfus_core::{CoordinatorId, FutureId, RequestId};
 use galfus_vm::VirtualMachine;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
-    mpsc,
 };
 
 use future_registry::FutureRegistry;
@@ -83,9 +83,10 @@ fn stamp_adapter_handles(
 
 pub(crate) struct Orchestrator {
     kernel: VirtualKernel,
-    receiver: mpsc::Receiver<(u64, RuntimeEvent)>,
-    sink: EventSink,
-    driver: Option<Rc<dyn KernelDriver>>,
+    driver: Option<Rc<dyn ExecutionDriver>>,
+    event_sink: Option<Arc<dyn RuntimeEventSink>>,
+    pending_events: BTreeMap<EventSequence, RuntimeEvent>,
+    next_event_sequence: EventSequence,
     vm: Option<Arc<VirtualMachine>>,
     /// Keeps orchestration state owned by exactly one execution lane.
     _not_send_sync: PhantomData<Rc<()>>,
@@ -140,12 +141,12 @@ pub(crate) struct MailboxFutureWait {
 
 impl Orchestrator {
     pub(crate) fn new() -> Self {
-        let (sender, receiver) = mpsc::channel();
         Self {
             kernel: VirtualKernel::new(),
-            receiver,
-            sink: EventSink::new(sender),
             driver: None,
+            event_sink: None,
+            pending_events: BTreeMap::new(),
+            next_event_sequence: EventSequence::FIRST,
             vm: None,
             _not_send_sync: PhantomData,
             failure: None,
@@ -175,8 +176,12 @@ impl Orchestrator {
         self.root_thread_id = Some(thread_id);
     }
 
-    pub(crate) fn set_driver(&mut self, driver: Rc<dyn KernelDriver>) {
+    pub(crate) fn set_driver(&mut self, driver: Rc<dyn ExecutionDriver>) {
         self.driver = Some(driver);
+    }
+
+    pub(crate) fn set_event_sink(&mut self, sink: Arc<dyn RuntimeEventSink>) {
+        self.event_sink = Some(sink);
     }
 
     pub(crate) fn set_vm(&mut self, vm: Arc<VirtualMachine>) {
@@ -199,8 +204,14 @@ impl Orchestrator {
         &self.kernel
     }
 
-    pub(crate) fn sink(&self) -> EventSink {
-        self.sink.clone()
+    #[cfg(test)]
+    pub(crate) fn submit_event(&mut self, event: RuntimeEvent) {
+        let sequence = self
+            .pending_events
+            .last_key_value()
+            .map(|(sequence, _)| sequence.next().expect("event sequence space exhausted"))
+            .unwrap_or(self.next_event_sequence);
+        self.pending_events.insert(sequence, event);
     }
 
     pub(crate) fn initialization_complete(&self) -> Arc<AtomicBool> {
@@ -750,13 +761,17 @@ impl Orchestrator {
                     thread_id,
                     thread,
                     self.vm.as_ref().unwrap().clone(),
-                    self.sink.clone(),
+                    self.event_sink
+                        .as_ref()
+                        .expect("event sink is configured before execution")
+                        .clone(),
                     self.future_workers.get(&thread_id).copied(),
                 ));
 
                 let kernel_task = KernelTask::Any(task);
                 if is_front {
                     self.driver.as_ref().unwrap().dispatch_front(kernel_task);
+                    break;
                 } else {
                     self.driver.as_ref().unwrap().dispatch(kernel_task);
                 }
@@ -766,9 +781,38 @@ impl Orchestrator {
 
     /// Processes all pending events in the queue without blocking.
     pub(crate) fn process_events(&mut self) {
-        while let Ok((_event_id, event)) = self.receiver.try_recv() {
-            self.sink.mark_received();
-            match event {
+        let events = self
+            .driver
+            .as_ref()
+            .map(|driver| driver.drain_events())
+            .unwrap_or_default();
+        for (sequence, event) in events {
+            if sequence < self.next_event_sequence {
+                continue;
+            }
+            if self.pending_events.insert(sequence, event).is_some() {
+                self.failure = Some(ExecutionFailure::new(
+                    ExecutionFailureKind::InvalidContinuation,
+                    format!("duplicate external event sequence {}", sequence.0),
+                ));
+                return;
+            }
+        }
+
+        while let Some(event) = self.pending_events.remove(&self.next_event_sequence) {
+            self.next_event_sequence = self
+                .next_event_sequence
+                .next()
+                .expect("event sequence space exhausted");
+            self.process_event(event);
+            if self.failure.is_some() {
+                return;
+            }
+        }
+    }
+
+    fn process_event(&mut self, event: RuntimeEvent) {
+        match event {
                 RuntimeEvent::ThreadSpawned { mut thread } => {
                     self.flush_thread_handle_drops(&mut thread);
                     let id = match self.kernel.spawn(thread, None) {
@@ -794,7 +838,7 @@ impl Orchestrator {
                     self.kernel.mark_exited(thread_id, thread, result.clone());
                     if let Some(waiters) = self.thread_exit_waits.remove(&thread_id) {
                         for (owner_thread_id, future_lease) in waiters {
-                            self.sink.send(RuntimeEvent::FutureCompleted {
+                            self.process_event(RuntimeEvent::FutureCompleted {
                                 thread_id: owner_thread_id,
                                 future_lease,
                                 result: result.clone(),
@@ -911,7 +955,6 @@ impl Orchestrator {
                     self.startup_plans.remove(&thread_id);
                     self.cancel_and_teardown_thread(thread_id);
                 }
-            }
         }
     }
 

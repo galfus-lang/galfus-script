@@ -18,6 +18,7 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync;
 
+use crate::driver::ExecutionDriver;
 use galfus_contract::{
     AdapterBindings, BoundaryType, BoundaryValue, Providers, RuntimeCapabilities,
     validate_numeric_semantics,
@@ -119,7 +120,7 @@ impl Runtime {
     pub fn start(
         self,
         args: &[Vec<u8>],
-        driver: Rc<dyn galfus_contract::KernelDriver>,
+        driver: Rc<dyn ExecutionDriver>,
     ) -> Result<Execution, RuntimeError> {
         let Runtime {
             package,
@@ -239,12 +240,10 @@ impl Runtime {
             .kernel_mut()
             .enqueue_runnable(root_thread_id, root_thread);
 
-        let sink = orchestrator.sink();
         let initialization_complete = orchestrator.initialization_complete();
         Ok(Execution::new(
             orchestrator,
             driver,
-            sink,
             initialization_complete,
             is_initializing,
         ))

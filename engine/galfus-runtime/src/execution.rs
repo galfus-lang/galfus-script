@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod tests;
 
-use crate::event::{EventSink, RuntimeEvent};
+use crate::driver::{ExecutionDriver, RuntimeEventSink};
+use crate::event::RuntimeEvent;
 use galfus_contract::{
-    BoundaryValue, ExecutionFailure, ExecutionFailureKind, ExecutorStepResult, KernelDriver,
-    ThreadResult,
+    BoundaryValue, ExecutionFailure, ExecutionFailureKind, ExecutorStepResult, ThreadResult,
 };
 use std::marker::PhantomData;
 use std::rc::Rc;
@@ -20,8 +20,8 @@ use std::sync::{
 /// The future `ExecutionHost` is responsible for owning this execution lane.
 pub struct Execution {
     orchestrator: Option<crate::orchestrator::Orchestrator>,
-    driver: Rc<dyn KernelDriver>,
-    sink: EventSink,
+    driver: Rc<dyn ExecutionDriver>,
+    event_sink: std::sync::Arc<dyn RuntimeEventSink>,
     result: Option<Result<BoundaryValue, ExecutionFailure>>,
     state: ExecutionState,
     initialization_complete: Arc<AtomicBool>,
@@ -44,16 +44,18 @@ pub enum ExecutionState {
 }
 impl Execution {
     pub(crate) fn new(
-        orchestrator: crate::orchestrator::Orchestrator,
-        driver: Rc<dyn KernelDriver>,
-        sink: EventSink,
+        mut orchestrator: crate::orchestrator::Orchestrator,
+        driver: Rc<dyn ExecutionDriver>,
         initialization_complete: Arc<AtomicBool>,
         is_initializing: bool,
     ) -> Self {
+        let event_sink = driver.event_sink();
+        orchestrator.set_event_sink(event_sink.clone());
+        orchestrator.set_driver(driver.clone());
         Self {
             orchestrator: Some(orchestrator),
             driver,
-            sink,
+            event_sink,
             result: None,
             state: if is_initializing {
                 ExecutionState::Initializing
@@ -68,7 +70,7 @@ impl Execution {
 
     pub fn handle(&self) -> ExecutionHandle {
         ExecutionHandle {
-            sink: self.sink.clone(),
+            sink: self.event_sink.clone(),
         }
     }
 
@@ -82,7 +84,7 @@ impl Execution {
 
     /// Advances virtual time; the change is applied by the execution owner on poll.
     pub fn tick_timeouts(&self, delta_ms: u64) {
-        self.sink.send(RuntimeEvent::Tick { delta_ms });
+        self.event_sink.submit(RuntimeEvent::Tick { delta_ms });
     }
 
     pub fn poll(&mut self, budget: usize) -> Result<ExecutorStepResult, ExecutionFailure> {
@@ -170,7 +172,7 @@ impl Execution {
                     });
                 }
                 ExecutorStepResult::Blocked { .. } => {
-                    if !self.sink.has_pending() {
+                    if !self.driver.has_pending_events() {
                         let failure_info = self
                             .orchestrator
                             .as_ref()
@@ -201,7 +203,7 @@ impl Execution {
                 | ExecutionState::Running
                 | ExecutionState::Waiting
         ) {
-            self.sink.send(RuntimeEvent::CancelExecution);
+            self.event_sink.submit(RuntimeEvent::CancelExecution);
             self.state = ExecutionState::Cancelling;
         }
     }
@@ -213,16 +215,16 @@ impl Execution {
 /// core directly.
 #[derive(Clone)]
 pub struct ExecutionHandle {
-    sink: EventSink,
+    sink: std::sync::Arc<dyn RuntimeEventSink>,
 }
 
 impl ExecutionHandle {
     pub fn cancel_thread(&self, thread_id: galfus_core::ThreadId) {
-        self.sink.send(RuntimeEvent::CancelThread { thread_id });
+        self.sink.submit(RuntimeEvent::CancelThread { thread_id });
     }
 
     pub fn cancel(&self) {
-        self.sink.send(RuntimeEvent::CancelExecution);
+        self.sink.submit(RuntimeEvent::CancelExecution);
     }
 
     pub fn resolve_request(
@@ -231,7 +233,7 @@ impl ExecutionHandle {
         request_lease: galfus_core::RequestLease,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
-        self.sink.send(RuntimeEvent::EffectCompleted {
+        self.sink.submit(RuntimeEvent::EffectCompleted {
             thread_id,
             request_lease,
             result,
@@ -244,7 +246,7 @@ impl ExecutionHandle {
         future_lease: galfus_core::FutureLease,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
-        self.sink.send(RuntimeEvent::FutureCompleted {
+        self.sink.submit(RuntimeEvent::FutureCompleted {
             thread_id,
             future_lease,
             result,
@@ -264,14 +266,14 @@ impl galfus_contract::MessageInjector for ExecutionHandle {
 }
 
 pub(crate) struct FutureCompletionInjector {
-    sink: EventSink,
+    sink: std::sync::Arc<dyn RuntimeEventSink>,
     owner_thread_id: crate::registry::ThreadId,
     future_lease: galfus_core::FutureLease,
 }
 
 impl FutureCompletionInjector {
     pub(crate) fn new(
-        sink: EventSink,
+        sink: std::sync::Arc<dyn RuntimeEventSink>,
         owner_thread_id: crate::registry::ThreadId,
         future_lease: galfus_core::FutureLease,
     ) -> Self {
@@ -290,7 +292,7 @@ impl galfus_contract::MessageInjector for FutureCompletionInjector {
         _request_lease: galfus_core::RequestLease,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
-        self.sink.send(RuntimeEvent::FutureCompleted {
+        self.sink.submit(RuntimeEvent::FutureCompleted {
             thread_id: self.owner_thread_id,
             future_lease: self.future_lease,
             result,
