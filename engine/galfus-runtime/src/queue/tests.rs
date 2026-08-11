@@ -1,8 +1,39 @@
-use super::BlockedQueue;
+use super::{BlockedQueue, RunnableQueue};
 use crate::registry::ThreadId;
 
 fn thread_id(value: u32) -> ThreadId {
     galfus_core::ThreadId::new(value)
+}
+
+#[test]
+fn runnable_queue_keeps_only_the_first_position_for_a_thread() {
+    let mut queue = RunnableQueue::new();
+    let first = thread_id(1);
+    let second = thread_id(2);
+
+    queue.enqueue(first);
+    queue.enqueue(second);
+    queue.enqueue(first);
+    queue.enqueue_front(first);
+
+    assert_eq!(queue.len(), 2);
+    assert_eq!(queue.dequeue_detailed(), Some((first, false)));
+    assert_eq!(queue.dequeue_detailed(), Some((second, false)));
+    assert_eq!(queue.dequeue_detailed(), None);
+}
+
+#[test]
+fn runnable_queue_allows_a_thread_after_removal_or_dequeue() {
+    let mut queue = RunnableQueue::new();
+    let id = thread_id(1);
+
+    queue.enqueue(id);
+    assert_eq!(queue.dequeue(), Some(id));
+    queue.enqueue_front(id);
+    queue.remove(id);
+    queue.enqueue(id);
+
+    assert_eq!(queue.dequeue_detailed(), Some((id, false)));
 }
 
 #[test]
