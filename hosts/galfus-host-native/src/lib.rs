@@ -1,0 +1,38 @@
+use galfus_bytecode::PackageImage;
+use galfus_contract::{Providers, AdapterBindings, KernelDriver, ExecutionFailure};
+use std::rc::Rc;
+
+pub struct PackageLoader {
+    // Defines paths and mechanisms to load dynamic libraries for adapters
+}
+
+impl PackageLoader {
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    pub fn load_from_bytes(&self, bytes: &[u8]) -> Result<PackageImage, String> {
+        PackageImage::from_bytecode(bytes).map_err(|e| e.to_string())
+    }
+}
+
+pub struct ExecutionHost {
+    providers: Providers,
+    adapters: AdapterBindings,
+    driver: Rc<dyn KernelDriver>,
+}
+
+impl ExecutionHost {
+    pub fn new(providers: Providers, adapters: AdapterBindings, driver: Rc<dyn KernelDriver>) -> Self {
+        Self {
+            providers,
+            adapters,
+            driver,
+        }
+    }
+
+    pub fn run(&self, package: &PackageImage) -> Result<i32, ExecutionFailure> {
+        // Here we will bridge to VirtualKernel and Execution
+        todo!("Bridge to VirtualKernel and Execution");
+    }
+}

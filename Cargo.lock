@@ -302,6 +302,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "galfus-host-embedded-hal"
+version = "0.0.0"
+dependencies = [
+ "galfus-bytecode",
+ "galfus-contract",
+ "galfus-runtime",
+]
+
+[[package]]
+name = "galfus-host-native"
+version = "0.0.0"
+dependencies = [
+ "galfus-bytecode",
+ "galfus-contract",
+ "galfus-runtime",
+]
+
+[[package]]
+name = "galfus-host-web"
+version = "0.0.0"
+dependencies = [
+ "galfus-bytecode",
+ "galfus-contract",
+ "galfus-runtime",
+]
+
+[[package]]
 name = "galfus-ir"
 version = "0.0.0"
 dependencies = [
