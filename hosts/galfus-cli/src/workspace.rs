@@ -6,8 +6,8 @@ use std::sync;
 
 use crate::native_io::NativeIoProvider;
 use anyhow::{Context, Result, bail};
-use galfus_contract::{Providers, RuntimeCapabilities};
-use galfus_runtime::{CooperativeDriver, Runtime};
+use galfus_contract::Providers;
+use galfus_runtime::{CooperativeDriver, ExecutionHost};
 use galfus_workspace::{LoadResult, Workspace};
 use std::path::Path;
 
@@ -44,9 +44,6 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
         .collect::<Vec<_>>();
     let executor = std::rc::Rc::new(CooperativeDriver::new());
 
-    let preflight = galfus_workspace::AdapterBindingPreflight::new();
-    // Note: CLI doesn't currently register external loaders, but it should run the preflight
-    // to catch any unmet requirements.
     let mut properties = std::collections::BTreeMap::new();
     properties.insert("os".to_string(), std::env::consts::OS.to_string());
     properties.insert("arch".to_string(), std::env::consts::ARCH.to_string());
@@ -72,19 +69,15 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
         properties,
     };
 
-    let bindings = preflight
-        .bind_package(&compile_report.package, &context)
-        .map_err(|error| anyhow::anyhow!("package preflight failed: {error:?}"))?;
-
-    let mut execution = Runtime::new(
-        sync::Arc::clone(&compile_report.package),
-        RuntimeCapabilities::builder()
-            .with_providers(Providers::with_host(Box::new(NativeIoProvider)))
-            .with_adapter_bindings(bindings)
-            .build(),
-    )
-    .start(args.as_slice(), executor.clone())
-    .map_err(|error| anyhow::anyhow!("package execution failed: {error}"))?;
+    let host = ExecutionHost::new(context)
+        .with_providers(Providers::with_host(Box::new(NativeIoProvider)));
+    let mut execution = host
+        .start(
+            sync::Arc::clone(&compile_report.package),
+            args.as_slice(),
+            executor.clone(),
+        )
+        .map_err(|error| anyhow::anyhow!("package execution failed: {error}"))?;
     let result = execution
         .run_sync_to_completion()
         .map_err(|error| anyhow::anyhow!("package execution failed: {error}"))?;

@@ -6,8 +6,10 @@
 pub mod driver;
 pub mod event;
 pub mod execution;
+pub mod execution_host;
 mod kernel;
 mod orchestrator;
+pub mod preflight;
 pub mod queue;
 pub mod registry;
 pub mod task;
@@ -30,6 +32,8 @@ pub use execution::{
     CancellationReport, CompletionMetrics, Execution, ExecutionHandle, ExecutionState,
     ShutdownReport,
 };
+pub use execution_host::{ExecutionHost, HostBootstrapError};
+pub use preflight::{AdapterBindingPreflight, PreflightError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {

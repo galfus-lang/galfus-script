@@ -11,8 +11,8 @@ use galfus_bytecode::{
     PackageImage,
 };
 use galfus_contract::{
-    CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget, ProviderModuleRequirement, Providers,
-    RuntimeCapabilities,
+    AdapterLoadContext, CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget, ProviderModuleRequirement,
+    Providers, RuntimeCapabilities,
 };
 use galfus_core::{ModuleId, ModulePath, SemanticRevision, SourceId, Span};
 
@@ -274,6 +274,42 @@ fn runtime_rejects_a_missing_required_provider_before_execution() {
         result,
         Err(RuntimeError::ProviderRequirementUnsatisfied { module_path })
             if module_path == "std/io"
+    ));
+}
+
+#[test]
+fn execution_host_runs_preflight_before_runtime_bootstrap() {
+    let (graph, module_id) = startup_graph();
+    let package = package_with_required_provider(graph, module_id);
+    let mismatched_context = AdapterLoadContext {
+        target: ExecutionTarget::new("other").expect("valid target"),
+        properties: collections::BTreeMap::new(),
+    };
+    let preflight_result = ExecutionHost::new(mismatched_context).start(
+        sync::Arc::clone(&package),
+        &[],
+        std::rc::Rc::new(CooperativeDriver::new()),
+    );
+
+    assert!(matches!(
+        preflight_result,
+        Err(HostBootstrapError::Preflight(
+            PreflightError::PackageTargetMismatch { .. }
+        ))
+    ));
+
+    let context = AdapterLoadContext {
+        target: target(),
+        properties: collections::BTreeMap::new(),
+    };
+    let result =
+        ExecutionHost::new(context).start(package, &[], std::rc::Rc::new(CooperativeDriver::new()));
+
+    assert!(matches!(
+        result,
+        Err(HostBootstrapError::Runtime(
+            RuntimeError::ProviderRequirementUnsatisfied { module_path }
+        )) if module_path == "std/io"
     ));
 }
 
