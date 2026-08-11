@@ -73,7 +73,7 @@ impl RunnableTask for AdapterDispatchTask {
         let module = match self.bindings.lock() {
             Ok(mut bindings) => bindings.take_module(&self.module),
             Err(_) => {
-                self.injector.inject_system_response(
+                let _ = self.injector.inject_system_response(
                     self.thread_id,
                     self.request_lease,
                     Err(ExecutionFailure::new(
@@ -85,7 +85,7 @@ impl RunnableTask for AdapterDispatchTask {
             }
         };
         let Some(mut module) = module else {
-            self.injector.inject_system_response(
+            let _ = self.injector.inject_system_response(
                 self.thread_id,
                 self.request_lease,
                 Err(ExecutionFailure::new(
@@ -129,7 +129,7 @@ impl RunnableTask for ProviderDispatchTask {
         let host = match self.providers.lock() {
             Ok(mut providers) => providers.take_host(),
             Err(_) => {
-                self.injector.inject_system_response(
+                let _ = self.injector.inject_system_response(
                     self.thread_id,
                     self.request_lease,
                     Err(ExecutionFailure::new(
@@ -141,7 +141,7 @@ impl RunnableTask for ProviderDispatchTask {
             }
         };
         let Some(mut host) = host else {
-            self.injector.inject_system_response(
+            let _ = self.injector.inject_system_response(
                 self.thread_id,
                 self.request_lease,
                 Err(ExecutionFailure::new(

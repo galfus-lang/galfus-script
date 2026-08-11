@@ -28,7 +28,7 @@ impl HostProvider for NativeIoProvider {
                     let stdout = io::stdout();
                     let mut handle = stdout.lock();
                     if let Err(e) = handle.write_all(bytes).and_then(|()| handle.flush()) {
-                        injector.inject_system_response(
+                        let _ = injector.inject_system_response(
                             thread_id,
                             request_lease,
                             Err(ExecutionFailure::new(
@@ -38,13 +38,13 @@ impl HostProvider for NativeIoProvider {
                         );
                         return;
                     }
-                    injector.inject_system_response(
+                    let _ = injector.inject_system_response(
                         thread_id,
                         request_lease,
                         Ok(BoundaryValue::Null),
                     );
                 } else {
-                    injector.inject_system_response(
+                    let _ = injector.inject_system_response(
                         thread_id,
                         request_lease,
                         Err(ExecutionFailure::new(
@@ -58,7 +58,7 @@ impl HostProvider for NativeIoProvider {
                 let terminator = if let Some(BoundaryValue::Bytes(b)) = args.first() {
                     b.clone()
                 } else {
-                    injector.inject_system_response(
+                    let _ = injector.inject_system_response(
                         thread_id,
                         request_lease,
                         Err(ExecutionFailure::new(
@@ -70,7 +70,7 @@ impl HostProvider for NativeIoProvider {
                 };
 
                 if terminator.is_empty() {
-                    injector.inject_system_response(
+                    let _ = injector.inject_system_response(
                         thread_id,
                         request_lease,
                         Err(ExecutionFailure::new(
@@ -89,7 +89,7 @@ impl HostProvider for NativeIoProvider {
                 loop {
                     match handle.read(&mut byte) {
                         Ok(0) if input.is_empty() => {
-                            injector.inject_system_response(
+                            let _ = injector.inject_system_response(
                                 thread_id,
                                 request_lease,
                                 Ok(BoundaryValue::Bytes(Vec::new())),
@@ -97,7 +97,7 @@ impl HostProvider for NativeIoProvider {
                             return;
                         }
                         Ok(0) => {
-                            injector.inject_system_response(
+                            let _ = injector.inject_system_response(
                                 thread_id,
                                 request_lease,
                                 Ok(BoundaryValue::Bytes(input)),
@@ -108,7 +108,7 @@ impl HostProvider for NativeIoProvider {
                             input.push(byte[0]);
                             if input.ends_with(&terminator) {
                                 input.truncate(input.len() - terminator.len());
-                                injector.inject_system_response(
+                                let _ = injector.inject_system_response(
                                     thread_id,
                                     request_lease,
                                     Ok(BoundaryValue::Bytes(input)),
@@ -117,7 +117,7 @@ impl HostProvider for NativeIoProvider {
                             }
                         }
                         Err(error) => {
-                            injector.inject_system_response(
+                            let _ = injector.inject_system_response(
                                 thread_id,
                                 request_lease,
                                 Err(ExecutionFailure::new(
@@ -131,7 +131,7 @@ impl HostProvider for NativeIoProvider {
                 }
             }
             _ => {
-                injector.inject_system_response(
+                let _ = injector.inject_system_response(
                     thread_id,
                     request_lease,
                     Err(ExecutionFailure::new(

@@ -95,7 +95,7 @@ impl BufferIoProvider {
                 let len = input.len();
                 state.input.drain(0..len);
                 input.truncate(len - terminator.len());
-                injector.inject_system_response(
+                let _ = injector.inject_system_response(
                     thread_id,
                     request_lease,
                     Ok(BoundaryValue::Bytes(input)),
@@ -146,7 +146,7 @@ impl HostProvider for BufferIoProvider {
                     if let Some(WriteCallback(callback)) = callback {
                         let value = Uint8Array::from(bytes.as_slice());
                         if let Err(e) = callback.call1(&JsValue::UNDEFINED, &value.into()) {
-                            injector.inject_system_response(
+                            let _ = injector.inject_system_response(
                                 thread_id,
                                 request_lease,
                                 Err(ExecutionFailure::new(
@@ -157,13 +157,13 @@ impl HostProvider for BufferIoProvider {
                             return;
                         }
                     }
-                    injector.inject_system_response(
+                    let _ = injector.inject_system_response(
                         thread_id,
                         request_lease,
                         Ok(BoundaryValue::Null),
                     );
                 } else {
-                    injector.inject_system_response(
+                    let _ = injector.inject_system_response(
                         thread_id,
                         request_lease,
                         Err(ExecutionFailure::new(
@@ -177,7 +177,7 @@ impl HostProvider for BufferIoProvider {
                 let terminator = if let Some(bytes) = args.first().and_then(boundary_bytes) {
                     bytes
                 } else {
-                    injector.inject_system_response(
+                    let _ = injector.inject_system_response(
                         thread_id,
                         request_lease,
                         Err(ExecutionFailure::new(
@@ -189,7 +189,7 @@ impl HostProvider for BufferIoProvider {
                 };
 
                 if terminator.is_empty() {
-                    injector.inject_system_response(
+                    let _ = injector.inject_system_response(
                         thread_id,
                         request_lease,
                         Err(ExecutionFailure::new(
@@ -215,7 +215,7 @@ impl HostProvider for BufferIoProvider {
                     let len = input.len();
                     state.input.drain(0..len);
                     input.truncate(len - terminator.len());
-                    injector.inject_system_response(
+                    let _ = injector.inject_system_response(
                         thread_id,
                         request_lease,
                         Ok(BoundaryValue::Bytes(input)),
@@ -225,7 +225,7 @@ impl HostProvider for BufferIoProvider {
                 }
             }
             _ => {
-                injector.inject_system_response(
+                let _ = injector.inject_system_response(
                     thread_id,
                     request_lease,
                     Err(ExecutionFailure::new(

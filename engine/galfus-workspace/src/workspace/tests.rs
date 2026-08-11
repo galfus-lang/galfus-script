@@ -38,13 +38,14 @@ impl HostProvider for TerminatorIo {
             } else if let Some(BoundaryValue::Bytes(b)) = args.first() {
                 *self.terminator.lock().expect("terminator state") = b.clone();
             }
-            injector.inject_system_response(
+            let _ = injector.inject_system_response(
                 thread_id,
                 request_lease,
                 Ok(BoundaryValue::Bytes(Vec::new())),
             );
         } else {
-            injector.inject_system_response(thread_id, request_lease, Ok(BoundaryValue::Null));
+            let _ =
+                injector.inject_system_response(thread_id, request_lease, Ok(BoundaryValue::Null));
         }
     }
 }

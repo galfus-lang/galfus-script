@@ -222,7 +222,7 @@ impl Execution {
                 | ExecutionState::Running
                 | ExecutionState::Waiting
         ) {
-            self.event_sink.submit(RuntimeEvent::CancelExecution);
+            let _ = self.event_sink.submit(RuntimeEvent::CancelExecution);
             self.state = ExecutionState::Closing;
         }
     }

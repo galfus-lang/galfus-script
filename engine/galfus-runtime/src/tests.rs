@@ -49,7 +49,7 @@ impl galfus_contract::HostProvider for StartupProvider {
     ) {
         self.calls.lock().unwrap().push(name.to_string());
         if name == "initialize" && self.fail_initializer {
-            injector.inject_system_response(
+            let _ = injector.inject_system_response(
                 thread_id,
                 request_lease,
                 Err(galfus_contract::ExecutionFailure::new(
@@ -60,7 +60,7 @@ impl galfus_contract::HostProvider for StartupProvider {
         } else if name == "initialize" {
             *self.pending.lock().unwrap() = Some((thread_id, request_lease, injector));
         } else {
-            injector.inject_system_response(
+            let _ = injector.inject_system_response(
                 thread_id,
                 request_lease,
                 Ok(galfus_contract::BoundaryValue::Null),
@@ -577,7 +577,7 @@ fn run_initializes_dependencies_before_the_entry_module() {
             _args: &[galfus_contract::BoundaryValue],
             injector: sync::Arc<dyn galfus_contract::MessageInjector>,
         ) {
-            injector.inject_system_response(
+            let _ = injector.inject_system_response(
                 thread_id,
                 request_lease,
                 Ok(galfus_contract::BoundaryValue::Null),
