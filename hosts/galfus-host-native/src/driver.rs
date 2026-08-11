@@ -1,7 +1,9 @@
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use galfus_contract::{
-    ExecutionFailure, ExecutorStepResult, KernelDriver, KernelTask, RunnableTask, TaskAffinity, ThreadResult,
+    ExecutionFailure, ExecutorStepResult, KernelDriver, KernelTask, RunnableTask, ThreadResult,
 };
+use galfus_runtime::driver::{ExecutionDriver, NativeEventBridge, RuntimeEventSink};
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
 
@@ -11,6 +13,8 @@ pub struct NativeDriver {
 
     worker_queue_tx: Sender<Box<dyn RunnableTask + Send>>,
     worker_queue_rx: Receiver<Box<dyn RunnableTask + Send>>,
+
+    event_bridge: Arc<NativeEventBridge>,
 
     exit_callback: Mutex<Option<Box<dyn Fn(Result<i32, ExecutionFailure>) + Send + Sync>>>,
 }
@@ -41,6 +45,7 @@ impl NativeDriver {
             main_queue_rx: main_rx,
             worker_queue_tx: worker_tx,
             worker_queue_rx: worker_rx,
+            event_bridge: Arc::new(NativeEventBridge::new()),
             exit_callback: Mutex::new(None),
         }
     }
@@ -125,6 +130,20 @@ impl KernelDriver for NativeDriver {
 
         // Se a Main está vazia, o orchestrator está idle. Reporta block.
         ExecutorStepResult::Blocked { timeout: None }
+    }
+}
+
+impl ExecutionDriver for NativeDriver {
+    fn event_sink(&self) -> Arc<dyn RuntimeEventSink> {
+        self.event_bridge.clone()
+    }
+
+    fn drain_events(&self) -> Vec<(galfus_runtime::event::EventSequence, galfus_runtime::event::RuntimeEvent)> {
+        self.event_bridge.drain()
+    }
+
+    fn has_pending_events(&self) -> bool {
+        self.event_bridge.has_pending()
     }
 }
 

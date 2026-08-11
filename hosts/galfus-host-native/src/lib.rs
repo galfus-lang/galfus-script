@@ -1,8 +1,11 @@
 pub mod driver;
 pub mod providers;
 use galfus_bytecode::PackageImage;
-use galfus_contract::{Providers, AdapterBindings, KernelDriver, ExecutionFailure};
+use galfus_contract::{Providers, AdapterBindings, ExecutionFailure, RuntimeCapabilities};
+use galfus_runtime::driver::ExecutionDriver;
+use galfus_runtime::Runtime;
 use std::rc::Rc;
+use std::sync::Arc;
 
 pub struct PackageLoader {
     // Defines paths and mechanisms to load dynamic libraries for adapters
@@ -21,11 +24,11 @@ impl PackageLoader {
 pub struct ExecutionHost {
     providers: Providers,
     adapters: AdapterBindings,
-    driver: Rc<dyn KernelDriver>,
+    driver: Rc<dyn ExecutionDriver>,
 }
 
 impl ExecutionHost {
-    pub fn new(providers: Providers, adapters: AdapterBindings, driver: Rc<dyn KernelDriver>) -> Self {
+    pub fn new(providers: Providers, adapters: AdapterBindings, driver: Rc<dyn ExecutionDriver>) -> Self {
         Self {
             providers,
             adapters,
@@ -33,8 +36,31 @@ impl ExecutionHost {
         }
     }
 
-    pub fn run(&self, package: &PackageImage) -> Result<i32, ExecutionFailure> {
-        // Here we will bridge to VirtualKernel and Execution
-        todo!("Bridge to VirtualKernel and Execution");
+    pub fn run(self, package: Arc<PackageImage>, args: &[Vec<u8>]) -> Result<i32, ExecutionFailure> {
+        let capabilities = RuntimeCapabilities::builder()
+            .with_providers(self.providers)
+            .with_adapter_bindings(self.adapters)
+            .build();
+
+        let runtime = Runtime::new(package, capabilities);
+        
+        let mut execution = runtime
+            .start(args, self.driver.clone())
+            .map_err(|e| ExecutionFailure::new(
+                galfus_contract::ExecutionFailureKind::InitializationFailure,
+                e.to_string()
+            ))?;
+
+        let result = execution.run_sync_to_completion()
+            .map_err(|e| ExecutionFailure::new(
+                galfus_contract::ExecutionFailureKind::InternalRuntimeFailure,
+                e.to_string()
+            ))?;
+
+        if let galfus_contract::BoundaryValue::I32(code) = result {
+            Ok(code)
+        } else {
+            Ok(0)
+        }
     }
 }
