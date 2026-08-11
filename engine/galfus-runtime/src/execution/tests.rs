@@ -1,6 +1,6 @@
 use super::*;
-use crate::orchestrator::Orchestrator;
 use crate::driver::{ExecutionDriver, NativeEventBridge, RuntimeEventSink};
+use crate::orchestrator::Orchestrator;
 use galfus_contract::{ExecutorStepResult, KernelDriver, KernelTask};
 use std::sync::{
     Arc,
@@ -86,12 +86,7 @@ fn execution_remains_initializing_until_the_orchestrator_signal() {
     orchestrator.set_vm(Arc::new(galfus_vm::VirtualMachine::new(Default::default())));
     orchestrator.set_driver(driver.clone());
 
-    let mut execution = Execution::new(
-        orchestrator,
-        driver,
-        initialization_complete.clone(),
-        true,
-    );
+    let mut execution = Execution::new(orchestrator, driver, initialization_complete.clone(), true);
 
     execution.poll(1).expect("initializing slice succeeds");
     assert_eq!(execution.status(), ExecutionState::Initializing);

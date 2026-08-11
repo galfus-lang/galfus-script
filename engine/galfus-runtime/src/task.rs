@@ -1,11 +1,11 @@
 #[cfg(test)]
 mod tests;
 
+use crate::driver::RuntimeEventSink;
 use crate::registry;
 use galfus_contract::{
     ExecutionFailure, ExecutionFailureKind, ExecutionFrame, RunnableTask, ThreadResult,
 };
-use crate::driver::RuntimeEventSink;
 use galfus_vm::VirtualMachine;
 
 use std::sync::Arc;

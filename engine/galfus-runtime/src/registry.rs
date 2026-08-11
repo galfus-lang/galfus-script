@@ -49,6 +49,7 @@ pub use galfus_core::ThreadId;
 pub struct ThreadRegistry {
     tcbs: HashMap<ThreadId, ThreadControlBlock>,
     keys: HashMap<String, ThreadId>,
+    spawned_since_observation: std::collections::HashSet<ThreadId>,
 }
 
 impl ThreadRegistry {
@@ -56,6 +57,7 @@ impl ThreadRegistry {
         Self {
             tcbs: HashMap::new(),
             keys: HashMap::new(),
+            spawned_since_observation: std::collections::HashSet::new(),
         }
     }
 
@@ -155,6 +157,20 @@ impl ThreadRegistry {
         self.tcbs.get(&id).map(|tcb| tcb.state.clone())
     }
 
+    pub fn mark_spawned(&mut self, id: ThreadId) {
+        self.spawned_since_observation.insert(id);
+    }
+
+    pub fn is_running(&self, id: ThreadId) -> bool {
+        self.spawned_since_observation.contains(&id)
+            || self.state(id).is_some_and(|state| state.is_running())
+    }
+
+    pub fn is_exited(&mut self, id: ThreadId) -> bool {
+        self.state(id).is_some_and(|state| state.is_exited())
+            && !self.spawned_since_observation.remove(&id)
+    }
+
     pub fn mark_running(&mut self, id: ThreadId) -> bool {
         if let Some(tcb) = self.tcbs.get_mut(&id) {
             if !tcb.state.is_exited() {
@@ -184,6 +200,7 @@ impl ThreadRegistry {
     }
 
     pub fn cancel(&mut self, id: ThreadId) -> bool {
+        self.spawned_since_observation.remove(&id);
         if let Some(tcb) = self.tcbs.remove(&id) {
             if let Some(key) = tcb.key {
                 self.keys.remove(&key);

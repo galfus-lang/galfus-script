@@ -445,14 +445,10 @@ impl Orchestrator {
                                     Some(Ok(BoundaryValue::I64(id)))
                                 }
                                 "__internal_thread_is_running" => Some(Ok(BoundaryValue::Bool(
-                                    thread_arg(0)
-                                        .and_then(|id| self.kernel.state(id))
-                                        .is_some_and(|state| state.is_running()),
+                                    thread_arg(0).is_some_and(|id| self.kernel.is_running(id)),
                                 ))),
                                 "__internal_thread_is_exited" => Some(Ok(BoundaryValue::Bool(
-                                    thread_arg(0)
-                                        .and_then(|id| self.kernel.state(id))
-                                        .is_some_and(|state| state.is_exited()),
+                                    thread_arg(0).is_some_and(|id| self.kernel.is_exited(id)),
                                 ))),
                                 "__internal_thread_exit_reason" => Some(Ok(thread_arg(0)
                                     .and_then(|id| self.kernel.state(id))
@@ -741,6 +737,7 @@ impl Orchestrator {
                                         if prepared.is_ok() {
                                             self.kernel.enqueue_runnable(target_id, target_thread);
                                             self.kernel.mark_running(target_id);
+                                            self.kernel.mark_spawned(target_id);
                                             true
                                         } else {
                                             self.kernel.park_running(target_id, target_thread);

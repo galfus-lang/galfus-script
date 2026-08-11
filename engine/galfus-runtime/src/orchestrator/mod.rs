@@ -12,9 +12,7 @@ use crate::driver::{ExecutionDriver, RuntimeEventSink};
 use crate::event::{EventSequence, RuntimeEvent};
 use crate::kernel::VirtualKernel;
 use crate::task::{RuntimeTask, execution_stack, with_execution_stack};
-use galfus_contract::{
-    BoundaryValue, ExecutionFailure, ExecutionFailureKind, KernelTask,
-};
+use galfus_contract::{BoundaryValue, ExecutionFailure, ExecutionFailureKind, KernelTask};
 use galfus_core::{CoordinatorId, FutureId, RequestId};
 use galfus_vm::VirtualMachine;
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -289,7 +287,10 @@ impl Orchestrator {
             .expect("VM is configured before execution")
             .resume(thread_id, &mut thread, continuation, value);
         match result {
-            Ok(()) => self.kernel.enqueue_runnable_front(thread_id, thread),
+            Ok(()) => {
+                self.kernel.enqueue_runnable_front(thread_id, thread);
+                self.dispatch_runnables();
+            }
             Err(error) => {
                 self.failure = Some(with_execution_stack(
                     error.with_thread_id(thread_id),
@@ -753,29 +754,30 @@ impl Orchestrator {
 
     /// Dispatches all currently runnable threads from the VirtualKernel to the driver.
     pub(crate) fn dispatch_runnables(&mut self) {
-        while let Some((thread_id, is_front)) = self.kernel.next_runnable_detailed() {
-            if let Some(thread) = self.kernel.take_thread(thread_id) {
-                self.kernel.mark_running(thread_id);
+        let Some((thread_id, is_front)) = self.kernel.next_runnable_detailed() else {
+            return;
+        };
+        let Some(thread) = self.kernel.take_thread(thread_id) else {
+            return;
+        };
+        self.kernel.mark_running(thread_id);
 
-                let task = Box::new(RuntimeTask::new(
-                    thread_id,
-                    thread,
-                    self.vm.as_ref().unwrap().clone(),
-                    self.event_sink
-                        .as_ref()
-                        .expect("event sink is configured before execution")
-                        .clone(),
-                    self.future_workers.get(&thread_id).copied(),
-                ));
+        let task = Box::new(RuntimeTask::new(
+            thread_id,
+            thread,
+            self.vm.as_ref().unwrap().clone(),
+            self.event_sink
+                .as_ref()
+                .expect("event sink is configured before execution")
+                .clone(),
+            self.future_workers.get(&thread_id).copied(),
+        ));
 
-                let kernel_task = KernelTask::Any(task);
-                if is_front {
-                    self.driver.as_ref().unwrap().dispatch_front(kernel_task);
-                    break;
-                } else {
-                    self.driver.as_ref().unwrap().dispatch(kernel_task);
-                }
-            }
+        let kernel_task = KernelTask::Any(task);
+        if is_front {
+            self.driver.as_ref().unwrap().dispatch_front(kernel_task);
+        } else {
+            self.driver.as_ref().unwrap().dispatch(kernel_task);
         }
     }
 
@@ -813,148 +815,144 @@ impl Orchestrator {
 
     fn process_event(&mut self, event: RuntimeEvent) {
         match event {
-                RuntimeEvent::ThreadSpawned { mut thread } => {
-                    self.flush_thread_handle_drops(&mut thread);
-                    let id = match self.kernel.spawn(thread, None) {
-                        Ok(id) => id,
-                        Err(error) => {
-                            self.failure = Some(error);
-                            self.cancel_and_teardown_all_threads();
-                            return;
-                        }
-                    };
-                    let thread = self
-                        .kernel
-                        .take_thread(id)
-                        .expect("spawned thread is registered");
-                    self.kernel.enqueue_runnable(id, thread);
-                }
-                RuntimeEvent::Exited {
-                    thread_id,
-                    mut thread,
-                    result,
-                } => {
-                    self.teardown_thread_handles(&mut thread);
-                    self.kernel.mark_exited(thread_id, thread, result.clone());
-                    if let Some(waiters) = self.thread_exit_waits.remove(&thread_id) {
-                        for (owner_thread_id, future_lease) in waiters {
-                            self.process_event(RuntimeEvent::FutureCompleted {
-                                thread_id: owner_thread_id,
-                                future_lease,
-                                result: result.clone(),
-                            });
-                        }
+            RuntimeEvent::ThreadSpawned { mut thread } => {
+                self.flush_thread_handle_drops(&mut thread);
+                let id = match self.kernel.spawn(thread, None) {
+                    Ok(id) => id,
+                    Err(error) => {
+                        self.failure = Some(error);
+                        self.cancel_and_teardown_all_threads();
+                        return;
+                    }
+                };
+                let thread = self
+                    .kernel
+                    .take_thread(id)
+                    .expect("spawned thread is registered");
+                self.kernel.enqueue_runnable(id, thread);
+            }
+            RuntimeEvent::Exited {
+                thread_id,
+                mut thread,
+                result,
+            } => {
+                self.teardown_thread_handles(&mut thread);
+                self.kernel.mark_exited(thread_id, thread, result.clone());
+                if let Some(waiters) = self.thread_exit_waits.remove(&thread_id) {
+                    for (owner_thread_id, future_lease) in waiters {
+                        self.process_event(RuntimeEvent::FutureCompleted {
+                            thread_id: owner_thread_id,
+                            future_lease,
+                            result: result.clone(),
+                        });
                     }
                 }
-                RuntimeEvent::Initialized {
-                    thread_id,
-                    mut thread,
-                    module_id,
-                } => {
-                    self.flush_thread_handle_drops(&mut thread);
-                    self.advance_startup(thread_id, thread, module_id)
+            }
+            RuntimeEvent::Initialized {
+                thread_id,
+                mut thread,
+                module_id,
+            } => {
+                self.flush_thread_handle_drops(&mut thread);
+                self.advance_startup(thread_id, thread, module_id)
+            }
+            RuntimeEvent::Failed { thread_id, error } => {
+                self.failure = Some(error.with_thread_id(thread_id));
+                self.cancel_pending_continuations(thread_id);
+                self.startup_plans.remove(&thread_id);
+                self.cancel_and_teardown_thread(thread_id);
+            }
+            RuntimeEvent::EffectCompleted {
+                thread_id,
+                request_lease,
+                result,
+            } => {
+                if request_lease.generation
+                    == self
+                        .request_generations
+                        .get(&request_lease.id.raw())
+                        .copied()
+                        .unwrap_or(0)
+                {
+                    self.complete_pending(thread_id, PendingKey::Request(request_lease.id), result)
                 }
-                RuntimeEvent::Failed { thread_id, error } => {
-                    self.failure = Some(error.with_thread_id(thread_id));
-                    self.cancel_pending_continuations(thread_id);
-                    self.startup_plans.remove(&thread_id);
-                    self.cancel_and_teardown_thread(thread_id);
+            }
+            RuntimeEvent::FutureCompleted {
+                thread_id,
+                future_lease,
+                result,
+            } => {
+                if future_lease.generation
+                    == self
+                        .future_generations
+                        .get(&future_lease.id.raw())
+                        .copied()
+                        .unwrap_or(0)
+                {
+                    self.complete_future(thread_id, future_lease.id, result)
                 }
-                RuntimeEvent::EffectCompleted {
-                    thread_id,
-                    request_lease,
-                    result,
-                } => {
-                    if request_lease.generation
-                        == self
-                            .request_generations
-                            .get(&request_lease.id.raw())
-                            .copied()
-                            .unwrap_or(0)
-                    {
-                        self.complete_pending(
-                            thread_id,
-                            PendingKey::Request(request_lease.id),
-                            result,
-                        )
-                    }
+            }
+            RuntimeEvent::FutureWorkerCompleted {
+                worker_thread_id,
+                owner_thread_id,
+                future_lease,
+                mut thread,
+                result,
+            } => {
+                self.future_workers.remove(&worker_thread_id);
+                self.teardown_thread_handles(&mut thread);
+                self.kernel
+                    .mark_exited(worker_thread_id, thread, result.clone());
+                if future_lease.generation
+                    == self
+                        .future_generations
+                        .get(&future_lease.id.raw())
+                        .copied()
+                        .unwrap_or(0)
+                {
+                    self.complete_future(owner_thread_id, future_lease.id, result);
                 }
-                RuntimeEvent::FutureCompleted {
-                    thread_id,
-                    future_lease,
-                    result,
-                } => {
-                    if future_lease.generation
-                        == self
-                            .future_generations
-                            .get(&future_lease.id.raw())
-                            .copied()
-                            .unwrap_or(0)
-                    {
-                        self.complete_future(thread_id, future_lease.id, result)
-                    }
-                }
-                RuntimeEvent::FutureWorkerCompleted {
-                    worker_thread_id,
-                    owner_thread_id,
-                    future_lease,
-                    mut thread,
-                    result,
-                } => {
-                    self.future_workers.remove(&worker_thread_id);
-                    self.teardown_thread_handles(&mut thread);
-                    self.kernel
-                        .mark_exited(worker_thread_id, thread, result.clone());
-                    if future_lease.generation
-                        == self
-                            .future_generations
-                            .get(&future_lease.id.raw())
-                            .copied()
-                            .unwrap_or(0)
-                    {
-                        self.complete_future(owner_thread_id, future_lease.id, result);
-                    }
-                }
-                RuntimeEvent::Tick { delta_ms } => {
-                    self.kernel.tick(delta_ms);
-                    self.expire_mailbox_future_waits(delta_ms);
-                }
-                RuntimeEvent::CancelExecution => {
-                    self.shutting_down = true;
-                    self.cancel_all_pending_continuations();
-                    self.cancel_all_futures();
-                    self.startup_plans.clear();
-                    self.cancel_and_teardown_all_threads();
-                    self.failure = Some(galfus_contract::ExecutionFailure::new(
-                        galfus_contract::ExecutionFailureKind::Cancelled,
-                        "execution cancelled",
-                    ));
-                }
-                RuntimeEvent::Syscall { thread_id, .. } if self.shutting_down => {
-                    self.cancel_and_teardown_thread(thread_id);
-                }
-                RuntimeEvent::Syscall {
-                    thread_id,
-                    mut thread,
-                    effect,
-                    continuation,
-                } => {
-                    self.flush_thread_handle_drops(&mut thread);
-                    self.handle_effect(thread_id, thread, effect, continuation);
-                }
-                RuntimeEvent::Yielded {
-                    thread_id,
-                    mut thread,
-                } => {
-                    self.flush_thread_handle_drops(&mut thread);
-                    self.kernel.enqueue_runnable(thread_id, thread);
-                }
-                RuntimeEvent::CancelThread { thread_id } => {
-                    self.cancel_pending_continuations(thread_id);
-                    self.cancel_thread_futures(thread_id);
-                    self.startup_plans.remove(&thread_id);
-                    self.cancel_and_teardown_thread(thread_id);
-                }
+            }
+            RuntimeEvent::Tick { delta_ms } => {
+                self.kernel.tick(delta_ms);
+                self.expire_mailbox_future_waits(delta_ms);
+            }
+            RuntimeEvent::CancelExecution => {
+                self.shutting_down = true;
+                self.cancel_all_pending_continuations();
+                self.cancel_all_futures();
+                self.startup_plans.clear();
+                self.cancel_and_teardown_all_threads();
+                self.failure = Some(galfus_contract::ExecutionFailure::new(
+                    galfus_contract::ExecutionFailureKind::Cancelled,
+                    "execution cancelled",
+                ));
+            }
+            RuntimeEvent::Syscall { thread_id, .. } if self.shutting_down => {
+                self.cancel_and_teardown_thread(thread_id);
+            }
+            RuntimeEvent::Syscall {
+                thread_id,
+                mut thread,
+                effect,
+                continuation,
+            } => {
+                self.flush_thread_handle_drops(&mut thread);
+                self.handle_effect(thread_id, thread, effect, continuation);
+            }
+            RuntimeEvent::Yielded {
+                thread_id,
+                mut thread,
+            } => {
+                self.flush_thread_handle_drops(&mut thread);
+                self.kernel.enqueue_runnable(thread_id, thread);
+            }
+            RuntimeEvent::CancelThread { thread_id } => {
+                self.cancel_pending_continuations(thread_id);
+                self.cancel_thread_futures(thread_id);
+                self.startup_plans.remove(&thread_id);
+                self.cancel_and_teardown_thread(thread_id);
+            }
         }
     }
 

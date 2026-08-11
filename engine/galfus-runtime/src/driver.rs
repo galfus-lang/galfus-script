@@ -39,13 +39,8 @@ impl NativeEventBridge {
     }
 
     pub fn drain(&self) -> Vec<(EventSequence, RuntimeEvent)> {
-        let events = self
-            .receiver
-            .lock()
-            .unwrap()
-            .try_iter()
-            .collect::<Vec<_>>();
         let mut pending = self.pending.lock().unwrap();
+        let events = self.receiver.lock().unwrap().try_iter().collect::<Vec<_>>();
         *pending = pending.saturating_sub(events.len());
         events
     }
@@ -62,9 +57,12 @@ impl RuntimeEventSink for NativeEventBridge {
         let Some(next) = current.next() else {
             return;
         };
+        let mut pending = self.pending.lock().unwrap();
+        *pending += 1;
         if self.sender.send((current, event)).is_ok() {
             *sequence = next;
-            *self.pending.lock().unwrap() += 1;
+        } else {
+            *pending -= 1;
         }
     }
 }

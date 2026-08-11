@@ -95,7 +95,12 @@ impl ExecutionDriver for PlaygroundExecutor {
         self.events.clone()
     }
 
-    fn drain_events(&self) -> Vec<(galfus_runtime::event::EventSequence, galfus_runtime::event::RuntimeEvent)> {
+    fn drain_events(
+        &self,
+    ) -> Vec<(
+        galfus_runtime::event::EventSequence,
+        galfus_runtime::event::RuntimeEvent,
+    )> {
         self.events.drain()
     }
 

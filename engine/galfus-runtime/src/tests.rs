@@ -587,9 +587,7 @@ fn run_initializes_dependencies_before_the_entry_module() {
             self.events.clone()
         }
 
-        fn drain_events(
-            &self,
-        ) -> Vec<(crate::event::EventSequence, crate::event::RuntimeEvent)> {
+        fn drain_events(&self) -> Vec<(crate::event::EventSequence, crate::event::RuntimeEvent)> {
             self.events.drain()
         }
 

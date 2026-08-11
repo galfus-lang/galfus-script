@@ -150,6 +150,18 @@ impl VirtualKernel {
         self.registry.state(id)
     }
 
+    pub fn mark_spawned(&mut self, id: ThreadId) {
+        self.registry.mark_spawned(id);
+    }
+
+    pub fn is_running(&self, id: ThreadId) -> bool {
+        self.registry.is_running(id)
+    }
+
+    pub fn is_exited(&mut self, id: ThreadId) -> bool {
+        self.registry.is_exited(id)
+    }
+
     pub fn mark_running(&mut self, id: ThreadId) -> bool {
         self.registry.mark_running(id)
     }
