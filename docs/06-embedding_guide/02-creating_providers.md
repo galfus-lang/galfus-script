@@ -26,8 +26,8 @@ impl HostProvider for MyIOProvider {
     /// Handles an incoming call from a Galfus script.
     fn dispatch(
         &mut self,
-        thread_id: usize,
-        request_id: u64,
+        thread_id: galfus_core::ThreadId,
+        request_lease: galfus_core::RequestLease,
         name: &str,
         args: &[BoundaryValue],
         injector: Arc<dyn MessageInjector>,
@@ -42,13 +42,13 @@ impl HostProvider for MyIOProvider {
                 }
 
                 // Complete the activation synchronously.
-                injector.inject_system_response(thread_id, request_id, Ok(BoundaryValue::Null));
+                let _ = injector.inject_system_response(thread_id, request_lease, Ok(BoundaryValue::Null));
             },
             _ => {
                 // Reject unknown functions
-                injector.inject_system_response(
+                let _ = injector.inject_system_response(
                     thread_id,
-                    request_id,
+                    request_lease,
                     Err(galfus_contract::ExecutionFailure::ProviderError("Unknown function".into()))
                 );
             }
@@ -56,7 +56,7 @@ impl HostProvider for MyIOProvider {
     }
 
     /// Handle task cancellations if the Galfus runtime unmounts or drops the owning thread.
-    fn cancel(&mut self, _thread_id: usize, _request_id: u64) -> CancellationOutcome {
+    fn cancel(&mut self, _thread_id: galfus_core::ThreadId, _request_lease: galfus_core::RequestLease) -> CancellationOutcome {
         CancellationOutcome::Unsupported
     }
 }

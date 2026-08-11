@@ -16,8 +16,8 @@ planned rather than source-level features.
 
 ## Table of Contents
 
-- [Embedding Galfus](docs/Embedding_Galfus_in_Rust.md)
-- [Why Galfus Is Embeddable](docs/Why_Galfus_Is_Embeddable.md)
+- [Embedding Galfus](docs/06-embedding_guide/01-embedding_in_rust.md)
+- [Why Galfus Is Embeddable](docs/01-introduction/01-why_galfus_is_embeddable.md)
 - [Status](#status)
 - [Core Features](#core-features)
 - [Memory Philosophy](#memory-philosophy)
@@ -84,17 +84,19 @@ Galfus Script is structured as a cargo workspace containing the following crates
 
 ```txt
 galfus-script/
-  ├── crates/
+  ├── engine/
        ├── galfus-core/       # Shared IDs, diagnostics, spans, and primitive metadata
        ├── galfus-frontend/   # Lexer, parser, resolver, checker, and semantic validation
-       ├── galfus-ir/         # MIR representation and VM lowering code
+       ├── galfus-compiler/   # IR generation and bytecode compilation logic
+       ├── galfus-ir/         # MIR representation and structures
        ├── galfus-bytecode/   # Bytecode format, validation, and in-memory executable graph
-       ├── galfus-contract/       # Optional host-provider contracts used at execution time
-       ├── galfus-runtime/    # Runtime execution state, module globals, and VM setup
-       ├── galfus-vm/         # Virtual Machine interpreter and ownership graph engine
-       ├── galfus-builtins/   # Standard library builtins and rich_builtins files
-       ├── galfus-runner/     # Workspace compilation pipeline and executor
-       └── galfus-cli/        # CLI interface (Command Line Interface)
+       ├── galfus-contract/   # Host-provider contracts, adapter schemas, and builtin source templates
+       ├── galfus-workspace/  # Pipeline integration, incremental compilation, and embedded API
+       ├── galfus-runtime/    # Runtime execution state, thread mailboxes, and Virtual Kernel
+       └── galfus-vm/         # Virtual Machine interpreter and ownership graph engine
+  ├── hosts/
+       ├── galfus-cli/        # CLI interface (Command Line Interface) and native host provider
+       └── galfus-playground/ # Web WASM playground and browser host provider
   └── examples/
        └── project/           # Sample workspace project with local main.gfs and config
 ```

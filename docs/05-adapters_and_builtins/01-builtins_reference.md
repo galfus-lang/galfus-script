@@ -21,20 +21,20 @@ The Galfus standard library is organized into three distinct tiers defined in `g
 
 +------------------------------------------------------------------+
 |                    2. Utility Modules (Universal)                |
-|    (text, format, json, regex, math, path, http, crypto, etc.)   |
+|    (text, format, format/ansi)                                   |
 +------------------------------------------------------------------+
 
 +------------------------------------------------------------------+
 |                 1. Internal Core Modules (VM Native)             |
-|                 (std/async, std/thread)                          |
+|    (std/async, std/thread, std/math, std/constraints, std/iterable)|
 +------------------------------------------------------------------+
 ```
 
-1. **Internal Core Modules (`std/async`, `std/thread`)**
+1. **Internal Core Modules (`std/async`, `std/thread`, `std/math`, `std/constraints`, `std/iterable`)**
    - Always included by default in every workspace.
    - Execute entirely within VM engine isolation using `__internal_*` primitives without touching the host OS.
 
-2. **Utility Modules (`text`, `format`, `json`, `math`, `path`, etc.)**
+2. **Utility Modules (`text`, `format`, `format/ansi`)**
    - Pure Galfus Script algorithmic utilities.
    - Platform-agnostic, developer-friendly interfaces.
 
@@ -323,56 +323,11 @@ fn parse<T>(s: [u8]): ParseResult<T>
 - concrete integer widths (`i8`, `i16`, `i32`, `i64`, `i128`, `u8`, `u16`, `u32`, `u64`, `u128`)
 - concrete float widths (`f32`, `f64`)
 
-### `json`
-
-Highly optimized JSON parsing and serialization.
-
-- `fn parse<T>(jsonBytes: [u8]): ParseResult<T>` - Deserialize JSON bytes into a concrete structure or native types.
-- `fn stringify<T>(val: T): [u8]` - Serialize structured data back into JSON UTF-8 bytes. Supported `T` types include `bool`, `null`, `[u8]`, concrete integer/float widths, and arrays/structs composed of these supported types.
-
-### `regex`
-
-Regular expression pattern matching.
-
-- `fn match(pattern: [u8], text: [u8]): bool` - Test if text matches regex.
-- `fn find(pattern: [u8], text: [u8]): [[u8]]` - Find capture groups of regex match.
-- `fn replace(pattern: [u8], text: [u8], replacement: [u8]): [u8]` - Replace matches in text.
-
-### `math`
+### `math` (Implemented as `std/math`)
 
 Standard mathematical functions.
 
 - Constants: `PI` (3.14159...), `E` (2.71828...).
 - Functions: `sin(x)`, `cos(x)`, `tan(x)`, `log(x)`, `pow(base, exp)`, `sqrt(x)`, `ceil(x)`, `floor(x)`, `round(x)`.
 
-### `path`
-
-Algorithmic file path manipulation (purely textual).
-
-- `fn join(parts: [[u8]]): [u8]` - Join path components safely according to target path separators.
-- `fn dirname(path: [u8]): [u8]` - Get parent directory path segment.
-- `fn basename(path: [u8]): [u8]` - Get filename portion.
-- `fn extname(path: [u8]): [u8]` - Get file extension portion.
-
-### `http`
-
-High-level HTTP client and listener capabilities (built on `std/net` and `std/time`).
-
-- `fn get(url: [u8]): HttpResponse`
-- `fn post(url: [u8], body: [u8], headers: Map): HttpResponse`
-- `fn createServer(port: i32, handler: fn(HttpRequest): HttpResponse): HttpServer`
-
-### `collections`
-
-Standard utility structures and generic operations.
-
-- `Map` / `Set` implementation wrappers and utilities.
-- List operations: `filter`, `map`, `reduce`, `sort`, `reverse`.
-
-### `crypto`
-
-Cryptographic primitives and utilities (built on `std/random`).
-
-- Hash functions: `sha256(data: [u8]): [u8]`, `md5(data: [u8]): [u8]`.
-- Cipher helpers: `encrypt(data: [u8], key: [u8]): [u8]`, `decrypt(data: [u8], key: [u8]): [u8]`.
-- Signatures: `sign(data: [u8], privateKey: [u8]): [u8]`, `verify(data: [u8], signature: [u8], publicKey: [u8]): bool`.
+*(Note: Other utility modules like `json`, `regex`, `path`, `http`, `collections`, and `crypto` are planned but not currently implemented in the core engine's utility modules list).*
