@@ -1,6 +1,7 @@
 use super::Orchestrator;
 use crate::orchestrator::future_registry::Activation;
 use crate::orchestrator::pending::PendingOperation;
+use galfus_contract::AdapterBindingsCloseReport;
 use std::sync::atomic::Ordering;
 
 impl Orchestrator {
@@ -130,9 +131,9 @@ impl Orchestrator {
         }
     }
 
-    pub(crate) fn shutdown(&mut self) {
+    pub(crate) fn shutdown(&mut self) -> AdapterBindingsCloseReport {
         if self.shutting_down {
-            return;
+            return self.shutdown_report.clone().unwrap_or_default();
         }
         self.shutting_down = true;
         self.cancel_all_pending_continuations();
@@ -146,8 +147,13 @@ impl Orchestrator {
             self.coordinator_id_manager.free(coordinator_id);
         }
         self.cancel_and_teardown_all_threads();
-        if let Some(bindings) = &self.adapter_bindings {
-            bindings.lock().unwrap().release_all_handles();
-        }
+        let report = self
+            .adapter_bindings
+            .as_ref()
+            .map_or_else(AdapterBindingsCloseReport::default, |bindings| {
+                bindings.lock().unwrap().close()
+            });
+        self.shutdown_report = Some(report.clone());
+        report
     }
 }

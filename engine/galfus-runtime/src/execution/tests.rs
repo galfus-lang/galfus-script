@@ -1,7 +1,11 @@
 use super::*;
 use crate::driver::{ExecutionDriver, NativeEventBridge, RuntimeEventSink};
 use crate::orchestrator::Orchestrator;
-use galfus_contract::{ExecutorStepResult, KernelDriver, KernelTask};
+use galfus_contract::{
+    AdapterBindings, AdapterModuleBinding, AdapterModuleDescriptor, AdapterReleaseError,
+    ExecutorStepResult, HandleReleaseOutcome, KernelDriver, KernelTask,
+};
+use galfus_core::{HandleId, OpaqueTypeId};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -42,6 +46,62 @@ impl ExecutionDriver for IdleDriver {
 
     fn has_pending_events(&self) -> bool {
         self.events.has_pending()
+    }
+}
+
+struct ReleaseRecordingAdapter(Arc<std::sync::atomic::AtomicUsize>);
+
+struct FailingReleaseAdapter;
+
+impl AdapterModuleBinding for ReleaseRecordingAdapter {
+    fn descriptor(&self) -> AdapterModuleDescriptor {
+        AdapterModuleDescriptor::empty()
+    }
+
+    fn dispatch(
+        &mut self,
+        _symbol: &str,
+        _thread_id: galfus_core::ThreadId,
+        _request_lease: galfus_core::RequestLease,
+        _args: &[BoundaryValue],
+        _injector: Arc<dyn galfus_contract::MessageInjector>,
+    ) {
+    }
+
+    fn release_handle(
+        &mut self,
+        _type_id: &OpaqueTypeId,
+        _id: HandleId,
+    ) -> Result<HandleReleaseOutcome, AdapterReleaseError> {
+        self.0.fetch_add(1, Ordering::AcqRel);
+        Ok(HandleReleaseOutcome::Released)
+    }
+}
+
+impl AdapterModuleBinding for FailingReleaseAdapter {
+    fn descriptor(&self) -> AdapterModuleDescriptor {
+        AdapterModuleDescriptor::empty()
+    }
+
+    fn dispatch(
+        &mut self,
+        _symbol: &str,
+        _thread_id: galfus_core::ThreadId,
+        _request_lease: galfus_core::RequestLease,
+        _args: &[BoundaryValue],
+        _injector: Arc<dyn galfus_contract::MessageInjector>,
+    ) {
+    }
+
+    fn release_handle(
+        &mut self,
+        _type_id: &OpaqueTypeId,
+        _id: HandleId,
+    ) -> Result<HandleReleaseOutcome, AdapterReleaseError> {
+        Err(AdapterReleaseError {
+            code: "unavailable".to_string(),
+            message: "adapter cannot release the resource".to_string(),
+        })
     }
 }
 
@@ -88,6 +148,66 @@ fn execution_shutdown_is_idempotent_and_preserves_its_final_report() {
     assert!(
         matches!(first.result, Err(ref error) if error.kind == ExecutionFailureKind::Cancelled)
     );
+}
+
+#[test]
+fn execution_shutdown_reports_adapter_handle_teardown() {
+    let releases = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut bindings = AdapterBindings::default();
+    let binding_id = bindings
+        .register_module(
+            "graphics",
+            Box::new(ReleaseRecordingAdapter(releases.clone())),
+        )
+        .expect("adapter binding registers");
+    let type_id = OpaqueTypeId::new("graphics", "Texture").expect("valid type id");
+    bindings
+        .register_handle(binding_id, type_id, HandleId::new(1))
+        .expect("handle registers");
+
+    let mut orchestrator = Orchestrator::new();
+    orchestrator.set_adapter_bindings(Some(Arc::new(std::sync::Mutex::new(bindings))));
+    let mut execution = Execution::new(
+        orchestrator,
+        Rc::new(IdleDriver::new()),
+        Arc::new(AtomicBool::new(true)),
+        false,
+    );
+
+    let report = execution.shutdown();
+
+    assert!(report.adapter_close.is_complete());
+    assert_eq!(report.adapter_close.released, 1);
+    assert_eq!(releases.load(Ordering::Acquire), 1);
+}
+
+#[test]
+fn execution_shutdown_propagates_adapter_teardown_failures() {
+    let mut bindings = AdapterBindings::default();
+    let binding_id = bindings
+        .register_module("graphics", Box::new(FailingReleaseAdapter))
+        .expect("adapter binding registers");
+    let type_id = OpaqueTypeId::new("graphics", "Texture").expect("valid type id");
+    bindings
+        .register_handle(binding_id, type_id, HandleId::new(1))
+        .expect("handle registers");
+
+    let mut orchestrator = Orchestrator::new();
+    orchestrator.set_adapter_bindings(Some(Arc::new(std::sync::Mutex::new(bindings))));
+    let mut execution = Execution::new(
+        orchestrator,
+        Rc::new(IdleDriver::new()),
+        Arc::new(AtomicBool::new(true)),
+        false,
+    );
+
+    let report = execution.shutdown();
+
+    assert_eq!(report.adapter_close.failures.len(), 1);
+    assert!(matches!(
+        report.result,
+        Err(ref error) if error.kind == ExecutionFailureKind::AdapterCallFailure
+    ));
 }
 
 #[test]

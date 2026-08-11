@@ -99,6 +99,19 @@ pub enum CancellationOutcome {
     AlreadyCompleted,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandleReleaseOutcome {
+    Released,
+    AlreadyReleased,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("adapter handle release failed [{code}]: {message}")]
+pub struct AdapterReleaseError {
+    pub code: String,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExecutionFailureKind {
     VmPanic,
@@ -264,7 +277,13 @@ pub trait AdapterModuleBinding: Send {
     }
 
     /// Releases a foreign resource previously exposed through a nominal handle.
-    fn release_handle(&mut self, _type_id: &OpaqueTypeId, _id: HandleId) {}
+    fn release_handle(
+        &mut self,
+        _type_id: &OpaqueTypeId,
+        _id: HandleId,
+    ) -> Result<HandleReleaseOutcome, AdapterReleaseError> {
+        Ok(HandleReleaseOutcome::Released)
+    }
 }
 
 /// Adapter bindings are explicit and keyed by nominal proxy module.
@@ -285,6 +304,32 @@ pub enum AdapterBindingError {
     InvalidHandle,
     #[error("cannot remove binding with active handles")]
     HandlesStillActive,
+    #[error("could not compensate a rejected handle batch: {0}")]
+    CompensationReleaseFailed(AdapterBindingReleaseError),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum AdapterBindingReleaseError {
+    #[error("adapter binding {binding_id:?} could not release handle {type_id:?}/{id:?}: {error}")]
+    AdapterReleaseFailed {
+        binding_id: BindingId,
+        type_id: OpaqueTypeId,
+        id: HandleId,
+        error: AdapterReleaseError,
+    },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AdapterBindingsCloseReport {
+    pub released: usize,
+    pub already_released: usize,
+    pub failures: Vec<AdapterBindingReleaseError>,
+}
+
+impl AdapterBindingsCloseReport {
+    pub fn is_complete(&self) -> bool {
+        self.failures.is_empty()
+    }
 }
 
 struct AdapterBinding {
@@ -415,7 +460,19 @@ impl AdapterBindings {
                 .find(|binding| binding.id == binding_id)
             {
                 for (type_id, id) in compensation {
-                    binding.module.release_handle(&type_id, id);
+                    binding
+                        .module
+                        .release_handle(&type_id, id)
+                        .map_err(|error| {
+                            AdapterBindingError::CompensationReleaseFailed(
+                                AdapterBindingReleaseError::AdapterReleaseFailed {
+                                    binding_id,
+                                    type_id,
+                                    id,
+                                    error,
+                                },
+                            )
+                        })?;
                 }
             }
             if exhausted {
@@ -451,34 +508,44 @@ impl AdapterBindings {
         binding_id: BindingId,
         type_id: &OpaqueTypeId,
         id: HandleId,
-    ) -> bool {
+    ) -> Result<HandleReleaseOutcome, AdapterBindingReleaseError> {
         let Some(binding) = self
             .modules
             .values_mut()
             .find(|binding| binding.id == binding_id)
         else {
-            return false;
+            return Ok(HandleReleaseOutcome::AlreadyReleased);
         };
         if !self.handles.remove(&(binding_id, type_id.clone(), id)) {
-            return false;
+            return Ok(HandleReleaseOutcome::AlreadyReleased);
         }
-        binding.module.release_handle(type_id, id);
-        true
+        match binding.module.release_handle(type_id, id) {
+            Ok(outcome) => Ok(outcome),
+            Err(error) => {
+                self.handles.insert((binding_id, type_id.clone(), id));
+                Err(AdapterBindingReleaseError::AdapterReleaseFailed {
+                    binding_id,
+                    type_id: type_id.clone(),
+                    id,
+                    error,
+                })
+            }
+        }
     }
 
     /// Releases every foreign handle still owned by this execution.
-    pub fn release_all_handles(&mut self) {
-        let mut handles = self.handles.drain().collect::<Vec<_>>();
+    pub fn close(&mut self) -> AdapterBindingsCloseReport {
+        let mut handles = self.handles.iter().cloned().collect::<Vec<_>>();
         handles.sort_unstable();
+        let mut report = AdapterBindingsCloseReport::default();
         for (binding_id, type_id, id) in handles {
-            if let Some(binding) = self
-                .modules
-                .values_mut()
-                .find(|binding| binding.id == binding_id)
-            {
-                binding.module.release_handle(&type_id, id);
+            match self.release_handle(binding_id, &type_id, id) {
+                Ok(HandleReleaseOutcome::Released) => report.released += 1,
+                Ok(HandleReleaseOutcome::AlreadyReleased) => report.already_released += 1,
+                Err(error) => report.failures.push(error),
             }
         }
+        report
     }
 
     fn proxy_module_for(&self, binding_id: BindingId) -> Option<&str> {

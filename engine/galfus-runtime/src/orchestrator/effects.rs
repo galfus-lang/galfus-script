@@ -47,13 +47,22 @@ impl Orchestrator {
                 id,
             } => {
                 if let Some(bindings) = &self.adapter_bindings {
-                    // `AdapterBindings` removes the ownership entry before
-                    // notifying the adapter, making repeated graph-release
-                    // notifications harmless.
-                    bindings
+                    let release = bindings
                         .lock()
                         .unwrap()
                         .release_handle(binding_id, &type_id, id);
+                    if let Err(error) = release {
+                        self.failure = Some(
+                            ExecutionFailure::new(
+                                ExecutionFailureKind::AdapterCallFailure,
+                                error.to_string(),
+                            )
+                            .with_thread_id(thread_id)
+                            .with_stack(execution_stack(&thread)),
+                        );
+                        self.kernel.cancel(thread_id);
+                        return;
+                    }
                 }
                 self.resume_or_fail_front(
                     thread_id,

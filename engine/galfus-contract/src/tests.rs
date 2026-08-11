@@ -9,6 +9,11 @@ struct IoHost;
 
 struct DummyAdapter(Arc<std::sync::atomic::AtomicUsize>);
 
+struct RetriableReleaseAdapter {
+    should_fail: Arc<std::sync::atomic::AtomicBool>,
+    releases: Arc<std::sync::atomic::AtomicUsize>,
+}
+
 impl AdapterModuleBinding for DummyAdapter {
     fn descriptor(&self) -> AdapterModuleDescriptor {
         AdapterModuleDescriptor::empty()
@@ -24,8 +29,45 @@ impl AdapterModuleBinding for DummyAdapter {
     ) {
     }
 
-    fn release_handle(&mut self, _type_id: &OpaqueTypeId, _id: HandleId) {
+    fn release_handle(
+        &mut self,
+        _type_id: &OpaqueTypeId,
+        _id: HandleId,
+    ) -> Result<HandleReleaseOutcome, AdapterReleaseError> {
         self.0.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        Ok(HandleReleaseOutcome::Released)
+    }
+}
+
+impl AdapterModuleBinding for RetriableReleaseAdapter {
+    fn descriptor(&self) -> AdapterModuleDescriptor {
+        AdapterModuleDescriptor::empty()
+    }
+
+    fn dispatch(
+        &mut self,
+        _symbol: &str,
+        _thread_id: galfus_core::ThreadId,
+        _request_lease: galfus_core::RequestLease,
+        _args: &[BoundaryValue],
+        _injector: Arc<dyn MessageInjector>,
+    ) {
+    }
+
+    fn release_handle(
+        &mut self,
+        _type_id: &OpaqueTypeId,
+        _id: HandleId,
+    ) -> Result<HandleReleaseOutcome, AdapterReleaseError> {
+        if self.should_fail.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(AdapterReleaseError {
+                code: "busy".to_string(),
+                message: "resource is temporarily unavailable".to_string(),
+            });
+        }
+        self.releases
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        Ok(HandleReleaseOutcome::Released)
     }
 }
 
@@ -150,9 +192,48 @@ fn adapter_bindings_own_and_release_nominal_handles() {
             .is_ok()
     );
     assert!(bindings.contains_handle(binding_id, &type_id, handle_id));
-    assert!(bindings.release_handle(binding_id, &type_id, handle_id));
+    assert_eq!(
+        bindings.release_handle(binding_id, &type_id, handle_id),
+        Ok(HandleReleaseOutcome::Released)
+    );
     assert!(!bindings.contains_handle(binding_id, &type_id, handle_id));
-    assert!(!bindings.release_handle(binding_id, &type_id, handle_id));
+    assert_eq!(
+        bindings.release_handle(binding_id, &type_id, handle_id),
+        Ok(HandleReleaseOutcome::AlreadyReleased)
+    );
+    assert_eq!(releases.load(std::sync::atomic::Ordering::Acquire), 1);
+}
+
+#[test]
+fn adapter_bindings_close_reports_failures_and_retains_handles_for_retry() {
+    let should_fail = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let releases = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut bindings = AdapterBindings::default();
+    let binding_id = bindings
+        .register_module(
+            "graphics",
+            Box::new(RetriableReleaseAdapter {
+                should_fail: should_fail.clone(),
+                releases: releases.clone(),
+            }),
+        )
+        .expect("adapter binding registers");
+    let type_id = OpaqueTypeId::new("graphics", "Texture").unwrap();
+    let handle_id = HandleId::new(1);
+    bindings
+        .register_handle(binding_id, type_id.clone(), handle_id)
+        .expect("handle registers");
+
+    let failed = bindings.close();
+    assert!(!failed.is_complete());
+    assert_eq!(failed.failures.len(), 1);
+    assert!(bindings.contains_handle(binding_id, &type_id, handle_id));
+
+    should_fail.store(false, std::sync::atomic::Ordering::Release);
+    let retried = bindings.close();
+    assert!(retried.is_complete());
+    assert_eq!(retried.released, 1);
+    assert!(!bindings.contains_handle(binding_id, &type_id, handle_id));
     assert_eq!(releases.load(std::sync::atomic::Ordering::Acquire), 1);
 }
 
@@ -204,7 +285,10 @@ fn adapter_handle_ids_are_monotonic_and_never_reused() {
             .register_handle(binding_id, type_id.clone(), HandleId::new(1))
             .is_ok()
     );
-    assert!(bindings.release_handle(binding_id, &type_id, HandleId::new(1)));
+    assert_eq!(
+        bindings.release_handle(binding_id, &type_id, HandleId::new(1)),
+        Ok(HandleReleaseOutcome::Released)
+    );
     assert!(
         bindings
             .register_handle(binding_id, type_id.clone(), HandleId::new(1))
@@ -244,7 +328,10 @@ fn adapter_handles_require_the_binding_that_created_them() {
             .register_handle(first_binding, type_id.clone(), handle_id)
             .is_ok()
     );
-    assert!(!bindings.release_handle(second_binding, &type_id, handle_id));
+    assert_eq!(
+        bindings.release_handle(second_binding, &type_id, handle_id),
+        Ok(HandleReleaseOutcome::AlreadyReleased)
+    );
     assert!(bindings.contains_handle(first_binding, &type_id, handle_id));
 }
 

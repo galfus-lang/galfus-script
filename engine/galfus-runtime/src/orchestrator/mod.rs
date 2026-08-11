@@ -12,7 +12,9 @@ use crate::driver::{ExecutionDriver, RuntimeEventSink};
 use crate::event::{EventSequence, RuntimeEvent};
 use crate::kernel::VirtualKernel;
 use crate::task::{RuntimeTask, execution_stack, with_execution_stack};
-use galfus_contract::{BoundaryValue, ExecutionFailure, ExecutionFailureKind, KernelTask};
+use galfus_contract::{
+    AdapterBindingsCloseReport, BoundaryValue, ExecutionFailure, ExecutionFailureKind, KernelTask,
+};
 use galfus_core::{CoordinatorId, FutureId, RequestId};
 use galfus_vm::VirtualMachine;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
@@ -101,6 +103,7 @@ pub(crate) struct Orchestrator {
     adapter_bindings: Option<Arc<std::sync::Mutex<galfus_contract::AdapterBindings>>>,
     initialization_complete: Arc<AtomicBool>,
     shutting_down: bool,
+    shutdown_report: Option<AdapterBindingsCloseReport>,
     late_completions: VecDeque<LateCompletion>,
     root_thread_id: Option<crate::registry::ThreadId>,
     future_workers:
@@ -166,6 +169,7 @@ impl Orchestrator {
             adapter_bindings: None,
             initialization_complete: Arc::new(AtomicBool::new(true)),
             shutting_down: false,
+            shutdown_report: None,
             late_completions: VecDeque::new(),
             root_thread_id: None,
             future_workers: HashMap::new(),
@@ -519,6 +523,9 @@ impl Orchestrator {
                     | galfus_contract::AdapterBindingError::InvalidHandle
                     | galfus_contract::AdapterBindingError::HandlesStillActive => {
                         ExecutionFailureKind::BoundaryCodecFailure
+                    }
+                    galfus_contract::AdapterBindingError::CompensationReleaseFailed(_) => {
+                        ExecutionFailureKind::AdapterCallFailure
                     }
                 };
                 self.failure = Some(
@@ -992,28 +999,39 @@ impl Orchestrator {
 
     fn flush_thread_handle_drops(&mut self, thread: &mut galfus_vm::thread::VmThreadState) {
         let handles = std::mem::take(&mut thread.pending_adapter_handle_drops);
-        if handles.is_empty() {
-            return;
-        }
-        if let Some(bindings) = &self.adapter_bindings {
-            let mut bindings = bindings.lock().unwrap();
-            for (binding_id, type_id, id) in handles {
-                bindings.release_handle(binding_id, &type_id, id);
-            }
+        if let Err(error) = self.release_adapter_handles(handles) {
+            self.failure = Some(ExecutionFailure::new(
+                ExecutionFailureKind::AdapterCallFailure,
+                error.to_string(),
+            ));
         }
     }
 
     fn teardown_thread_handles(&mut self, thread: &mut galfus_vm::thread::VmThreadState) {
         let handles = thread.extract_all_adapter_handles();
-        if handles.is_empty() {
-            return;
+        if let Err(error) = self.release_adapter_handles(handles) {
+            self.failure = Some(ExecutionFailure::new(
+                ExecutionFailureKind::AdapterCallFailure,
+                error.to_string(),
+            ));
         }
+    }
+
+    fn release_adapter_handles(
+        &mut self,
+        handles: Vec<(
+            galfus_core::BindingId,
+            galfus_core::OpaqueTypeId,
+            galfus_core::HandleId,
+        )>,
+    ) -> Result<(), galfus_contract::AdapterBindingReleaseError> {
         if let Some(bindings) = &self.adapter_bindings {
             let mut bindings = bindings.lock().unwrap();
             for (binding_id, type_id, id) in handles {
-                bindings.release_handle(binding_id, &type_id, id);
+                bindings.release_handle(binding_id, &type_id, id)?;
             }
         }
+        Ok(())
     }
 
     pub(crate) fn cancel_and_teardown_thread(&mut self, thread_id: crate::registry::ThreadId) {

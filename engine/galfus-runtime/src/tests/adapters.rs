@@ -83,12 +83,17 @@ impl AdapterModuleBinding for DemoAdapter {
         CancellationOutcome::Confirmed
     }
 
-    fn release_handle(&mut self, type_id: &OpaqueTypeId, id: HandleId) {
+    fn release_handle(
+        &mut self,
+        type_id: &OpaqueTypeId,
+        id: HandleId,
+    ) -> Result<galfus_contract::HandleReleaseOutcome, galfus_contract::AdapterReleaseError> {
         self.state
             .lock()
             .unwrap()
             .releases
             .push((type_id.name().to_string(), u64::from(id.raw())));
+        Ok(galfus_contract::HandleReleaseOutcome::Released)
     }
 }
 

@@ -4,7 +4,8 @@ mod tests;
 use crate::driver::{ExecutionDriver, RuntimeEventSink};
 use crate::event::RuntimeEvent;
 use galfus_contract::{
-    BoundaryValue, ExecutionFailure, ExecutionFailureKind, ExecutorStepResult, ThreadResult,
+    AdapterBindingsCloseReport, BoundaryValue, ExecutionFailure, ExecutionFailureKind,
+    ExecutorStepResult, ThreadResult,
 };
 use std::marker::PhantomData;
 use std::rc::Rc;
@@ -44,6 +45,7 @@ pub enum ExecutionState {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShutdownReport {
     pub result: Result<BoundaryValue, ExecutionFailure>,
+    pub adapter_close: AdapterBindingsCloseReport,
 }
 impl Execution {
     pub(crate) fn new(
@@ -211,11 +213,32 @@ impl Execution {
             return;
         }
         self.state = ExecutionState::Closing;
-        if let Some(mut orchestrator) = self.orchestrator.take() {
-            orchestrator.shutdown();
-        }
+        let adapter_close = self
+            .orchestrator
+            .take()
+            .map_or_else(AdapterBindingsCloseReport::default, |mut orchestrator| {
+                orchestrator.shutdown()
+            });
+        let result = if adapter_close.is_complete() {
+            result
+        } else {
+            let failure = ExecutionFailure::new(
+                ExecutionFailureKind::AdapterCallFailure,
+                format!(
+                    "execution teardown failed to release {} adapter handle(s)",
+                    adapter_close.failures.len()
+                ),
+            );
+            Err(match result {
+                Ok(_) => failure,
+                Err(error) => failure.with_cause(error),
+            })
+        };
         self.result = Some(result.clone());
-        self.shutdown_report = Some(ShutdownReport { result });
+        self.shutdown_report = Some(ShutdownReport {
+            result,
+            adapter_close,
+        });
         self.state = ExecutionState::Closed;
     }
 
