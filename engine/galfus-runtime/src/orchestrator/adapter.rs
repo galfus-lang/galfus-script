@@ -33,8 +33,21 @@ impl RunnableTask for AdapterDispatchTask {
         if !self.active.load(Ordering::Acquire) {
             return ThreadResult::Discarded;
         }
-        let mut bindings = self.bindings.lock().unwrap();
-        let Some(module) = bindings.get_mut(&self.module) else {
+        let module = match self.bindings.lock() {
+            Ok(mut bindings) => bindings.take_module(&self.module),
+            Err(_) => {
+                self.injector.inject_system_response(
+                    self.thread_id,
+                    self.request_lease,
+                    Err(ExecutionFailure::new(
+                        ExecutionFailureKind::InternalRuntimeFailure,
+                        "adapter registry lock is poisoned",
+                    )),
+                );
+                return ThreadResult::Discarded;
+            }
+        };
+        let Some(mut module) = module else {
             self.injector.inject_system_response(
                 self.thread_id,
                 self.request_lease,
@@ -52,6 +65,9 @@ impl RunnableTask for AdapterDispatchTask {
             &self.args,
             self.injector.clone(),
         );
+        if let Ok(mut bindings) = self.bindings.lock() {
+            let _ = bindings.restore_module(&self.module, module);
+        }
         ThreadResult::Discarded
     }
     fn into_any_thread(self: Box<Self>) -> Option<Box<dyn RunnableTask + Send>> {
@@ -75,8 +91,21 @@ impl RunnableTask for ProviderDispatchTask {
         if !self.active.load(Ordering::Acquire) {
             return ThreadResult::Discarded;
         }
-        let mut providers = self.providers.lock().unwrap();
-        let Some(host) = providers.host_mut() else {
+        let host = match self.providers.lock() {
+            Ok(mut providers) => providers.take_host(),
+            Err(_) => {
+                self.injector.inject_system_response(
+                    self.thread_id,
+                    self.request_lease,
+                    Err(ExecutionFailure::new(
+                        ExecutionFailureKind::InternalRuntimeFailure,
+                        "provider registry lock is poisoned",
+                    )),
+                );
+                return ThreadResult::Discarded;
+            }
+        };
+        let Some(mut host) = host else {
             self.injector.inject_system_response(
                 self.thread_id,
                 self.request_lease,
@@ -95,6 +124,9 @@ impl RunnableTask for ProviderDispatchTask {
             self.args.as_slice(),
             self.injector.clone(),
         );
+        if let Ok(mut providers) = self.providers.lock() {
+            providers.restore_host(host);
+        }
         ThreadResult::Discarded
     }
 

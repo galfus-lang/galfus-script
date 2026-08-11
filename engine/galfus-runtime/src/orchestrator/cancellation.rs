@@ -40,7 +40,11 @@ impl Orchestrator {
                 let Some(providers) = vm.providers() else {
                     return;
                 };
-                if let Some(host) = providers.lock().unwrap().host_mut() {
+                let host = match providers.lock() {
+                    Ok(mut providers) => providers.take_host(),
+                    Err(_) => None,
+                };
+                if let Some(mut host) = host {
                     let generation = self
                         .request_generations
                         .get(&request_id.raw())
@@ -50,6 +54,9 @@ impl Orchestrator {
                         thread_id,
                         galfus_core::RequestLease::new(request_id, generation),
                     );
+                    if let Ok(mut providers) = providers.lock() {
+                        providers.restore_host(host);
+                    }
                 }
                 self.request_id_manager.free(request_id);
             }
@@ -68,12 +75,20 @@ impl Orchestrator {
                         .get(&request_id.raw())
                         .copied()
                         .unwrap_or(0);
-                    let _outcome = bindings.lock().unwrap().cancel(
-                        &proxy_module,
-                        &symbol,
-                        thread_id,
-                        galfus_core::RequestLease::new(request_id, generation),
-                    );
+                    let module = match bindings.lock() {
+                        Ok(mut bindings) => bindings.take_module(&proxy_module),
+                        Err(_) => None,
+                    };
+                    if let Some(mut module) = module {
+                        let _outcome = module.cancel(
+                            &symbol,
+                            thread_id,
+                            galfus_core::RequestLease::new(request_id, generation),
+                        );
+                        if let Ok(mut bindings) = bindings.lock() {
+                            let _ = bindings.restore_module(&proxy_module, module);
+                        }
+                    }
                 }
                 self.request_id_manager.free(request_id);
             }
@@ -147,12 +162,7 @@ impl Orchestrator {
             self.coordinator_id_manager.free(coordinator_id);
         }
         self.cancel_and_teardown_all_threads();
-        let report = self
-            .adapter_bindings
-            .as_ref()
-            .map_or_else(AdapterBindingsCloseReport::default, |bindings| {
-                bindings.lock().unwrap().close()
-            });
+        let report = self.close_adapter_bindings();
         self.shutdown_report = Some(report.clone());
         report
     }

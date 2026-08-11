@@ -1025,13 +1025,88 @@ impl Orchestrator {
             galfus_core::HandleId,
         )>,
     ) -> Result<(), galfus_contract::AdapterBindingReleaseError> {
-        if let Some(bindings) = &self.adapter_bindings {
-            let mut bindings = bindings.lock().unwrap();
-            for (binding_id, type_id, id) in handles {
-                bindings.release_handle(binding_id, &type_id, id)?;
-            }
+        for (binding_id, type_id, id) in handles {
+            self.release_adapter_handle(binding_id, type_id, id)?;
         }
         Ok(())
+    }
+
+    pub(super) fn release_adapter_handle(
+        &mut self,
+        binding_id: galfus_core::BindingId,
+        type_id: galfus_core::OpaqueTypeId,
+        id: galfus_core::HandleId,
+    ) -> Result<(), galfus_contract::AdapterBindingReleaseError> {
+        let Some(bindings) = &self.adapter_bindings else {
+            return Ok(());
+        };
+        let (release, module) = {
+            let mut bindings = bindings
+                .lock()
+                .map_err(|_| galfus_contract::AdapterBindingReleaseError::RegistryPoisoned)?;
+            let Some(release) = bindings.take_handle_for_release(binding_id, &type_id, id) else {
+                return Ok(());
+            };
+            let module = bindings.take_module(release.proxy_module());
+            (release, module)
+        };
+        let (outcome, module) = match module {
+            Some(mut module) => {
+                let outcome = module
+                    .release_handle(release.type_id(), release.id())
+                    .map_err(|error| {
+                        galfus_contract::AdapterBindingReleaseError::AdapterReleaseFailed {
+                            binding_id: release.binding_id(),
+                            type_id: release.type_id().clone(),
+                            id: release.id(),
+                            error,
+                        }
+                    });
+                (outcome, Some(module))
+            }
+            None => (
+                Ok(galfus_contract::HandleReleaseOutcome::AlreadyReleased),
+                None,
+            ),
+        };
+        let mut bindings = bindings
+            .lock()
+            .map_err(|_| galfus_contract::AdapterBindingReleaseError::RegistryPoisoned)?;
+        if let Some(module) = module {
+            let _ = bindings.restore_module(release.proxy_module(), module);
+        }
+        match outcome {
+            Ok(_) => Ok(()),
+            Err(error) => {
+                bindings.restore_handle_after_failed_release(release);
+                Err(error)
+            }
+        }
+    }
+
+    pub(super) fn close_adapter_bindings(&mut self) -> AdapterBindingsCloseReport {
+        let handles = match self.adapter_bindings.as_ref() {
+            Some(bindings) => match bindings.lock() {
+                Ok(bindings) => bindings.active_handles(),
+                Err(_) => {
+                    return AdapterBindingsCloseReport {
+                        failures: vec![
+                            galfus_contract::AdapterBindingReleaseError::RegistryPoisoned,
+                        ],
+                        ..AdapterBindingsCloseReport::default()
+                    };
+                }
+            },
+            None => return AdapterBindingsCloseReport::default(),
+        };
+        let mut report = AdapterBindingsCloseReport::default();
+        for (binding_id, type_id, id) in handles {
+            match self.release_adapter_handle(binding_id, type_id, id) {
+                Ok(()) => report.released += 1,
+                Err(error) => report.failures.push(error),
+            }
+        }
+        report
     }
 
     pub(crate) fn cancel_and_teardown_thread(&mut self, thread_id: crate::registry::ThreadId) {

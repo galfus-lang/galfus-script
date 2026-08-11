@@ -310,6 +310,8 @@ pub enum AdapterBindingError {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AdapterBindingReleaseError {
+    #[error("adapter binding registry is poisoned")]
+    RegistryPoisoned,
     #[error("adapter binding {binding_id:?} could not release handle {type_id:?}/{id:?}: {error}")]
     AdapterReleaseFailed {
         binding_id: BindingId,
@@ -326,6 +328,32 @@ pub struct AdapterBindingsCloseReport {
     pub failures: Vec<AdapterBindingReleaseError>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdapterHandleRelease {
+    proxy_module: String,
+    binding_id: BindingId,
+    type_id: OpaqueTypeId,
+    id: HandleId,
+}
+
+impl AdapterHandleRelease {
+    pub fn proxy_module(&self) -> &str {
+        self.proxy_module.as_str()
+    }
+
+    pub fn binding_id(&self) -> BindingId {
+        self.binding_id
+    }
+
+    pub fn type_id(&self) -> &OpaqueTypeId {
+        &self.type_id
+    }
+
+    pub fn id(&self) -> HandleId {
+        self.id
+    }
+}
+
 impl AdapterBindingsCloseReport {
     pub fn is_complete(&self) -> bool {
         self.failures.is_empty()
@@ -335,7 +363,7 @@ impl AdapterBindingsCloseReport {
 struct AdapterBinding {
     id: BindingId,
     next_handle_id: Option<HandleId>,
-    module: Box<dyn AdapterModuleBinding>,
+    module: Option<Box<dyn AdapterModuleBinding>>,
 }
 
 impl AdapterBindings {
@@ -358,7 +386,7 @@ impl AdapterBindings {
             AdapterBinding {
                 id,
                 next_handle_id: Some(HandleId::new(1)),
-                module,
+                module: Some(module),
             },
         );
         Ok(id)
@@ -378,9 +406,38 @@ impl AdapterBindings {
         Ok(())
     }
 
-    pub fn get_mut(&mut self, proxy_module: &str) -> Option<&mut (dyn AdapterModuleBinding + '_)> {
-        let binding = self.modules.get_mut(proxy_module)?;
-        Some(&mut *binding.module)
+    pub fn has_module(&self, proxy_module: &str) -> bool {
+        self.modules
+            .get(proxy_module)
+            .is_some_and(|binding| binding.module.is_some())
+    }
+
+    pub fn get_mut(&mut self, proxy_module: &str) -> Option<&mut Box<dyn AdapterModuleBinding>> {
+        self.modules.get_mut(proxy_module)?.module.as_mut()
+    }
+
+    /// Temporarily removes one adapter from the registry for an external callback.
+    ///
+    /// Callers must restore it with [`Self::restore_module`] after the callback finishes.
+    pub fn take_module(&mut self, proxy_module: &str) -> Option<Box<dyn AdapterModuleBinding>> {
+        self.modules.get_mut(proxy_module)?.module.take()
+    }
+
+    pub fn restore_module(
+        &mut self,
+        proxy_module: &str,
+        module: Box<dyn AdapterModuleBinding>,
+    ) -> Result<(), AdapterBindingError> {
+        let Some(binding) = self.modules.get_mut(proxy_module) else {
+            return Err(AdapterBindingError::InvalidHandle);
+        };
+        if binding.module.is_some() {
+            return Err(AdapterBindingError::DuplicateProxyModule(
+                proxy_module.to_string(),
+            ));
+        }
+        binding.module = Some(module);
+        Ok(())
     }
 
     pub fn binding_id(&self, proxy_module: &str) -> Option<BindingId> {
@@ -390,7 +447,8 @@ impl AdapterBindings {
     pub fn validates(&self, requirement: &AdapterModuleRequirement) -> bool {
         self.modules
             .get(requirement.proxy_module.as_str())
-            .is_some_and(|binding| binding.module.descriptor() == requirement.descriptor)
+            .and_then(|binding| binding.module.as_ref())
+            .is_some_and(|module| module.descriptor() == requirement.descriptor)
     }
 
     /// Notifies the owning adapter that a request no longer has an execution owner.
@@ -401,7 +459,9 @@ impl AdapterBindings {
         thread_id: galfus_core::ThreadId,
         request_lease: galfus_core::RequestLease,
     ) -> Option<CancellationOutcome> {
-        self.get_mut(proxy_module)
+        self.modules
+            .get_mut(proxy_module)
+            .and_then(|binding| binding.module.as_deref_mut())
             .map(|module| module.cancel(symbol, thread_id, request_lease))
     }
 
@@ -460,19 +520,19 @@ impl AdapterBindings {
                 .find(|binding| binding.id == binding_id)
             {
                 for (type_id, id) in compensation {
-                    binding
-                        .module
-                        .release_handle(&type_id, id)
-                        .map_err(|error| {
-                            AdapterBindingError::CompensationReleaseFailed(
-                                AdapterBindingReleaseError::AdapterReleaseFailed {
-                                    binding_id,
-                                    type_id,
-                                    id,
-                                    error,
-                                },
-                            )
-                        })?;
+                    let Some(module) = binding.module.as_deref_mut() else {
+                        return Err(AdapterBindingError::InvalidHandle);
+                    };
+                    module.release_handle(&type_id, id).map_err(|error| {
+                        AdapterBindingError::CompensationReleaseFailed(
+                            AdapterBindingReleaseError::AdapterReleaseFailed {
+                                binding_id,
+                                type_id,
+                                id,
+                                error,
+                            },
+                        )
+                    })?;
                 }
             }
             if exhausted {
@@ -503,6 +563,35 @@ impl AdapterBindings {
         self.handles.contains(&(binding_id, type_id.clone(), id))
     }
 
+    pub fn active_handles(&self) -> Vec<(BindingId, OpaqueTypeId, HandleId)> {
+        let mut handles = self.handles.iter().cloned().collect::<Vec<_>>();
+        handles.sort_unstable();
+        handles
+    }
+
+    /// Removes local ownership before an external release callback.
+    pub fn take_handle_for_release(
+        &mut self,
+        binding_id: BindingId,
+        type_id: &OpaqueTypeId,
+        id: HandleId,
+    ) -> Option<AdapterHandleRelease> {
+        let proxy_module = self.proxy_module_for(binding_id)?.to_string();
+        self.handles
+            .remove(&(binding_id, type_id.clone(), id))
+            .then_some(AdapterHandleRelease {
+                proxy_module,
+                binding_id,
+                type_id: type_id.clone(),
+                id,
+            })
+    }
+
+    pub fn restore_handle_after_failed_release(&mut self, release: AdapterHandleRelease) {
+        self.handles
+            .insert((release.binding_id, release.type_id, release.id));
+    }
+
     pub fn release_handle(
         &mut self,
         binding_id: BindingId,
@@ -519,7 +608,11 @@ impl AdapterBindings {
         if !self.handles.remove(&(binding_id, type_id.clone(), id)) {
             return Ok(HandleReleaseOutcome::AlreadyReleased);
         }
-        match binding.module.release_handle(type_id, id) {
+        let Some(module) = binding.module.as_deref_mut() else {
+            self.handles.insert((binding_id, type_id.clone(), id));
+            return Ok(HandleReleaseOutcome::AlreadyReleased);
+        };
+        match module.release_handle(type_id, id) {
             Ok(outcome) => Ok(outcome),
             Err(error) => {
                 self.handles.insert((binding_id, type_id.clone(), id));
@@ -572,6 +665,17 @@ impl Providers {
 
     pub fn with_host(host: Box<dyn HostProvider>) -> Self {
         Self { host: Some(host) }
+    }
+
+    /// Temporarily removes the host provider for an external callback.
+    ///
+    /// The caller must restore it after dispatch or cancellation completes.
+    pub fn take_host(&mut self) -> Option<Box<dyn HostProvider>> {
+        self.host.take()
+    }
+
+    pub fn restore_host(&mut self, host: Box<dyn HostProvider>) {
+        self.host = Some(host);
     }
 
     pub fn host_mut(&mut self) -> Option<&mut (dyn HostProvider + 'static)> {
