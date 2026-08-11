@@ -11,6 +11,9 @@ dist/
 .tmp/
 .temp/
 .codegraph
+fuzz/artifacts/
+fuzz/corpus/
+fuzz/target/
 
 # code coverage
 coverage/

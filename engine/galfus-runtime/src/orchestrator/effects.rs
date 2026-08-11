@@ -46,14 +46,17 @@ impl Orchestrator {
                 type_id,
                 id,
             } => {
-                if let Some(bindings) = &self.adapter_bindings {
-                    // `AdapterBindings` removes the ownership entry before
-                    // notifying the adapter, making repeated graph-release
-                    // notifications harmless.
-                    bindings
-                        .lock()
-                        .unwrap()
-                        .release_handle(binding_id, &type_id, id);
+                if let Err(error) = self.release_adapter_handle(binding_id, type_id, id) {
+                    self.failure = Some(
+                        ExecutionFailure::new(
+                            ExecutionFailureKind::AdapterCallFailure,
+                            error.to_string(),
+                        )
+                        .with_thread_id(thread_id)
+                        .with_stack(execution_stack(&thread)),
+                    );
+                    self.kernel.cancel(thread_id);
+                    return;
                 }
                 self.resume_or_fail_front(
                     thread_id,
@@ -265,8 +268,23 @@ impl Orchestrator {
                                 return;
                             };
                             let affinity = {
-                                let mut providers = providers.lock().unwrap();
-                                let Some(host) = providers.host_mut() else {
+                                let host = match providers.lock() {
+                                    Ok(mut providers) => providers.take_host(),
+                                    Err(_) => {
+                                        self.failure = Some(
+                                            ExecutionFailure::new(
+                                                ExecutionFailureKind::InternalRuntimeFailure,
+                                                "provider registry lock is poisoned",
+                                            )
+                                            .with_thread_id(thread_id)
+                                            .with_future_id(future_id)
+                                            .with_stack(execution_stack(&thread)),
+                                        );
+                                        self.kernel.cancel(thread_id);
+                                        return;
+                                    }
+                                };
+                                let Some(host) = host else {
                                     self.failure = Some(
                                         ExecutionFailure::new(
                                             ExecutionFailureKind::MissingProvider,
@@ -279,7 +297,11 @@ impl Orchestrator {
                                     self.kernel.cancel(thread_id);
                                     return;
                                 };
-                                host.affinity(name.as_str())
+                                let affinity = host.affinity(name.as_str());
+                                if let Ok(mut providers) = providers.lock() {
+                                    providers.restore_host(host);
+                                }
+                                affinity
                             };
                             let request_lease =
                                 match self.allocate_request_lease(thread_id, future_id, &thread) {
@@ -307,6 +329,7 @@ impl Orchestrator {
                                         .expect("event sink is configured before execution")
                                         .clone(),
                                     thread_id,
+                                    request_lease,
                                     galfus_core::FutureLease::new(
                                         future_id,
                                         self.future_generations
@@ -344,7 +367,23 @@ impl Orchestrator {
                                 self.kernel.cancel(thread_id);
                                 return;
                             };
-                            if bindings.lock().unwrap().get_mut(&proxy_module).is_none() {
+                            let has_module = match bindings.lock() {
+                                Ok(bindings) => bindings.has_module(&proxy_module),
+                                Err(_) => {
+                                    self.failure = Some(
+                                        ExecutionFailure::new(
+                                            ExecutionFailureKind::InternalRuntimeFailure,
+                                            "adapter registry lock is poisoned",
+                                        )
+                                        .with_thread_id(thread_id)
+                                        .with_future_id(future_id)
+                                        .with_stack(execution_stack(&thread)),
+                                    );
+                                    self.kernel.cancel(thread_id);
+                                    return;
+                                }
+                            };
+                            if !has_module {
                                 self.failure = Some(
                                     ExecutionFailure::new(
                                         ExecutionFailureKind::MissingAdapter,
@@ -384,6 +423,7 @@ impl Orchestrator {
                                         .expect("event sink is configured before execution")
                                         .clone(),
                                     thread_id,
+                                    request_lease,
                                     galfus_core::FutureLease::new(
                                         future_id,
                                         self.future_generations

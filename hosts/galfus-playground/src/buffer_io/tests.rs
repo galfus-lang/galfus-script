@@ -18,8 +18,9 @@ impl MessageInjector for MockInjector {
         _thread_id: galfus_core::ThreadId,
         request_lease: galfus_core::RequestLease,
         response: Result<BoundaryValue, ExecutionFailure>,
-    ) {
+    ) -> Result<(), galfus_contract::MessageInjectionError> {
         *self.response.lock().unwrap() = Some((request_lease.id, response));
+        Ok(())
     }
 }
 

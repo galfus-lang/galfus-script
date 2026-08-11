@@ -1,6 +1,7 @@
 use super::Orchestrator;
 use crate::orchestrator::future_registry::Activation;
 use crate::orchestrator::pending::PendingOperation;
+use galfus_contract::AdapterBindingsCloseReport;
 use std::sync::atomic::Ordering;
 
 impl Orchestrator {
@@ -39,16 +40,24 @@ impl Orchestrator {
                 let Some(providers) = vm.providers() else {
                     return;
                 };
-                if let Some(host) = providers.lock().unwrap().host_mut() {
+                let host = match providers.lock() {
+                    Ok(mut providers) => providers.take_host(),
+                    Err(_) => None,
+                };
+                if let Some(mut host) = host {
                     let generation = self
                         .request_generations
                         .get(&request_id.raw())
                         .copied()
                         .unwrap_or(0);
-                    let _outcome = host.cancel(
+                    let outcome = host.cancel(
                         thread_id,
                         galfus_core::RequestLease::new(request_id, generation),
                     );
+                    self.cancellation_report.record(outcome);
+                    if let Ok(mut providers) = providers.lock() {
+                        providers.restore_host(host);
+                    }
                 }
                 self.request_id_manager.free(request_id);
             }
@@ -67,12 +76,21 @@ impl Orchestrator {
                         .get(&request_id.raw())
                         .copied()
                         .unwrap_or(0);
-                    let _outcome = bindings.lock().unwrap().cancel(
-                        &proxy_module,
-                        &symbol,
-                        thread_id,
-                        galfus_core::RequestLease::new(request_id, generation),
-                    );
+                    let module = match bindings.lock() {
+                        Ok(mut bindings) => bindings.take_module(&proxy_module),
+                        Err(_) => None,
+                    };
+                    if let Some(mut module) = module {
+                        let outcome = module.cancel(
+                            &symbol,
+                            thread_id,
+                            galfus_core::RequestLease::new(request_id, generation),
+                        );
+                        self.cancellation_report.record(outcome);
+                        if let Ok(mut bindings) = bindings.lock() {
+                            let _ = bindings.restore_module(&proxy_module, module);
+                        }
+                    }
                 }
                 self.request_id_manager.free(request_id);
             }
@@ -130,9 +148,9 @@ impl Orchestrator {
         }
     }
 
-    pub(crate) fn shutdown(&mut self) {
+    pub(crate) fn shutdown(&mut self) -> AdapterBindingsCloseReport {
         if self.shutting_down {
-            return;
+            return self.shutdown_report.clone().unwrap_or_default();
         }
         self.shutting_down = true;
         self.cancel_all_pending_continuations();
@@ -146,8 +164,8 @@ impl Orchestrator {
             self.coordinator_id_manager.free(coordinator_id);
         }
         self.cancel_and_teardown_all_threads();
-        if let Some(bindings) = &self.adapter_bindings {
-            bindings.lock().unwrap().release_all_handles();
-        }
+        let report = self.close_adapter_bindings();
+        self.shutdown_report = Some(report.clone());
+        report
     }
 }

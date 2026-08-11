@@ -3,8 +3,8 @@ use crate::event::EventSequence;
 use crate::orchestrator::adapter::ProviderDispatchTask;
 use galfus_bytecode::instruction::{Reg, TypeIdx};
 use galfus_contract::{
-    BoundaryValue, HostProvider, MessageInjector, Providers, RunnableTask, TaskAffinity,
-    ThreadResult,
+    BoundaryValue, ExecutionFailure, ExecutionFailureKind, HostProvider, MessageInjector,
+    Providers, RunnableTask, TaskAffinity, ThreadResult,
 };
 use galfus_core::{CoordinatorId, FutureId, ModuleId, ThreadId};
 use std::sync::{
@@ -39,7 +39,24 @@ impl MessageInjector for NoopInjector {
         _thread_id: galfus_core::ThreadId,
         _request_lease: galfus_core::RequestLease,
         _result: Result<BoundaryValue, galfus_contract::ExecutionFailure>,
-    ) {
+    ) -> Result<(), galfus_contract::MessageInjectionError> {
+        Ok(())
+    }
+}
+
+struct FailureInjector(Arc<Mutex<Vec<ExecutionFailure>>>);
+
+impl MessageInjector for FailureInjector {
+    fn inject_system_response(
+        &self,
+        _thread_id: galfus_core::ThreadId,
+        _request_lease: galfus_core::RequestLease,
+        result: Result<BoundaryValue, ExecutionFailure>,
+    ) -> Result<(), galfus_contract::MessageInjectionError> {
+        if let Err(failure) = result {
+            self.0.lock().unwrap().push(failure);
+        }
+        Ok(())
     }
 }
 
@@ -64,7 +81,7 @@ fn provider_dispatch_tasks_use_the_declared_driver_lane() {
     let KernelTask::Main(task) = task.into_kernel_task(TaskAffinity::Main) else {
         panic!("main-affine provider must receive a main task");
     };
-    assert!(matches!(task.run(1), ThreadResult::Discarded));
+    assert!(matches!(Box::new(task).run(1), ThreadResult::Discarded));
     assert!(called.load(Ordering::Acquire));
 
     let task = provider_dispatch_task(Arc::new(AtomicBool::new(false)));
@@ -72,6 +89,40 @@ fn provider_dispatch_tasks_use_the_declared_driver_lane() {
         task.into_kernel_task(TaskAffinity::Any),
         KernelTask::Any(_)
     ));
+}
+
+#[test]
+fn provider_dispatch_reports_a_poisoned_registry_without_panicking() {
+    let providers = Arc::new(Mutex::new(Providers::default()));
+    let poisoned = providers.clone();
+    assert!(
+        std::thread::spawn(move || {
+            let _guard = poisoned.lock().unwrap();
+            panic!("poison provider registry");
+        })
+        .join()
+        .is_err()
+    );
+
+    let failures = Arc::new(Mutex::new(Vec::new()));
+    let task = ProviderDispatchTask {
+        providers,
+        thread_id: galfus_core::ThreadId::new(1),
+        request_lease: galfus_core::RequestLease::new(galfus_core::RequestId::new(1), 1),
+        name: "operation".to_string(),
+        args: vec![],
+        injector: Arc::new(FailureInjector(failures.clone())),
+        active: Arc::new(AtomicBool::new(true)),
+    };
+
+    assert!(matches!(Box::new(task).run(1), ThreadResult::Discarded));
+    assert_eq!(
+        failures.lock().unwrap().as_slice(),
+        [ExecutionFailure::new(
+            ExecutionFailureKind::InternalRuntimeFailure,
+            "provider registry lock is poisoned",
+        )]
+    );
 }
 
 #[test]

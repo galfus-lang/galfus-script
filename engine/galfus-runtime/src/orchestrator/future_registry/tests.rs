@@ -380,3 +380,86 @@ fn late_completion_after_discard_is_ignored_and_recorded_deterministically() {
         Some(FutureState::Discarded) | None
     ));
 }
+
+#[test]
+fn completion_and_terminal_actions_have_one_deterministic_outcome_in_every_order() {
+    #[derive(Clone, Copy)]
+    enum Action {
+        Complete,
+        Cancel,
+        OwnerExit,
+        Shutdown,
+    }
+
+    fn apply(registry: &mut FutureRegistry, action: Action) -> (bool, usize) {
+        let future_id = galfus_core::FutureId::new(7);
+        match action {
+            Action::Complete => registry
+                .complete(owner(), future_id, Ok(BoundaryValue::Null))
+                .map(|_| (true, 0))
+                .unwrap_or((false, 0)),
+            Action::Cancel => registry
+                .discard(owner(), future_id)
+                .map(|disposition| {
+                    (
+                        true,
+                        usize::from(matches!(disposition, DiscardDisposition::Running(_))),
+                    )
+                })
+                .unwrap_or((false, 0)),
+            Action::OwnerExit => {
+                let discarded = registry.discard_all_for_owner(owner());
+                (
+                    !discarded.is_empty(),
+                    discarded
+                        .iter()
+                        .filter(|(_, activation)| activation.is_some())
+                        .count(),
+                )
+            }
+            Action::Shutdown => {
+                let discarded = registry.discard_all();
+                (
+                    !discarded.is_empty(),
+                    discarded
+                        .iter()
+                        .filter(|(_, _, activation)| activation.is_some())
+                        .count(),
+                )
+            }
+        }
+    }
+
+    let actions = [
+        Action::Complete,
+        Action::Cancel,
+        Action::OwnerExit,
+        Action::Shutdown,
+    ];
+    for first in actions {
+        for second in actions {
+            let mut registry = FutureRegistry::new();
+            let future_id = galfus_core::FutureId::new(7);
+            registry
+                .create(owner(), future_id, None, None, activation())
+                .expect("future registers");
+            registry
+                .take_activation_for_start(owner(), future_id)
+                .expect("future starts");
+
+            let (first_applied, first_cancellations) = apply(&mut registry, first);
+            let (_, second_cancellations) = apply(&mut registry, second);
+            assert!(first_applied);
+            assert!(
+                first_cancellations + second_cancellations <= 1,
+                "a running request must only be cancelled once"
+            );
+            assert!(
+                registry
+                    .complete(owner(), future_id, Ok(BoundaryValue::Null))
+                    .is_err(),
+                "every action order must leave the request in one terminal state"
+            );
+        }
+    }
+}

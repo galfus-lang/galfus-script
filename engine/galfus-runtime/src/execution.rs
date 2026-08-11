@@ -4,7 +4,8 @@ mod tests;
 use crate::driver::{ExecutionDriver, RuntimeEventSink};
 use crate::event::RuntimeEvent;
 use galfus_contract::{
-    BoundaryValue, ExecutionFailure, ExecutionFailureKind, ExecutorStepResult, ThreadResult,
+    AdapterBindingsCloseReport, BoundaryValue, ExecutionFailure, ExecutionFailureKind,
+    ExecutorStepResult, ThreadResult,
 };
 use std::marker::PhantomData;
 use std::rc::Rc;
@@ -44,6 +45,40 @@ pub enum ExecutionState {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShutdownReport {
     pub result: Result<BoundaryValue, ExecutionFailure>,
+    pub adapter_close: AdapterBindingsCloseReport,
+    pub cancellations: CancellationReport,
+    pub completions: CompletionMetrics,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CancellationReport {
+    pub confirmed: usize,
+    pub best_effort: usize,
+    pub unsupported: usize,
+    pub already_completed: usize,
+}
+
+impl CancellationReport {
+    pub(crate) fn record(&mut self, outcome: galfus_contract::CancellationOutcome) {
+        match outcome {
+            galfus_contract::CancellationOutcome::Confirmed => self.confirmed += 1,
+            galfus_contract::CancellationOutcome::BestEffort => self.best_effort += 1,
+            galfus_contract::CancellationOutcome::Unsupported => self.unsupported += 1,
+            galfus_contract::CancellationOutcome::AlreadyCompleted => self.already_completed += 1,
+        }
+    }
+
+    pub fn has_unconfirmed(&self) -> bool {
+        self.best_effort != 0 || self.unsupported != 0
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CompletionMetrics {
+    pub accepted: usize,
+    pub duplicate: usize,
+    pub late_after_cancel: usize,
+    pub unknown_request: usize,
 }
 impl Execution {
     pub(crate) fn new(
@@ -92,7 +127,7 @@ impl Execution {
 
     /// Advances virtual time; the change is applied by the execution owner on poll.
     pub fn tick_timeouts(&self, delta_ms: u64) {
-        self.event_sink.submit(RuntimeEvent::Tick { delta_ms });
+        let _ = self.event_sink.submit(RuntimeEvent::Tick { delta_ms });
     }
 
     pub fn poll(&mut self, budget: usize) -> Result<ExecutorStepResult, ExecutionFailure> {
@@ -187,7 +222,7 @@ impl Execution {
                 | ExecutionState::Running
                 | ExecutionState::Waiting
         ) {
-            self.event_sink.submit(RuntimeEvent::CancelExecution);
+            let _ = self.event_sink.submit(RuntimeEvent::CancelExecution);
             self.state = ExecutionState::Closing;
         }
     }
@@ -201,9 +236,12 @@ impl Execution {
             ExecutionFailureKind::Cancelled,
             "execution shut down before completion",
         )));
-        self.shutdown_report
+        let report = self
+            .shutdown_report
             .clone()
-            .expect("closing an execution produces a shutdown report")
+            .expect("closing an execution produces a shutdown report");
+        self.notify_exit(&report.result);
+        report
     }
 
     fn close_with(&mut self, result: Result<BoundaryValue, ExecutionFailure>) {
@@ -211,29 +249,73 @@ impl Execution {
             return;
         }
         self.state = ExecutionState::Closing;
-        if let Some(mut orchestrator) = self.orchestrator.take() {
-            orchestrator.shutdown();
-        }
+        let (adapter_close, orchestrator_cancellation_report, orchestrator_completion_metrics) =
+            self.orchestrator.take().map_or_else(
+                || {
+                    (
+                        AdapterBindingsCloseReport::default(),
+                        CancellationReport::default(),
+                        CompletionMetrics::default(),
+                    )
+                },
+                |mut orchestrator| {
+                    let adapter_close = orchestrator.shutdown();
+                    (
+                        adapter_close,
+                        orchestrator.cancellation_report().clone(),
+                        orchestrator.completion_metrics().clone(),
+                    )
+                },
+            );
+        let result = if adapter_close.is_complete() {
+            result
+        } else {
+            let failure = ExecutionFailure::new(
+                ExecutionFailureKind::AdapterCallFailure,
+                format!(
+                    "execution teardown failed to release {} adapter handle(s)",
+                    adapter_close.failures.len()
+                ),
+            );
+            Err(match result {
+                Ok(_) => failure,
+                Err(error) => failure.with_cause(error),
+            })
+        };
         self.result = Some(result.clone());
-        self.shutdown_report = Some(ShutdownReport { result });
+        self.shutdown_report = Some(ShutdownReport {
+            result,
+            adapter_close,
+            cancellations: orchestrator_cancellation_report,
+            completions: orchestrator_completion_metrics,
+        });
         self.state = ExecutionState::Closed;
     }
 
     fn step_result(&mut self) -> Result<ExecutorStepResult, ExecutionFailure> {
-        let result = self.result.as_ref().expect("closed execution has a result");
-        if !self.exit_notified {
-            self.exit_notified = true;
-            self.driver.complete(match result {
-                Ok(BoundaryValue::I32(code)) => Ok(*code),
-                Ok(_) => Ok(0),
-                Err(error) => Err(error.clone()),
-            });
-        }
-        match result {
+        let result = self
+            .result
+            .as_ref()
+            .expect("closed execution has a result")
+            .clone();
+        self.notify_exit(&result);
+        match &result {
             Ok(BoundaryValue::I32(code)) => Ok(ExecutorStepResult::Completed(*code)),
             Ok(_) => Ok(ExecutorStepResult::Completed(0)),
             Err(error) => Err(error.clone()),
         }
+    }
+
+    fn notify_exit(&mut self, result: &Result<BoundaryValue, ExecutionFailure>) {
+        if self.exit_notified {
+            return;
+        }
+        self.exit_notified = true;
+        self.driver.complete(match result {
+            Ok(BoundaryValue::I32(code)) => Ok(*code),
+            Ok(_) => Ok(0),
+            Err(error) => Err(error.clone()),
+        });
     }
 }
 
@@ -256,11 +338,11 @@ pub struct ExecutionHandle {
 
 impl ExecutionHandle {
     pub fn cancel_thread(&self, thread_id: galfus_core::ThreadId) {
-        self.sink.submit(RuntimeEvent::CancelThread { thread_id });
+        let _ = self.sink.submit(RuntimeEvent::CancelThread { thread_id });
     }
 
     pub fn cancel(&self) {
-        self.sink.submit(RuntimeEvent::CancelExecution);
+        let _ = self.sink.submit(RuntimeEvent::CancelExecution);
     }
 
     pub fn resolve_request(
@@ -268,12 +350,14 @@ impl ExecutionHandle {
         thread_id: galfus_core::ThreadId,
         request_lease: galfus_core::RequestLease,
         result: Result<BoundaryValue, ExecutionFailure>,
-    ) {
-        self.sink.submit(RuntimeEvent::EffectCompleted {
-            thread_id,
-            request_lease,
-            result,
-        });
+    ) -> Result<(), galfus_contract::MessageInjectionError> {
+        self.sink
+            .submit(RuntimeEvent::EffectCompleted {
+                thread_id,
+                request_lease,
+                result,
+            })
+            .map_err(|_| galfus_contract::MessageInjectionError::ExecutionClosed)
     }
 
     pub fn resolve_future(
@@ -281,12 +365,14 @@ impl ExecutionHandle {
         thread_id: galfus_core::ThreadId,
         future_lease: galfus_core::FutureLease,
         result: Result<BoundaryValue, ExecutionFailure>,
-    ) {
-        self.sink.submit(RuntimeEvent::FutureCompleted {
-            thread_id,
-            future_lease,
-            result,
-        });
+    ) -> Result<(), galfus_contract::MessageInjectionError> {
+        self.sink
+            .submit(RuntimeEvent::FutureCompleted {
+                thread_id,
+                future_lease,
+                result,
+            })
+            .map_err(|_| galfus_contract::MessageInjectionError::ExecutionClosed)
     }
 }
 
@@ -296,14 +382,15 @@ impl galfus_contract::MessageInjector for ExecutionHandle {
         thread_id: galfus_core::ThreadId,
         request_lease: galfus_core::RequestLease,
         result: Result<BoundaryValue, ExecutionFailure>,
-    ) {
-        self.resolve_request(thread_id, request_lease, result);
+    ) -> Result<(), galfus_contract::MessageInjectionError> {
+        self.resolve_request(thread_id, request_lease, result)
     }
 }
 
 pub(crate) struct FutureCompletionInjector {
     sink: std::sync::Arc<dyn RuntimeEventSink>,
     owner_thread_id: crate::registry::ThreadId,
+    request_lease: galfus_core::RequestLease,
     future_lease: galfus_core::FutureLease,
 }
 
@@ -311,11 +398,13 @@ impl FutureCompletionInjector {
     pub(crate) fn new(
         sink: std::sync::Arc<dyn RuntimeEventSink>,
         owner_thread_id: crate::registry::ThreadId,
+        request_lease: galfus_core::RequestLease,
         future_lease: galfus_core::FutureLease,
     ) -> Self {
         Self {
             sink,
             owner_thread_id,
+            request_lease,
             future_lease,
         }
     }
@@ -324,14 +413,19 @@ impl FutureCompletionInjector {
 impl galfus_contract::MessageInjector for FutureCompletionInjector {
     fn inject_system_response(
         &self,
-        _thread_id: galfus_core::ThreadId,
-        _request_lease: galfus_core::RequestLease,
+        thread_id: galfus_core::ThreadId,
+        request_lease: galfus_core::RequestLease,
         result: Result<BoundaryValue, ExecutionFailure>,
-    ) {
-        self.sink.submit(RuntimeEvent::FutureCompleted {
-            thread_id: self.owner_thread_id,
-            future_lease: self.future_lease,
-            result,
-        });
+    ) -> Result<(), galfus_contract::MessageInjectionError> {
+        if thread_id != self.owner_thread_id || request_lease != self.request_lease {
+            return Err(galfus_contract::MessageInjectionError::HostProtocolViolation);
+        }
+        self.sink
+            .submit(RuntimeEvent::FutureCompleted {
+                thread_id: self.owner_thread_id,
+                future_lease: self.future_lease,
+                result,
+            })
+            .map_err(|_| galfus_contract::MessageInjectionError::ExecutionClosed)
     }
 }

@@ -8,8 +8,18 @@ use galfus_contract::{
     ExecutionFailure, ExecutorStepResult, KernelDriver, KernelTask, ThreadResult,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum EventDeliveryError {
+    #[error("execution event receiver is closed")]
+    ReceiverClosed,
+    #[error("execution event sequence is exhausted")]
+    SequenceExhausted,
+    #[error("execution event queue is unavailable")]
+    QueueUnavailable,
+}
+
 pub trait RuntimeEventSink: Send + Sync {
-    fn submit(&self, event: RuntimeEvent);
+    fn submit(&self, event: RuntimeEvent) -> Result<(), EventDeliveryError>;
 }
 
 pub trait ExecutionDriver: KernelDriver {
@@ -51,19 +61,26 @@ impl NativeEventBridge {
 }
 
 impl RuntimeEventSink for NativeEventBridge {
-    fn submit(&self, event: RuntimeEvent) {
-        let mut sequence = self.next_sequence.lock().unwrap();
+    fn submit(&self, event: RuntimeEvent) -> Result<(), EventDeliveryError> {
+        let mut sequence = self
+            .next_sequence
+            .lock()
+            .map_err(|_| EventDeliveryError::QueueUnavailable)?;
         let current = *sequence;
-        let Some(next) = current.next() else {
-            return;
-        };
-        let mut pending = self.pending.lock().unwrap();
+        let next = current
+            .next()
+            .ok_or(EventDeliveryError::SequenceExhausted)?;
+        let mut pending = self
+            .pending
+            .lock()
+            .map_err(|_| EventDeliveryError::QueueUnavailable)?;
         *pending += 1;
-        if self.sender.send((current, event)).is_ok() {
-            *sequence = next;
-        } else {
+        if self.sender.send((current, event)).is_err() {
             *pending -= 1;
+            return Err(EventDeliveryError::ReceiverClosed);
         }
+        *sequence = next;
+        Ok(())
     }
 }
 

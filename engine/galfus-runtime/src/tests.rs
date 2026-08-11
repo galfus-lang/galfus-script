@@ -11,8 +11,8 @@ use galfus_bytecode::{
     PackageImage,
 };
 use galfus_contract::{
-    CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget, ProviderModuleRequirement, Providers,
-    RuntimeCapabilities,
+    AdapterLoadContext, CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget, ProviderModuleRequirement,
+    Providers, RuntimeCapabilities,
 };
 use galfus_core::{ModuleId, ModulePath, SemanticRevision, SourceId, Span};
 
@@ -49,7 +49,7 @@ impl galfus_contract::HostProvider for StartupProvider {
     ) {
         self.calls.lock().unwrap().push(name.to_string());
         if name == "initialize" && self.fail_initializer {
-            injector.inject_system_response(
+            let _ = injector.inject_system_response(
                 thread_id,
                 request_lease,
                 Err(galfus_contract::ExecutionFailure::new(
@@ -60,7 +60,7 @@ impl galfus_contract::HostProvider for StartupProvider {
         } else if name == "initialize" {
             *self.pending.lock().unwrap() = Some((thread_id, request_lease, injector));
         } else {
-            injector.inject_system_response(
+            let _ = injector.inject_system_response(
                 thread_id,
                 request_lease,
                 Ok(galfus_contract::BoundaryValue::Null),
@@ -278,6 +278,42 @@ fn runtime_rejects_a_missing_required_provider_before_execution() {
 }
 
 #[test]
+fn execution_host_runs_preflight_before_runtime_bootstrap() {
+    let (graph, module_id) = startup_graph();
+    let package = package_with_required_provider(graph, module_id);
+    let mismatched_context = AdapterLoadContext {
+        target: ExecutionTarget::new("other").expect("valid target"),
+        properties: collections::BTreeMap::new(),
+    };
+    let preflight_result = ExecutionHost::new(mismatched_context).start(
+        sync::Arc::clone(&package),
+        &[],
+        std::rc::Rc::new(CooperativeDriver::new()),
+    );
+
+    assert!(matches!(
+        preflight_result,
+        Err(HostBootstrapError::Preflight(
+            PreflightError::PackageTargetMismatch { .. }
+        ))
+    ));
+
+    let context = AdapterLoadContext {
+        target: target(),
+        properties: collections::BTreeMap::new(),
+    };
+    let result =
+        ExecutionHost::new(context).start(package, &[], std::rc::Rc::new(CooperativeDriver::new()));
+
+    assert!(matches!(
+        result,
+        Err(HostBootstrapError::Runtime(
+            RuntimeError::ProviderRequirementUnsatisfied { module_path }
+        )) if module_path == "std/io"
+    ));
+}
+
+#[test]
 fn format_panic_uses_materialized_module_paths_and_locations() {
     let module_id = ModuleId::new(7);
     let mut metadata = ExecutionMetadata::default();
@@ -356,20 +392,25 @@ fn pending_initializer_delays_entry_until_its_completion() {
         .unwrap()
         .take()
         .expect("initializer is pending");
-    injector.inject_system_response(
-        galfus_core::ThreadId::new(thread_id.raw() + 1),
-        request_lease,
-        Ok(galfus_contract::BoundaryValue::Null),
+    assert_eq!(
+        injector.inject_system_response(
+            galfus_core::ThreadId::new(thread_id.raw() + 1),
+            request_lease,
+            Ok(galfus_contract::BoundaryValue::Null),
+        ),
+        Err(galfus_contract::MessageInjectionError::HostProtocolViolation)
     );
     execution
         .poll(100)
         .expect("cross-thread completion is ignored safely");
     assert_eq!(*calls.lock().unwrap(), vec!["initialize"]);
-    injector.inject_system_response(
-        thread_id,
-        request_lease,
-        Ok(galfus_contract::BoundaryValue::Null),
-    );
+    injector
+        .inject_system_response(
+            thread_id,
+            request_lease,
+            Ok(galfus_contract::BoundaryValue::Null),
+        )
+        .expect("matching completion is accepted");
 
     assert_eq!(
         execution.run_sync_to_completion(),
@@ -536,7 +577,7 @@ fn run_initializes_dependencies_before_the_entry_module() {
             _args: &[galfus_contract::BoundaryValue],
             injector: sync::Arc<dyn galfus_contract::MessageInjector>,
         ) {
-            injector.inject_system_response(
+            let _ = injector.inject_system_response(
                 thread_id,
                 request_lease,
                 Ok(galfus_contract::BoundaryValue::Null),

@@ -76,7 +76,7 @@ impl ExecutionMetadata {
 }
 
 /// The compiled artifact for one source module.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BytecodeNode {
     pub id: ModuleId,
     pub path: ModulePath,
@@ -106,7 +106,7 @@ impl BytecodeNode {
 }
 
 /// An edge where `from` imports a symbol from `to`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ImportEdge {
     pub from: ModuleId,
     pub to: ModuleId,
@@ -222,7 +222,7 @@ pub enum BytecodeGraphTransactionError {
 }
 
 /// The immutable executable graph published by a workspace.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BytecodeGraph {
     #[serde(skip)]
     version: u64,
@@ -234,6 +234,19 @@ pub struct BytecodeGraph {
 }
 
 impl BytecodeGraph {
+    pub(crate) fn rebuild_transient_indexes(
+        &mut self,
+    ) -> Result<(), BytecodeGraphValidationErrors> {
+        self.ids_by_path = self
+            .modules
+            .iter()
+            .map(|(id, node)| (node.path.clone(), *id))
+            .collect();
+        self.edges
+            .sort_by_key(|edge| (edge.from.raw(), edge.to.raw()));
+        self.validate()
+    }
+
     pub fn new() -> Self {
         Self::default()
     }

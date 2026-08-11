@@ -6,8 +6,10 @@
 pub mod driver;
 pub mod event;
 pub mod execution;
+pub mod execution_host;
 mod kernel;
 mod orchestrator;
+pub mod preflight;
 pub mod queue;
 pub mod registry;
 pub mod task;
@@ -26,7 +28,12 @@ use galfus_contract::{
 use galfus_vm::{VirtualMachine, VmPanic, VmValue};
 
 pub use driver::CooperativeDriver;
-pub use execution::{Execution, ExecutionHandle, ExecutionState};
+pub use execution::{
+    CancellationReport, CompletionMetrics, Execution, ExecutionHandle, ExecutionState,
+    ShutdownReport,
+};
+pub use execution_host::{ExecutionHost, HostBootstrapError};
+pub use preflight::{AdapterBindingPreflight, PreflightError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
