@@ -33,6 +33,7 @@ fn main() {
 }
 
 fn emit_version(name: &str, version: &str) {
+    let version = version.split('-').next().unwrap_or(version);
     let mut components = version.split('.');
     let major = components.next().unwrap();
     let minor = components.next().unwrap();
