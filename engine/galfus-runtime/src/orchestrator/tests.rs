@@ -1,9 +1,12 @@
 use super::*;
+use crate::event::EventSequence;
 use crate::orchestrator::adapter::ProviderDispatchTask;
+use galfus_bytecode::instruction::{Reg, TypeIdx};
 use galfus_contract::{
     BoundaryValue, HostProvider, MessageInjector, Providers, RunnableTask, TaskAffinity,
     ThreadResult,
 };
+use galfus_core::{CoordinatorId, FutureId, ModuleId, ThreadId};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -92,6 +95,48 @@ fn spawned_event_is_registered_and_queued_by_the_execution_owner() {
 
     assert_eq!(orchestrator.kernel().active_count(), 1);
     assert_eq!(orchestrator.kernel().runnable_count(), 1);
+}
+
+#[test]
+fn race_winner_uses_event_sequence_then_member_index() {
+    let mut orchestrator = Orchestrator::new();
+    let coordinator_id = CoordinatorId::new(1);
+    let thread_id = ThreadId::new(1);
+    let module_id = ModuleId::new(1);
+    orchestrator.aggregate_coordinators.insert(
+        coordinator_id,
+        AggregateCoordinator {
+            mode: AggregateMode::Race,
+            future_ids: vec![FutureId::new(1), FutureId::new(2), FutureId::new(3)],
+            pending: PendingContinuation {
+                thread_id,
+                continuation: galfus_vm::Continuation::for_provider(Reg(0), module_id, TypeIdx(0)),
+                module_id,
+                return_type: TypeIdx(0),
+                stack: vec![],
+                operation: PendingOperation::Future,
+                active: Arc::new(AtomicBool::new(true)),
+            },
+            results: vec![None, None, None],
+            winner: None,
+            armed: false,
+        },
+    );
+
+    orchestrator.active_event_sequence = Some(EventSequence(3));
+    orchestrator.complete_aggregate_member(coordinator_id, 2, Ok(BoundaryValue::I32(3)));
+    orchestrator.active_event_sequence = Some(EventSequence(1));
+    orchestrator.complete_aggregate_member(coordinator_id, 1, Ok(BoundaryValue::I32(2)));
+    orchestrator.active_event_sequence = Some(EventSequence(1));
+    orchestrator.complete_aggregate_member(coordinator_id, 0, Ok(BoundaryValue::I32(1)));
+
+    assert_eq!(
+        orchestrator.aggregate_coordinators[&coordinator_id]
+            .winner
+            .as_ref()
+            .map(|(sequence, index, result)| (*sequence, *index, result.clone())),
+        Some((EventSequence(1), 0, Ok(BoundaryValue::I32(1))))
+    );
 }
 
 #[test]

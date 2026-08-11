@@ -15,7 +15,7 @@ use crate::task::{RuntimeTask, execution_stack, with_execution_stack};
 use galfus_contract::{BoundaryValue, ExecutionFailure, ExecutionFailureKind, KernelTask};
 use galfus_core::{CoordinatorId, FutureId, RequestId};
 use galfus_vm::VirtualMachine;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::{
@@ -85,6 +85,8 @@ pub(crate) struct Orchestrator {
     event_sink: Option<Arc<dyn RuntimeEventSink>>,
     pending_events: BTreeMap<EventSequence, RuntimeEvent>,
     next_event_sequence: EventSequence,
+    active_event_sequence: Option<EventSequence>,
+    pending_aggregate_finishes: BTreeSet<CoordinatorId>,
     vm: Option<Arc<VirtualMachine>>,
     /// Keeps orchestration state owned by exactly one execution lane.
     _not_send_sync: PhantomData<Rc<()>>,
@@ -125,7 +127,11 @@ pub(crate) struct AggregateCoordinator {
     pub(crate) future_ids: Vec<galfus_core::FutureId>,
     pub(crate) pending: PendingContinuation,
     pub(crate) results: Vec<Option<Result<BoundaryValue, ExecutionFailure>>>,
-    pub(crate) winner: Option<Result<BoundaryValue, ExecutionFailure>>,
+    pub(crate) winner: Option<(
+        EventSequence,
+        usize,
+        Result<BoundaryValue, ExecutionFailure>,
+    )>,
     pub(crate) armed: bool,
 }
 
@@ -145,6 +151,8 @@ impl Orchestrator {
             event_sink: None,
             pending_events: BTreeMap::new(),
             next_event_sequence: EventSequence::FIRST,
+            active_event_sequence: None,
+            pending_aggregate_finishes: BTreeSet::new(),
             vm: None,
             _not_send_sync: PhantomData,
             failure: None,
@@ -697,13 +705,25 @@ impl Orchestrator {
             return;
         }
         coordinator.results[index] = Some(result.clone());
-        if matches!(coordinator.mode, AggregateMode::Race) && coordinator.winner.is_none() {
-            coordinator.winner = Some(result);
+        if matches!(coordinator.mode, AggregateMode::Race) {
+            let sequence = self
+                .active_event_sequence
+                .expect("aggregate completions are processed by an event");
+            let candidate = (sequence, index);
+            if coordinator
+                .winner
+                .as_ref()
+                .is_none_or(|(winner_sequence, winner_index, _)| {
+                    candidate < (*winner_sequence, *winner_index)
+                })
+            {
+                coordinator.winner = Some((sequence, index, result));
+            }
         }
         if !coordinator.armed {
             return;
         }
-        self.finish_aggregate_if_ready(coordinator_id);
+        self.pending_aggregate_finishes.insert(coordinator_id);
     }
 
     pub(super) fn finish_aggregate_if_ready(&mut self, coordinator_id: galfus_core::CoordinatorId) {
@@ -720,7 +740,7 @@ impl Orchestrator {
                 values.map(BoundaryValue::Tuple)
             }
             AggregateMode::Race => match coordinator.winner.clone() {
-                Some(result) => result,
+                Some((_, _, result)) => result,
                 None => return,
             },
             AggregateMode::All => return,
@@ -750,6 +770,16 @@ impl Orchestrator {
             result,
             PendingKey::Coordinator(coordinator_id),
         );
+    }
+
+    fn finish_pending_aggregates(&mut self) {
+        let coordinator_ids = std::mem::take(&mut self.pending_aggregate_finishes);
+        for coordinator_id in coordinator_ids {
+            self.finish_aggregate_if_ready(coordinator_id);
+            if self.failure.is_some() {
+                return;
+            }
+        }
     }
 
     /// Dispatches all currently runnable threads from the VirtualKernel to the driver.
@@ -802,11 +832,17 @@ impl Orchestrator {
         }
 
         while let Some(event) = self.pending_events.remove(&self.next_event_sequence) {
+            let sequence = self.next_event_sequence;
             self.next_event_sequence = self
                 .next_event_sequence
                 .next()
                 .expect("event sequence space exhausted");
+            self.active_event_sequence = Some(sequence);
             self.process_event(event);
+            if self.failure.is_none() {
+                self.finish_pending_aggregates();
+            }
+            self.active_event_sequence = None;
             if self.failure.is_some() {
                 return;
             }
