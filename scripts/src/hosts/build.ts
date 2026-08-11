@@ -24,7 +24,7 @@ const TARGET_MAP: Record<string, string> = {
 
 type BuildHostOptions = {
   target?: string;
-  release?: boolean;
+  profile: string;
 };
 
 export async function buildHostPackages(options: BuildHostOptions): Promise<void> {
@@ -44,20 +44,27 @@ export async function buildHostPackages(options: BuildHostOptions): Promise<void
     '--locked',
   ];
 
-  if (options.release) {
-    cargoArgs.push('--release');
+  let cargoProfile = 'dev';
+  if (options.profile === 'fastest') {
+    cargoProfile = 'release';
+  } else if (options.profile === 'minimal') {
+    cargoProfile = 'release-min';
+  }
+
+  if (cargoProfile !== 'dev') {
+    cargoArgs.push('--profile', cargoProfile);
   }
 
   await run('cargo', cargoArgs);
 
   const ext = rustTarget.includes('windows') ? '.exe' : '';
-  const profileDir = options.release ? 'release' : 'debug';
+  const profileDir = cargoProfile === 'dev' ? 'debug' : cargoProfile;
   const sourceBinary = join(repositoryRoot, 'target', rustTarget, profileDir, `main${ext}`);
 
   const buildDir = join(repositoryRoot, 'build');
   await mkdir(buildDir, { recursive: true });
 
-  const destBinary = join(buildDir, `galfus-${buildName}${ext}`);
+  const destBinary = join(buildDir, `galfus-${buildName}-${options.profile}${ext}`);
 
   await copyFile(sourceBinary, destBinary);
   console.log(`Built ExecutionHostPackage: ${destBinary}`);

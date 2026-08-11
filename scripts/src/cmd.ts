@@ -37,7 +37,7 @@ hosts
   .command('build')
   .description('Build host packages for target platforms')
   .option('-t, --target <target>', 'Cargo target triple (e.g., x86_64-unknown-linux-gnu)')
-  .option('-r, --release', 'Build optimized release binary')
+  .option('-p, --profile <profile>', 'Build profile (debug, fastest, minimal)', 'debug')
   .action(buildHostPackages);
 
 check

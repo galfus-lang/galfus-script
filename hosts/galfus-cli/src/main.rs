@@ -30,6 +30,8 @@ enum Command {
         target: String,
         #[arg(short, long)]
         out: String,
+        #[arg(short, long, default_value = "debug")]
+        profile: String,
     },
 }
 
@@ -45,6 +47,7 @@ fn main() -> Result<()> {
             workspace,
             target,
             out,
-        } => workspace::compile_workspace(&workspace, &target, &out),
+            profile,
+        } => workspace::compile_workspace(&workspace, &target, &out, &profile),
     }
 }

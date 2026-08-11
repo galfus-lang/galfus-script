@@ -29,7 +29,7 @@ pub fn check_workspace_root(root: &str) -> Result<()> {
     }
 }
 
-pub fn compile_workspace(root: &str, target: &str, out: &str) -> Result<()> {
+pub fn compile_workspace(root: &str, target: &str, out: &str, profile: &str) -> Result<()> {
     let mut workspace = load_workspace(Path::new(root))?;
     let report = workspace.check();
     if !report.is_valid {
@@ -43,14 +43,14 @@ pub fn compile_workspace(root: &str, target: &str, out: &str) -> Result<()> {
     let bytecode = compile_report.package.to_bytecode()
         .map_err(|error| anyhow::anyhow!("failed to encode bytecode: {:?}", error))?;
         
-    let mut host_name = format!("galfus-{}", target);
+    let mut host_name = format!("galfus-{}-{}", target, profile);
     if target.contains("windows") {
         host_name.push_str(".exe");
     }
     
     let host_path = Path::new("build").join(host_name);
     if !host_path.exists() {
-        bail!("Host executable not found at {:?}. Please build it first using `bun cmd hosts build --target {} -r`", host_path, target);
+        bail!("Host executable not found at {:?}. Please build it first using `bun cmd hosts build --target {} -p {}`", host_path, target, profile);
     }
     
     let host_bytes = fs::read(&host_path)
