@@ -29,6 +29,59 @@ pub fn check_workspace_root(root: &str) -> Result<()> {
     }
 }
 
+pub fn compile_workspace(root: &str, target: &str, out: &str) -> Result<()> {
+    let mut workspace = load_workspace(Path::new(root))?;
+    let report = workspace.check();
+    if !report.is_valid {
+        bail!("workspace validation failed: {:?}", report.diagnostics);
+    }
+    
+    let compile_report = workspace
+        .compile()
+        .map_err(|error| anyhow::anyhow!("workspace compilation failed: {error:?}"))?;
+        
+    let bytecode = compile_report.package.to_bytecode()
+        .map_err(|error| anyhow::anyhow!("failed to encode bytecode: {:?}", error))?;
+        
+    let mut host_name = format!("galfus-{}", target);
+    if target.contains("windows") {
+        host_name.push_str(".exe");
+    }
+    
+    let host_path = Path::new("build").join(host_name);
+    if !host_path.exists() {
+        bail!("Host executable not found at {:?}. Please build it first using `bun cmd hosts build --target {} -r`", host_path, target);
+    }
+    
+    let host_bytes = fs::read(&host_path)
+        .with_context(|| format!("failed to read host binary at {:?}", host_path))?;
+        
+    let mut out_file = fs::File::create(out)
+        .with_context(|| format!("failed to create output file at {}", out))?;
+        
+    use std::io::Write;
+    out_file.write_all(&host_bytes)?;
+    out_file.write_all(&bytecode)?;
+    
+    let payload_size = bytecode.len() as u64;
+    out_file.write_all(&payload_size.to_le_bytes())?;
+    
+    const MAGIC_MARKER: &[u8; 8] = b"GLFS_PKG";
+    out_file.write_all(MAGIC_MARKER)?;
+    
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = out_file.metadata()?.permissions();
+        perms.set_mode(0o755);
+        out_file.set_permissions(perms)?;
+    }
+    
+    println!("Successfully compiled standalone executable to {}", out);
+    
+    Ok(())
+}
+
 pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
     let mut workspace = load_workspace(Path::new(root))?;
     let report = workspace.check();

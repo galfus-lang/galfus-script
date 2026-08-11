@@ -5,6 +5,7 @@ use galfus_contract::{
 use galfus_runtime::driver::{ExecutionDriver, NativeEventBridge, RuntimeEventSink};
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
 pub struct NativeDriver {
@@ -14,6 +15,7 @@ pub struct NativeDriver {
     worker_queue_tx: Sender<Box<dyn RunnableTask + Send>>,
 
     event_bridge: Arc<NativeEventBridge>,
+    active_workers: Arc<AtomicUsize>,
 
     exit_callback: Mutex<Option<Box<dyn Fn(Result<i32, ExecutionFailure>) + Send + Sync>>>,
 }
@@ -22,6 +24,7 @@ impl NativeDriver {
     pub fn new() -> Self {
         let (main_tx, main_rx) = unbounded();
         let (worker_tx, worker_rx) = unbounded::<Box<dyn RunnableTask + Send>>();
+        let active_workers = Arc::new(AtomicUsize::new(0));
 
         // Use available logical cores, defaulting to 4 if detection fails.
         let num_workers = std::thread::available_parallelism()
@@ -30,11 +33,13 @@ impl NativeDriver {
 
         for _ in 0..num_workers {
             let rx = worker_rx.clone();
+            let active = active_workers.clone();
 
             thread::spawn(move || {
                 // Background worker loop
                 while let Ok(task) = rx.recv() {
                     let _ = task.run(100);
+                    active.fetch_sub(1, Ordering::SeqCst);
                 }
             });
         }
@@ -44,6 +49,7 @@ impl NativeDriver {
             main_queue_rx: main_rx,
             worker_queue_tx: worker_tx,
             event_bridge: Arc::new(NativeEventBridge::new()),
+            active_workers,
             exit_callback: Mutex::new(None),
         }
     }
@@ -73,6 +79,7 @@ impl KernelDriver for NativeDriver {
                 let _ = self.main_queue_tx.send(KernelTask::Main(t));
             }
             KernelTask::Any(t) => {
+                self.active_workers.fetch_add(1, Ordering::SeqCst);
                 let _ = self.worker_queue_tx.send(t);
             }
         }
@@ -126,7 +133,12 @@ impl KernelDriver for NativeDriver {
             return ExecutorStepResult::Running;
         }
 
-        // Se a Main está vazia, o orchestrator está idle. Reporta block.
+        // Se a Main está vazia, mas há workers rodando ou tarefas na fila, reporta Running.
+        if self.active_workers.load(Ordering::SeqCst) > 0 {
+            return ExecutorStepResult::Running;
+        }
+
+        // Se a Main e Workers estão vazios, reporta Blocked.
         ExecutorStepResult::Blocked { timeout: None }
     }
 }

@@ -24,6 +24,13 @@ enum Command {
     Check {
         workspace: String,
     },
+    Compile {
+        workspace: String,
+        #[arg(short, long)]
+        target: String,
+        #[arg(short, long)]
+        out: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -34,5 +41,10 @@ fn main() -> Result<()> {
             process::exit(exit_code);
         }
         Command::Check { workspace } => workspace::check_workspace_root(&workspace),
+        Command::Compile {
+            workspace,
+            target,
+            out,
+        } => workspace::compile_workspace(&workspace, &target, &out),
     }
 }

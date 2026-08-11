@@ -26,10 +26,10 @@ impl HostProvider for NativeIoProvider {
         injector: Arc<dyn MessageInjector>,
     ) {
         match name {
-            "__provider_io_print" => {
+            "io_write" => {
                 if let Some(BoundaryValue::Bytes(bytes)) = args.get(0) {
                     if let Ok(text) = std::str::from_utf8(bytes) {
-                        println!("{}", text);
+                        print!("{}", text);
                     }
                 }
 
@@ -37,6 +37,15 @@ impl HostProvider for NativeIoProvider {
                     thread_id,
                     request_lease,
                     Ok(BoundaryValue::Null),
+                );
+            }
+            "io_read" => {
+                let mut buffer = String::new();
+                std::io::stdin().read_line(&mut buffer).unwrap();
+                let _ = injector.inject_system_response(
+                    thread_id,
+                    request_lease,
+                    Ok(BoundaryValue::Bytes(buffer.into_bytes())),
                 );
             }
             _ => {
