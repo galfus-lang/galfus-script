@@ -299,6 +299,50 @@ fn dropping_its_final_handle_removes_its_registry_record() {
 }
 
 #[test]
+fn owner_shutdown_releases_all_future_payloads_and_keeps_tombstones() {
+    let mut registry = FutureRegistry::new();
+    for future_id in [galfus_core::FutureId::new(7), galfus_core::FutureId::new(8)] {
+        registry
+            .create(owner(), future_id, None, None, activation())
+            .unwrap();
+    }
+    registry
+        .complete(
+            owner(),
+            galfus_core::FutureId::new(7),
+            Ok(BoundaryValue::I32(42)),
+        )
+        .unwrap();
+    registry
+        .take_activation_for_start(owner(), galfus_core::FutureId::new(8))
+        .unwrap();
+
+    let discarded = registry.discard_all_for_owner(owner());
+
+    assert_eq!(discarded.len(), 2);
+    assert!(
+        registry
+            .get(owner(), galfus_core::FutureId::new(7))
+            .is_none()
+    );
+    assert!(
+        registry
+            .get(owner(), galfus_core::FutureId::new(8))
+            .is_none()
+    );
+    for future_id in [galfus_core::FutureId::new(7), galfus_core::FutureId::new(8)] {
+        let error = match registry.complete(owner(), future_id, Ok(BoundaryValue::Null)) {
+            Err(error) => error,
+            Ok(_) => panic!("shutdown future must reject a late completion"),
+        };
+        assert_eq!(
+            error.kind,
+            galfus_contract::ExecutionFailureKind::DuplicateCompletion
+        );
+    }
+}
+
+#[test]
 fn late_completion_after_discard_is_ignored_and_recorded_deterministically() {
     let mut registry = FutureRegistry::new();
     registry

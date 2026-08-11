@@ -60,13 +60,34 @@ fn execution_transitions_from_created_to_running_and_preserves_completion() {
         execution.poll(1),
         Ok(ExecutorStepResult::Completed(0))
     ));
-    assert_eq!(execution.status(), ExecutionState::Completed);
+    assert_eq!(execution.status(), ExecutionState::Closed);
     assert_eq!(execution.result(), Some(&Ok(BoundaryValue::I32(0))));
     assert_eq!(
         execution.run_sync_to_completion(),
         Ok(BoundaryValue::I32(0))
     );
     assert_eq!(execution.result(), Some(&Ok(BoundaryValue::I32(0))));
+}
+
+#[test]
+fn execution_shutdown_is_idempotent_and_preserves_its_final_report() {
+    let mut execution = Execution::new(
+        Orchestrator::new(),
+        Rc::new(IdleDriver::new()),
+        Arc::new(AtomicBool::new(true)),
+        false,
+    );
+
+    let first = execution.shutdown();
+    let second = execution.shutdown();
+
+    assert_eq!(first, second);
+    assert_eq!(execution.status(), ExecutionState::Closed);
+    assert!(execution.orchestrator.is_none());
+    assert_eq!(execution.shutdown_report(), Some(&first));
+    assert!(
+        matches!(first.result, Err(ref error) if error.kind == ExecutionFailureKind::Cancelled)
+    );
 }
 
 #[test]
@@ -106,13 +127,13 @@ fn cancellation_transitions_the_execution_to_cancelled() {
     );
 
     execution.cancel();
-    assert_eq!(execution.status(), ExecutionState::Cancelling);
+    assert_eq!(execution.status(), ExecutionState::Closing);
 
     let Err(error) = execution.poll(100) else {
         panic!("cancellation must produce a structured failure");
     };
     assert_eq!(error.kind, ExecutionFailureKind::Cancelled);
-    assert_eq!(execution.status(), ExecutionState::Cancelled);
+    assert_eq!(execution.status(), ExecutionState::Closed);
 }
 
 #[test]
@@ -144,7 +165,7 @@ fn execution_drops_orchestrator_and_sets_failed_state_on_error() {
         Ok(_) => panic!("execution must fail"),
     };
     assert_eq!(error.kind, ExecutionFailureKind::VmPanic);
-    assert_eq!(execution.status(), ExecutionState::Failed);
+    assert_eq!(execution.status(), ExecutionState::Closed);
     // orchestrator should be dropped. Since it is Option<Orchestrator>, it should be None.
     // wait, we can't easily assert on `execution.orchestrator` because it's private and we might not be in the same exact scope, but wait, `execution.rs` and `execution/tests.rs` are in `execution` module.
     assert!(execution.orchestrator.is_none());

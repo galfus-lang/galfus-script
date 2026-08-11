@@ -39,7 +39,7 @@ pub struct MailboxMessage {
 pub struct ThreadControlBlock {
     pub id: ThreadId,
     pub state: ThreadState,
-    pub mailbox: Arc<Mutex<VecDeque<MailboxMessage>>>,
+    pub mailbox: Option<Arc<Mutex<VecDeque<MailboxMessage>>>>,
     pub key: Option<String>,
     pub vm_state: Option<VmThreadState>,
 }
@@ -90,7 +90,7 @@ impl ThreadRegistry {
             ThreadControlBlock {
                 id,
                 state: ThreadState::Created,
-                mailbox: Arc::new(Mutex::new(VecDeque::new())),
+                mailbox: Some(Arc::new(Mutex::new(VecDeque::new()))),
                 key,
                 vm_state: Some(thread),
             },
@@ -103,7 +103,7 @@ impl ThreadRegistry {
     }
 
     pub fn get_mailbox(&self, id: ThreadId) -> Option<Arc<Mutex<VecDeque<MailboxMessage>>>> {
-        self.tcbs.get(&id).map(|tcb| tcb.mailbox.clone())
+        self.tcbs.get(&id).and_then(|tcb| tcb.mailbox.clone())
     }
 
     pub fn active_count(&self) -> usize {
@@ -187,6 +187,8 @@ impl ThreadRegistry {
         result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
     ) -> bool {
         if let Some(tcb) = self.tcbs.get_mut(&id) {
+            tcb.vm_state = None;
+            tcb.mailbox = None;
             tcb.state = ThreadState::Exited(result);
             return true;
         }

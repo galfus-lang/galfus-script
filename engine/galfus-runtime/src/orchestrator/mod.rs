@@ -954,11 +954,7 @@ impl Orchestrator {
                 self.expire_mailbox_future_waits(delta_ms);
             }
             RuntimeEvent::CancelExecution => {
-                self.shutting_down = true;
-                self.cancel_all_pending_continuations();
-                self.cancel_all_futures();
-                self.startup_plans.clear();
-                self.cancel_and_teardown_all_threads();
+                self.shutdown();
                 self.failure = Some(galfus_contract::ExecutionFailure::new(
                     galfus_contract::ExecutionFailureKind::Cancelled,
                     "execution cancelled",

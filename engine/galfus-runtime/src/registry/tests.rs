@@ -66,6 +66,19 @@ fn registry_tracks_state_after_the_thread_body_is_taken() {
 }
 
 #[test]
+fn exited_threads_keep_only_terminal_metadata() {
+    let id = galfus_core::ThreadId::new(1);
+    let mut registry = ThreadRegistry::new();
+
+    registry.register(id, VmThreadState::new(), None).unwrap();
+    assert!(registry.mark_exited(id, Ok(galfus_contract::BoundaryValue::Null)));
+
+    assert!(registry.take(id).is_none());
+    assert!(registry.get_mailbox(id).is_none());
+    assert!(matches!(registry.state(id), Some(ThreadState::Exited(_))));
+}
+
+#[test]
 fn registry_only_releases_a_created_thread_once_for_spawn() {
     let id = galfus_core::ThreadId::new(1);
     let mut registry = ThreadRegistry::new();

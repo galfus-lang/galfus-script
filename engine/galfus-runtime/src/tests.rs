@@ -375,7 +375,7 @@ fn pending_initializer_delays_entry_until_its_completion() {
         execution.run_sync_to_completion(),
         Ok(galfus_contract::BoundaryValue::I32(42))
     );
-    assert_eq!(execution.status(), ExecutionState::Completed);
+    assert_eq!(execution.status(), ExecutionState::Closed);
     assert_eq!(
         execution.result(),
         Some(&Ok(galfus_contract::BoundaryValue::I32(42)))

@@ -23,6 +23,7 @@ pub struct Execution {
     driver: Rc<dyn ExecutionDriver>,
     event_sink: std::sync::Arc<dyn RuntimeEventSink>,
     result: Option<Result<BoundaryValue, ExecutionFailure>>,
+    shutdown_report: Option<ShutdownReport>,
     state: ExecutionState,
     initialization_complete: Arc<AtomicBool>,
     exit_notified: bool,
@@ -35,12 +36,14 @@ pub enum ExecutionState {
     Initializing,
     Running,
     Waiting,
-    Cancelling,
-    Completed,
-    Failed,
-    Cancelled,
-    ShuttingDown,
-    Stopped,
+    Closing,
+    Closed,
+}
+
+/// The immutable outcome produced after all execution-owned resources are released.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShutdownReport {
+    pub result: Result<BoundaryValue, ExecutionFailure>,
 }
 impl Execution {
     pub(crate) fn new(
@@ -57,6 +60,7 @@ impl Execution {
             driver,
             event_sink,
             result: None,
+            shutdown_report: None,
             state: if is_initializing {
                 ExecutionState::Initializing
             } else {
@@ -82,14 +86,18 @@ impl Execution {
         self.result.as_ref()
     }
 
+    pub fn shutdown_report(&self) -> Option<&ShutdownReport> {
+        self.shutdown_report.as_ref()
+    }
+
     /// Advances virtual time; the change is applied by the execution owner on poll.
     pub fn tick_timeouts(&self, delta_ms: u64) {
         self.event_sink.submit(RuntimeEvent::Tick { delta_ms });
     }
 
     pub fn poll(&mut self, budget: usize) -> Result<ExecutorStepResult, ExecutionFailure> {
-        if matches!(self.state, ExecutionState::Cancelling) {
-            self.state = ExecutionState::ShuttingDown;
+        if matches!(self.state, ExecutionState::Closed) {
+            return self.step_result();
         }
         if matches!(self.state, ExecutionState::Created) {
             self.state = ExecutionState::Running;
@@ -103,43 +111,19 @@ impl Execution {
             match orchestrator.step(budget) {
                 ThreadResult::Discarded => {
                     if let Some(failure) = orchestrator.failure.take() {
-                        self.state =
-                            if failure.kind == galfus_contract::ExecutionFailureKind::Cancelled {
-                                ExecutionState::Cancelled
-                            } else {
-                                ExecutionState::Failed
-                            };
-                        self.result = Some(Err(failure));
-                        self.orchestrator = None;
+                        self.close_with(Err(failure));
                     }
                 }
                 ThreadResult::Completed(res) => {
-                    self.state = match res {
-                        Ok(_) => ExecutionState::Completed,
-                        Err(_) => ExecutionState::Failed,
-                    };
-                    self.result = Some(res);
-                    self.orchestrator = None;
+                    self.close_with(res);
                 }
                 ThreadResult::Blocked { .. } => {
                     self.state = ExecutionState::Waiting;
                 }
             }
         }
-        if let Some(result) = &self.result {
-            if !self.exit_notified {
-                self.exit_notified = true;
-                self.driver.complete(match result {
-                    Ok(BoundaryValue::I32(code)) => Ok(*code),
-                    Ok(_) => Ok(0),
-                    Err(error) => Err(error.clone()),
-                });
-            }
-            return match result {
-                Ok(BoundaryValue::I32(code)) => Ok(ExecutorStepResult::Completed(*code)),
-                Ok(_) => Ok(ExecutorStepResult::Completed(0)),
-                Err(error) => Err(error.clone()),
-            };
+        if self.result.is_some() {
+            return self.step_result();
         }
         let state = self.driver.step();
         if matches!(state, ExecutorStepResult::Completed(_)) && self.orchestrator.is_some() {
@@ -204,7 +188,59 @@ impl Execution {
                 | ExecutionState::Waiting
         ) {
             self.event_sink.submit(RuntimeEvent::CancelExecution);
-            self.state = ExecutionState::Cancelling;
+            self.state = ExecutionState::Closing;
+        }
+    }
+
+    /// Releases every resource owned by this execution without waiting for a driver turn.
+    pub fn shutdown(&mut self) -> ShutdownReport {
+        if let Some(report) = &self.shutdown_report {
+            return report.clone();
+        }
+        self.close_with(Err(ExecutionFailure::new(
+            ExecutionFailureKind::Cancelled,
+            "execution shut down before completion",
+        )));
+        self.shutdown_report
+            .clone()
+            .expect("closing an execution produces a shutdown report")
+    }
+
+    fn close_with(&mut self, result: Result<BoundaryValue, ExecutionFailure>) {
+        if self.shutdown_report.is_some() {
+            return;
+        }
+        self.state = ExecutionState::Closing;
+        if let Some(mut orchestrator) = self.orchestrator.take() {
+            orchestrator.shutdown();
+        }
+        self.result = Some(result.clone());
+        self.shutdown_report = Some(ShutdownReport { result });
+        self.state = ExecutionState::Closed;
+    }
+
+    fn step_result(&mut self) -> Result<ExecutorStepResult, ExecutionFailure> {
+        let result = self.result.as_ref().expect("closed execution has a result");
+        if !self.exit_notified {
+            self.exit_notified = true;
+            self.driver.complete(match result {
+                Ok(BoundaryValue::I32(code)) => Ok(*code),
+                Ok(_) => Ok(0),
+                Err(error) => Err(error.clone()),
+            });
+        }
+        match result {
+            Ok(BoundaryValue::I32(code)) => Ok(ExecutorStepResult::Completed(*code)),
+            Ok(_) => Ok(ExecutorStepResult::Completed(0)),
+            Err(error) => Err(error.clone()),
+        }
+    }
+}
+
+impl Drop for Execution {
+    fn drop(&mut self) {
+        if self.shutdown_report.is_none() {
+            let _report = self.shutdown();
         }
     }
 }
