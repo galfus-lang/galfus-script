@@ -70,6 +70,8 @@ fn hostile_module(data: &[u8]) -> BytecodeModule {
 }
 
 fuzz_target!(|data: &[u8]| {
+    let _ = PackageImage::from_bytecode(data);
+
     let module = hostile_module(data);
     let _ = validate_bytecode_module(&module);
 

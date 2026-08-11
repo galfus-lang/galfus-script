@@ -24,7 +24,7 @@ pub use package::*;
 pub use validation::*;
 pub use version::*;
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Constant {
     Bool(bool),
     Int8(i8),
@@ -42,7 +42,7 @@ pub enum Constant {
     Function(FuncIdx),
 }
 
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ConstantPool {
     pub constants: Vec<Constant>,
 }
@@ -51,7 +51,7 @@ pub struct ConstantPool {
 // Types & Layout Table
 // =========================================================================
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum BytecodeType {
     Null,
     Bool,
@@ -76,14 +76,14 @@ pub enum BytecodeType {
     ChoiceVariant(ChoiceLayoutIdx, u16),
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum OwnershipKind {
     Strong,
     Weak,
     Value,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FieldLayout {
     pub name: String,
     pub ty: TypeIdx,
@@ -91,20 +91,20 @@ pub struct FieldLayout {
     pub ownership: OwnershipKind,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StructLayout {
     pub name: String,
     pub fields: Vec<FieldLayout>,
     pub constraints: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChoiceVariantLayout {
     pub name: String,
     pub payload_ty: Option<TypeIdx>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChoiceLayout {
     pub name: String,
     pub variants: Vec<ChoiceVariantLayout>,
@@ -114,13 +114,13 @@ pub struct ChoiceLayout {
 // Imports & Exports
 // =========================================================================
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ImportKind {
     Function,
     Global,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ImportSlot {
     pub module_name: String,
     pub symbol_name: String,
@@ -128,13 +128,13 @@ pub struct ImportSlot {
     pub kind: ImportKind,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ExportKind {
     Function(FuncIdx),
     Global(GlobalIdx),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ExportSlot {
     pub symbol_name: String,
     pub kind: ExportKind,
@@ -144,13 +144,13 @@ pub struct ExportSlot {
 // Bytecode Function & Module Container
 // =========================================================================
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AdapterProxyMetadata {
     pub proxy_module: String,
     pub symbol: String,
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BytecodeFunction {
     pub name: String,
     pub param_count: u8,
@@ -161,7 +161,7 @@ pub struct BytecodeFunction {
     pub instructions: Vec<Instruction>,
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BytecodeModule {
     pub name: String,
     /// Number of addressable global slots owned by this module.

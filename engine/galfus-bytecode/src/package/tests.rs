@@ -5,7 +5,7 @@ use galfus_contract::{
 };
 use galfus_core::{ModuleId, ModulePath, SemanticRevision};
 
-use super::{PackageEntryPoint, PackageImage, PackageValidationError};
+use super::{PackageDecodingError, PackageEntryPoint, PackageImage, PackageValidationError};
 use crate::{
     BytecodeGraph, BytecodeModule, BytecodeNode, CURRENT_BYTECODE_FORMAT_VERSION,
     CURRENT_PACKAGE_FORMAT_VERSION, ConstantPool, ImportEdge,
@@ -232,4 +232,43 @@ fn package_content_hash_changes_for_execution_relevant_data() {
         first.content_hash().expect("canonical package hash"),
         second.content_hash().expect("canonical package hash")
     );
+}
+
+#[test]
+fn package_bytecode_round_trip_rebuilds_graph_indexes() {
+    let package = PackageImage::try_new(
+        graph(
+            &["src/main.gfs", "src/dependency.gfs"],
+            vec![ImportEdge {
+                from: ModuleId::new(1),
+                to: ModuleId::new(2),
+            }],
+        ),
+        target(),
+        None,
+        Vec::new(),
+        Vec::new(),
+    )
+    .expect("valid package");
+
+    let bytes = package.to_bytecode().expect("package encodes");
+    let decoded = PackageImage::from_bytecode(bytes.as_slice()).expect("package decodes");
+
+    assert_eq!(decoded.graph().len(), 2);
+    assert_eq!(
+        decoded
+            .graph()
+            .deps_of(ModuleId::new(1))
+            .collect::<Vec<_>>(),
+        vec![ModuleId::new(2)]
+    );
+    assert_eq!(decoded.to_bytecode().expect("package re-encodes"), bytes);
+}
+
+#[test]
+fn package_bytecode_rejects_malformed_input() {
+    assert!(matches!(
+        PackageImage::from_bytecode(&[0xff, 0xff]),
+        Err(PackageDecodingError::Postcard(_))
+    ));
 }

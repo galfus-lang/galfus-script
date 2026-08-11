@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests;
 
-use bincode::Options;
 use galfus_contract::{
     AdapterModuleRequirement, BoundaryAbiVersion, CURRENT_BOUNDARY_ABI_VERSION,
     CURRENT_NUMERIC_SEMANTICS_VERSION, CURRENT_PRODUCER_VERSION, ContentHash, ExecutionTarget,
@@ -11,11 +10,13 @@ use galfus_core::{ModuleId, ModulePath};
 use std::collections::BTreeSet;
 
 use crate::{
-    BytecodeFormatVersion, BytecodeGraph, CURRENT_PACKAGE_FORMAT_VERSION, PackageFormatVersion,
+    BytecodeFormatError, BytecodeFormatVersion, BytecodeGraph, BytecodeGraphValidationErrors,
+    CURRENT_PACKAGE_FORMAT_VERSION, PackageFormatError, PackageFormatVersion,
+    validate_package_format,
 };
 
 /// The exported entry point of a package image.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PackageEntryPoint {
     module_path: ModulePath,
     function_name: String,
@@ -39,7 +40,7 @@ impl PackageEntryPoint {
 }
 
 /// Version contracts recorded with a package image.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PackageVersions {
     producer: ProducerVersion,
     package_format: PackageFormatVersion,
@@ -84,7 +85,7 @@ impl PackageVersions {
 ///
 /// The graph and its declarative external requirements are created together
 /// and cannot be replaced independently after publication.
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PackageImage {
     graph: BytecodeGraph,
     target: ExecutionTarget,
@@ -108,8 +109,29 @@ pub enum PackageValidationError {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("could not encode the canonical package image: {0}")]
-pub struct PackageEncodingError(#[from] bincode::Error);
+pub enum PackageEncodingError {
+    #[error("could not encode the package image: {0}")]
+    Postcard(#[from] postcard::Error),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum PackageDecodingError {
+    #[error("could not decode the package image: {0}")]
+    Postcard(#[from] postcard::Error),
+    #[error(transparent)]
+    PackageFormat(PackageFormatError),
+    #[error(transparent)]
+    BytecodeFormat(BytecodeFormatError),
+    #[error(transparent)]
+    Graph(#[from] BytecodeGraphValidationErrors),
+    #[error(transparent)]
+    Validation(#[from] PackageValidationError),
+    #[error("package declares bytecode format {declared:?}, but graph contains {actual:?}")]
+    BytecodeFormatMismatch {
+        declared: BytecodeFormatVersion,
+        actual: BytecodeFormatVersion,
+    },
+}
 
 impl PackageImage {
     pub fn try_new(
@@ -248,11 +270,37 @@ impl PackageImage {
     /// Graph snapshot revisions and debug locations are not part of a package image,
     /// because they do not affect executable behavior.
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, PackageEncodingError> {
-        bincode::DefaultOptions::new()
-            .with_fixint_encoding()
-            .with_little_endian()
-            .serialize(self)
-            .map_err(PackageEncodingError::from)
+        postcard::to_stdvec(self).map_err(PackageEncodingError::from)
+    }
+
+    /// Serializes this package into the compact transport representation used by loaders.
+    pub fn to_bytecode(&self) -> Result<Vec<u8>, PackageEncodingError> {
+        self.canonical_bytes()
+    }
+
+    /// Decodes and validates a package received from a loader before it reaches the runtime.
+    pub fn from_bytecode(bytes: &[u8]) -> Result<Self, PackageDecodingError> {
+        let mut package = postcard::from_bytes::<Self>(bytes)?;
+        validate_package_format(package.versions.package_format())
+            .map_err(PackageDecodingError::PackageFormat)?;
+        package
+            .graph
+            .validate_format()
+            .map_err(PackageDecodingError::BytecodeFormat)?;
+        if package.versions.bytecode_format() != package.graph.format_version() {
+            return Err(PackageDecodingError::BytecodeFormatMismatch {
+                declared: package.versions.bytecode_format(),
+                actual: package.graph.format_version(),
+            });
+        }
+        package.graph.rebuild_transient_indexes()?;
+        Self::validate_adapter_requirements(
+            &package.graph,
+            package.entry_point.as_ref(),
+            &package.adapter_requirements,
+        )?;
+        Self::validate_provider_requirements(&package.provider_requirements)?;
+        Ok(package)
     }
 
     pub fn content_hash(&self) -> Result<ContentHash, PackageEncodingError> {
