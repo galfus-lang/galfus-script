@@ -158,14 +158,10 @@ fn adapter_bindings_own_and_release_nominal_handles() {
 
 #[test]
 fn adapter_handle_batches_are_registered_atomically() {
+    let releases = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut bindings = AdapterBindings::default();
     let binding_id = bindings
-        .register_module(
-            "graphics",
-            Box::new(DummyAdapter(Arc::new(std::sync::atomic::AtomicUsize::new(
-                0,
-            )))),
-        )
+        .register_module("graphics", Box::new(DummyAdapter(releases.clone())))
         .expect("adapter binding registers");
     let type_id = OpaqueTypeId::new("graphics", "Texture").unwrap();
     assert!(
@@ -187,6 +183,7 @@ fn adapter_handle_batches_are_registered_atomically() {
     );
     assert!(!bindings.contains_handle(binding_id, &type_id, HandleId::new(2)));
     assert!(bindings.contains_handle(binding_id, &type_id, HandleId::new(1)));
+    assert_eq!(releases.load(std::sync::atomic::Ordering::Acquire), 1);
 }
 
 #[test]

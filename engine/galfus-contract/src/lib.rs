@@ -381,39 +381,55 @@ impl AdapterBindings {
         };
         let Some(binding) = self
             .modules
-            .values_mut()
+            .values()
             .find(|binding| binding.id == binding_id)
         else {
             return Err(AdapterBindingError::InvalidHandle);
         };
         let mut next_handle_id = binding.next_handle_id;
+        let mut compensation = Vec::new();
+        let mut invalid = false;
         let mut exhausted = false;
-        let valid = handles.iter().all(|(type_id, id)| {
+
+        for (type_id, id) in handles {
             let Some(expected_id) = next_handle_id else {
                 exhausted = true;
-                return false;
+                continue;
             };
+            let handle_key = (binding_id, type_id.clone(), *id);
             if !type_id_belongs_to_proxy(type_id, &proxy_module)
                 || *id != expected_id
-                || self.handles.contains(&(binding_id, type_id.clone(), *id))
+                || self.handles.contains(&handle_key)
             {
-                return false;
+                invalid = true;
+                continue;
             }
+            compensation.push((type_id.clone(), *id));
             next_handle_id = id.raw().checked_add(1).map(HandleId::new);
-            true
-        });
-        if exhausted {
-            for (type_id, id) in handles {
-                binding.module.release_handle(type_id, *id);
-            }
-            return Err(AdapterBindingError::IdSpaceExhausted { domain: "HandleId" });
         }
-        if !valid {
-            for (type_id, id) in handles {
-                binding.module.release_handle(type_id, *id);
+
+        if exhausted || invalid {
+            if let Some(binding) = self
+                .modules
+                .values_mut()
+                .find(|binding| binding.id == binding_id)
+            {
+                for (type_id, id) in compensation {
+                    binding.module.release_handle(&type_id, id);
+                }
+            }
+            if exhausted {
+                return Err(AdapterBindingError::IdSpaceExhausted { domain: "HandleId" });
             }
             return Err(AdapterBindingError::InvalidHandle);
         }
+        let Some(binding) = self
+            .modules
+            .values_mut()
+            .find(|binding| binding.id == binding_id)
+        else {
+            return Err(AdapterBindingError::InvalidHandle);
+        };
         binding.next_handle_id = next_handle_id;
         for (type_id, id) in handles {
             self.handles.insert((binding_id, type_id.clone(), *id));
