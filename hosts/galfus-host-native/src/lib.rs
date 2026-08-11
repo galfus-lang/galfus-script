@@ -1,9 +1,9 @@
 pub mod driver;
 pub mod providers;
 use galfus_bytecode::PackageImage;
-use galfus_contract::{Providers, AdapterBindings, ExecutionFailure, RuntimeCapabilities};
-use galfus_runtime::driver::ExecutionDriver;
+use galfus_contract::{AdapterBindings, ExecutionFailure, Providers, RuntimeCapabilities};
 use galfus_runtime::Runtime;
+use galfus_runtime::driver::ExecutionDriver;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -28,7 +28,11 @@ pub struct ExecutionHost {
 }
 
 impl ExecutionHost {
-    pub fn new(providers: Providers, adapters: AdapterBindings, driver: Rc<dyn ExecutionDriver>) -> Self {
+    pub fn new(
+        providers: Providers,
+        adapters: AdapterBindings,
+        driver: Rc<dyn ExecutionDriver>,
+    ) -> Self {
         Self {
             providers,
             adapters,
@@ -36,26 +40,31 @@ impl ExecutionHost {
         }
     }
 
-    pub fn run(self, package: Arc<PackageImage>, args: &[Vec<u8>]) -> Result<i32, ExecutionFailure> {
+    pub fn run(
+        self,
+        package: Arc<PackageImage>,
+        args: &[Vec<u8>],
+    ) -> Result<i32, ExecutionFailure> {
         let capabilities = RuntimeCapabilities::builder()
             .with_providers(self.providers)
             .with_adapter_bindings(self.adapters)
             .build();
 
         let runtime = Runtime::new(package, capabilities);
-        
-        let mut execution = runtime
-            .start(args, self.driver.clone())
-            .map_err(|e| ExecutionFailure::new(
-                galfus_contract::ExecutionFailureKind::InitializationFailure,
-                e.to_string()
-            ))?;
 
-        let result = execution.run_sync_to_completion()
-            .map_err(|e| ExecutionFailure::new(
+        let mut execution = runtime.start(args, self.driver.clone()).map_err(|e| {
+            ExecutionFailure::new(
+                galfus_contract::ExecutionFailureKind::InitializationFailure,
+                e.to_string(),
+            )
+        })?;
+
+        let result = execution.run_sync_to_completion().map_err(|e| {
+            ExecutionFailure::new(
                 galfus_contract::ExecutionFailureKind::InternalRuntimeFailure,
-                e.to_string()
-            ))?;
+                e.to_string(),
+            )
+        })?;
 
         if let galfus_contract::BoundaryValue::I32(code) = result {
             Ok(code)

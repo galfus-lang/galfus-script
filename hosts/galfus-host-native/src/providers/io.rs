@@ -1,7 +1,7 @@
 use galfus_contract::builtins::std_io_provider_descriptor;
 use galfus_contract::{
-    BoundaryValue, CancellationOutcome, ExecutionFailure, ExecutionFailureKind, HostProvider, MessageInjector,
-    ProviderDescriptor, TaskAffinity,
+    BoundaryValue, CancellationOutcome, ExecutionFailure, ExecutionFailureKind, HostProvider,
+    MessageInjector, ProviderDescriptor, TaskAffinity,
 };
 use std::sync::Arc;
 

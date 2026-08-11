@@ -1,10 +1,10 @@
 #![no_std]
 
 extern crate alloc;
-use alloc::string::{String, ToString};
 use alloc::rc::Rc;
+use alloc::string::{String, ToString};
 use galfus_bytecode::PackageImage;
-use galfus_contract::{Providers, AdapterBindings, KernelDriver, ExecutionFailure};
+use galfus_contract::{AdapterBindings, ExecutionFailure, KernelDriver, Providers};
 
 pub struct PackageLoader {
     // Embedded-specific loader state (e.g. pointer to flash memory region)
@@ -27,7 +27,11 @@ pub struct ExecutionHost {
 }
 
 impl ExecutionHost {
-    pub fn new(providers: Providers, adapters: AdapterBindings, driver: Rc<dyn KernelDriver>) -> Self {
+    pub fn new(
+        providers: Providers,
+        adapters: AdapterBindings,
+        driver: Rc<dyn KernelDriver>,
+    ) -> Self {
         Self {
             providers,
             adapters,

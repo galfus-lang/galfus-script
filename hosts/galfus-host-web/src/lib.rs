@@ -1,5 +1,5 @@
 use galfus_bytecode::PackageImage;
-use galfus_contract::{Providers, AdapterBindings, KernelDriver, ExecutionFailure};
+use galfus_contract::{AdapterBindings, ExecutionFailure, KernelDriver, Providers};
 use std::rc::Rc;
 
 pub struct PackageLoader {
@@ -23,7 +23,11 @@ pub struct ExecutionHost {
 }
 
 impl ExecutionHost {
-    pub fn new(providers: Providers, adapters: AdapterBindings, driver: Rc<dyn KernelDriver>) -> Self {
+    pub fn new(
+        providers: Providers,
+        adapters: AdapterBindings,
+        driver: Rc<dyn KernelDriver>,
+    ) -> Self {
         Self {
             providers,
             adapters,

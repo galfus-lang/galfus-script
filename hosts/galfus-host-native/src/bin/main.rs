@@ -1,8 +1,8 @@
 use galfus_bytecode::PackageImage;
 use galfus_contract::{AdapterBindings, Providers};
+use galfus_host_native::ExecutionHost;
 use galfus_host_native::driver::NativeDriver;
 use galfus_host_native::providers::io::NativeIoProvider;
-use galfus_host_native::ExecutionHost;
 use std::rc::Rc;
 use std::sync::Arc;
 const MAGIC_MARKER: &[u8; 8] = b"GLFS_PKG";
@@ -24,12 +24,17 @@ fn main() {
                 if file.seek(SeekFrom::End(-16)).is_ok() {
                     let mut size_buf = [0u8; 8];
                     let mut magic_buf = [0u8; 8];
-                    
-                    if file.read_exact(&mut size_buf).is_ok() && file.read_exact(&mut magic_buf).is_ok() {
+
+                    if file.read_exact(&mut size_buf).is_ok()
+                        && file.read_exact(&mut magic_buf).is_ok()
+                    {
                         if &magic_buf == MAGIC_MARKER {
                             let payload_size = u64::from_le_bytes(size_buf);
                             if file_size >= 16 + payload_size {
-                                if file.seek(SeekFrom::End(-(16 + payload_size as i64))).is_ok() {
+                                if file
+                                    .seek(SeekFrom::End(-(16 + payload_size as i64)))
+                                    .is_ok()
+                                {
                                     let mut buf = vec![0u8; payload_size as usize];
                                     if file.read_exact(&mut buf).is_ok() {
                                         package_bytes = Some(buf);
@@ -50,7 +55,9 @@ fn main() {
             let args: Vec<String> = std::env::args().collect();
             if args.len() < 2 {
                 eprintln!("Usage: {} <package.gfb>", args[0]);
-                eprintln!("(Ou execute como um binário empacotado, onde o payload foi anexado no final)");
+                eprintln!(
+                    "(Ou execute como um binário empacotado, onde o payload foi anexado no final)"
+                );
                 std::process::exit(1);
             }
             std::fs::read(&args[1]).unwrap_or_else(|e| {

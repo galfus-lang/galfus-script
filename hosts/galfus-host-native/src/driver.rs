@@ -1,4 +1,4 @@
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, unbounded};
 use galfus_contract::{
     ExecutionFailure, ExecutorStepResult, KernelDriver, KernelTask, RunnableTask, ThreadResult,
 };
@@ -31,7 +31,7 @@ impl NativeDriver {
 
         for _ in 0..num_workers {
             let rx = worker_rx.clone();
-            
+
             thread::spawn(move || {
                 // Background worker loop
                 while let Ok(task) = rx.recv() {
@@ -81,8 +81,8 @@ impl KernelDriver for NativeDriver {
     }
 
     fn dispatch_front(&self, task: KernelTask) {
-        // Crossbeam's unbounded doesn't natively support LIFO/push_front. 
-        // For the MVP, we route it directly as a normal dispatch. 
+        // Crossbeam's unbounded doesn't natively support LIFO/push_front.
+        // For the MVP, we route it directly as a normal dispatch.
         self.dispatch(task);
     }
 
@@ -138,7 +138,12 @@ impl ExecutionDriver for NativeDriver {
         self.event_bridge.clone()
     }
 
-    fn drain_events(&self) -> Vec<(galfus_runtime::event::EventSequence, galfus_runtime::event::RuntimeEvent)> {
+    fn drain_events(
+        &self,
+    ) -> Vec<(
+        galfus_runtime::event::EventSequence,
+        galfus_runtime::event::RuntimeEvent,
+    )> {
         self.event_bridge.drain()
     }
 
