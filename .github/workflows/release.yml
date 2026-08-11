@@ -78,12 +78,15 @@ jobs:
           echo "linker = \"aarch64-linux-gnu-gcc\"" >> .cargo/config.toml
 
       - name: Build Host (Debug)
+        working-directory: scripts
         run: bun cmd hosts build -t ${{ matrix.alias }} -p debug
 
       - name: Build Host (Fastest)
+        working-directory: scripts
         run: bun cmd hosts build -t ${{ matrix.alias }} -p fastest
 
       - name: Build Host (Minimal)
+        working-directory: scripts
         run: bun cmd hosts build -t ${{ matrix.alias }} -p minimal
 
       - name: Build CLI
