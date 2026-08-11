@@ -12,7 +12,6 @@ pub struct NativeDriver {
     main_queue_rx: Receiver<KernelTask>,
 
     worker_queue_tx: Sender<Box<dyn RunnableTask + Send>>,
-    worker_queue_rx: Receiver<Box<dyn RunnableTask + Send>>,
 
     event_bridge: Arc<NativeEventBridge>,
 
@@ -44,7 +43,6 @@ impl NativeDriver {
             main_queue_tx: main_tx,
             main_queue_rx: main_rx,
             worker_queue_tx: worker_tx,
-            worker_queue_rx: worker_rx,
             event_bridge: Arc::new(NativeEventBridge::new()),
             exit_callback: Mutex::new(None),
         }

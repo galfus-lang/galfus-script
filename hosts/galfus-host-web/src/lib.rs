@@ -17,9 +17,9 @@ impl PackageLoader {
 }
 
 pub struct ExecutionHost {
-    providers: Providers,
-    adapters: AdapterBindings,
-    driver: Rc<dyn KernelDriver>,
+    _providers: Providers,
+    _adapters: AdapterBindings,
+    _driver: Rc<dyn KernelDriver>,
 }
 
 impl ExecutionHost {
@@ -29,13 +29,13 @@ impl ExecutionHost {
         driver: Rc<dyn KernelDriver>,
     ) -> Self {
         Self {
-            providers,
-            adapters,
-            driver,
+            _providers: providers,
+            _adapters: adapters,
+            _driver: driver,
         }
     }
 
-    pub fn run(&self, package: &PackageImage) -> Result<i32, ExecutionFailure> {
+    pub fn run(&self, _package: &PackageImage) -> Result<i32, ExecutionFailure> {
         // Here we will bridge to VirtualKernel and Execution
         todo!("Bridge to VirtualKernel and Execution for Web");
     }
