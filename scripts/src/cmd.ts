@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 
 import { checkCrateDependencies } from './dependencies';
+import { buildHostPackages } from './hosts/build';
 import { buildPlayground } from './playground/build';
 import { setupExtension } from './setup/extension';
 
@@ -13,6 +14,7 @@ const setup = program.command('setup').description('Local development setup comm
 const playground = program
   .command('playground')
   .description('Playground development and distribution commands');
+const hosts = program.command('hosts').description('Host binaries build and release commands');
 const check = program.command('check').description('Repository validation commands');
 
 
@@ -30,6 +32,13 @@ playground
   .option('-t, --target <target>', 'wasm-bindgen target (web, bundler, nodejs, etc)', 'web')
   .option('-o, --out-dir <path>', 'Output directory relative to the repository root')
   .action(buildPlayground);
+
+hosts
+  .command('build')
+  .description('Build host packages for target platforms')
+  .option('-t, --target <target>', 'Cargo target triple (e.g., x86_64-unknown-linux-gnu)')
+  .option('-r, --release', 'Build optimized release binary')
+  .action(buildHostPackages);
 
 check
   .command('dependencies')
