@@ -113,7 +113,7 @@ pub(crate) struct Orchestrator {
     driver: Option<Rc<dyn KernelDriver>>,
     vm: Option<Arc<VirtualMachine>>,
     main_thread_id: ThreadId,
-    /// Explicitly marks the Orchestrator as !Send and !Sync to ensure it stays on its creation thread.
+    /// Keeps orchestration state owned by exactly one execution lane.
     _not_send_sync: PhantomData<Rc<()>>,
     pub(crate) failure: Option<galfus_contract::ExecutionFailure>,
     pending_continuations: HashMap<PendingKey, PendingContinuation>,

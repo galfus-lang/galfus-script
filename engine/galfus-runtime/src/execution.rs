@@ -6,12 +6,18 @@ use galfus_contract::{
     BoundaryValue, ExecutionFailure, ExecutionFailureKind, ExecutorStepResult, KernelDriver,
     ThreadResult,
 };
+use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
 
+/// A single-owner runtime execution.
+///
+/// The owner advances this state exclusively through `&mut self`. Host callbacks may use an
+/// [`ExecutionHandle`] to submit events, but never receive mutable access to the runtime core.
+/// The future `ExecutionHost` is responsible for owning this execution lane.
 pub struct Execution {
     orchestrator: Option<crate::orchestrator::Orchestrator>,
     driver: Rc<dyn KernelDriver>,
@@ -20,6 +26,7 @@ pub struct Execution {
     state: ExecutionState,
     initialization_complete: Arc<AtomicBool>,
     exit_notified: bool,
+    _single_owner: PhantomData<Rc<()>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +62,7 @@ impl Execution {
             },
             initialization_complete,
             exit_notified: false,
+            _single_owner: PhantomData,
         }
     }
 
@@ -72,7 +80,7 @@ impl Execution {
         self.result.as_ref()
     }
 
-    /// Advances virtual time; the change is applied by the main-thread orchestrator on poll.
+    /// Advances virtual time; the change is applied by the execution owner on poll.
     pub fn tick_timeouts(&self, delta_ms: u64) {
         self.sink.send(RuntimeEvent::Tick { delta_ms });
     }
@@ -199,7 +207,10 @@ impl Execution {
     }
 }
 
-/// Thread-safe handle that lets external integrations request cancellation.
+/// Thread-safe ingress for external integrations.
+///
+/// This handle queues requests for the exclusive owner to process; it cannot mutate the runtime
+/// core directly.
 #[derive(Clone)]
 pub struct ExecutionHandle {
     sink: EventSink,
