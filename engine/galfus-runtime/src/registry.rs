@@ -50,7 +50,10 @@ pub struct ThreadRegistry {
     tcbs: HashMap<ThreadId, ThreadControlBlock>,
     keys: HashMap<String, ThreadId>,
     spawned_since_observation: std::collections::HashSet<ThreadId>,
+    exited_order: VecDeque<ThreadId>,
 }
+
+const MAX_EXITED_TOMBSTONES: usize = 1024;
 
 impl ThreadRegistry {
     pub fn new() -> Self {
@@ -58,6 +61,7 @@ impl ThreadRegistry {
             tcbs: HashMap::new(),
             keys: HashMap::new(),
             spawned_since_observation: std::collections::HashSet::new(),
+            exited_order: VecDeque::new(),
         }
     }
 
@@ -187,9 +191,24 @@ impl ThreadRegistry {
         result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
     ) -> bool {
         if let Some(tcb) = self.tcbs.get_mut(&id) {
+            if tcb.state.is_exited() {
+                return false;
+            }
             tcb.vm_state = None;
             tcb.mailbox = None;
             tcb.state = ThreadState::Exited(result);
+            self.exited_order.push_back(id);
+            while self.exited_order.len() > MAX_EXITED_TOMBSTONES {
+                let Some(expired_id) = self.exited_order.pop_front() else {
+                    break;
+                };
+                if let Some(expired) = self.tcbs.remove(&expired_id) {
+                    if let Some(key) = expired.key {
+                        self.keys.remove(&key);
+                    }
+                    self.spawned_since_observation.remove(&expired_id);
+                }
+            }
             return true;
         }
         false
@@ -203,6 +222,7 @@ impl ThreadRegistry {
 
     pub fn cancel(&mut self, id: ThreadId) -> bool {
         self.spawned_since_observation.remove(&id);
+        self.exited_order.retain(|exited_id| *exited_id != id);
         if let Some(tcb) = self.tcbs.remove(&id) {
             if let Some(key) = tcb.key {
                 self.keys.remove(&key);

@@ -79,6 +79,19 @@ fn exited_threads_keep_only_terminal_metadata() {
 }
 
 #[test]
+fn exited_tombstones_have_bounded_retention() {
+    let mut registry = ThreadRegistry::new();
+    for raw_id in 1..=1025 {
+        let id = galfus_core::ThreadId::new(raw_id);
+        registry.register(id, VmThreadState::new(), None).unwrap();
+        assert!(registry.mark_exited(id, Ok(galfus_contract::BoundaryValue::Null)));
+    }
+
+    assert!(!registry.contains(galfus_core::ThreadId::new(1)));
+    assert!(registry.contains(galfus_core::ThreadId::new(1025)));
+}
+
+#[test]
 fn registry_only_releases_a_created_thread_once_for_spawn() {
     let id = galfus_core::ThreadId::new(1);
     let mut registry = ThreadRegistry::new();
