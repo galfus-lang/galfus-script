@@ -1,0 +1,22 @@
+[package]
+name = "galfus-script-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+galfus-bytecode = { path = "../engine/galfus-bytecode" }
+galfus-contract = { path = "../engine/galfus-contract" }
+galfus-core = { path = "../engine/galfus-core" }
+
+[[bin]]
+name = "bytecode_validation"
+path = "src/bytecode_validation.rs"
+test = false
+doc = false
+
+[workspace]

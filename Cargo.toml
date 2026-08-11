@@ -3,6 +3,7 @@ members = [
     "engine/*",
     "hosts/*",
 ]
+exclude = ["fuzz"]
 default-members = ["hosts/galfus-cli"]
 resolver = "3"
 

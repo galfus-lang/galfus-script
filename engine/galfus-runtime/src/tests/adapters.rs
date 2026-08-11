@@ -23,12 +23,19 @@ struct DemoAdapterState {
     completion_threads: Vec<ThreadId>,
     cancellations: Vec<(String, galfus_core::ThreadId, galfus_core::RequestId)>,
     releases: Vec<(String, u64)>,
+    drops: usize,
 }
 
 struct DemoAdapter {
     state: Arc<Mutex<DemoAdapterState>>,
     complete: bool,
     descriptor: AdapterModuleDescriptor,
+}
+
+impl Drop for DemoAdapter {
+    fn drop(&mut self) {
+        self.state.lock().unwrap().drops += 1;
+    }
 }
 
 impl AdapterModuleBinding for DemoAdapter {
@@ -447,6 +454,22 @@ fn demo_adapter_completes_from_a_worker_and_releases_its_handle_once() {
     assert_eq!(state.completion_threads.len(), 1);
     assert_ne!(state.completion_threads[0], main_thread);
     assert_eq!(state.releases, vec![("Texture".to_string(), 1)]);
+}
+
+#[test]
+fn repeated_async_adapter_executions_return_to_the_resource_baseline() {
+    const CYCLES: usize = 128;
+
+    for _ in 0..CYCLES {
+        let (mut execution, state) = execution_with_demo_adapter(true);
+        assert_eq!(
+            execution.run_sync_to_completion(),
+            Ok(BoundaryValue::I32(0))
+        );
+        let state = state.lock().unwrap();
+        assert_eq!(state.releases, vec![("Texture".to_string(), 1)]);
+        assert_eq!(state.drops, 1);
+    }
 }
 
 #[test]

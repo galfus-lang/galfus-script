@@ -113,10 +113,14 @@ Offers basic console input/output interface:
 - `fn print(text: [u8]): null`: Output a slice of u8 characters directly to the standard output.
 - `fn println(text: [u8]): null`: Output a slice of u8 characters followed by a newline.
 
-The workspace is host-neutral. A host optionally supplies `Providers` when
-calling `Workspace::run`; the CLI supplies native streams and the playground
-supplies buffered streams. A program that reaches `std/io` without an I/O
-provider fails at runtime, so a host can create a sandbox by supplying none.
+The workspace is host-neutral. A package that does not reference `std/io` can
+run without an I/O provider. Once compilation records `std/io` as a provider
+requirement, the execution host must supply a compatible provider during
+preflight, before the first instruction runs. The CLI supplies native streams
+and the playground supplies buffered streams. A host creates a sandbox by
+omitting capabilities from the package or by rejecting the package during
+preflight; operational I/O failures are delivered later through the normal
+future/await result.
 
 ---
 
