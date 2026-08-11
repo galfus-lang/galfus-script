@@ -3,13 +3,16 @@ use galfus_bytecode::instruction::{ConstIdx, FuncIdx, Instruction, Reg, TypeIdx}
 use galfus_bytecode::{
     BytecodeFunction, BytecodeGraph, BytecodeModule, BytecodeNode, BytecodeType, Constant,
     ConstantPool, ExportKind, ExportSlot, ImportEdge, PackageEntryPoint, PackageImage,
+    PackageLoader,
 };
 use galfus_contract::{
-    AdapterBindings, AdapterModuleBinding, AdapterModuleDescriptor, AdapterModuleRequirement,
-    BoundaryValue, CURRENT_BOUNDARY_ABI_VERSION, CancellationOutcome, ExecutionTarget,
-    MessageInjector, RuntimeCapabilities,
+    AdapterArtifact, AdapterBindings, AdapterLoadContext, AdapterLoadError, AdapterModuleBinding,
+    AdapterModuleDescriptor, AdapterModuleLoader, AdapterModuleRequirement, AdapterTarget,
+    BoundaryValue, CURRENT_BOUNDARY_ABI_VERSION, CancellationOutcome, ContentHash, ExecutionTarget,
+    MessageInjector, ProviderModuleRequirement, Providers, RuntimeCapabilities,
+    SelectedAdapterTarget, VerifiedAdapterArtifact,
 };
-use galfus_core::{HandleId, ModuleId, ModulePath, OpaqueTypeId, SemanticRevision};
+use galfus_core::{HandleId, ModuleId, ModulePath, OpaqueTypeId, SemanticRevision, Version};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
@@ -25,11 +28,12 @@ struct DemoAdapterState {
 struct DemoAdapter {
     state: Arc<Mutex<DemoAdapterState>>,
     complete: bool,
+    descriptor: AdapterModuleDescriptor,
 }
 
 impl AdapterModuleBinding for DemoAdapter {
     fn descriptor(&self) -> galfus_contract::AdapterModuleDescriptor {
-        galfus_contract::AdapterModuleDescriptor::empty()
+        self.descriptor.clone()
     }
 
     fn dispatch(
@@ -94,6 +98,90 @@ impl AdapterModuleBinding for DemoAdapter {
             .releases
             .push((type_id.name().to_string(), u64::from(id.raw())));
         Ok(galfus_contract::HandleReleaseOutcome::Released)
+    }
+}
+
+struct DemoAdapterLoader {
+    state: Arc<Mutex<DemoAdapterState>>,
+}
+
+impl AdapterModuleLoader for DemoAdapterLoader {
+    fn load_artifact(
+        &self,
+        _selected_target: &SelectedAdapterTarget,
+        _context: &AdapterLoadContext,
+    ) -> Result<Vec<u8>, AdapterLoadError> {
+        Ok(b"demo-adapter".to_vec())
+    }
+
+    fn load_module(
+        &self,
+        requirement: &AdapterModuleRequirement,
+        _selected_target: &SelectedAdapterTarget,
+        artifact: VerifiedAdapterArtifact,
+        _context: &AdapterLoadContext,
+    ) -> Result<Box<dyn AdapterModuleBinding>, AdapterLoadError> {
+        if artifact.as_bytes() != b"demo-adapter" {
+            return Err(AdapterLoadError {
+                code: "invalid_artifact".to_string(),
+                message: "unexpected demo adapter artifact".to_string(),
+            });
+        }
+        Ok(Box::new(DemoAdapter {
+            state: Arc::clone(&self.state),
+            complete: true,
+            descriptor: requirement.descriptor.clone(),
+        }))
+    }
+}
+
+struct DeclaredProvider;
+
+struct StaticPackageLoader(Arc<PackageImage>);
+
+impl PackageLoader for StaticPackageLoader {
+    type Error = std::convert::Infallible;
+
+    fn load(&mut self) -> Result<Arc<PackageImage>, Self::Error> {
+        Ok(Arc::clone(&self.0))
+    }
+}
+
+impl galfus_contract::HostProvider for DeclaredProvider {
+    fn descriptor(&self) -> galfus_contract::ProviderDescriptor {
+        galfus_contract::std_io_provider_descriptor()
+    }
+
+    fn dispatch(
+        &mut self,
+        _thread_id: galfus_core::ThreadId,
+        _request_lease: galfus_core::RequestLease,
+        _name: &str,
+        _args: &[BoundaryValue],
+        _injector: Arc<dyn MessageInjector>,
+    ) {
+    }
+}
+
+fn demo_adapter_descriptor() -> AdapterModuleDescriptor {
+    let target = ExecutionTarget::new("test").expect("valid target");
+    let artifact = b"demo-adapter";
+    AdapterModuleDescriptor {
+        adapter: "demo".to_string(),
+        config: Default::default(),
+        targets: vec![AdapterTarget {
+            target,
+            locator: "memory://demo-adapter".to_string(),
+            platform: "test".to_string(),
+            abi: "1".to_string(),
+            artifact: AdapterArtifact {
+                content_hash: ContentHash::of(artifact),
+                size_bytes: artifact.len() as u64,
+                media_type: "application/x-galfus-demo".to_string(),
+                content_version: Version::new(1, 0, 0),
+            },
+        }],
+        exports: Vec::new(),
     }
 }
 
@@ -217,12 +305,42 @@ fn adapter_package(graph: Arc<BytecodeGraph>) -> Arc<PackageImage> {
             )),
             vec![AdapterModuleRequirement {
                 proxy_module: "graphics.gfp".to_string(),
-                descriptor: AdapterModuleDescriptor::empty(),
+                descriptor: demo_adapter_descriptor(),
                 boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
             }],
             Vec::new(),
         )
         .expect("package adapter requirement matches the reachable proxy"),
+    )
+}
+
+fn adapter_package_with_provider(graph: Arc<BytecodeGraph>) -> Arc<PackageImage> {
+    let provider = galfus_contract::std_io_provider_descriptor()
+        .modules
+        .into_iter()
+        .next()
+        .expect("std/io descriptor has a module");
+    Arc::new(
+        PackageImage::try_new(
+            (*graph).clone(),
+            ExecutionTarget::new("test").expect("valid target"),
+            Some(PackageEntryPoint::new(
+                ModulePath::new("main.gfs").expect("valid module path"),
+                "main",
+            )),
+            vec![AdapterModuleRequirement {
+                proxy_module: "graphics.gfp".to_string(),
+                descriptor: demo_adapter_descriptor(),
+                boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
+            }],
+            vec![ProviderModuleRequirement {
+                module_path: provider.module_path,
+                schema_fingerprint: provider.schema_fingerprint,
+                boundary_abi: provider.boundary_abi,
+                exports: provider.exports,
+            }],
+        )
+        .expect("complete package manifest"),
     )
 }
 
@@ -236,6 +354,7 @@ fn execution_with_demo_adapter(complete: bool) -> (Execution, Arc<Mutex<DemoAdap
             Box::new(DemoAdapter {
                 state: Arc::clone(&state),
                 complete,
+                descriptor: demo_adapter_descriptor(),
             }),
         )
         .expect("adapter binding registers");
@@ -265,6 +384,53 @@ fn runtime_rejects_a_missing_required_adapter_before_execution() {
         Err(RuntimeError::AdapterRequirementUnsatisfied { proxy_module })
             if proxy_module == "graphics.gfp"
     ));
+}
+
+#[test]
+fn execution_host_bootstraps_a_compiled_package_with_provider_and_adapter() {
+    let (graph, _) = adapter_graph();
+    let mut loader = StaticPackageLoader(adapter_package_with_provider(graph));
+    let package = loader.load().expect("package image is available");
+    let context = AdapterLoadContext {
+        target: ExecutionTarget::new("test").expect("valid target"),
+        properties: Default::default(),
+    };
+    let driver = Rc::new(CooperativeDriver::new());
+
+    let missing_loader = ExecutionHost::new(AdapterLoadContext {
+        target: context.target.clone(),
+        properties: Default::default(),
+    })
+    .with_providers(Providers::with_host(Box::new(DeclaredProvider)))
+    .start(Arc::clone(&package), &[], driver.clone());
+    assert!(matches!(
+        missing_loader,
+        Err(HostBootstrapError::Preflight(PreflightError::MissingLoader(adapter)))
+            if adapter == "demo"
+    ));
+
+    let state = Arc::new(Mutex::new(DemoAdapterState::default()));
+    let mut host = ExecutionHost::new(context)
+        .with_providers(Providers::with_host(Box::new(DeclaredProvider)));
+    host.register_adapter_loader(
+        "demo",
+        Box::new(DemoAdapterLoader {
+            state: Arc::clone(&state),
+        }),
+    )
+    .expect("loader registers");
+
+    let mut execution = host
+        .start(package, &[], driver)
+        .expect("compiled package bootstraps through the host");
+    assert_eq!(
+        execution.run_sync_to_completion(),
+        Ok(BoundaryValue::I32(0))
+    );
+    assert_eq!(
+        state.lock().unwrap().releases,
+        vec![("Texture".to_string(), 1)]
+    );
 }
 
 #[test]

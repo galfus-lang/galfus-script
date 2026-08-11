@@ -14,6 +14,8 @@ struct RetriableReleaseAdapter {
     releases: Arc<std::sync::atomic::AtomicUsize>,
 }
 
+struct RecordingReleaseAdapter(Arc<std::sync::Mutex<Vec<HandleId>>>);
+
 impl AdapterModuleBinding for DummyAdapter {
     fn descriptor(&self) -> AdapterModuleDescriptor {
         AdapterModuleDescriptor::empty()
@@ -67,6 +69,31 @@ impl AdapterModuleBinding for RetriableReleaseAdapter {
         }
         self.releases
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        Ok(HandleReleaseOutcome::Released)
+    }
+}
+
+impl AdapterModuleBinding for RecordingReleaseAdapter {
+    fn descriptor(&self) -> AdapterModuleDescriptor {
+        AdapterModuleDescriptor::empty()
+    }
+
+    fn dispatch(
+        &mut self,
+        _symbol: &str,
+        _thread_id: galfus_core::ThreadId,
+        _request_lease: galfus_core::RequestLease,
+        _args: &[BoundaryValue],
+        _injector: Arc<dyn MessageInjector>,
+    ) {
+    }
+
+    fn release_handle(
+        &mut self,
+        _type_id: &OpaqueTypeId,
+        id: HandleId,
+    ) -> Result<HandleReleaseOutcome, AdapterReleaseError> {
+        self.0.lock().expect("release log is available").push(id);
         Ok(HandleReleaseOutcome::Released)
     }
 }
@@ -265,6 +292,68 @@ fn adapter_handle_batches_are_registered_atomically() {
     assert!(!bindings.contains_handle(binding_id, &type_id, HandleId::new(2)));
     assert!(bindings.contains_handle(binding_id, &type_id, HandleId::new(1)));
     assert_eq!(releases.load(std::sync::atomic::Ordering::Acquire), 1);
+}
+
+#[test]
+fn accepted_handles_are_released_exactly_once_across_rollback_and_close() {
+    let releases = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut bindings = AdapterBindings::default();
+    let binding_id = bindings
+        .register_module(
+            "graphics",
+            Box::new(RecordingReleaseAdapter(Arc::clone(&releases))),
+        )
+        .expect("adapter binding registers");
+    let type_id = OpaqueTypeId::new("graphics", "Texture").expect("valid opaque type");
+
+    bindings
+        .register_handle(binding_id, type_id.clone(), HandleId::new(1))
+        .expect("first handle registers");
+    bindings
+        .register_handles(
+            binding_id,
+            &[
+                (type_id.clone(), HandleId::new(2)),
+                (type_id.clone(), HandleId::new(3)),
+            ],
+        )
+        .expect("handle batch registers");
+
+    assert!(
+        bindings
+            .register_handles(
+                binding_id,
+                &[
+                    (type_id.clone(), HandleId::new(4)),
+                    (type_id.clone(), HandleId::new(3)),
+                ],
+            )
+            .is_err()
+    );
+    assert_eq!(
+        bindings.release_handle(binding_id, &type_id, HandleId::new(1)),
+        Ok(HandleReleaseOutcome::Released)
+    );
+    assert_eq!(
+        bindings.release_handle(binding_id, &type_id, HandleId::new(1)),
+        Ok(HandleReleaseOutcome::AlreadyReleased)
+    );
+
+    let close = bindings.close();
+    assert!(close.is_complete());
+    assert_eq!(close.released, 2);
+
+    let releases = releases.lock().expect("release log is available");
+    for handle_id in 1..=4 {
+        assert_eq!(
+            releases
+                .iter()
+                .filter(|released_id| released_id.raw() == handle_id)
+                .count(),
+            1,
+            "handle {handle_id} must be released exactly once"
+        );
+    }
 }
 
 #[test]
