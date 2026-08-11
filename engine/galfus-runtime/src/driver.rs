@@ -3,13 +3,74 @@ use std::sync;
 use std::sync::Mutex;
 use std::thread;
 
+use crate::event::{EventSequence, RuntimeEvent};
 use galfus_contract::{
     ExecutionFailure, ExecutorStepResult, KernelDriver, KernelTask, ThreadResult,
 };
 
+pub trait RuntimeEventSink: Send + Sync {
+    fn submit(&self, event: RuntimeEvent);
+}
+
+pub trait ExecutionDriver: KernelDriver {
+    fn event_sink(&self) -> std::sync::Arc<dyn RuntimeEventSink>;
+
+    fn drain_events(&self) -> Vec<(EventSequence, RuntimeEvent)>;
+
+    fn has_pending_events(&self) -> bool;
+}
+
+pub struct NativeEventBridge {
+    sender: std::sync::mpsc::Sender<(EventSequence, RuntimeEvent)>,
+    receiver: Mutex<std::sync::mpsc::Receiver<(EventSequence, RuntimeEvent)>>,
+    next_sequence: Mutex<EventSequence>,
+    pending: Mutex<usize>,
+}
+
+impl NativeEventBridge {
+    pub fn new() -> Self {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        Self {
+            sender,
+            receiver: Mutex::new(receiver),
+            next_sequence: Mutex::new(EventSequence::FIRST),
+            pending: Mutex::new(0),
+        }
+    }
+
+    pub fn drain(&self) -> Vec<(EventSequence, RuntimeEvent)> {
+        let mut pending = self.pending.lock().unwrap();
+        let events = self.receiver.lock().unwrap().try_iter().collect::<Vec<_>>();
+        *pending = pending.saturating_sub(events.len());
+        events
+    }
+
+    pub fn has_pending(&self) -> bool {
+        *self.pending.lock().unwrap() != 0
+    }
+}
+
+impl RuntimeEventSink for NativeEventBridge {
+    fn submit(&self, event: RuntimeEvent) {
+        let mut sequence = self.next_sequence.lock().unwrap();
+        let current = *sequence;
+        let Some(next) = current.next() else {
+            return;
+        };
+        let mut pending = self.pending.lock().unwrap();
+        *pending += 1;
+        if self.sender.send((current, event)).is_ok() {
+            *sequence = next;
+        } else {
+            *pending -= 1;
+        }
+    }
+}
+
 /// Runs Galfus tasks cooperatively on the calling host thread.
 pub struct CooperativeDriver {
     queue: Mutex<VecDeque<KernelTask>>,
+    events: std::sync::Arc<NativeEventBridge>,
     exit_result: sync::Mutex<Option<Result<i32, ExecutionFailure>>>,
     exit_callback: Mutex<Option<Box<dyn Fn(Result<i32, ExecutionFailure>) + Send + Sync>>>,
 }
@@ -18,6 +79,7 @@ impl CooperativeDriver {
     pub fn new() -> Self {
         Self {
             queue: Mutex::new(VecDeque::new()),
+            events: std::sync::Arc::new(NativeEventBridge::new()),
             exit_result: sync::Mutex::new(None),
             exit_callback: Mutex::new(None),
         }
@@ -128,6 +190,20 @@ impl KernelDriver for CooperativeDriver {
                 }
             }
         }
+    }
+}
+
+impl ExecutionDriver for CooperativeDriver {
+    fn event_sink(&self) -> std::sync::Arc<dyn RuntimeEventSink> {
+        self.events.clone()
+    }
+
+    fn drain_events(&self) -> Vec<(EventSequence, RuntimeEvent)> {
+        self.events.drain()
+    }
+
+    fn has_pending_events(&self) -> bool {
+        self.events.has_pending()
     }
 }
 

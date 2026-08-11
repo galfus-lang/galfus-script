@@ -6,13 +6,19 @@ use std::sync::atomic::Ordering;
 impl Orchestrator {
     pub(super) fn cancel_thread_futures(&mut self, thread_id: crate::registry::ThreadId) {
         for (future_id, activation) in self.future_registry.discard_all_for_owner(thread_id) {
-            self.cancel_future_activation(thread_id, future_id, activation);
+            if let Some(activation) = activation {
+                self.cancel_future_activation(thread_id, future_id, activation);
+            }
+            self.future_id_manager.free(future_id);
         }
     }
 
     pub(super) fn cancel_all_futures(&mut self) {
         for (thread_id, future_id, activation) in self.future_registry.discard_all() {
-            self.cancel_future_activation(thread_id, future_id, activation);
+            if let Some(activation) = activation {
+                self.cancel_future_activation(thread_id, future_id, activation);
+            }
+            self.future_id_manager.free(future_id);
         }
     }
 
@@ -44,6 +50,7 @@ impl Orchestrator {
                         galfus_core::RequestLease::new(request_id, generation),
                     );
                 }
+                self.request_id_manager.free(request_id);
             }
             Activation::Provider {
                 request_id: None, ..
@@ -67,6 +74,7 @@ impl Orchestrator {
                         galfus_core::RequestLease::new(request_id, generation),
                     );
                 }
+                self.request_id_manager.free(request_id);
             }
             Activation::Adapter {
                 request_id: None, ..
@@ -119,6 +127,27 @@ impl Orchestrator {
         thread_ids.dedup();
         for thread_id in thread_ids {
             self.cancel_pending_continuations(thread_id);
+        }
+    }
+
+    pub(crate) fn shutdown(&mut self) {
+        if self.shutting_down {
+            return;
+        }
+        self.shutting_down = true;
+        self.cancel_all_pending_continuations();
+        self.cancel_all_futures();
+        self.startup_plans.clear();
+        self.thread_exit_waits.clear();
+        self.mailbox_future_waits.clear();
+        self.pending_events.clear();
+        self.pending_aggregate_finishes.clear();
+        for coordinator_id in self.aggregate_coordinators.drain().map(|(id, _)| id) {
+            self.coordinator_id_manager.free(coordinator_id);
+        }
+        self.cancel_and_teardown_all_threads();
+        if let Some(bindings) = &self.adapter_bindings {
+            bindings.lock().unwrap().release_all_handles();
         }
     }
 }

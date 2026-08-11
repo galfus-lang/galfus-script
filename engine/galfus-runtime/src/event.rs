@@ -4,11 +4,17 @@ mod tests;
 use crate::registry::ThreadId;
 use galfus_vm::thread::VmThreadState;
 use galfus_vm::{Continuation, VmEffect};
-use std::sync::mpsc;
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicU64, AtomicUsize, Ordering},
-};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct EventSequence(pub u64);
+
+impl EventSequence {
+    pub const FIRST: Self = Self(1);
+
+    pub fn next(self) -> Option<Self> {
+        self.0.checked_add(1).map(Self)
+    }
+}
 
 pub enum RuntimeEvent {
     /// A thread created outside the kernel must be registered on the main thread.
@@ -73,43 +79,4 @@ pub enum RuntimeEvent {
     CancelThread {
         thread_id: ThreadId,
     },
-}
-
-#[derive(Clone)]
-pub struct EventSink {
-    sender: mpsc::Sender<(u64, RuntimeEvent)>,
-    pending: Arc<AtomicUsize>,
-    next_event_id: Arc<AtomicU64>,
-    send_lock: Arc<Mutex<()>>,
-}
-
-impl EventSink {
-    pub fn new(sender: mpsc::Sender<(u64, RuntimeEvent)>) -> Self {
-        Self {
-            sender,
-            pending: Arc::new(AtomicUsize::new(0)),
-            next_event_id: Arc::new(AtomicU64::new(1)),
-            send_lock: Arc::new(Mutex::new(())),
-        }
-    }
-
-    pub fn send(&self, event: RuntimeEvent) {
-        let _send_guard = self.send_lock.lock().unwrap();
-        let event_id = self
-            .next_event_id
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-            .expect("event id space exhausted");
-        self.pending.fetch_add(1, Ordering::Release);
-        if self.sender.send((event_id, event)).is_err() {
-            self.pending.fetch_sub(1, Ordering::Release);
-        }
-    }
-
-    pub fn has_pending(&self) -> bool {
-        self.pending.load(Ordering::Acquire) != 0
-    }
-
-    pub(crate) fn mark_received(&self) {
-        self.pending.fetch_sub(1, Ordering::AcqRel);
-    }
 }

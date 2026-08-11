@@ -1,25 +1,33 @@
 #[cfg(test)]
 mod tests;
 
-use crate::event::{EventSink, RuntimeEvent};
+use crate::driver::{ExecutionDriver, RuntimeEventSink};
+use crate::event::RuntimeEvent;
 use galfus_contract::{
-    BoundaryValue, ExecutionFailure, ExecutionFailureKind, ExecutorStepResult, KernelDriver,
-    ThreadResult,
+    BoundaryValue, ExecutionFailure, ExecutionFailureKind, ExecutorStepResult, ThreadResult,
 };
+use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
 
+/// A single-owner runtime execution.
+///
+/// The owner advances this state exclusively through `&mut self`. Host callbacks may use an
+/// [`ExecutionHandle`] to submit events, but never receive mutable access to the runtime core.
+/// The future `ExecutionHost` is responsible for owning this execution lane.
 pub struct Execution {
     orchestrator: Option<crate::orchestrator::Orchestrator>,
-    driver: Rc<dyn KernelDriver>,
-    sink: EventSink,
+    driver: Rc<dyn ExecutionDriver>,
+    event_sink: std::sync::Arc<dyn RuntimeEventSink>,
     result: Option<Result<BoundaryValue, ExecutionFailure>>,
+    shutdown_report: Option<ShutdownReport>,
     state: ExecutionState,
     initialization_complete: Arc<AtomicBool>,
     exit_notified: bool,
+    _single_owner: PhantomData<Rc<()>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,26 +36,31 @@ pub enum ExecutionState {
     Initializing,
     Running,
     Waiting,
-    Cancelling,
-    Completed,
-    Failed,
-    Cancelled,
-    ShuttingDown,
-    Stopped,
+    Closing,
+    Closed,
+}
+
+/// The immutable outcome produced after all execution-owned resources are released.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShutdownReport {
+    pub result: Result<BoundaryValue, ExecutionFailure>,
 }
 impl Execution {
     pub(crate) fn new(
-        orchestrator: crate::orchestrator::Orchestrator,
-        driver: Rc<dyn KernelDriver>,
-        sink: EventSink,
+        mut orchestrator: crate::orchestrator::Orchestrator,
+        driver: Rc<dyn ExecutionDriver>,
         initialization_complete: Arc<AtomicBool>,
         is_initializing: bool,
     ) -> Self {
+        let event_sink = driver.event_sink();
+        orchestrator.set_event_sink(event_sink.clone());
+        orchestrator.set_driver(driver.clone());
         Self {
             orchestrator: Some(orchestrator),
             driver,
-            sink,
+            event_sink,
             result: None,
+            shutdown_report: None,
             state: if is_initializing {
                 ExecutionState::Initializing
             } else {
@@ -55,12 +68,13 @@ impl Execution {
             },
             initialization_complete,
             exit_notified: false,
+            _single_owner: PhantomData,
         }
     }
 
     pub fn handle(&self) -> ExecutionHandle {
         ExecutionHandle {
-            sink: self.sink.clone(),
+            sink: self.event_sink.clone(),
         }
     }
 
@@ -72,14 +86,18 @@ impl Execution {
         self.result.as_ref()
     }
 
-    /// Advances virtual time; the change is applied by the main-thread orchestrator on poll.
+    pub fn shutdown_report(&self) -> Option<&ShutdownReport> {
+        self.shutdown_report.as_ref()
+    }
+
+    /// Advances virtual time; the change is applied by the execution owner on poll.
     pub fn tick_timeouts(&self, delta_ms: u64) {
-        self.sink.send(RuntimeEvent::Tick { delta_ms });
+        self.event_sink.submit(RuntimeEvent::Tick { delta_ms });
     }
 
     pub fn poll(&mut self, budget: usize) -> Result<ExecutorStepResult, ExecutionFailure> {
-        if matches!(self.state, ExecutionState::Cancelling) {
-            self.state = ExecutionState::ShuttingDown;
+        if matches!(self.state, ExecutionState::Closed) {
+            return self.step_result();
         }
         if matches!(self.state, ExecutionState::Created) {
             self.state = ExecutionState::Running;
@@ -93,43 +111,19 @@ impl Execution {
             match orchestrator.step(budget) {
                 ThreadResult::Discarded => {
                     if let Some(failure) = orchestrator.failure.take() {
-                        self.state =
-                            if failure.kind == galfus_contract::ExecutionFailureKind::Cancelled {
-                                ExecutionState::Cancelled
-                            } else {
-                                ExecutionState::Failed
-                            };
-                        self.result = Some(Err(failure));
-                        self.orchestrator = None;
+                        self.close_with(Err(failure));
                     }
                 }
                 ThreadResult::Completed(res) => {
-                    self.state = match res {
-                        Ok(_) => ExecutionState::Completed,
-                        Err(_) => ExecutionState::Failed,
-                    };
-                    self.result = Some(res);
-                    self.orchestrator = None;
+                    self.close_with(res);
                 }
                 ThreadResult::Blocked { .. } => {
                     self.state = ExecutionState::Waiting;
                 }
             }
         }
-        if let Some(result) = &self.result {
-            if !self.exit_notified {
-                self.exit_notified = true;
-                self.driver.complete(match result {
-                    Ok(BoundaryValue::I32(code)) => Ok(*code),
-                    Ok(_) => Ok(0),
-                    Err(error) => Err(error.clone()),
-                });
-            }
-            return match result {
-                Ok(BoundaryValue::I32(code)) => Ok(ExecutorStepResult::Completed(*code)),
-                Ok(_) => Ok(ExecutorStepResult::Completed(0)),
-                Err(error) => Err(error.clone()),
-            };
+        if self.result.is_some() {
+            return self.step_result();
         }
         let state = self.driver.step();
         if matches!(state, ExecutorStepResult::Completed(_)) && self.orchestrator.is_some() {
@@ -162,7 +156,7 @@ impl Execution {
                     });
                 }
                 ExecutorStepResult::Blocked { .. } => {
-                    if !self.sink.has_pending() {
+                    if !self.driver.has_pending_events() {
                         let failure_info = self
                             .orchestrator
                             .as_ref()
@@ -193,25 +187,80 @@ impl Execution {
                 | ExecutionState::Running
                 | ExecutionState::Waiting
         ) {
-            self.sink.send(RuntimeEvent::CancelExecution);
-            self.state = ExecutionState::Cancelling;
+            self.event_sink.submit(RuntimeEvent::CancelExecution);
+            self.state = ExecutionState::Closing;
+        }
+    }
+
+    /// Releases every resource owned by this execution without waiting for a driver turn.
+    pub fn shutdown(&mut self) -> ShutdownReport {
+        if let Some(report) = &self.shutdown_report {
+            return report.clone();
+        }
+        self.close_with(Err(ExecutionFailure::new(
+            ExecutionFailureKind::Cancelled,
+            "execution shut down before completion",
+        )));
+        self.shutdown_report
+            .clone()
+            .expect("closing an execution produces a shutdown report")
+    }
+
+    fn close_with(&mut self, result: Result<BoundaryValue, ExecutionFailure>) {
+        if self.shutdown_report.is_some() {
+            return;
+        }
+        self.state = ExecutionState::Closing;
+        if let Some(mut orchestrator) = self.orchestrator.take() {
+            orchestrator.shutdown();
+        }
+        self.result = Some(result.clone());
+        self.shutdown_report = Some(ShutdownReport { result });
+        self.state = ExecutionState::Closed;
+    }
+
+    fn step_result(&mut self) -> Result<ExecutorStepResult, ExecutionFailure> {
+        let result = self.result.as_ref().expect("closed execution has a result");
+        if !self.exit_notified {
+            self.exit_notified = true;
+            self.driver.complete(match result {
+                Ok(BoundaryValue::I32(code)) => Ok(*code),
+                Ok(_) => Ok(0),
+                Err(error) => Err(error.clone()),
+            });
+        }
+        match result {
+            Ok(BoundaryValue::I32(code)) => Ok(ExecutorStepResult::Completed(*code)),
+            Ok(_) => Ok(ExecutorStepResult::Completed(0)),
+            Err(error) => Err(error.clone()),
         }
     }
 }
 
-/// Thread-safe handle that lets external integrations request cancellation.
+impl Drop for Execution {
+    fn drop(&mut self) {
+        if self.shutdown_report.is_none() {
+            let _report = self.shutdown();
+        }
+    }
+}
+
+/// Thread-safe ingress for external integrations.
+///
+/// This handle queues requests for the exclusive owner to process; it cannot mutate the runtime
+/// core directly.
 #[derive(Clone)]
 pub struct ExecutionHandle {
-    sink: EventSink,
+    sink: std::sync::Arc<dyn RuntimeEventSink>,
 }
 
 impl ExecutionHandle {
     pub fn cancel_thread(&self, thread_id: galfus_core::ThreadId) {
-        self.sink.send(RuntimeEvent::CancelThread { thread_id });
+        self.sink.submit(RuntimeEvent::CancelThread { thread_id });
     }
 
     pub fn cancel(&self) {
-        self.sink.send(RuntimeEvent::CancelExecution);
+        self.sink.submit(RuntimeEvent::CancelExecution);
     }
 
     pub fn resolve_request(
@@ -220,7 +269,7 @@ impl ExecutionHandle {
         request_lease: galfus_core::RequestLease,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
-        self.sink.send(RuntimeEvent::EffectCompleted {
+        self.sink.submit(RuntimeEvent::EffectCompleted {
             thread_id,
             request_lease,
             result,
@@ -233,7 +282,7 @@ impl ExecutionHandle {
         future_lease: galfus_core::FutureLease,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
-        self.sink.send(RuntimeEvent::FutureCompleted {
+        self.sink.submit(RuntimeEvent::FutureCompleted {
             thread_id,
             future_lease,
             result,
@@ -253,14 +302,14 @@ impl galfus_contract::MessageInjector for ExecutionHandle {
 }
 
 pub(crate) struct FutureCompletionInjector {
-    sink: EventSink,
+    sink: std::sync::Arc<dyn RuntimeEventSink>,
     owner_thread_id: crate::registry::ThreadId,
     future_lease: galfus_core::FutureLease,
 }
 
 impl FutureCompletionInjector {
     pub(crate) fn new(
-        sink: EventSink,
+        sink: std::sync::Arc<dyn RuntimeEventSink>,
         owner_thread_id: crate::registry::ThreadId,
         future_lease: galfus_core::FutureLease,
     ) -> Self {
@@ -279,7 +328,7 @@ impl galfus_contract::MessageInjector for FutureCompletionInjector {
         _request_lease: galfus_core::RequestLease,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) {
-        self.sink.send(RuntimeEvent::FutureCompleted {
+        self.sink.submit(RuntimeEvent::FutureCompleted {
             thread_id: self.owner_thread_id,
             future_lease: self.future_lease,
             result,

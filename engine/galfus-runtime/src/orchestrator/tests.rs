@@ -1,14 +1,16 @@
 use super::*;
+use crate::event::EventSequence;
 use crate::orchestrator::adapter::ProviderDispatchTask;
+use galfus_bytecode::instruction::{Reg, TypeIdx};
 use galfus_contract::{
     BoundaryValue, HostProvider, MessageInjector, Providers, RunnableTask, TaskAffinity,
     ThreadResult,
 };
+use galfus_core::{CoordinatorId, FutureId, ModuleId, ThreadId};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
-use std::thread;
 
 struct RecordingProvider(Arc<AtomicBool>);
 
@@ -83,51 +85,65 @@ fn cancelled_provider_dispatch_tasks_do_not_start_adapter_work() {
 }
 
 #[test]
-#[should_panic(expected = "main-thread token used from another thread")]
-fn main_thread_tokens_reject_a_different_thread_binding() {
-    let other_thread_id = thread::spawn(|| thread::current().id())
-        .join()
-        .expect("thread identity is available");
-    let token = MainThreadToken {
-        thread_id: other_thread_id,
-        _marker: std::marker::PhantomData,
-    };
-
-    token.assert_current();
-}
-
-#[test]
-#[should_panic(expected = "orchestrator accessed from a non-main thread")]
-fn orchestrator_rejects_a_different_thread_binding() {
-    let other_thread_id = thread::spawn(|| thread::current().id())
-        .join()
-        .expect("thread identity is available");
+fn spawned_event_is_registered_and_queued_by_the_execution_owner() {
     let mut orchestrator = Orchestrator::new();
-    orchestrator.main_thread_id = other_thread_id;
-
-    let _ = orchestrator.main_thread_token();
-}
-
-#[test]
-fn spawned_event_is_registered_and_queued_on_the_main_thread() {
-    let mut orchestrator = Orchestrator::new();
-    orchestrator.sink().send(RuntimeEvent::ThreadSpawned {
+    orchestrator.submit_event(RuntimeEvent::ThreadSpawned {
         thread: galfus_vm::thread::VmThreadState::new(),
     });
 
-    let token = orchestrator.main_thread_token();
-    orchestrator.process_events(token);
+    orchestrator.process_events();
 
-    assert_eq!(orchestrator.kernel(token).active_count(), 1);
-    assert_eq!(orchestrator.kernel(token).runnable_count(), 1);
+    assert_eq!(orchestrator.kernel().active_count(), 1);
+    assert_eq!(orchestrator.kernel().runnable_count(), 1);
+}
+
+#[test]
+fn race_winner_uses_event_sequence_then_member_index() {
+    let mut orchestrator = Orchestrator::new();
+    let coordinator_id = CoordinatorId::new(1);
+    let thread_id = ThreadId::new(1);
+    let module_id = ModuleId::new(1);
+    orchestrator.aggregate_coordinators.insert(
+        coordinator_id,
+        AggregateCoordinator {
+            mode: AggregateMode::Race,
+            future_ids: vec![FutureId::new(1), FutureId::new(2), FutureId::new(3)],
+            pending: PendingContinuation {
+                thread_id,
+                continuation: galfus_vm::Continuation::for_provider(Reg(0), module_id, TypeIdx(0)),
+                module_id,
+                return_type: TypeIdx(0),
+                stack: vec![],
+                operation: PendingOperation::Future,
+                active: Arc::new(AtomicBool::new(true)),
+            },
+            results: vec![None, None, None],
+            winner: None,
+            armed: false,
+        },
+    );
+
+    orchestrator.active_event_sequence = Some(EventSequence(3));
+    orchestrator.complete_aggregate_member(coordinator_id, 2, Ok(BoundaryValue::I32(3)));
+    orchestrator.active_event_sequence = Some(EventSequence(1));
+    orchestrator.complete_aggregate_member(coordinator_id, 1, Ok(BoundaryValue::I32(2)));
+    orchestrator.active_event_sequence = Some(EventSequence(1));
+    orchestrator.complete_aggregate_member(coordinator_id, 0, Ok(BoundaryValue::I32(1)));
+
+    assert_eq!(
+        orchestrator.aggregate_coordinators[&coordinator_id]
+            .winner
+            .as_ref()
+            .map(|(sequence, index, result)| (*sequence, *index, result.clone())),
+        Some((EventSequence(1), 0, Ok(BoundaryValue::I32(1))))
+    );
 }
 
 #[test]
 fn cancellation_event_removes_a_queued_thread() {
     let mut orchestrator = Orchestrator::new();
-    let token = orchestrator.main_thread_token();
     let thread_id = {
-        let kernel = orchestrator.kernel_mut(token);
+        let kernel = orchestrator.kernel_mut();
         let thread_id = kernel
             .spawn(galfus_vm::thread::VmThreadState::new(), None)
             .unwrap();
@@ -137,22 +153,60 @@ fn cancellation_event_removes_a_queued_thread() {
         kernel.enqueue_runnable(thread_id, thread);
         thread_id
     };
+    orchestrator.submit_event(RuntimeEvent::CancelThread { thread_id });
+
+    orchestrator.process_events();
+
+    assert_eq!(orchestrator.kernel().active_count(), 0);
+    assert_eq!(orchestrator.kernel().runnable_count(), 0);
+}
+
+#[test]
+fn owner_exit_removes_all_of_its_future_records() {
+    let mut orchestrator = Orchestrator::new();
+    let thread_id = orchestrator
+        .kernel_mut()
+        .spawn(galfus_vm::thread::VmThreadState::new(), None)
+        .unwrap();
+    let future_id = FutureId::new(1);
     orchestrator
-        .sink()
-        .send(RuntimeEvent::CancelThread { thread_id });
+        .future_registry
+        .create(
+            thread_id,
+            future_id,
+            None,
+            None,
+            future_registry::Activation::Internal {
+                operation: "test".to_string(),
+                args: vec![],
+            },
+        )
+        .unwrap();
+    let thread = orchestrator
+        .kernel_mut()
+        .take_thread(thread_id)
+        .expect("spawned thread is registered");
+    orchestrator.submit_event(RuntimeEvent::Exited {
+        thread_id,
+        thread,
+        result: Ok(BoundaryValue::Null),
+    });
 
-    orchestrator.process_events(token);
+    orchestrator.process_events();
 
-    assert_eq!(orchestrator.kernel(token).active_count(), 0);
-    assert_eq!(orchestrator.kernel(token).runnable_count(), 0);
+    assert!(
+        orchestrator
+            .future_registry
+            .get(thread_id, future_id)
+            .is_none()
+    );
 }
 
 #[test]
 fn execution_cancellation_removes_every_thread_and_returns_a_structured_failure() {
     let mut orchestrator = Orchestrator::new();
-    let token = orchestrator.main_thread_token();
     for _ in 0..2 {
-        let kernel = orchestrator.kernel_mut(token);
+        let kernel = orchestrator.kernel_mut();
         let thread_id = kernel
             .spawn(galfus_vm::thread::VmThreadState::new(), None)
             .unwrap();
@@ -161,7 +215,7 @@ fn execution_cancellation_removes_every_thread_and_returns_a_structured_failure(
             .expect("spawned thread is registered");
         kernel.enqueue_runnable(thread_id, thread);
     }
-    orchestrator.sink().send(RuntimeEvent::CancelExecution);
+    orchestrator.submit_event(RuntimeEvent::CancelExecution);
 
     match orchestrator.step(100) {
         galfus_contract::ThreadResult::Discarded => {}
@@ -172,15 +226,13 @@ fn execution_cancellation_removes_every_thread_and_returns_a_structured_failure(
 #[test]
 fn late_provider_completions_after_thread_cancellation_are_ignored() {
     let mut orchestrator = Orchestrator::new();
-    let token = orchestrator.main_thread_token();
     let thread_id = orchestrator
-        .kernel_mut(token)
+        .kernel_mut()
         .spawn(galfus_vm::thread::VmThreadState::new(), None)
         .unwrap();
-    let sink = orchestrator.sink();
-    sink.send(RuntimeEvent::CancelThread { thread_id });
+    orchestrator.submit_event(RuntimeEvent::CancelThread { thread_id });
     for _ in 0..2 {
-        sink.send(RuntimeEvent::EffectCompleted {
+        orchestrator.submit_event(RuntimeEvent::EffectCompleted {
             thread_id,
             request_lease: galfus_core::RequestLease::new(galfus_core::RequestId::new(1), 0),
             result: Err(galfus_contract::ExecutionFailure::new(
@@ -190,9 +242,9 @@ fn late_provider_completions_after_thread_cancellation_are_ignored() {
         });
     }
 
-    orchestrator.process_events(token);
+    orchestrator.process_events();
 
-    assert_eq!(orchestrator.kernel(token).active_count(), 0);
+    assert_eq!(orchestrator.kernel().active_count(), 0);
     assert!(orchestrator.failure.is_none());
     assert!(orchestrator.pending_continuations.is_empty());
     assert_eq!(orchestrator.late_completion_count(), 2);
@@ -294,14 +346,12 @@ fn generations_prevent_reuse_collisions() {
     assert_eq!(lease2.generation, 2);
 
     // Complete using the old lease, should be ignored
-    let sink = orchestrator.sink();
-    sink.send(RuntimeEvent::EffectCompleted {
+    orchestrator.submit_event(RuntimeEvent::EffectCompleted {
         thread_id,
         request_lease: lease1,
         result: Ok(galfus_contract::BoundaryValue::Null),
     });
 
-    let token = orchestrator.main_thread_token();
-    orchestrator.process_events(token);
+    orchestrator.process_events();
     assert_eq!(orchestrator.late_completion_count(), 0); // ignored because generation mismatch
 }

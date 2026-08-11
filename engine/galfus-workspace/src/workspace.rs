@@ -973,7 +973,7 @@ impl Workspace {
         &mut self,
         args: &[Vec<u8>],
         providers: Option<Providers>,
-        driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
+        driver: std::rc::Rc<dyn galfus_runtime::driver::ExecutionDriver>,
     ) -> Result<Execution, crate::state::WorkspaceRunError> {
         let package = match &self.bytecode_state.compile_state {
             CompileState::Ready { package, .. } => Arc::clone(package),
@@ -1000,7 +1000,7 @@ impl Workspace {
         args: &[Vec<u8>],
         providers: Option<Providers>,
         bindings: galfus_contract::AdapterBindings,
-        driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
+        driver: std::rc::Rc<dyn galfus_runtime::driver::ExecutionDriver>,
     ) -> Result<Execution, crate::state::WorkspaceRunError> {
         let package = match &self.bytecode_state.compile_state {
             CompileState::Ready { package, .. } => Arc::clone(package),
@@ -1028,7 +1028,7 @@ impl Workspace {
         &mut self,
         args: &[Vec<u8>],
         providers: Option<Providers>,
-        driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
+        driver: std::rc::Rc<dyn galfus_runtime::driver::ExecutionDriver>,
     ) -> Result<galfus_contract::BoundaryValue, crate::state::WorkspaceRunError> {
         let mut execution = self.start_execution(args, providers, driver)?;
         execution
@@ -1041,7 +1041,7 @@ impl Workspace {
         args: &[Vec<u8>],
         providers: Option<Providers>,
         bindings: galfus_contract::AdapterBindings,
-        driver: std::rc::Rc<dyn galfus_contract::KernelDriver>,
+        driver: std::rc::Rc<dyn galfus_runtime::driver::ExecutionDriver>,
     ) -> Result<galfus_contract::BoundaryValue, crate::state::WorkspaceRunError> {
         let mut execution =
             self.start_execution_with_bindings(args, providers, bindings, driver)?;

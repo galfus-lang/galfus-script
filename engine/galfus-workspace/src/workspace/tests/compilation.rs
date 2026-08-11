@@ -653,6 +653,69 @@ fn compile_produces_identical_bytecode_regardless_of_module_load_order() {
     }
 }
 
+#[test]
+fn package_is_reproducible_across_all_module_load_permutations() {
+    let config = br#"
+        [module]
+        name = "permutation-determinism"
+        target = "app"
+        entry = "main.gfs"
+    "#;
+    let modules = [
+        (
+            "main.gfs",
+            b"import { add } from \"./add\"\nimport { mul } from \"./mul\"\nimport { sub } from \"./sub\"\nimport { div } from \"./div\"\nimport { id } from \"./id\"\nimport { print } from \"std/io\"\nexport fn main(args: [[u8]]): i32 { print(\"determinism\"); return id(div(sub(add(mul(6, 7), 2), 4), 5)) }".as_slice(),
+        ),
+        ("add.gfs", b"export fn add(a: i32, b: i32): i32 { return a + b }".as_slice()),
+        ("mul.gfs", b"export fn mul(a: i32, b: i32): i32 { return a * b }".as_slice()),
+        ("sub.gfs", b"export fn sub(a: i32, b: i32): i32 { return a - b }".as_slice()),
+        ("div.gfs", b"export fn div(a: i32, b: i32): i32 { return a / b }".as_slice()),
+        ("id.gfs", b"export fn id(value: i32): i32 { return value }".as_slice()),
+    ];
+    let mut permutations = vec![(0..modules.len()).collect::<Vec<_>>()];
+    for index in 0..modules.len() {
+        let mut next = Vec::new();
+        for permutation in permutations {
+            for position in index..modules.len() {
+                let mut permutation = permutation.clone();
+                permutation.swap(index, position);
+                next.push(permutation);
+            }
+        }
+        permutations = next;
+    }
+
+    let mut expected = None;
+    for permutation in permutations {
+        let mut workspace = Workspace::new();
+        workspace.set_catalog(io_catalog(galfus_contract::STD_IO_SOURCE));
+        workspace.load_config(config).expect("valid configuration");
+        for index in permutation {
+            let (path, source) = modules[index];
+            workspace.load_module(path, source).expect("valid source module");
+        }
+        let diagnostics = format!("{:?}", workspace.check().diagnostics);
+        let report = workspace.compile().expect("permutation compiles");
+        let package = report.package;
+        assert!(
+            !package.provider_requirements().is_empty(),
+            "the permutation fixture must exercise provider requirements"
+        );
+        let output = (
+            diagnostics,
+            package.adapter_requirements().to_vec(),
+            package.provider_requirements().to_vec(),
+            package.canonical_bytes().expect("canonical package encoding"),
+            package.content_hash().expect("package hash"),
+        );
+        if let Some(expected) = &expected {
+            assert_eq!(expected, &output, "load permutation must be reproducible");
+        } else {
+            expected = Some(output);
+        }
+    }
+}
+
 fn io_catalog(source: &str) -> std::sync::Arc<galfus_contract::CapabilityCatalog> {
     std::sync::Arc::new(
         galfus_contract::CapabilityCatalog::new(

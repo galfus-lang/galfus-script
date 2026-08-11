@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests;
 
+use crate::driver::RuntimeEventSink;
 use crate::registry;
 use galfus_contract::{
     ExecutionFailure, ExecutionFailureKind, ExecutionFrame, RunnableTask, ThreadResult,
@@ -305,7 +306,7 @@ pub struct RuntimeTask {
     pub thread_id: registry::ThreadId,
     pub thread: Option<galfus_vm::thread::VmThreadState>,
     pub vm: Arc<VirtualMachine>,
-    pub events: crate::event::EventSink,
+    pub events: Arc<dyn RuntimeEventSink>,
     pub future_completion: Option<(registry::ThreadId, galfus_core::FutureLease)>,
 }
 
@@ -314,7 +315,7 @@ impl RuntimeTask {
         thread_id: registry::ThreadId,
         thread: galfus_vm::thread::VmThreadState,
         vm: Arc<VirtualMachine>,
-        events: crate::event::EventSink,
+        events: Arc<dyn RuntimeEventSink>,
         future_completion: Option<(registry::ThreadId, galfus_core::FutureLease)>,
     ) -> Self {
         Self {
@@ -396,7 +397,7 @@ impl RunnableTask for RuntimeTask {
                         .with_thread_id(self.thread_id)
                         .with_stack(panic_stack(&e)),
                 );
-                self.events.send(crate::event::RuntimeEvent::Failed {
+                self.events.submit(crate::event::RuntimeEvent::Failed {
                     thread_id: self.thread_id,
                     error: failure.clone(),
                 });
@@ -406,7 +407,7 @@ impl RunnableTask for RuntimeTask {
 
         match step {
             galfus_vm::VmStep::Continue => {
-                self.events.send(crate::event::RuntimeEvent::Yielded {
+                self.events.submit(crate::event::RuntimeEvent::Yielded {
                     thread_id: self.thread_id,
                     thread,
                 });
@@ -418,7 +419,7 @@ impl RunnableTask for RuntimeTask {
                 return_type,
             } => {
                 if let Some(module_id) = thread.finish_module_initialization() {
-                    self.events.send(crate::event::RuntimeEvent::Initialized {
+                    self.events.submit(crate::event::RuntimeEvent::Initialized {
                         thread_id: self.thread_id,
                         thread,
                         module_id,
@@ -448,7 +449,7 @@ impl RunnableTask for RuntimeTask {
 
                 if let Some((owner_thread_id, future_lease)) = self.future_completion {
                     self.events
-                        .send(crate::event::RuntimeEvent::FutureWorkerCompleted {
+                        .submit(crate::event::RuntimeEvent::FutureWorkerCompleted {
                             worker_thread_id: self.thread_id,
                             owner_thread_id,
                             future_lease,
@@ -456,7 +457,7 @@ impl RunnableTask for RuntimeTask {
                             result: result.clone(),
                         });
                 } else {
-                    self.events.send(crate::event::RuntimeEvent::Exited {
+                    self.events.submit(crate::event::RuntimeEvent::Exited {
                         thread_id: self.thread_id,
                         thread,
                         result: result.clone(),
@@ -469,7 +470,7 @@ impl RunnableTask for RuntimeTask {
                 mut continuation,
             } => {
                 continuation.origin_thread_id = Some(self.thread_id);
-                self.events.send(crate::event::RuntimeEvent::Syscall {
+                self.events.submit(crate::event::RuntimeEvent::Syscall {
                     thread_id: self.thread_id,
                     thread,
                     effect,
@@ -485,7 +486,7 @@ impl RunnableTask for RuntimeTask {
                         execution_stack(&thread),
                     ),
                 );
-                self.events.send(crate::event::RuntimeEvent::Failed {
+                self.events.submit(crate::event::RuntimeEvent::Failed {
                     thread_id: self.thread_id,
                     error: err.clone(),
                 });

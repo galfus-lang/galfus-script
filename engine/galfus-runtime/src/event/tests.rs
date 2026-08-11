@@ -1,40 +1,10 @@
-use super::*;
-use std::thread;
+use super::EventSequence;
 
 #[test]
-fn events_receive_monotonic_ids_in_send_order() {
-    let (sender, receiver) = mpsc::channel();
-    let sink = EventSink::new(sender);
+fn event_sequences_are_strictly_monotonic() {
+    let first = EventSequence::FIRST;
+    let second = first.next().expect("sequence continues");
 
-    sink.send(RuntimeEvent::Tick { delta_ms: 1 });
-    sink.send(RuntimeEvent::Tick { delta_ms: 2 });
-
-    let (first_id, _) = receiver.recv().expect("first event is queued");
-    let (second_id, _) = receiver.recv().expect("second event is queued");
-    assert_eq!(first_id + 1, second_id);
-}
-
-#[test]
-fn concurrent_producers_are_serialized_by_event_id() {
-    let (sender, receiver) = mpsc::channel();
-    let sink = EventSink::new(sender);
-    let producers = (0..4)
-        .map(|_| {
-            let sink = sink.clone();
-            thread::spawn(move || {
-                for _ in 0..8 {
-                    sink.send(RuntimeEvent::Tick { delta_ms: 1 });
-                }
-            })
-        })
-        .collect::<Vec<_>>();
-
-    for producer in producers {
-        producer.join().expect("event producer completes");
-    }
-
-    let event_ids = (0..32)
-        .map(|_| receiver.recv().expect("event is queued").0)
-        .collect::<Vec<_>>();
-    assert_eq!(event_ids, (1..=32).collect::<Vec<_>>());
+    assert!(second > first);
+    assert_eq!(second.0, first.0 + 1);
 }

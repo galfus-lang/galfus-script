@@ -375,7 +375,7 @@ fn pending_initializer_delays_entry_until_its_completion() {
         execution.run_sync_to_completion(),
         Ok(galfus_contract::BoundaryValue::I32(42))
     );
-    assert_eq!(execution.status(), ExecutionState::Completed);
+    assert_eq!(execution.status(), ExecutionState::Closed);
     assert_eq!(
         execution.result(),
         Some(&Ok(galfus_contract::BoundaryValue::I32(42)))
@@ -520,6 +520,7 @@ fn run_initializes_dependencies_before_the_entry_module() {
 
     struct TestExecutor {
         queue: sync::Mutex<collections::VecDeque<galfus_contract::KernelTask>>,
+        events: sync::Arc<crate::driver::NativeEventBridge>,
     }
     struct ImmediateProvider;
     impl galfus_contract::HostProvider for ImmediateProvider {
@@ -581,8 +582,22 @@ fn run_initializes_dependencies_before_the_entry_module() {
             }
         }
     }
+    impl crate::driver::ExecutionDriver for TestExecutor {
+        fn event_sink(&self) -> sync::Arc<dyn crate::driver::RuntimeEventSink> {
+            self.events.clone()
+        }
+
+        fn drain_events(&self) -> Vec<(crate::event::EventSequence, crate::event::RuntimeEvent)> {
+            self.events.drain()
+        }
+
+        fn has_pending_events(&self) -> bool {
+            self.events.has_pending()
+        }
+    }
     let executor = std::rc::Rc::new(TestExecutor {
         queue: sync::Mutex::new(collections::VecDeque::new()),
+        events: sync::Arc::new(crate::driver::NativeEventBridge::new()),
     });
 
     let package = sync::Arc::new(

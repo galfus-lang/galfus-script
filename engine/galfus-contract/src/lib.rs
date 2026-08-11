@@ -114,6 +114,7 @@ pub enum ExecutionFailureKind {
     Timeout,
     Cancelled,
     InvalidContinuation,
+    DuplicateThreadKey,
     DuplicateCompletion,
     DriverFailure,
     InternalRuntimeFailure,
@@ -447,6 +448,21 @@ impl AdapterBindings {
         }
         binding.module.release_handle(type_id, id);
         true
+    }
+
+    /// Releases every foreign handle still owned by this execution.
+    pub fn release_all_handles(&mut self) {
+        let mut handles = self.handles.drain().collect::<Vec<_>>();
+        handles.sort_unstable();
+        for (binding_id, type_id, id) in handles {
+            if let Some(binding) = self
+                .modules
+                .values_mut()
+                .find(|binding| binding.id == binding_id)
+            {
+                binding.module.release_handle(&type_id, id);
+            }
+        }
     }
 
     fn proxy_module_for(&self, binding_id: BindingId) -> Option<&str> {

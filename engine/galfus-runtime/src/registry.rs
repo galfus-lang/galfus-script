@@ -39,7 +39,7 @@ pub struct MailboxMessage {
 pub struct ThreadControlBlock {
     pub id: ThreadId,
     pub state: ThreadState,
-    pub mailbox: Arc<Mutex<VecDeque<MailboxMessage>>>,
+    pub mailbox: Option<Arc<Mutex<VecDeque<MailboxMessage>>>>,
     pub key: Option<String>,
     pub vm_state: Option<VmThreadState>,
 }
@@ -49,22 +49,44 @@ pub use galfus_core::ThreadId;
 pub struct ThreadRegistry {
     tcbs: HashMap<ThreadId, ThreadControlBlock>,
     keys: HashMap<String, ThreadId>,
+    spawned_since_observation: std::collections::HashSet<ThreadId>,
+    exited_order: VecDeque<ThreadId>,
 }
+
+const MAX_EXITED_TOMBSTONES: usize = 1024;
 
 impl ThreadRegistry {
     pub fn new() -> Self {
         Self {
             tcbs: HashMap::new(),
             keys: HashMap::new(),
+            spawned_since_observation: std::collections::HashSet::new(),
+            exited_order: VecDeque::new(),
         }
     }
 
-    pub fn register(&mut self, id: ThreadId, thread: VmThreadState, key: Option<String>) {
-        self.park(id, thread, key);
+    pub fn register(
+        &mut self,
+        id: ThreadId,
+        thread: VmThreadState,
+        key: Option<String>,
+    ) -> Result<(), galfus_contract::ExecutionFailure> {
+        self.park(id, thread, key)
     }
 
-    pub fn park(&mut self, id: ThreadId, thread: VmThreadState, key: Option<String>) {
+    pub fn park(
+        &mut self,
+        id: ThreadId,
+        thread: VmThreadState,
+        key: Option<String>,
+    ) -> Result<(), galfus_contract::ExecutionFailure> {
         if let Some(ref k) = key {
+            if self.keys.contains_key(k) {
+                return Err(galfus_contract::ExecutionFailure::new(
+                    galfus_contract::ExecutionFailureKind::DuplicateThreadKey,
+                    format!("thread key '{k}' is already registered"),
+                ));
+            }
             self.keys.insert(k.clone(), id);
         }
         self.tcbs.insert(
@@ -72,15 +94,20 @@ impl ThreadRegistry {
             ThreadControlBlock {
                 id,
                 state: ThreadState::Created,
-                mailbox: Arc::new(Mutex::new(VecDeque::new())),
+                mailbox: Some(Arc::new(Mutex::new(VecDeque::new()))),
                 key,
                 vm_state: Some(thread),
             },
         );
+        Ok(())
+    }
+
+    pub fn key_is_available(&self, key: Option<&str>) -> bool {
+        key.is_none_or(|key| !self.keys.contains_key(key))
     }
 
     pub fn get_mailbox(&self, id: ThreadId) -> Option<Arc<Mutex<VecDeque<MailboxMessage>>>> {
-        self.tcbs.get(&id).map(|tcb| tcb.mailbox.clone())
+        self.tcbs.get(&id).and_then(|tcb| tcb.mailbox.clone())
     }
 
     pub fn active_count(&self) -> usize {
@@ -134,6 +161,20 @@ impl ThreadRegistry {
         self.tcbs.get(&id).map(|tcb| tcb.state.clone())
     }
 
+    pub fn mark_spawned(&mut self, id: ThreadId) {
+        self.spawned_since_observation.insert(id);
+    }
+
+    pub fn is_running(&self, id: ThreadId) -> bool {
+        self.spawned_since_observation.contains(&id)
+            || self.state(id).is_some_and(|state| state.is_running())
+    }
+
+    pub fn is_exited(&mut self, id: ThreadId) -> bool {
+        self.state(id).is_some_and(|state| state.is_exited())
+            && !self.spawned_since_observation.remove(&id)
+    }
+
     pub fn mark_running(&mut self, id: ThreadId) -> bool {
         if let Some(tcb) = self.tcbs.get_mut(&id) {
             if !tcb.state.is_exited() {
@@ -150,7 +191,24 @@ impl ThreadRegistry {
         result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
     ) -> bool {
         if let Some(tcb) = self.tcbs.get_mut(&id) {
+            if tcb.state.is_exited() {
+                return false;
+            }
+            tcb.vm_state = None;
+            tcb.mailbox = None;
             tcb.state = ThreadState::Exited(result);
+            self.exited_order.push_back(id);
+            while self.exited_order.len() > MAX_EXITED_TOMBSTONES {
+                let Some(expired_id) = self.exited_order.pop_front() else {
+                    break;
+                };
+                if let Some(expired) = self.tcbs.remove(&expired_id) {
+                    if let Some(key) = expired.key {
+                        self.keys.remove(&key);
+                    }
+                    self.spawned_since_observation.remove(&expired_id);
+                }
+            }
             return true;
         }
         false
@@ -163,6 +221,8 @@ impl ThreadRegistry {
     }
 
     pub fn cancel(&mut self, id: ThreadId) -> bool {
+        self.spawned_since_observation.remove(&id);
+        self.exited_order.retain(|exited_id| *exited_id != id);
         if let Some(tcb) = self.tcbs.remove(&id) {
             if let Some(key) = tcb.key {
                 self.keys.remove(&key);

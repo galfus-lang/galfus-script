@@ -271,38 +271,35 @@ impl FutureRegistry {
     pub fn discard_all_for_owner(
         &mut self,
         owner_thread_id: ThreadId,
-    ) -> Vec<(galfus_core::FutureId, Activation)> {
-        self.records
-            .iter_mut()
-            .filter_map(|((owner, future_id), record)| {
-                if *owner != owner_thread_id {
-                    return None;
-                }
-                match record.state {
-                    FutureState::Created => {
-                        record.activation = None;
-                        record.active.store(false, Ordering::Release);
-                        record.state = FutureState::Discarded;
-                        None
-                    }
-                    FutureState::Running => {
-                        let activation = record.running_activation.take()?;
-                        record.active.store(false, Ordering::Release);
-                        record.state = FutureState::Discarded;
-                        Some((*future_id, activation))
-                    }
-                    FutureState::Resolved(_) | FutureState::Discarded => None,
-                }
+    ) -> Vec<(galfus_core::FutureId, Option<Activation>)> {
+        let mut keys = self
+            .records
+            .keys()
+            .filter(|(owner, _)| *owner == owner_thread_id)
+            .copied()
+            .collect::<Vec<_>>();
+        keys.sort_unstable();
+
+        keys.into_iter()
+            .filter_map(|(owner, future_id)| {
+                let mut record = self.records.remove(&(owner, future_id))?;
+                record.active.store(false, Ordering::Release);
+                record.activation = None;
+                record.waiters.clear();
+                self.record_tombstone(owner, future_id);
+                Some((future_id, record.running_activation.take()))
             })
             .collect()
     }
 
-    pub fn discard_all(&mut self) -> Vec<(ThreadId, galfus_core::FutureId, Activation)> {
-        let owners = self
+    pub fn discard_all(&mut self) -> Vec<(ThreadId, galfus_core::FutureId, Option<Activation>)> {
+        let mut owners = self
             .records
             .keys()
             .map(|(owner, _)| *owner)
             .collect::<std::collections::HashSet<_>>();
+        let mut owners = owners.drain().collect::<Vec<_>>();
+        owners.sort_unstable();
         owners
             .into_iter()
             .flat_map(|owner| {
@@ -362,10 +359,7 @@ impl FutureRegistry {
 
         if is_terminal {
             self.records.remove(&(owner_thread_id, future_id));
-            if self.tombstones.len() >= 1024 {
-                self.tombstones.pop_front();
-            }
-            self.tombstones.push_back((owner_thread_id, future_id));
+            self.record_tombstone(owner_thread_id, future_id);
         }
         res
     }
@@ -430,6 +424,13 @@ impl FutureRegistry {
         self.records
             .get(&(owner_thread_id, future_id))
             .map(|record| record.active.clone())
+    }
+
+    fn record_tombstone(&mut self, owner_thread_id: ThreadId, future_id: galfus_core::FutureId) {
+        if self.tombstones.len() >= 1024 {
+            self.tombstones.pop_front();
+        }
+        self.tombstones.push_back((owner_thread_id, future_id));
     }
 
     #[cfg(test)]
