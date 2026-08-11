@@ -162,6 +162,47 @@ fn cancellation_event_removes_a_queued_thread() {
 }
 
 #[test]
+fn owner_exit_removes_all_of_its_future_records() {
+    let mut orchestrator = Orchestrator::new();
+    let thread_id = orchestrator
+        .kernel_mut()
+        .spawn(galfus_vm::thread::VmThreadState::new(), None)
+        .unwrap();
+    let future_id = FutureId::new(1);
+    orchestrator
+        .future_registry
+        .create(
+            thread_id,
+            future_id,
+            None,
+            None,
+            future_registry::Activation::Internal {
+                operation: "test".to_string(),
+                args: vec![],
+            },
+        )
+        .unwrap();
+    let thread = orchestrator
+        .kernel_mut()
+        .take_thread(thread_id)
+        .expect("spawned thread is registered");
+    orchestrator.submit_event(RuntimeEvent::Exited {
+        thread_id,
+        thread,
+        result: Ok(BoundaryValue::Null),
+    });
+
+    orchestrator.process_events();
+
+    assert!(
+        orchestrator
+            .future_registry
+            .get(thread_id, future_id)
+            .is_none()
+    );
+}
+
+#[test]
 fn execution_cancellation_removes_every_thread_and_returns_a_structured_failure() {
     let mut orchestrator = Orchestrator::new();
     for _ in 0..2 {

@@ -872,6 +872,7 @@ impl Orchestrator {
                 mut thread,
                 result,
             } => {
+                self.cancel_thread_futures(thread_id);
                 self.teardown_thread_handles(&mut thread);
                 self.kernel.mark_exited(thread_id, thread, result.clone());
                 if let Some(waiters) = self.thread_exit_waits.remove(&thread_id) {
@@ -895,6 +896,7 @@ impl Orchestrator {
             RuntimeEvent::Failed { thread_id, error } => {
                 self.failure = Some(error.with_thread_id(thread_id));
                 self.cancel_pending_continuations(thread_id);
+                self.cancel_thread_futures(thread_id);
                 self.startup_plans.remove(&thread_id);
                 self.cancel_and_teardown_thread(thread_id);
             }
