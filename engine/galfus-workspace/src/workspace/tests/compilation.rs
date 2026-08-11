@@ -1,4 +1,31 @@
 #[test]
+fn workspace_package_loader_checks_and_compiles_its_loaded_sources() {
+    let mut workspace = Workspace::new();
+    workspace
+        .load_config(
+            br#"
+            [module]
+            name = "package-loader"
+            target = "app"
+            entry = "main.gfs"
+            "#,
+        )
+        .expect("valid configuration");
+    workspace
+        .load_module(
+            "main.gfs",
+            b"export fn main(args: [[u8]]): i32 { return 0 }",
+        )
+        .expect("valid entry module");
+
+    let package = galfus_bytecode::PackageLoader::load(&mut workspace)
+        .expect("workspace produces a package image");
+
+    assert_eq!(package.target().as_str(), "default");
+    assert_eq!(package.graph().len(), 1);
+}
+
+#[test]
 fn check_includes_configured_entry_and_exports_as_semantic_roots() {
     let mut workspace = Workspace::new();
     workspace

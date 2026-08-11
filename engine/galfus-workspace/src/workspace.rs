@@ -1050,3 +1050,12 @@ impl Workspace {
             .map_err(crate::state::WorkspaceRunError::ExecutionFailed)
     }
 }
+
+impl galfus_bytecode::PackageLoader for Workspace {
+    type Error = CompileBlocked;
+
+    fn load(&mut self) -> Result<Arc<PackageImage>, Self::Error> {
+        self.check();
+        self.compile().map(|report| report.package)
+    }
+}

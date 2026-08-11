@@ -5,6 +5,7 @@
 pub mod graph;
 pub mod graph_resolver;
 pub mod instruction;
+pub mod loader;
 pub mod opcode;
 pub mod package;
 pub mod validation;
@@ -17,6 +18,7 @@ pub use graph::{
 };
 pub use graph_resolver::{GraphResolutionError, ModuleImports, ResolvedImport};
 pub use instruction::*;
+pub use loader::*;
 pub use opcode::*;
 pub use package::*;
 pub use validation::*;
