@@ -123,6 +123,7 @@ dependencies = [
 name = "galfus-script-fuzz"
 version = "0.0.0"
 dependencies = [
+ "bincode",
  "galfus-bytecode",
  "galfus-contract",
  "galfus-core",

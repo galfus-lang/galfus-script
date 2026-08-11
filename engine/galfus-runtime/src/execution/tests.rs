@@ -13,12 +13,14 @@ use std::sync::{
 
 struct IdleDriver {
     events: Arc<NativeEventBridge>,
+    exits: Arc<std::sync::Mutex<Vec<Result<i32, ExecutionFailure>>>>,
 }
 
 impl IdleDriver {
     fn new() -> Self {
         Self {
             events: Arc::new(NativeEventBridge::new()),
+            exits: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 }
@@ -29,6 +31,10 @@ impl KernelDriver for IdleDriver {
     fn on_exit(&self, _callback: Box<dyn Fn(Result<i32, ExecutionFailure>) + Send + Sync>) {}
 
     fn run(&self) {}
+
+    fn complete(&self, result: Result<i32, ExecutionFailure>) {
+        self.exits.lock().expect("exit log lock").push(result);
+    }
 
     fn step(&self) -> ExecutorStepResult {
         ExecutorStepResult::Running
@@ -148,6 +154,26 @@ fn execution_shutdown_is_idempotent_and_preserves_its_final_report() {
     assert!(
         matches!(first.result, Err(ref error) if error.kind == ExecutionFailureKind::Cancelled)
     );
+}
+
+#[test]
+fn dropping_an_incomplete_execution_notifies_the_driver_of_shutdown_failure() {
+    let driver = Rc::new(IdleDriver::new());
+    let exits = Arc::clone(&driver.exits);
+    let execution = Execution::new(
+        Orchestrator::new(),
+        driver,
+        Arc::new(AtomicBool::new(true)),
+        false,
+    );
+
+    drop(execution);
+
+    let exits = exits.lock().expect("exit log remains available");
+    assert!(matches!(
+        exits.as_slice(),
+        [Err(error)] if error.kind == ExecutionFailureKind::Cancelled
+    ));
 }
 
 #[test]

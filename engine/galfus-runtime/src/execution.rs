@@ -236,9 +236,12 @@ impl Execution {
             ExecutionFailureKind::Cancelled,
             "execution shut down before completion",
         )));
-        self.shutdown_report
+        let report = self
+            .shutdown_report
             .clone()
-            .expect("closing an execution produces a shutdown report")
+            .expect("closing an execution produces a shutdown report");
+        self.notify_exit(&report.result);
+        report
     }
 
     fn close_with(&mut self, result: Result<BoundaryValue, ExecutionFailure>) {
@@ -290,20 +293,29 @@ impl Execution {
     }
 
     fn step_result(&mut self) -> Result<ExecutorStepResult, ExecutionFailure> {
-        let result = self.result.as_ref().expect("closed execution has a result");
-        if !self.exit_notified {
-            self.exit_notified = true;
-            self.driver.complete(match result {
-                Ok(BoundaryValue::I32(code)) => Ok(*code),
-                Ok(_) => Ok(0),
-                Err(error) => Err(error.clone()),
-            });
-        }
-        match result {
+        let result = self
+            .result
+            .as_ref()
+            .expect("closed execution has a result")
+            .clone();
+        self.notify_exit(&result);
+        match &result {
             Ok(BoundaryValue::I32(code)) => Ok(ExecutorStepResult::Completed(*code)),
             Ok(_) => Ok(ExecutorStepResult::Completed(0)),
             Err(error) => Err(error.clone()),
         }
+    }
+
+    fn notify_exit(&mut self, result: &Result<BoundaryValue, ExecutionFailure>) {
+        if self.exit_notified {
+            return;
+        }
+        self.exit_notified = true;
+        self.driver.complete(match result {
+            Ok(BoundaryValue::I32(code)) => Ok(*code),
+            Ok(_) => Ok(0),
+            Err(error) => Err(error.clone()),
+        });
     }
 }
 

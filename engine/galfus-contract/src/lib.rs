@@ -49,7 +49,7 @@ pub enum BoundaryType {
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum BoundaryValue {
     Null,
     Bool(bool),

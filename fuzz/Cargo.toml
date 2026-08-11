@@ -8,6 +8,7 @@ edition = "2024"
 cargo-fuzz = true
 
 [dependencies]
+bincode = "1.3"
 libfuzzer-sys = "0.4"
 galfus-bytecode = { path = "../engine/galfus-bytecode" }
 galfus-contract = { path = "../engine/galfus-contract" }
@@ -16,6 +17,12 @@ galfus-core = { path = "../engine/galfus-core" }
 [[bin]]
 name = "bytecode_validation"
 path = "src/bytecode_validation.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "boundary_value"
+path = "src/boundary_value.rs"
 test = false
 doc = false
 

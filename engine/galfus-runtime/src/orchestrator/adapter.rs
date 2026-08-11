@@ -3,9 +3,46 @@ use galfus_contract::{
     RunnableTask, TaskAffinity, ThreadResult,
 };
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
+
+fn restore_adapter_module(
+    bindings: &Mutex<galfus_contract::AdapterBindings>,
+    proxy_module: &str,
+    module: Box<dyn galfus_contract::AdapterModuleBinding>,
+) {
+    match bindings.lock() {
+        Ok(mut bindings) => {
+            let _ = bindings.restore_module(proxy_module, module);
+        }
+        Err(poisoned) => {
+            // No adapter code runs while this registry is locked. Recover the table so the
+            // detached module is never lost merely because an unrelated callback poisoned it.
+            let mut guard = poisoned.into_inner();
+            let _ = guard.restore_module(proxy_module, module);
+            drop(guard);
+            bindings.clear_poison();
+        }
+    }
+}
+
+fn restore_provider(
+    providers: &Mutex<galfus_contract::Providers>,
+    host: Box<dyn galfus_contract::HostProvider>,
+) {
+    match providers.lock() {
+        Ok(mut providers) => providers.restore_host(host),
+        Err(poisoned) => {
+            // See `restore_adapter_module`: retaining the host capability is safer than
+            // permanently losing it after a recoverable poisoned lock.
+            let mut guard = poisoned.into_inner();
+            guard.restore_host(host);
+            drop(guard);
+            providers.clear_poison();
+        }
+    }
+}
 
 pub(crate) struct ProviderDispatchTask {
     pub(crate) providers: Arc<std::sync::Mutex<galfus_contract::Providers>>,
@@ -65,9 +102,7 @@ impl RunnableTask for AdapterDispatchTask {
             &self.args,
             self.injector.clone(),
         );
-        if let Ok(mut bindings) = self.bindings.lock() {
-            let _ = bindings.restore_module(&self.module, module);
-        }
+        restore_adapter_module(&self.bindings, &self.module, module);
         ThreadResult::Discarded
     }
     fn into_any_thread(self: Box<Self>) -> Option<Box<dyn RunnableTask + Send>> {
@@ -124,9 +159,7 @@ impl RunnableTask for ProviderDispatchTask {
             self.args.as_slice(),
             self.injector.clone(),
         );
-        if let Ok(mut providers) = self.providers.lock() {
-            providers.restore_host(host);
-        }
+        restore_provider(&self.providers, host);
         ThreadResult::Discarded
     }
 
