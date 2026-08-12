@@ -1,0 +1,44 @@
+import { println } from "std/io"
+import { write, read, exists, is_file, delete } from "std/fs"
+import { concat } from "text"
+
+export fn main(_args: [[u8]]): i32 {
+    println("--- std/fs showcase ---")
+    
+    const fileName = "test_file.txt"
+    const fileContent = "Hello from Galfus std/fs!"
+    
+    println(concat("Writing to ", fileName))
+    const writeResult = write(fileName, fileContent)
+    
+    if writeResult {
+        println("File written successfully.")
+    } else {
+        println("Failed to write file.")
+        return 1
+    }
+    
+    if exists(fileName) {
+        println("File exists.")
+        if is_file(fileName) {
+            println("It is a file.")
+        }
+    }
+    
+    const readContent = read(fileName)
+    instanceof readContent {
+        [u8] data => println(concat("Read content: ", data)),
+        null => println("Failed to read file."),
+    }
+    
+    println("Cleaning up...")
+    const deleteResult = delete(fileName)
+    if deleteResult {
+        println("File deleted successfully.")
+    } else {
+        println("Failed to delete file.")
+    }
+    
+    println("-----------------------")
+    return 0
+}

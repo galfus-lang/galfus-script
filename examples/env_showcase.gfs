@@ -1,0 +1,23 @@
+import { println } from "std/io"
+import env from "std/env"
+import { concat } from "text"
+
+export fn main(_args: [[u8]]): i32 {
+    println("--- std/env showcase ---")
+    
+    const varName = "PATH"
+    
+    if env::has(varName) {
+        println(concat("Environment variable ", concat(varName, " is present.")))
+        const value = env::get(varName)
+        instanceof value {
+            [u8] text => println(concat("Value: ", text)),
+            null => println("Value: null"),
+        }
+    } else {
+        println(concat("Environment variable ", concat(varName, " is NOT present.")))
+    }
+    
+    println("------------------------")
+    return 0
+}

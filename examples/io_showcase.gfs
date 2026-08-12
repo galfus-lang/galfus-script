@@ -1,0 +1,11 @@
+import { print, println, read } from "std/io"
+
+export fn main(_args: [[u8]]): i32 {
+    println("Hello from std/io provider!")
+    print("Please enter something (press enter): ")
+    const input = read()
+    print("You typed: ")
+    print(input)
+    println("")
+    return 0
+}
