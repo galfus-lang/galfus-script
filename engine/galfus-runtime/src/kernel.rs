@@ -61,8 +61,12 @@ impl VirtualKernel {
     pub fn enqueue_runnable(
         &mut self,
         id: ThreadId,
-        mut thread: VmThreadState,
+        thread: VmThreadState,
     ) -> Result<(), galfus_contract::ExecutionFailureKind> {
+        if self.runnable.contains(id) {
+            self.registry.restore_vm_state(id, thread);
+            return Ok(());
+        }
         let result = thread
             .global_quota()
             .lock()
@@ -77,8 +81,12 @@ impl VirtualKernel {
     pub fn enqueue_runnable_front(
         &mut self,
         id: ThreadId,
-        mut thread: VmThreadState,
+        thread: VmThreadState,
     ) -> Result<(), galfus_contract::ExecutionFailureKind> {
+        if self.runnable.contains(id) {
+            self.registry.restore_vm_state(id, thread);
+            return Ok(());
+        }
         let result = thread
             .global_quota()
             .lock()
@@ -209,7 +217,10 @@ impl VirtualKernel {
         let mut results = Vec::new();
         for &id in &woke_up {
             if let Some(thread) = self.registry.take(id) {
-                thread.global_quota().lock().unwrap().release_timers(1);
+                let mut quota = thread.global_quota().lock().unwrap();
+                quota.release_pending_states(1);
+                quota.release_timers(1);
+                drop(quota);
                 let result = self.enqueue_runnable(id, thread);
                 results.push((id, result));
             }

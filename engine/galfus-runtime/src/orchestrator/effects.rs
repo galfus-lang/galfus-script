@@ -1141,7 +1141,17 @@ impl Orchestrator {
         future_ids: Vec<galfus_core::FutureId>,
         mode: crate::orchestrator::AggregateMode,
     ) {
+        if let Err(error) = self.quota.lock().unwrap().try_reserve_pending_states(1) {
+            self.failure = Some(
+                ExecutionFailure::new(error, "pending states limit exceeded")
+                    .with_thread_id(thread_id)
+                    .with_stack(execution_stack(&thread)),
+            );
+            self.kernel.cancel(thread_id);
+            return;
+        }
         let Some(coordinator_id) = self.allocate_coordinator_id(thread_id, &thread) else {
+            self.quota.lock().unwrap().release_pending_states(1);
             return;
         };
         self.aggregate_coordinators.insert(
@@ -1178,6 +1188,7 @@ impl Orchestrator {
                     .with_stack(execution_stack(&thread)),
                 );
                 self.aggregate_coordinators.remove(&coordinator_id);
+                self.quota.lock().unwrap().release_pending_states(1);
                 self.kernel.cancel(thread_id);
                 return;
             };
@@ -1202,6 +1213,7 @@ impl Orchestrator {
             self.aggregate_registration = None;
             if self.failure.is_some() {
                 self.aggregate_coordinators.remove(&coordinator_id);
+                self.quota.lock().unwrap().release_pending_states(1);
                 self.kernel.cancel(thread_id);
                 return;
             }

@@ -37,15 +37,15 @@ impl PrivateHeap {
     }
 
     pub fn alloc(&mut self, obj: HeapObject) -> Result<VmObjectRef, VmError> {
+        let next_id = self
+            .next_id
+            .checked_add(1)
+            .ok_or(VmError::IdCounterExhausted)?;
         self.quota
             .lock()
             .unwrap()
             .try_reserve_heap(1, obj.heap_bytes())
             .map_err(VmError::ResourceLimitExceeded)?;
-        let next_id = self
-            .next_id
-            .checked_add(1)
-            .ok_or(VmError::IdCounterExhausted)?;
 
         self.allocations_since_release += 1;
 

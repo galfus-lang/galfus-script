@@ -45,6 +45,10 @@ impl RunnableQueue {
         self.queue.len()
     }
 
+    pub fn contains(&self, id: ThreadId) -> bool {
+        self.queued.contains(&id)
+    }
+
     pub fn remove(&mut self, id: ThreadId) -> bool {
         let initial_len = self.queue.len();
         self.queue.retain(|(queued, _)| *queued != id);

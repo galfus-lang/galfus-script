@@ -164,9 +164,14 @@ impl Orchestrator {
             .release_event_queue(self.pending_events.len());
         self.pending_events.clear();
         self.pending_aggregate_finishes.clear();
+        let coordinator_count = self.aggregate_coordinators.len();
         for coordinator_id in self.aggregate_coordinators.drain().map(|(id, _)| id) {
             self.coordinator_id_manager.free(coordinator_id);
         }
+        self.quota
+            .lock()
+            .unwrap()
+            .release_pending_states(coordinator_count);
         self.cancel_and_teardown_all_threads();
         let report = self.close_adapter_bindings();
         self.shutdown_report = Some(report.clone());

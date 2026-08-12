@@ -102,7 +102,9 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
         .iter()
         .map(|argument| argument.as_bytes().to_vec())
         .collect::<Vec<_>>();
-    let executor = std::rc::Rc::new(CooperativeDriver::new());
+    let executor = std::rc::Rc::new(CooperativeDriver::with_event_queue_capacity(
+        compile_report.package.limits().max_event_queue,
+    ));
 
     let mut properties = std::collections::BTreeMap::new();
     properties.insert("os".to_string(), std::env::consts::OS.to_string());

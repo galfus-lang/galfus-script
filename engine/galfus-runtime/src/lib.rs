@@ -37,6 +37,8 @@ pub use preflight::{AdapterBindingPreflight, PreflightError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
+    #[error("execution driver cannot provide the requested event queue capacity {requested}")]
+    EventQueueCapacityExceeded { requested: usize },
     #[error("package has no configured entry point")]
     MissingPackageEntry,
     #[error("module `{0}` is not loaded")]
@@ -139,6 +141,11 @@ impl Runtime {
         validate_numeric_semantics(package.versions().numeric_semantics())
             .map_err(RuntimeError::NumericSemantics)?;
         preflight_capabilities(&package, providers.as_ref(), &adapter_bindings)?;
+        driver.configure_limits(package.limits()).map_err(|_| {
+            RuntimeError::EventQueueCapacityExceeded {
+                requested: package.limits().max_event_queue,
+            }
+        })?;
 
         let quota = std::sync::Arc::new(std::sync::Mutex::new(galfus_vm::quota::GlobalQuota::new(
             package.limits().clone(),

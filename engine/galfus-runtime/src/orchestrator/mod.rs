@@ -854,6 +854,7 @@ impl Orchestrator {
         let Some(coordinator) = self.aggregate_coordinators.remove(&coordinator_id) else {
             return;
         };
+        self.quota.lock().unwrap().release_pending_states(1);
         self.coordinator_id_manager.free(coordinator_id);
         if matches!(coordinator.mode, AggregateMode::Race) {
             for future_id in coordinator.future_ids {
