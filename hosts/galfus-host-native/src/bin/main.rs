@@ -72,7 +72,7 @@ fn main() {
         std::process::exit(1);
     });
 
-    let providers = Providers::with_host(Box::new(NativeIoProvider));
+    let providers = Providers::new().with_host("io", Box::new(NativeIoProvider));
 
     let adapters = AdapterBindings::default();
     let driver = Rc::new(NativeDriver::new());

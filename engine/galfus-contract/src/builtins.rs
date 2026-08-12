@@ -32,7 +32,12 @@ pub static BRIDGE_TEMPLATES: &[(&str, &str)] = &[
     ("std/io", STD_IO_SOURCE),
     ("std/time", STD_TIME_SOURCE),
     ("std/env", STD_ENV_SOURCE),
+    ("std/fs", STD_FS_SOURCE),
 ];
+
+pub fn is_bridge_template(source: &str) -> bool {
+    BRIDGE_TEMPLATES.iter().any(|(name, _)| *name == source)
+}
 
 pub fn std_io_provider_descriptor() -> ProviderDescriptor {
     ProviderDescriptor {
@@ -81,7 +86,9 @@ pub fn std_env_provider_descriptor() -> ProviderDescriptor {
                 ProviderFunctionSignature {
                     name: "env_get".to_string(),
                     parameter_types: vec![BoundaryType::Array(Box::new(BoundaryType::U8))],
-                    return_type: BoundaryType::Nullable(Box::new(BoundaryType::Array(Box::new(BoundaryType::U8)))),
+                    return_type: BoundaryType::Nullable(Box::new(BoundaryType::Array(Box::new(
+                        BoundaryType::U8,
+                    )))),
                 },
                 ProviderFunctionSignature {
                     name: "env_has".to_string(),
@@ -96,7 +103,7 @@ pub fn std_env_provider_descriptor() -> ProviderDescriptor {
 pub fn std_fs_provider_descriptor() -> ProviderDescriptor {
     let byte_array = BoundaryType::Array(Box::new(BoundaryType::U8));
     let byte_array_array = BoundaryType::Array(Box::new(byte_array.clone()));
-    
+
     ProviderDescriptor {
         modules: vec![ProviderModuleDescriptor {
             module_path: "std/fs".to_string(),
@@ -168,10 +175,6 @@ pub static BUILTIN_MODULES: &[(&str, &str)] = &[
     ("text", TEXT_SOURCE),
     ("format", FORMAT_SOURCE),
     ("format/ansi", FORMAT_ANSI_SOURCE),
-    ("std/io", STD_IO_SOURCE),
-    ("std/time", STD_TIME_SOURCE),
-    ("std/env", STD_ENV_SOURCE),
-    ("std/fs", STD_FS_SOURCE),
 ];
 
 pub fn is_internal_module(source: &str) -> bool {

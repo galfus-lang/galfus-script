@@ -29,27 +29,11 @@ pub(super) fn restore_adapter_module(
     }
 }
 
-pub(super) fn restore_provider(
-    providers: &Mutex<galfus_contract::Providers>,
-    host: Box<dyn galfus_contract::HostProvider>,
-) {
-    match providers.lock() {
-        Ok(mut providers) => providers.restore_host(host),
-        Err(poisoned) => {
-            // See `restore_adapter_module`: retaining the host capability is safer than
-            // permanently losing it after a recoverable poisoned lock.
-            let mut guard = poisoned.into_inner();
-            guard.restore_host(host);
-            drop(guard);
-            providers.clear_poison();
-        }
-    }
-}
-
 pub(crate) struct ProviderDispatchTask {
     pub(crate) providers: Arc<std::sync::Mutex<galfus_contract::Providers>>,
     pub(crate) thread_id: galfus_core::ThreadId,
     pub(crate) request_lease: galfus_core::RequestLease,
+    pub(crate) alias: String,
     pub(crate) name: String,
     pub(crate) args: Vec<BoundaryValue>,
     pub(crate) injector: Arc<dyn MessageInjector>,
@@ -129,8 +113,8 @@ impl RunnableTask for ProviderDispatchTask {
         if !self.active.load(Ordering::Acquire) {
             return ThreadResult::Discarded;
         }
-        let host = match self.providers.lock() {
-            Ok(mut providers) => providers.take_host(),
+        let host_arc = match self.providers.lock() {
+            Ok(providers) => providers.get_host(&self.alias),
             Err(_) => {
                 let _ = self.injector.inject_system_response(
                     self.thread_id,
@@ -143,26 +127,39 @@ impl RunnableTask for ProviderDispatchTask {
                 return ThreadResult::Discarded;
             }
         };
-        let Some(mut host) = host else {
+        let Some(host_arc) = host_arc else {
             let _ = self.injector.inject_system_response(
                 self.thread_id,
                 self.request_lease,
                 Err(ExecutionFailure::new(
                     ExecutionFailureKind::MissingProvider,
-                    "HostProvider missing while dispatching request",
-                )
-                .with_request_lease(self.request_lease)),
+                    "HostProvider missing",
+                )),
             );
             return ThreadResult::Discarded;
+        };
+
+        let mut host = match host_arc.lock() {
+            Ok(host) => host,
+            Err(_) => {
+                let _ = self.injector.inject_system_response(
+                    self.thread_id,
+                    self.request_lease,
+                    Err(ExecutionFailure::new(
+                        ExecutionFailureKind::InternalRuntimeFailure,
+                        "provider lock is poisoned",
+                    )),
+                );
+                return ThreadResult::Discarded;
+            }
         };
         host.dispatch(
             self.thread_id,
             self.request_lease,
-            self.name.as_str(),
-            self.args.as_slice(),
+            &self.name,
+            &self.args,
             self.injector.clone(),
         );
-        restore_provider(&self.providers, host);
         ThreadResult::Discarded
     }
 

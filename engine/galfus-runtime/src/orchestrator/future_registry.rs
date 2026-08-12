@@ -25,6 +25,7 @@ pub enum Activation {
         args: Vec<BoundaryValue>,
     },
     Provider {
+        alias: String,
         name: String,
         args: Vec<BoundaryValue>,
         request_id: Option<galfus_core::RequestId>,

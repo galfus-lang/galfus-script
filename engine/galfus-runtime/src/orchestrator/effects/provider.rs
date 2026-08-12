@@ -12,6 +12,7 @@ impl Orchestrator {
         thread_id: crate::registry::ThreadId,
         thread: galfus_vm::thread::VmThreadState,
         future_id: galfus_core::FutureId,
+        alias: String,
         name: String,
         args: Vec<galfus_contract::BoundaryValue>,
     ) -> Option<galfus_vm::thread::VmThreadState> {
@@ -30,8 +31,8 @@ impl Orchestrator {
             return None;
         };
         let affinity = {
-            let host = match providers.lock() {
-                Ok(mut providers) => providers.take_host(),
+            let host_arc = match providers.lock() {
+                Ok(providers) => providers.get_host(&alias),
                 Err(_) => {
                     self.failure = Some(
                         ExecutionFailure::new(
@@ -46,7 +47,7 @@ impl Orchestrator {
                     return None;
                 }
             };
-            let Some(host) = host else {
+            let Some(host_arc) = host_arc else {
                 self.failure = Some(
                     ExecutionFailure::new(
                         ExecutionFailureKind::MissingProvider,
@@ -59,11 +60,23 @@ impl Orchestrator {
                 self.kernel.cancel(thread_id);
                 return None;
             };
-            let affinity = host.affinity(name.as_str());
-            if let Ok(mut providers) = providers.lock() {
-                providers.restore_host(host);
-            }
-            affinity
+            let host = match host_arc.lock() {
+                Ok(host) => host,
+                Err(_) => {
+                    self.failure = Some(
+                        ExecutionFailure::new(
+                            ExecutionFailureKind::InternalRuntimeFailure,
+                            "provider lock is poisoned",
+                        )
+                        .with_thread_id(thread_id)
+                        .with_future_id(future_id)
+                        .with_stack(execution_stack(&thread)),
+                    );
+                    self.kernel.cancel(thread_id);
+                    return None;
+                }
+            };
+            host.affinity(name.as_str())
         };
         let request_lease = match self.allocate_request_lease(thread_id, future_id, &thread) {
             Some(lease) => lease,
@@ -81,6 +94,7 @@ impl Orchestrator {
             providers,
             thread_id,
             request_lease,
+            alias,
             name,
             args,
             injector: Arc::new(FutureCompletionInjector::new(

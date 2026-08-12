@@ -117,6 +117,8 @@ pub enum PackageValidationError {
     UnexpectedAdapterRequirement { proxy_module: String },
     #[error("provider requirement for `{module_path}` is duplicated")]
     DuplicateProviderRequirement { module_path: String },
+    #[error("provider alias `{alias}` is duplicated")]
+    DuplicateProviderAlias { alias: String },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -158,7 +160,11 @@ impl PackageImage {
             requirement.descriptor.canonicalize();
         }
         adapter_requirements.sort_by(|left, right| left.proxy_module.cmp(&right.proxy_module));
-        provider_requirements.sort_by(|left, right| left.module_path.cmp(&right.module_path));
+        provider_requirements.sort_by(|left, right| {
+            left.module_path
+                .cmp(&right.module_path)
+                .then_with(|| left.alias.cmp(&right.alias))
+        });
         Self::validate_adapter_requirements(&graph, entry_point.as_ref(), &adapter_requirements)?;
         Self::validate_provider_requirements(&provider_requirements)?;
 
@@ -246,10 +252,16 @@ impl PackageImage {
         provider_requirements: &[ProviderModuleRequirement],
     ) -> Result<(), PackageValidationError> {
         let mut paths = BTreeSet::new();
+        let mut aliases = BTreeSet::new();
         for requirement in provider_requirements {
             if !paths.insert(requirement.module_path.as_str()) {
                 return Err(PackageValidationError::DuplicateProviderRequirement {
                     module_path: requirement.module_path.clone(),
+                });
+            }
+            if !aliases.insert(requirement.alias.as_str()) {
+                return Err(PackageValidationError::DuplicateProviderAlias {
+                    alias: requirement.alias.clone(),
                 });
             }
         }

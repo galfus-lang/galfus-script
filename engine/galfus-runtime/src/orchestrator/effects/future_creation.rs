@@ -266,7 +266,11 @@ impl Orchestrator {
             .map(|meta| (meta.proxy_module.clone(), meta.symbol.clone()));
 
         if let Some(name) = function_name.strip_prefix("__provider_") {
+            let alias = galfus_contract::provider_alias_from_operation(name)
+                .expect("compiled provider operations have a valid alias")
+                .to_string();
             crate::orchestrator::future_registry::Activation::Provider {
+                alias,
                 name: name.to_string(),
                 args,
                 request_id: None,

@@ -526,7 +526,9 @@ impl Workspace {
             .apply(transaction)
             .map_err(|error| CompileBlocked::CompilerError(error.to_string()))?;
         let adapter_requirements = self.adapter_requirements_for(&graph);
-        let provider_requirements = self.provider_requirements_for(&graph);
+        let provider_requirements = self
+            .provider_requirements_for(&graph)
+            .map_err(CompileBlocked::CompilerError)?;
         let entry_point = match self
             .config
             .as_ref()
@@ -609,7 +611,10 @@ impl Workspace {
         requirements
     }
 
-    fn provider_requirements_for(&self, graph: &BytecodeGraph) -> Vec<ProviderModuleRequirement> {
+    fn provider_requirements_for(
+        &self,
+        graph: &BytecodeGraph,
+    ) -> Result<Vec<ProviderModuleRequirement>, String> {
         graph
             .modules()
             .filter_map(|module| {
@@ -620,32 +625,40 @@ impl Workspace {
                     .unwrap_or(module.path().as_str());
                 self.catalog
                     .provider_schema_fingerprint(provider_path)
-                    .map(|schema_fingerprint| ProviderModuleRequirement {
-                        module_path: provider_path.to_string(),
-                        schema_fingerprint,
-                        boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
-                        exports: self.provider_exports_for(module.path()),
+                    .map(|schema_fingerprint| {
+                        self.provider_interface_for(module.path())
+                            .map(|(alias, exports)| ProviderModuleRequirement {
+                                alias,
+                                module_path: provider_path.to_string(),
+                                schema_fingerprint,
+                                boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
+                                exports,
+                            })
                     })
             })
-            .collect()
+            .collect::<Result<Vec<_>, _>>()
     }
 
-    fn provider_exports_for(&self, path: &ModulePath) -> Vec<ProviderFunctionSignature> {
+    fn provider_interface_for(
+        &self,
+        path: &ModulePath,
+    ) -> Result<(String, Vec<ProviderFunctionSignature>), String> {
         let Some(module) = self
             .frontend
             .modules()
             .iter()
             .find(|module| module.path() == path)
         else {
-            return Vec::new();
+            return Err(format!("provider module '{}' is not loaded", path));
         };
         let Some(type_result) = module.type_result() else {
-            return Vec::new();
+            return Err(format!("provider module '{}' has no type result", path));
         };
         let Some(resolution) = module.graph().resolution() else {
-            return Vec::new();
+            return Err(format!("provider module '{}' has no resolution", path));
         };
         let table = type_result.layer().table();
+        let mut aliases = std::collections::BTreeSet::new();
         let mut exports = resolution
             .symbols()
             .iter()
@@ -653,6 +666,8 @@ impl Workspace {
             .filter_map(|symbol| {
                 let name = self.frontend.string_table().resolve(symbol.name())?;
                 let name = name.strip_prefix("__provider_")?;
+                let alias = galfus_contract::provider_alias_from_operation(name)?;
+                aliases.insert(alias.to_string());
                 let TypeKind::Function(function) =
                     table.kind(type_result.layer().symbol_type(symbol.id())?)?
                 else {
@@ -688,6 +703,13 @@ impl Workspace {
             })
             .collect::<Vec<_>>();
         exports.sort();
-        exports
+        let aliases = aliases.into_iter().collect::<Vec<_>>();
+        let [alias] = aliases.as_slice() else {
+            return Err(format!(
+                "provider module '{}' must declare external operations with one valid alias",
+                path
+            ));
+        };
+        Ok((alias.clone(), exports))
     }
 }

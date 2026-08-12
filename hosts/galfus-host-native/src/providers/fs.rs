@@ -174,7 +174,9 @@ impl HostProvider for NativeFsProvider {
                         BoundaryValue::Choice {
                             variant: 0,
                             payload: Some(Box::new(BoundaryValue::Array {
-                                element_type: galfus_contract::BoundaryType::Array(Box::new(galfus_contract::BoundaryType::U8)),
+                                element_type: galfus_contract::BoundaryType::Array(Box::new(
+                                    galfus_contract::BoundaryType::U8,
+                                )),
                                 values: arr,
                             })),
                         }

@@ -100,9 +100,10 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
         .map(|argument| argument.as_bytes().to_vec())
         .collect::<Vec<_>>();
 
-    let providers = galfus_host_native::providers::default_providers(compile_report.package.metadata().clone());
+    let providers =
+        galfus_host_native::providers::default_providers(compile_report.package.metadata().clone());
     let driver = std::rc::Rc::new(galfus_host_native::driver::NativeDriver::new());
-    
+
     let host = galfus_host_native::ExecutionHost::new(
         providers,
         galfus_contract::AdapterBindings::default(),

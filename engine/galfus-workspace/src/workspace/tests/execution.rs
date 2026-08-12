@@ -34,9 +34,12 @@ fn run_passes_read_terminator_to_the_io_provider() {
     workspace.compile().expect("workspace compiles");
 
     let terminator = Arc::new(Mutex::new(Vec::new()));
-    let providers = Providers::with_host(Box::new(TerminatorIo {
-        terminator: Arc::clone(&terminator),
-    }));
+    let providers = Providers::new().with_host(
+        "io",
+        Box::new(TerminatorIo {
+            terminator: Arc::clone(&terminator),
+        }),
+    );
     let executor = std::rc::Rc::new(CooperativeDriver::new());
     let code = workspace
         .run(&[], Some(providers), executor)

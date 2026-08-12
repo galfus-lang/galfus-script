@@ -133,13 +133,23 @@ impl HostProvider for IoHost {
 
 #[test]
 fn providers_allow_execution_without_host() {
-    assert!(Providers::new().host_mut().is_none());
+    assert!(Providers::new().get_host("none").is_none());
 }
 
 #[test]
 fn providers_allow_host() {
-    let mut providers = Providers::with_host(Box::new(DummyHost));
-    assert!(providers.host_mut().is_some());
+    let providers = Providers::new().with_host("test", Box::new(DummyHost));
+    assert!(providers.get_host("test").is_some());
+}
+
+#[test]
+fn provider_aliases_are_unambiguous_and_cannot_contain_underscores() {
+    assert_eq!(
+        provider_alias_from_operation("vendorio_save"),
+        Some("vendorio")
+    );
+    assert!(!is_valid_provider_alias("vendor_io"));
+    assert_eq!(provider_alias_from_operation("vendorio"), None);
 }
 
 #[test]
@@ -152,14 +162,28 @@ fn provider_descriptors_validate_the_complete_compiled_requirement() {
     let descriptor = std_io_provider_descriptor();
     let module = descriptor.modules.first().unwrap();
     let requirement = ProviderModuleRequirement {
+        alias: "io".to_string(),
         module_path: module.module_path.clone(),
         schema_fingerprint: module.schema_fingerprint,
         boundary_abi: module.boundary_abi,
         exports: module.exports.clone(),
     };
 
-    assert!(Providers::with_host(Box::new(IoHost)).validates(&requirement));
-    assert!(!Providers::with_host(Box::new(DummyHost)).validates(&requirement));
+    assert!(
+        Providers::new()
+            .with_host("io", Box::new(IoHost))
+            .validates(&requirement)
+    );
+    assert!(
+        !Providers::new()
+            .with_host("io", Box::new(DummyHost))
+            .validates(&requirement)
+    );
+    assert!(
+        !Providers::new()
+            .with_host("wrong", Box::new(IoHost))
+            .validates(&requirement)
+    );
 }
 
 #[test]

@@ -63,11 +63,12 @@ impl MessageInjector for FailureInjector {
 
 pub(super) fn provider_dispatch_task(called: Arc<AtomicBool>) -> ProviderDispatchTask {
     ProviderDispatchTask {
-        providers: Arc::new(Mutex::new(Providers::with_host(Box::new(
-            RecordingProvider(called),
-        )))),
+        providers: Arc::new(Mutex::new(
+            Providers::new().with_host("io", Box::new(RecordingProvider(called))),
+        )),
         thread_id: galfus_core::ThreadId::new(1),
         request_lease: galfus_core::RequestLease::new(galfus_core::RequestId::new(1), 1),
+        alias: "io".to_string(),
         name: "operation".to_string(),
         args: vec![],
         injector: Arc::new(NoopInjector),
@@ -110,6 +111,7 @@ pub(super) fn provider_dispatch_reports_a_poisoned_registry_without_panicking() 
         providers,
         thread_id: galfus_core::ThreadId::new(1),
         request_lease: galfus_core::RequestLease::new(galfus_core::RequestId::new(1), 1),
+        alias: "io".to_string(),
         name: "operation".to_string(),
         args: vec![],
         injector: Arc::new(FailureInjector(failures.clone())),

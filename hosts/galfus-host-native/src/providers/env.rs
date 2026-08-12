@@ -89,11 +89,7 @@ impl HostProvider for NativeEnvProvider {
                         }
                     };
 
-                    let _ = injector.inject_system_response(
-                        thread_id,
-                        request_lease,
-                        Ok(response),
-                    );
+                    let _ = injector.inject_system_response(thread_id, request_lease, Ok(response));
                 }
             }
             _ => {

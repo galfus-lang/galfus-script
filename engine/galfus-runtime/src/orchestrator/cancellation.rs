@@ -31,6 +31,7 @@ impl Orchestrator {
     ) {
         match activation {
             Activation::Provider {
+                alias,
                 request_id: Some(request_id),
                 ..
             } => {
@@ -40,11 +41,17 @@ impl Orchestrator {
                 let Some(providers) = vm.providers() else {
                     return;
                 };
-                let host = match providers.lock() {
-                    Ok(mut providers) => providers.take_host(),
+                let host_arc = match providers.lock() {
+                    Ok(providers) => providers.get_host(&alias),
                     Err(_) => None,
                 };
-                if let Some(mut host) = host {
+                if let Some(host_arc) = host_arc {
+                    let Ok(mut host) = host_arc.lock() else {
+                        self.cancellation_report
+                            .record(galfus_contract::CancellationOutcome::BestEffort);
+                        self.free_request_id(request_id);
+                        return;
+                    };
                     let generation = self
                         .request_generations
                         .get(&request_id.raw())
@@ -55,9 +62,6 @@ impl Orchestrator {
                         galfus_core::RequestLease::new(request_id, generation),
                     );
                     self.cancellation_report.record(outcome);
-                    if let Ok(mut providers) = providers.lock() {
-                        providers.restore_host(host);
-                    }
                 }
                 self.free_request_id(request_id);
             }

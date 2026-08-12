@@ -26,8 +26,11 @@ impl Orchestrator {
                     thread_id, thread, future_id, module_id, func_idx, args, arg_types,
                 );
             }
-            Activation::Provider { name, args, .. } => {
-                return self.start_provider_activation(thread_id, thread, future_id, name, args);
+            Activation::Provider {
+                alias, name, args, ..
+            } => {
+                return self
+                    .start_provider_activation(thread_id, thread, future_id, alias, name, args);
             }
             Activation::Adapter {
                 proxy_module,
