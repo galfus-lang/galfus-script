@@ -3,6 +3,7 @@ use galfus_contract::{
     BoundaryValue, CancellationOutcome, ExecutionFailure, ExecutionFailureKind, HostProvider,
     MessageInjector, ProviderDescriptor, TaskAffinity,
 };
+use std::io::Write;
 use std::sync::Arc;
 
 pub struct NativeIoProvider;
@@ -30,6 +31,7 @@ impl HostProvider for NativeIoProvider {
                 if let Some(BoundaryValue::Bytes(bytes)) = args.get(0) {
                     if let Ok(text) = std::str::from_utf8(bytes) {
                         print!("{}", text);
+                        let _ = std::io::stdout().flush();
                     }
                 }
 
