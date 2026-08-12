@@ -18,7 +18,7 @@ fn node(id: galfus_core::ModuleId, module: BytecodeModule) -> BytecodeNode {
 fn call_to_missing_module_returns_module_not_found_error() {
     let graph = BytecodeGraph::new();
     let vm = VirtualMachine::new(sync::Arc::new(graph));
-    let mut thread = crate::thread::VmThreadState::new();
+    let mut thread = crate::thread::VmThreadState::test_new();
 
     let result = vm.run_function(&mut thread, ModuleId::new(99), FuncIdx(0), vec![]);
     assert!(
@@ -43,7 +43,7 @@ fn call_to_missing_function_returns_function_out_of_bounds_error() {
     );
     let graph = graph_with_node(node(module_id, module));
     let vm = VirtualMachine::new(sync::Arc::new(graph));
-    let mut thread = crate::thread::VmThreadState::new();
+    let mut thread = crate::thread::VmThreadState::test_new();
 
     let result = vm.run_function(&mut thread, module_id, FuncIdx(99), vec![]);
     assert!(
@@ -60,15 +60,17 @@ fn call_to_missing_function_returns_function_out_of_bounds_error() {
 fn create_future_for_missing_module_returns_module_not_found_error() {
     let graph = BytecodeGraph::new();
     let vm = VirtualMachine::new(sync::Arc::new(graph));
-    let mut thread = crate::thread::VmThreadState::new();
+    let mut thread = crate::thread::VmThreadState::test_new();
 
-    thread.call_stack.push(crate::CallFrame {
-        module_id: ModuleId::new(99),
-        func_idx: FuncIdx(0),
-        pc: 0,
-        return_dest: None,
-        registers: vec![],
-    });
+    thread
+        .push_frame(crate::CallFrame {
+            module_id: ModuleId::new(99),
+            func_idx: FuncIdx(0),
+            pc: 0,
+            return_dest: None,
+            registers: vec![],
+        })
+        .unwrap();
 
     let step = vm.execute_system_instruction(
         &mut thread,
@@ -94,15 +96,17 @@ fn create_future_for_missing_module_returns_module_not_found_error() {
 fn ret_from_missing_module_returns_module_not_found_error() {
     let graph = BytecodeGraph::new();
     let vm = VirtualMachine::new(sync::Arc::new(graph));
-    let mut thread = crate::thread::VmThreadState::new();
+    let mut thread = crate::thread::VmThreadState::test_new();
 
-    thread.call_stack.push(crate::CallFrame {
-        module_id: ModuleId::new(99),
-        func_idx: FuncIdx(0),
-        pc: 0,
-        return_dest: None,
-        registers: vec![],
-    });
+    thread
+        .push_frame(crate::CallFrame {
+            module_id: ModuleId::new(99),
+            func_idx: FuncIdx(0),
+            pc: 0,
+            return_dest: None,
+            registers: vec![],
+        })
+        .unwrap();
 
     let step = vm.execute_control_instruction(&mut thread, Instruction::RetNull);
     assert!(

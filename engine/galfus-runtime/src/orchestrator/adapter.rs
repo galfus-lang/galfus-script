@@ -1,7 +1,9 @@
 use galfus_contract::{
-    BoundaryValue, ExecutionFailure, ExecutionFailureKind, KernelTask, MessageInjector,
-    RunnableTask, TaskAffinity, ThreadResult,
+    BoundaryValue, ExecutionFailure, ExecutionFailureKind, MessageInjector, RunnableTask,
+    ThreadResult,
 };
+#[cfg(test)]
+use galfus_contract::{KernelTask, TaskAffinity};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -113,6 +115,7 @@ impl RunnableTask for AdapterDispatchTask {
 }
 
 impl ProviderDispatchTask {
+    #[cfg(test)]
     pub(crate) fn into_kernel_task(self, affinity: TaskAffinity) -> KernelTask {
         match affinity {
             TaskAffinity::Main => KernelTask::Main(Box::new(self)),

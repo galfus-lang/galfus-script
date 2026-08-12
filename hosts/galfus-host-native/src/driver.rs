@@ -1,6 +1,7 @@
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use galfus_contract::{
-    ExecutionFailure, ExecutorStepResult, KernelDriver, KernelTask, RunnableTask, ThreadResult,
+    ExecutionFailure, ExecutorStepResult, KernelDriver, KernelTask, LimitsMetadata, RunnableTask,
+    ThreadResult,
 };
 use galfus_runtime::driver::{ExecutionDriver, NativeEventBridge, RuntimeEventSink};
 use std::sync::Arc;
@@ -159,6 +160,13 @@ impl ExecutionDriver for NativeDriver {
 
     fn has_pending_events(&self) -> bool {
         self.event_bridge.has_pending()
+    }
+
+    fn configure_limits(
+        &self,
+        limits: &LimitsMetadata,
+    ) -> Result<(), galfus_runtime::driver::EventDeliveryError> {
+        self.event_bridge.configure_limit(limits.max_event_queue)
     }
 }
 

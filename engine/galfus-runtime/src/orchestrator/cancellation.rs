@@ -10,7 +10,7 @@ impl Orchestrator {
             if let Some(activation) = activation {
                 self.cancel_future_activation(thread_id, future_id, activation);
             }
-            self.future_id_manager.free(future_id);
+            self.free_future_id(future_id);
         }
     }
 
@@ -19,7 +19,7 @@ impl Orchestrator {
             if let Some(activation) = activation {
                 self.cancel_future_activation(thread_id, future_id, activation);
             }
-            self.future_id_manager.free(future_id);
+            self.free_future_id(future_id);
         }
     }
 
@@ -59,7 +59,7 @@ impl Orchestrator {
                         providers.restore_host(host);
                     }
                 }
-                self.request_id_manager.free(request_id);
+                self.free_request_id(request_id);
             }
             Activation::Provider {
                 request_id: None, ..
@@ -92,7 +92,7 @@ impl Orchestrator {
                         }
                     }
                 }
-                self.request_id_manager.free(request_id);
+                self.free_request_id(request_id);
             }
             Activation::Adapter {
                 request_id: None, ..
@@ -127,7 +127,7 @@ impl Orchestrator {
             };
             pending.active.store(false, Ordering::Release);
             if let super::pending::PendingKey::Request(request_id) = key {
-                self.request_id_manager.free(request_id);
+                self.free_request_id(request_id);
             }
             match pending.operation {
                 PendingOperation::Future | PendingOperation::AggregateMember { .. } => {}
@@ -158,11 +158,20 @@ impl Orchestrator {
         self.startup_plans.clear();
         self.thread_exit_waits.clear();
         self.mailbox_future_waits.clear();
+        self.quota
+            .lock()
+            .unwrap()
+            .release_event_queue(self.pending_events.len());
         self.pending_events.clear();
         self.pending_aggregate_finishes.clear();
+        let coordinator_count = self.aggregate_coordinators.len();
         for coordinator_id in self.aggregate_coordinators.drain().map(|(id, _)| id) {
             self.coordinator_id_manager.free(coordinator_id);
         }
+        self.quota
+            .lock()
+            .unwrap()
+            .release_pending_states(coordinator_count);
         self.cancel_and_teardown_all_threads();
         let report = self.close_adapter_bindings();
         self.shutdown_report = Some(report.clone());

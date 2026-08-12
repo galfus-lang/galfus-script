@@ -310,6 +310,36 @@ pub struct RuntimeTask {
     pub future_completion: Option<(registry::ThreadId, galfus_core::FutureLease)>,
 }
 
+pub(crate) struct QuotaTask<T: galfus_contract::RunnableTask> {
+    inner: Option<T>,
+    quota: Arc<std::sync::Mutex<galfus_vm::quota::GlobalQuota>>,
+}
+
+impl<T: galfus_contract::RunnableTask> QuotaTask<T> {
+    pub(crate) fn new(
+        inner: T,
+        quota: Arc<std::sync::Mutex<galfus_vm::quota::GlobalQuota>>,
+    ) -> Self {
+        Self {
+            inner: Some(inner),
+            quota,
+        }
+    }
+}
+
+impl<T: galfus_contract::RunnableTask> galfus_contract::RunnableTask for QuotaTask<T> {
+    fn run(mut self: Box<Self>, budget: usize) -> galfus_contract::ThreadResult {
+        let inner = self.inner.take().unwrap();
+        Box::new(inner).run(budget)
+    }
+}
+
+impl<T: galfus_contract::RunnableTask> Drop for QuotaTask<T> {
+    fn drop(&mut self) {
+        self.quota.lock().unwrap().release_kernel_tasks(1);
+    }
+}
+
 impl RuntimeTask {
     pub(crate) fn new(
         thread_id: registry::ThreadId,

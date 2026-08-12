@@ -1,6 +1,3 @@
-use crate::VmValue;
-use crate::runtime;
-
 use crate::error::VmError;
 use crate::runtime::Value;
 use crate::runtime::{CallFrame, HeapObject, RuntimeModuleState, VisitRoots, VmObjectRef};
@@ -14,33 +11,43 @@ pub struct PrivateHeap {
     allocations_since_release: usize,
     next_id: u64,
     object_to_slot: HashMap<VmObjectRef, usize>,
-}
-
-impl Default for PrivateHeap {
-    fn default() -> Self {
-        Self::new()
-    }
+    pub(crate) quota: std::sync::Arc<std::sync::Mutex<crate::quota::ThreadQuota>>,
 }
 
 impl PrivateHeap {
-    pub fn new() -> Self {
+    pub fn test_new() -> Self {
+        let limits = galfus_contract::LimitsMetadata::default();
+        Self::new(std::sync::Arc::new(std::sync::Mutex::new(
+            crate::quota::ThreadQuota::new(limits),
+        )))
+    }
+
+    pub fn new(quota: std::sync::Arc<std::sync::Mutex<crate::quota::ThreadQuota>>) -> Self {
         Self {
             objects: Vec::new(),
             free_slots: Vec::new(),
             allocations_since_release: 0,
             next_id: 1,
             object_to_slot: HashMap::new(),
+            quota,
         }
     }
 
     pub fn alloc(&mut self, obj: HeapObject) -> Result<VmObjectRef, VmError> {
-        self.allocations_since_release += 1;
-
-        let id = self.next_id;
-        self.next_id = self
+        let next_id = self
             .next_id
             .checked_add(1)
             .ok_or(VmError::IdCounterExhausted)?;
+        self.quota
+            .lock()
+            .unwrap()
+            .try_reserve_heap(1, obj.heap_bytes())
+            .map_err(VmError::ResourceLimitExceeded)?;
+
+        self.allocations_since_release += 1;
+
+        let id = self.next_id;
+        self.next_id = next_id;
         let obj_ref = VmObjectRef(id);
 
         let idx = if let Some(idx) = self.free_slots.pop() {
@@ -89,7 +96,13 @@ impl PrivateHeap {
             .object_to_slot
             .remove(&obj_ref)
             .ok_or(VmError::InvalidObjectReference)?;
-        self.objects[idx] = None;
+
+        if let Some((_, obj)) = self.objects[idx].take() {
+            let mut q = self.quota.lock().unwrap();
+            q.release_heap_objects(1);
+            q.release_heap_bytes(obj.heap_bytes());
+        }
+
         self.free_slots.push(idx);
         Ok(())
     }
@@ -151,13 +164,25 @@ impl PrivateHeap {
     }
 }
 
+impl Drop for PrivateHeap {
+    fn drop(&mut self) {
+        let mut q = self.quota.lock().unwrap();
+        for slot in &mut self.objects {
+            if let Some((_, obj)) = slot.take() {
+                q.release_heap_objects(1);
+                q.release_heap_bytes(obj.heap_bytes());
+            }
+        }
+    }
+}
+
 pub struct VmThreadState {
     pub call_stack: Vec<CallFrame>,
-    pub system_response: Option<VmValue>,
+    pub system_response: Option<crate::VmValue>,
     pub heap: PrivateHeap,
     pub module_states: HashMap<ModuleId, RuntimeModuleState>,
-    pub entry_func: Option<runtime::Value>,
-    pub initializing_module: Option<ModuleId>,
+    pub entry_func: Option<crate::runtime::Value>,
+    pub(crate) initializing_module: Option<ModuleId>,
     /// Adapter handles detached by graph release. The runtime owns dispatching
     /// their adapter release notifications on the main thread.
     pub pending_adapter_handle_drops: Vec<(
@@ -165,25 +190,72 @@ pub struct VmThreadState {
         galfus_core::OpaqueTypeId,
         galfus_core::HandleId,
     )>,
-}
-
-impl Default for VmThreadState {
-    fn default() -> Self {
-        Self::new()
-    }
+    pub is_spawned: bool,
+    pub(crate) global_quota: std::sync::Arc<std::sync::Mutex<crate::quota::GlobalQuota>>,
+    pub(crate) thread_quota: std::sync::Arc<std::sync::Mutex<crate::quota::ThreadQuota>>,
 }
 
 impl VmThreadState {
-    pub fn new() -> Self {
+    pub fn test_new() -> Self {
+        let limits = galfus_contract::LimitsMetadata::default();
+        Self::new(
+            std::sync::Arc::new(std::sync::Mutex::new(crate::quota::GlobalQuota::new(
+                limits.clone(),
+            ))),
+            std::sync::Arc::new(std::sync::Mutex::new(crate::quota::ThreadQuota::new(
+                limits,
+            ))),
+        )
+    }
+
+    pub fn new(
+        global_quota: std::sync::Arc<std::sync::Mutex<crate::quota::GlobalQuota>>,
+        thread_quota: std::sync::Arc<std::sync::Mutex<crate::quota::ThreadQuota>>,
+    ) -> Self {
         Self {
             call_stack: Vec::new(),
             system_response: None,
-            heap: PrivateHeap::new(),
+            heap: PrivateHeap::new(thread_quota.clone()),
             module_states: HashMap::new(),
             entry_func: None,
             initializing_module: None,
             pending_adapter_handle_drops: Vec::new(),
+            is_spawned: false,
+            global_quota,
+            thread_quota,
         }
+    }
+
+    pub fn mark_spawned(&mut self) -> Result<(), galfus_contract::ExecutionFailureKind> {
+        self.global_quota().lock().unwrap().try_reserve_threads(1)?;
+        self.is_spawned = true;
+        Ok(())
+    }
+
+    pub fn push_frame(&mut self, frame: CallFrame) -> Result<(), crate::error::VmError> {
+        self.thread_quota()
+            .lock()
+            .unwrap()
+            .try_reserve_call_depth(1)
+            .map_err(crate::error::VmError::ResourceLimitExceeded)?;
+        self.call_stack.push(frame);
+        Ok(())
+    }
+
+    pub fn pop_frame(&mut self) -> Option<CallFrame> {
+        let frame = self.call_stack.pop();
+        if frame.is_some() {
+            self.thread_quota().lock().unwrap().release_call_depth(1);
+        }
+        frame
+    }
+
+    pub fn global_quota(&self) -> &std::sync::Arc<std::sync::Mutex<crate::quota::GlobalQuota>> {
+        &self.global_quota
+    }
+
+    pub fn thread_quota(&self) -> &std::sync::Arc<std::sync::Mutex<crate::quota::ThreadQuota>> {
+        &self.thread_quota
     }
 
     pub fn module_state(&self, module_id: ModuleId) -> Option<&RuntimeModuleState> {
@@ -287,5 +359,17 @@ impl VisitRoots for VmThreadState {
         if let Some(ref entry) = self.entry_func {
             entry.visit_roots(visitor);
         }
+    }
+}
+
+impl Drop for VmThreadState {
+    fn drop(&mut self) {
+        if self.is_spawned {
+            self.global_quota().lock().unwrap().release_threads(1);
+        }
+        self.thread_quota()
+            .lock()
+            .unwrap()
+            .release_call_depth(self.call_stack.len());
     }
 }

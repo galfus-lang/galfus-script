@@ -35,40 +35,47 @@ pub fn compile_workspace(root: &str, target: &str, out: &str, profile: &str) -> 
     if !report.is_valid {
         bail!("workspace validation failed: {:?}", report.diagnostics);
     }
-    
+
     let compile_report = workspace
         .compile()
         .map_err(|error| anyhow::anyhow!("workspace compilation failed: {error:?}"))?;
-        
-    let bytecode = compile_report.package.to_bytecode()
+
+    let bytecode = compile_report
+        .package
+        .to_bytecode()
         .map_err(|error| anyhow::anyhow!("failed to encode bytecode: {:?}", error))?;
-        
+
     let mut host_name = format!("galfus-{}-{}", target, profile);
     if target.contains("windows") {
         host_name.push_str(".exe");
     }
-    
+
     let host_path = Path::new("build").join(host_name);
     if !host_path.exists() {
-        bail!("Host executable not found at {:?}. Please build it first using `bun cmd hosts build --target {} -p {}`", host_path, target, profile);
+        bail!(
+            "Host executable not found at {:?}. Please build it first using `bun cmd hosts build --target {} -p {}`",
+            host_path,
+            target,
+            profile
+        );
     }
-    
+
     let host_bytes = fs::read(&host_path)
         .with_context(|| format!("failed to read host binary at {:?}", host_path))?;
-        
+
     let mut out_file = fs::File::create(out)
         .with_context(|| format!("failed to create output file at {}", out))?;
-        
+
     use std::io::Write;
     out_file.write_all(&host_bytes)?;
     out_file.write_all(&bytecode)?;
-    
+
     let payload_size = bytecode.len() as u64;
     out_file.write_all(&payload_size.to_le_bytes())?;
-    
+
     const MAGIC_MARKER: &[u8; 8] = b"GLFS_PKG";
     out_file.write_all(MAGIC_MARKER)?;
-    
+
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -76,9 +83,9 @@ pub fn compile_workspace(root: &str, target: &str, out: &str, profile: &str) -> 
         perms.set_mode(0o755);
         out_file.set_permissions(perms)?;
     }
-    
+
     println!("Successfully compiled standalone executable to {}", out);
-    
+
     Ok(())
 }
 
@@ -95,7 +102,9 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
         .iter()
         .map(|argument| argument.as_bytes().to_vec())
         .collect::<Vec<_>>();
-    let executor = std::rc::Rc::new(CooperativeDriver::new());
+    let executor = std::rc::Rc::new(CooperativeDriver::with_event_queue_capacity(
+        compile_report.package.limits().max_event_queue,
+    ));
 
     let mut properties = std::collections::BTreeMap::new();
     properties.insert("os".to_string(), std::env::consts::OS.to_string());
@@ -177,8 +186,9 @@ fn load_source_file(file: &Path) -> Result<Workspace> {
     let source = fs::read(file.as_path())?;
 
     let mut workspace = workspace_with_native_io_catalog();
-    let config =
-        format!("[module]\nname = \"single-file\"\ntarget = \"app\"\nentry = \"{module_path}\"\n");
+    let config = format!(
+        "[module]\nname = \"single-file\"\ntarget = \"app\"\n[entry]\npath = \"{module_path}\"\n"
+    );
     if let LoadResult::Diagnostics(diagnostics) = workspace
         .load_config(config.as_bytes())
         .map_err(|error| anyhow::anyhow!("workspace configuration error: {error:?}"))?

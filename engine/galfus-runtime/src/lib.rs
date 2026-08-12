@@ -37,6 +37,8 @@ pub use preflight::{AdapterBindingPreflight, PreflightError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
+    #[error("execution driver cannot provide the requested event queue capacity {requested}")]
+    EventQueueCapacityExceeded { requested: usize },
     #[error("package has no configured entry point")]
     MissingPackageEntry,
     #[error("module `{0}` is not loaded")]
@@ -139,8 +141,16 @@ impl Runtime {
         validate_numeric_semantics(package.versions().numeric_semantics())
             .map_err(RuntimeError::NumericSemantics)?;
         preflight_capabilities(&package, providers.as_ref(), &adapter_bindings)?;
+        driver.configure_limits(package.limits()).map_err(|_| {
+            RuntimeError::EventQueueCapacityExceeded {
+                requested: package.limits().max_event_queue,
+            }
+        })?;
 
-        let mut orchestrator = crate::orchestrator::Orchestrator::new();
+        let quota = std::sync::Arc::new(std::sync::Mutex::new(galfus_vm::quota::GlobalQuota::new(
+            package.limits().clone(),
+        )));
+        let mut orchestrator = crate::orchestrator::Orchestrator::new(quota.clone());
         let entry = package
             .entry_point()
             .ok_or(RuntimeError::MissingPackageEntry)?;
@@ -183,7 +193,10 @@ impl Runtime {
             });
         }
 
-        let mut thread = galfus_vm::thread::VmThreadState::new();
+        let thread_quota = std::sync::Arc::new(std::sync::Mutex::new(
+            galfus_vm::quota::ThreadQuota::new(package.limits().clone()),
+        ));
+        let mut thread = galfus_vm::thread::VmThreadState::new(quota.clone(), thread_quota);
         let vm = VirtualMachine::new(graph.clone()).with_provider_handle(providers);
 
         let mut initializers = VecDeque::new();
@@ -245,7 +258,8 @@ impl Runtime {
         orchestrator.set_driver(driver.clone());
         orchestrator
             .kernel_mut()
-            .enqueue_runnable(root_thread_id, root_thread);
+            .enqueue_runnable(root_thread_id, root_thread)
+            .unwrap();
 
         let initialization_complete = orchestrator.initialization_complete();
         Ok(Execution::new(

@@ -1,3 +1,4 @@
+use galfus_contract::LimitsMetadata;
 mod adapters;
 
 use std::collections;
@@ -8,7 +9,7 @@ use galfus_bytecode::instruction::{ConstIdx, FuncIdx, GlobalIdx, Instruction, Re
 use galfus_bytecode::{
     BytecodeFunction, BytecodeGraph, BytecodeModule, BytecodeNode, BytecodeType, Constant,
     ConstantPool, ExecutionMetadata, ExportSlot, ImportEdge, ImportSlot, PackageEntryPoint,
-    PackageImage,
+    PackageImage, PackageMetadata,
 };
 use galfus_contract::{
     AdapterLoadContext, CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget, ProviderModuleRequirement,
@@ -192,6 +193,13 @@ fn package_with_entry(
             (*graph).clone(),
             target(),
             Some(PackageEntryPoint::new(module_path, "main")),
+            galfus_bytecode::PackageMetadata {
+                name: "test".into(),
+                version: None,
+                author: None,
+                description: None,
+            },
+            galfus_contract::LimitsMetadata::default(),
             Vec::new(),
             Vec::new(),
         )
@@ -213,6 +221,13 @@ fn package_with_required_provider(
             (*graph).clone(),
             target(),
             Some(PackageEntryPoint::new(module_path, "main")),
+            galfus_bytecode::PackageMetadata {
+                name: "test".into(),
+                version: None,
+                author: None,
+                description: None,
+            },
+            galfus_contract::LimitsMetadata::default(),
             Vec::new(),
             vec![ProviderModuleRequirement {
                 module_path: "std/io".to_string(),
@@ -243,8 +258,21 @@ fn runtime_rejects_an_unsupported_bytecode_format_before_loading_the_entry_modul
         BytecodeGraph::with_format_version(galfus_bytecode::BytecodeFormatVersion::new(1, 0, 0));
 
     let package = sync::Arc::new(
-        PackageImage::try_new(graph, target(), None, Vec::new(), Vec::new())
-            .expect("graph has no adapter proxies"),
+        PackageImage::try_new(
+            graph,
+            target(),
+            None,
+            PackageMetadata {
+                name: "test".into(),
+                version: None,
+                author: None,
+                description: None,
+            },
+            LimitsMetadata::default(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("graph has no adapter proxies"),
     );
     let result = Runtime::new(package, RuntimeCapabilities::builder().build())
         .start(&[], std::rc::Rc::new(CooperativeDriver::new()));
@@ -649,6 +677,13 @@ fn run_initializes_dependencies_before_the_entry_module() {
                 ModulePath::new("main.gfs").expect("valid module path"),
                 "main",
             )),
+            galfus_bytecode::PackageMetadata {
+                name: "test".into(),
+                version: None,
+                author: None,
+                description: None,
+            },
+            galfus_contract::LimitsMetadata::default(),
             Vec::new(),
             Vec::new(),
         )

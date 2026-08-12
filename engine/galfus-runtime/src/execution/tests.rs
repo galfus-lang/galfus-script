@@ -113,7 +113,7 @@ impl AdapterModuleBinding for FailingReleaseAdapter {
 
 #[test]
 fn execution_transitions_from_created_to_running_and_preserves_completion() {
-    let orchestrator = Orchestrator::new();
+    let orchestrator = Orchestrator::test_new();
     let mut execution = Execution::new(
         orchestrator,
         Rc::new(IdleDriver::new()),
@@ -138,7 +138,7 @@ fn execution_transitions_from_created_to_running_and_preserves_completion() {
 #[test]
 fn execution_shutdown_is_idempotent_and_preserves_its_final_report() {
     let mut execution = Execution::new(
-        Orchestrator::new(),
+        Orchestrator::test_new(),
         Rc::new(IdleDriver::new()),
         Arc::new(AtomicBool::new(true)),
         false,
@@ -161,7 +161,7 @@ fn dropping_an_incomplete_execution_notifies_the_driver_of_shutdown_failure() {
     let driver = Rc::new(IdleDriver::new());
     let exits = Arc::clone(&driver.exits);
     let execution = Execution::new(
-        Orchestrator::new(),
+        Orchestrator::test_new(),
         driver,
         Arc::new(AtomicBool::new(true)),
         false,
@@ -191,7 +191,7 @@ fn execution_shutdown_reports_adapter_handle_teardown() {
         .register_handle(binding_id, type_id, HandleId::new(1))
         .expect("handle registers");
 
-    let mut orchestrator = Orchestrator::new();
+    let mut orchestrator = Orchestrator::test_new();
     orchestrator.set_adapter_bindings(Some(Arc::new(std::sync::Mutex::new(bindings))));
     let mut execution = Execution::new(
         orchestrator,
@@ -218,7 +218,7 @@ fn execution_shutdown_propagates_adapter_teardown_failures() {
         .register_handle(binding_id, type_id, HandleId::new(1))
         .expect("handle registers");
 
-    let mut orchestrator = Orchestrator::new();
+    let mut orchestrator = Orchestrator::test_new();
     orchestrator.set_adapter_bindings(Some(Arc::new(std::sync::Mutex::new(bindings))));
     let mut execution = Execution::new(
         orchestrator,
@@ -239,15 +239,16 @@ fn execution_shutdown_propagates_adapter_teardown_failures() {
 #[test]
 fn execution_remains_initializing_until_the_orchestrator_signal() {
     let initialization_complete = Arc::new(AtomicBool::new(false));
-    let mut orchestrator = Orchestrator::new();
+    let mut orchestrator = Orchestrator::test_new();
     let thread_id = orchestrator
         .kernel_mut()
-        .spawn(galfus_vm::thread::VmThreadState::new(), None)
+        .spawn(galfus_vm::thread::VmThreadState::test_new(), None)
         .unwrap();
     let thread = orchestrator.kernel_mut().take_thread(thread_id).unwrap();
     orchestrator
         .kernel_mut()
-        .enqueue_runnable(thread_id, thread);
+        .enqueue_runnable(thread_id, thread)
+        .unwrap();
 
     let driver = Rc::new(IdleDriver::new());
     orchestrator.set_vm(Arc::new(galfus_vm::VirtualMachine::new(Default::default())));
@@ -264,7 +265,7 @@ fn execution_remains_initializing_until_the_orchestrator_signal() {
 
 #[test]
 fn cancellation_transitions_the_execution_to_cancelled() {
-    let orchestrator = Orchestrator::new();
+    let orchestrator = Orchestrator::test_new();
     let mut execution = Execution::new(
         orchestrator,
         Rc::new(IdleDriver::new()),
@@ -284,10 +285,10 @@ fn cancellation_transitions_the_execution_to_cancelled() {
 
 #[test]
 fn execution_drops_orchestrator_and_sets_failed_state_on_error() {
-    let mut orchestrator = Orchestrator::new();
+    let mut orchestrator = Orchestrator::test_new();
     let thread_id = orchestrator
         .kernel_mut()
-        .spawn(galfus_vm::thread::VmThreadState::new(), None)
+        .spawn(galfus_vm::thread::VmThreadState::test_new(), None)
         .unwrap();
     orchestrator.set_root_thread(thread_id);
     let thread = orchestrator.kernel_mut().take_thread(thread_id).unwrap();

@@ -45,9 +45,15 @@ impl RunnableQueue {
         self.queue.len()
     }
 
-    pub fn remove(&mut self, id: ThreadId) {
+    pub fn contains(&self, id: ThreadId) -> bool {
+        self.queued.contains(&id)
+    }
+
+    pub fn remove(&mut self, id: ThreadId) -> bool {
+        let initial_len = self.queue.len();
         self.queue.retain(|(queued, _)| *queued != id);
         self.queued.remove(&id);
+        initial_len != self.queue.len()
     }
 }
 
@@ -83,16 +89,17 @@ impl BlockedQueue {
         }
     }
 
-    pub fn block(&mut self, id: ThreadId) {
-        self.remove_timer(id);
+    pub fn block(&mut self, id: ThreadId) -> bool {
+        let had_timer = self.remove_timer(id).is_some();
         self.blocked.insert(id);
+        had_timer
     }
 
     pub fn block_with_timeout(
         &mut self,
         id: ThreadId,
         timeout_ms: u64,
-    ) -> Result<(), ExecutionFailure> {
+    ) -> Result<bool, ExecutionFailure> {
         let timer_id = self.timer_id_manager.try_allocate().ok_or_else(|| {
             ExecutionFailure::new(
                 ExecutionFailureKind::IdSpaceExhausted,
@@ -104,27 +111,32 @@ impl BlockedQueue {
             timer_id,
             thread_id: id,
         };
-        self.remove_timer(id);
+        let had_timer = self.remove_timer(id).is_some();
         self.blocked.insert(id);
         self.timers.insert(timer);
         self.active_timers.insert(id, timer);
-        Ok(())
+        Ok(had_timer)
     }
 
-    pub fn unblock(&mut self, id: ThreadId) -> bool {
-        self.remove_timer(id);
-        self.blocked.remove(&id)
+    pub fn unblock(&mut self, id: ThreadId) -> (bool, bool) {
+        let had_timer = self.remove_timer(id).is_some();
+        let was_blocked = self.blocked.remove(&id);
+        (was_blocked, had_timer)
     }
 
-    pub fn remove(&mut self, id: ThreadId) {
-        self.remove_timer(id);
-        self.blocked.remove(&id);
+    pub fn remove(&mut self, id: ThreadId) -> Option<bool> {
+        let had_timer = self.remove_timer(id).is_some();
+        let was_blocked = self.blocked.remove(&id);
+        if was_blocked { Some(had_timer) } else { None }
     }
 
-    fn remove_timer(&mut self, id: ThreadId) {
+    fn remove_timer(&mut self, id: ThreadId) -> Option<TimerEntry> {
         if let Some(timer) = self.active_timers.remove(&id) {
             self.timers.remove(&timer);
             self.timer_id_manager.free(timer.timer_id);
+            Some(timer)
+        } else {
+            None
         }
     }
 
