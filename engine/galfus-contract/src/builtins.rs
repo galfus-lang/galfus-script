@@ -3,9 +3,11 @@ pub const THREAD_SOURCE: &str = include_str!("../builtins/internals/thread.gfs")
 pub const MATH_SOURCE: &str = include_str!("../builtins/internals/math.gfs");
 pub const CONSTRAINTS_SOURCE: &str = include_str!("../builtins/internals/constraints.gfs");
 pub const ITERABLE_SOURCE: &str = include_str!("../builtins/internals/iterable.gfs");
+
 pub const TEXT_SOURCE: &str = include_str!("../builtins/utilities/text.gfs");
 pub const FORMAT_SOURCE: &str = include_str!("../builtins/utilities/format.gfs");
 pub const FORMAT_ANSI_SOURCE: &str = include_str!("../builtins/utilities/format/ansi.gfs");
+
 pub const STD_IO_SOURCE: &str = include_str!("../builtins/bridges/io.gfs");
 pub const STD_TIME_SOURCE: &str = include_str!("../builtins/bridges/time.gfs");
 pub const STD_ENV_SOURCE: &str = include_str!("../builtins/bridges/env.gfs");
