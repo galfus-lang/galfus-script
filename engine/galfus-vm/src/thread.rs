@@ -207,9 +207,27 @@ impl VmThreadState {
         }
     }
 
-    pub fn mark_spawned(&mut self) {
+    pub fn mark_spawned(&mut self) -> Result<(), galfus_contract::ExecutionFailureKind> {
+        self.quota().lock().unwrap().try_reserve_threads(1)?;
         self.is_spawned = true;
+        Ok(())
     }
+
+    pub fn push_frame(&mut self, frame: CallFrame) -> Result<(), crate::error::VmError> {
+        self.quota().lock().unwrap().try_reserve_call_depth(1)
+            .map_err(crate::error::VmError::ResourceLimitExceeded)?;
+        self.call_stack.push(frame);
+        Ok(())
+    }
+
+    pub fn pop_frame(&mut self) -> Option<CallFrame> {
+        let frame = self.call_stack.pop();
+        if frame.is_some() {
+            self.quota().lock().unwrap().release_call_depth(1);
+        }
+        frame
+    }
+
 
     pub fn quota(&self) -> &std::sync::Arc<std::sync::Mutex<crate::quota::RuntimeQuota>> {
         &self.heap.quota
@@ -316,5 +334,14 @@ impl VisitRoots for VmThreadState {
         if let Some(ref entry) = self.entry_func {
             entry.visit_roots(visitor);
         }
+    }
+}
+
+impl Drop for VmThreadState {
+    fn drop(&mut self) {
+        if self.is_spawned {
+            self.quota().lock().unwrap().release_threads(1);
+        }
+        self.quota().lock().unwrap().release_call_depth(self.call_stack.len());
     }
 }

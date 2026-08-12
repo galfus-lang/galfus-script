@@ -16,9 +16,9 @@ fn expired_timers_are_enqueued_in_deterministic_order() {
         kernel.block(thread_id, thread, Some(timeout_ms)).unwrap();
     }
 
-    assert_eq!(kernel.tick(5), vec![earlier]);
+    assert_eq!(kernel.tick(5), vec![(earlier, Ok(()))]);
     assert_eq!(kernel.next_runnable(), Some(earlier));
-    assert_eq!(kernel.tick(5), vec![first, second]);
+    assert_eq!(kernel.tick(5), vec![(first, Ok(())), (second, Ok(()))]);
     assert_eq!(kernel.next_runnable(), Some(first));
     assert_eq!(kernel.next_runnable(), Some(second));
 }
@@ -46,7 +46,7 @@ fn mailbox_wakeups_keep_their_arrival_order() {
                 sender_id: galfus_core::ThreadId::new(0),
                 data: vec![thread_id.raw() as u8],
             });
-        assert!(kernel.unblock(thread_id));
+        assert!(kernel.unblock(thread_id).unwrap());
     }
 
     assert_eq!(kernel.next_runnable(), Some(second));

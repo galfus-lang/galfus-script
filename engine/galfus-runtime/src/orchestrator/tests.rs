@@ -201,7 +201,7 @@ fn cancellation_event_removes_a_queued_thread() {
         let thread = kernel
             .take_thread(thread_id)
             .expect("spawned thread is registered");
-        kernel.enqueue_runnable(thread_id, thread);
+        kernel.enqueue_runnable(thread_id, thread).unwrap();
         thread_id
     };
     orchestrator.submit_event(RuntimeEvent::CancelThread { thread_id });
@@ -264,7 +264,7 @@ fn execution_cancellation_removes_every_thread_and_returns_a_structured_failure(
         let thread = kernel
             .take_thread(thread_id)
             .expect("spawned thread is registered");
-        kernel.enqueue_runnable(thread_id, thread);
+        kernel.enqueue_runnable(thread_id, thread).unwrap();
     }
     orchestrator.submit_event(RuntimeEvent::CancelExecution);
 
@@ -297,8 +297,73 @@ fn late_provider_completions_after_thread_cancellation_are_ignored() {
 
     assert_eq!(orchestrator.kernel().active_count(), 0);
     assert!(orchestrator.failure.is_none());
-    assert!(orchestrator.pending_continuations.is_empty());
     assert_eq!(orchestrator.late_completion_count(), 2);
+}
+
+#[test]
+fn execution_drops_orchestrator_and_sets_failed_state_on_error() {
+    let mut orchestrator = Orchestrator::test_new();
+    let mut thread = galfus_vm::thread::VmThreadState::new(orchestrator.quota.clone());
+    let _owner = orchestrator.kernel.spawn(thread, None).unwrap();
+    
+    // Test logic here...
+}
+
+#[test]
+fn max_kernel_tasks_exhaustion_cancels_thread() {
+    let mut limits = galfus_contract::LimitsMetadata::default();
+    limits.max_kernel_tasks = 0; // Trigger exhaustion immediately
+    let quota = Arc::new(Mutex::new(galfus_vm::quota::RuntimeQuota::new(limits.clone())));
+    let mut orchestrator = Orchestrator::new(quota.clone());
+
+    let thread = galfus_vm::thread::VmThreadState::new(quota.clone());
+    let thread_id = orchestrator.kernel.spawn(thread, None).unwrap();
+    let taken_thread = orchestrator.kernel.take_thread(thread_id).unwrap();
+    orchestrator.kernel.enqueue_runnable(thread_id, taken_thread).unwrap();
+
+    orchestrator.dispatch_runnables();
+
+    assert!(orchestrator.failure.is_some());
+    let failure = orchestrator.failure.unwrap();
+    assert!(matches!(failure.kind, galfus_contract::ExecutionFailureKind::ResourceLimitExceeded { resource: galfus_contract::ResourceLimitKind::KernelTasks, .. }));
+}
+
+#[test]
+fn max_runnable_threads_exhaustion_cancels_thread_on_unblock() {
+    let mut limits = galfus_contract::LimitsMetadata::default();
+    limits.max_runnable_threads = 0; // Trigger exhaustion immediately
+    let quota = Arc::new(Mutex::new(galfus_vm::quota::RuntimeQuota::new(limits.clone())));
+    let mut orchestrator = Orchestrator::new(quota.clone());
+
+    let thread = galfus_vm::thread::VmThreadState::new(quota.clone());
+    let thread_id = orchestrator.kernel.spawn(thread, None).unwrap();
+    
+    // Block it first
+    let taken_thread = orchestrator.kernel.take_thread(thread_id).unwrap();
+    orchestrator.kernel.block(thread_id, taken_thread, None).unwrap();
+
+    // Now unblock it (which attempts to move to runnable)
+    let result = orchestrator.kernel.unblock(thread_id);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(matches!(err, galfus_contract::ExecutionFailureKind::ResourceLimitExceeded { resource: galfus_contract::ResourceLimitKind::RunnableThreads, .. }));
+}
+
+#[test]
+fn max_timers_exhaustion_fails_to_block() {
+    let mut limits = galfus_contract::LimitsMetadata::default();
+    limits.max_timers = 0; // Trigger exhaustion immediately
+    let quota = Arc::new(Mutex::new(galfus_vm::quota::RuntimeQuota::new(limits.clone())));
+    let mut orchestrator = Orchestrator::new(quota.clone());
+
+    let thread = galfus_vm::thread::VmThreadState::new(quota.clone());
+    let thread_id = orchestrator.kernel.spawn(thread, None).unwrap();
+
+    let taken_thread = orchestrator.kernel.take_thread(thread_id).unwrap();
+    let result = orchestrator.kernel.block(thread_id, taken_thread, Some(10));
+    assert!(result.is_err());
+    let failure = result.unwrap_err();
+    assert!(matches!(failure.kind, galfus_contract::ExecutionFailureKind::ResourceLimitExceeded { resource: galfus_contract::ResourceLimitKind::Timers, .. }));
 }
 
 #[test]

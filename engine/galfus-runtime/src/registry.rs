@@ -161,8 +161,14 @@ impl ThreadRegistry {
         self.tcbs.get(&id).map(|tcb| tcb.state.clone())
     }
 
-    pub fn mark_spawned(&mut self, id: ThreadId) {
+    pub fn mark_spawned(&mut self, id: ThreadId) -> Result<(), galfus_contract::ExecutionFailureKind> {
+        if let Some(tcb) = self.tcbs.get_mut(&id) {
+            if let Some(ref mut thread) = tcb.vm_state {
+                thread.mark_spawned()?;
+            }
+        }
         self.spawned_since_observation.insert(id);
+        Ok(())
     }
 
     pub fn is_running(&self, id: ThreadId) -> bool {
@@ -194,6 +200,20 @@ impl ThreadRegistry {
             if tcb.state.is_exited() {
                 return false;
             }
+            let mut released_messages = 0;
+            let mut released_bytes = 0;
+            if let Some(ref mailbox) = tcb.mailbox {
+                for msg in mailbox.lock().unwrap().drain(..) {
+                    released_messages += 1;
+                    released_bytes += msg.data.len();
+                }
+            }
+            if let Some(ref vm_state) = tcb.vm_state {
+                let mut quota = vm_state.quota().lock().unwrap();
+                quota.release_mailbox_messages(released_messages);
+                quota.release_mailbox_bytes(released_bytes);
+            }
+            
             tcb.vm_state = None;
             tcb.mailbox = None;
             tcb.state = ThreadState::Exited(result);

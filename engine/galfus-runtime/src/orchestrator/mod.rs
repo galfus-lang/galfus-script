@@ -123,6 +123,18 @@ pub(crate) struct Orchestrator {
     quota: std::sync::Arc<std::sync::Mutex<galfus_vm::quota::RuntimeQuota>>,
 }
 
+impl Orchestrator {
+    pub(crate) fn free_future_id(&mut self, future_id: galfus_core::FutureId) {
+        self.future_id_manager.free(future_id);
+        self.quota.lock().unwrap().release_futures(1);
+    }
+
+    pub(crate) fn free_request_id(&mut self, request_id: galfus_core::RequestId) {
+        self.request_id_manager.free(request_id);
+        self.quota.lock().unwrap().release_pending_requests(1);
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum AggregateMode {
     All,
@@ -233,6 +245,7 @@ impl Orchestrator {
             .last_key_value()
             .map(|(sequence, _)| sequence.next().expect("event sequence space exhausted"))
             .unwrap_or(self.next_event_sequence);
+        self.quota.lock().unwrap().try_reserve_event_queue(1).unwrap();
         self.pending_events.insert(sequence, event);
     }
 
@@ -303,7 +316,10 @@ impl Orchestrator {
             self.cancel_and_teardown_thread(thread_id);
             return;
         }
-        self.kernel.enqueue_runnable(thread_id, thread);
+        if let Err(e) = self.kernel.enqueue_runnable(thread_id, thread) {
+            self.failure = Some(ExecutionFailure::new(e, "runnable threads limit exceeded").with_thread_id(thread_id));
+            self.cancel_and_teardown_thread(thread_id);
+        }
     }
 
     pub(super) fn resume_or_fail_front(
@@ -320,8 +336,12 @@ impl Orchestrator {
             .resume(thread_id, &mut thread, continuation, value);
         match result {
             Ok(()) => {
-                self.kernel.enqueue_runnable_front(thread_id, thread);
-                self.dispatch_runnables();
+                if let Err(e) = self.kernel.enqueue_runnable_front(thread_id, thread) {
+                    self.failure = Some(ExecutionFailure::new(e, "runnable threads limit exceeded").with_thread_id(thread_id));
+                    self.cancel_and_teardown_thread(thread_id);
+                } else {
+                    self.dispatch_runnables();
+                }
             }
             Err(error) => {
                 self.failure = Some(with_execution_stack(
@@ -370,7 +390,7 @@ impl Orchestrator {
         self.resume_pending(thread_id, pending, result, key);
         self.completion_metrics.accepted += 1;
         if let PendingKey::Request(request_id) = key {
-            self.request_id_manager.free(request_id);
+            self.free_request_id(request_id);
         }
     }
 
@@ -389,7 +409,11 @@ impl Orchestrator {
             self.complete_aggregate_member(coordinator_id, index, result);
             return;
         }
-        self.kernel.unblock(thread_id);
+        if let Err(e) = self.kernel.unblock(thread_id) {
+            self.failure = Some(ExecutionFailure::new(e, "runnable threads limit exceeded").with_thread_id(thread_id));
+            self.cancel_and_teardown_thread(thread_id);
+            return;
+        }
         let Some(mut thread) = self.kernel.take_thread(thread_id) else {
             return;
         };
@@ -538,25 +562,12 @@ impl Orchestrator {
         };
         if let (Some(proxy_module), Ok(value)) = (adapter_proxy_module, &result) {
             if let Err(error) = self.register_adapter_handles(&proxy_module, value) {
-                let kind = match error {
-                    galfus_contract::AdapterBindingError::IdSpaceExhausted { .. } => {
-                        ExecutionFailureKind::IdSpaceExhausted
-                    }
-                    galfus_contract::AdapterBindingError::DuplicateProxyModule(_)
-                    | galfus_contract::AdapterBindingError::InvalidHandle
-                    | galfus_contract::AdapterBindingError::HandlesStillActive => {
-                        ExecutionFailureKind::BoundaryCodecFailure
-                    }
-                    galfus_contract::AdapterBindingError::CompensationReleaseFailed(_) => {
-                        ExecutionFailureKind::AdapterCallFailure
-                    }
-                };
                 self.failure = Some(
-                    ExecutionFailure::new(kind, error.to_string())
+                    error
                         .with_thread_id(thread_id)
                         .with_future_id(future_id),
                 );
-                self.cancel_and_teardown_thread(thread_id);
+                self.kernel.cancel(thread_id);
                 return;
             }
         }
@@ -576,20 +587,45 @@ impl Orchestrator {
         &mut self,
         proxy_module: &str,
         value: &BoundaryValue,
-    ) -> Result<(), galfus_contract::AdapterBindingError> {
+    ) -> Result<(), galfus_contract::ExecutionFailure> {
         let mut handles = Vec::new();
         collect_adapter_handles(value, &mut handles);
         if handles.is_empty() {
             return Ok(());
         }
+        if let Err(e) = self.quota.lock().unwrap().try_reserve_external_handles(handles.len()) {
+            return Err(galfus_contract::ExecutionFailure::new(e, "external handles limit exceeded"));
+        }
         let Some(bindings) = &self.adapter_bindings else {
-            return Err(galfus_contract::AdapterBindingError::InvalidHandle);
+            return Err(galfus_contract::ExecutionFailure::new(
+                ExecutionFailureKind::BoundaryCodecFailure,
+                "invalid handle: no adapter bindings",
+            ));
         };
         let mut bindings = bindings.lock().unwrap();
         let Some(binding_id) = bindings.binding_id(proxy_module) else {
-            return Err(galfus_contract::AdapterBindingError::InvalidHandle);
+            return Err(galfus_contract::ExecutionFailure::new(
+                ExecutionFailureKind::BoundaryCodecFailure,
+                "invalid handle: unknown proxy module",
+            ));
         };
-        bindings.register_handles(binding_id, &handles)
+        if let Err(error) = bindings.register_handles(binding_id, &handles) {
+            let kind = match error {
+                galfus_contract::AdapterBindingError::IdSpaceExhausted { .. } => {
+                    ExecutionFailureKind::IdSpaceExhausted
+                }
+                galfus_contract::AdapterBindingError::DuplicateProxyModule(_)
+                | galfus_contract::AdapterBindingError::InvalidHandle
+                | galfus_contract::AdapterBindingError::HandlesStillActive => {
+                    ExecutionFailureKind::BoundaryCodecFailure
+                }
+                galfus_contract::AdapterBindingError::CompensationReleaseFailed(_) => {
+                    ExecutionFailureKind::AdapterCallFailure
+                }
+            };
+            return Err(galfus_contract::ExecutionFailure::new(kind, error.to_string()));
+        }
+        Ok(())
     }
 
     pub(super) fn register_thread_exit_future(
@@ -792,7 +828,7 @@ impl Orchestrator {
                         activation,
                     );
                 }
-                self.future_id_manager.free(future_id);
+                self.free_future_id(future_id);
             }
         }
         self.resume_pending(
@@ -823,15 +859,24 @@ impl Orchestrator {
         };
         self.kernel.mark_running(thread_id);
 
-        let task = Box::new(RuntimeTask::new(
-            thread_id,
-            thread,
-            self.vm.as_ref().unwrap().clone(),
-            self.event_sink
-                .as_ref()
-                .expect("event sink is configured before execution")
-                .clone(),
-            self.future_workers.get(&thread_id).copied(),
+        if let Err(e) = self.quota.lock().unwrap().try_reserve_kernel_tasks(1) {
+            self.failure = Some(ExecutionFailure::new(e, "kernel tasks limit exceeded").with_thread_id(thread_id));
+            self.kernel.cancel(thread_id);
+            return;
+        }
+
+        let task = Box::new(crate::task::QuotaTask::new(
+            RuntimeTask::new(
+                thread_id,
+                thread,
+                self.vm.as_ref().unwrap().clone(),
+                self.event_sink
+                    .as_ref()
+                    .expect("event sink is configured before execution")
+                    .clone(),
+                self.future_workers.get(&thread_id).copied(),
+            ),
+            self.quota.clone()
         ));
 
         let kernel_task = KernelTask::Any(task);
@@ -853,6 +898,10 @@ impl Orchestrator {
             if sequence < self.next_event_sequence {
                 continue;
             }
+            if let Err(e) = self.quota.lock().unwrap().try_reserve_event_queue(1) {
+                self.failure = Some(ExecutionFailure::new(e, "event queue quota exceeded"));
+                return;
+            }
             if self.pending_events.insert(sequence, event).is_some() {
                 self.failure = Some(ExecutionFailure::new(
                     ExecutionFailureKind::InvalidContinuation,
@@ -863,6 +912,7 @@ impl Orchestrator {
         }
 
         while let Some(event) = self.pending_events.remove(&self.next_event_sequence) {
+            self.quota.lock().unwrap().release_event_queue(1);
             let sequence = self.next_event_sequence;
             self.next_event_sequence = self
                 .next_event_sequence
@@ -896,7 +946,10 @@ impl Orchestrator {
                     .kernel
                     .take_thread(id)
                     .expect("spawned thread is registered");
-                self.kernel.enqueue_runnable(id, thread);
+                if let Err(e) = self.kernel.enqueue_runnable(id, thread) {
+                    self.failure = Some(ExecutionFailure::new(e, "runnable threads limit exceeded").with_thread_id(id));
+                    self.cancel_and_teardown_thread(id);
+                }
             }
             RuntimeEvent::Exited {
                 thread_id,
@@ -987,7 +1040,13 @@ impl Orchestrator {
                 }
             }
             RuntimeEvent::Tick { delta_ms } => {
-                self.kernel.tick(delta_ms);
+                let woke_up = self.kernel.tick(delta_ms);
+                for (id, result) in woke_up {
+                    if let Err(e) = result {
+                        self.failure = Some(ExecutionFailure::new(e, "runnable threads limit exceeded").with_thread_id(id));
+                        self.cancel_and_teardown_thread(id);
+                    }
+                }
                 self.expire_mailbox_future_waits(delta_ms);
             }
             RuntimeEvent::CancelExecution => {
@@ -1014,7 +1073,10 @@ impl Orchestrator {
                 mut thread,
             } => {
                 self.flush_thread_handle_drops(&mut thread);
-                self.kernel.enqueue_runnable(thread_id, thread);
+                if let Err(e) = self.kernel.enqueue_runnable(thread_id, thread) {
+                    self.failure = Some(ExecutionFailure::new(e, "runnable threads limit exceeded").with_thread_id(thread_id));
+                    self.cancel_and_teardown_thread(thread_id);
+                }
             }
             RuntimeEvent::CancelThread { thread_id } => {
                 self.cancel_pending_continuations(thread_id);
@@ -1078,6 +1140,7 @@ impl Orchestrator {
             let module = bindings.take_module(release.proxy_module());
             (release, module)
         };
+        self.quota.lock().unwrap().release_external_handles(1);
         let (outcome, module) = match module {
             Some(mut module) => {
                 let outcome = module

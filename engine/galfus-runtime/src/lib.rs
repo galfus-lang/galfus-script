@@ -246,7 +246,7 @@ impl Runtime {
         orchestrator.set_driver(driver.clone());
         orchestrator
             .kernel_mut()
-            .enqueue_runnable(root_thread_id, root_thread);
+            .enqueue_runnable(root_thread_id, root_thread).unwrap();
 
         let initialization_complete = orchestrator.initialization_complete();
         Ok(Execution::new(
