@@ -9,7 +9,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-fn restore_adapter_module(
+pub(super) fn restore_adapter_module(
     bindings: &Mutex<galfus_contract::AdapterBindings>,
     proxy_module: &str,
     module: Box<dyn galfus_contract::AdapterModuleBinding>,
@@ -29,7 +29,7 @@ fn restore_adapter_module(
     }
 }
 
-fn restore_provider(
+pub(super) fn restore_provider(
     providers: &Mutex<galfus_contract::Providers>,
     host: Box<dyn galfus_contract::HostProvider>,
 ) {

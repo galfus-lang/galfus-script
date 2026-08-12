@@ -310,7 +310,7 @@ impl FutureRegistry {
             .collect()
     }
 
-    fn discard_inner(
+    pub(super) fn discard_inner(
         &mut self,
         owner_thread_id: ThreadId,
         future_id: galfus_core::FutureId,
@@ -426,7 +426,11 @@ impl FutureRegistry {
             .map(|record| record.active.clone())
     }
 
-    fn record_tombstone(&mut self, owner_thread_id: ThreadId, future_id: galfus_core::FutureId) {
+    pub(super) fn record_tombstone(
+        &mut self,
+        owner_thread_id: ThreadId,
+        future_id: galfus_core::FutureId,
+    ) {
         if self.tombstones.len() >= 1024 {
             self.tombstones.pop_front();
         }

@@ -1,3 +1,6 @@
+use super::compilation::io_catalog;
+use super::*;
+
 #[test]
 fn run_passes_read_terminator_to_the_io_provider() {
     let mut workspace = Workspace::new();
@@ -262,6 +265,8 @@ fn run_propagates_runtime_start_error_on_entry_signature_mismatch() {
 
     assert!(matches!(
         result,
-        Err(crate::state::WorkspaceRunError::RuntimeStart(galfus_runtime::RuntimeError::EntryArityMismatch { .. }))
+        Err(crate::state::WorkspaceRunError::RuntimeStart(
+            galfus_runtime::RuntimeError::EntryArityMismatch { .. }
+        ))
     ));
 }

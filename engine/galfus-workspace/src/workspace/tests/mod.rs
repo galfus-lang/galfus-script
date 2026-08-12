@@ -1,3 +1,6 @@
+mod compilation;
+mod execution;
+
 use super::*;
 use galfus_contract::KernelDriver;
 use galfus_contract::{BoundaryType, BoundaryValue, HostProvider, MessageInjector, Providers};
@@ -49,6 +52,3 @@ impl HostProvider for TerminatorIo {
         }
     }
 }
-
-include!("tests/compilation.rs");
-include!("tests/execution.rs");

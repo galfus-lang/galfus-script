@@ -1,10 +1,11 @@
 use super::*;
 use crate::event::EventSequence;
 use crate::orchestrator::adapter::ProviderDispatchTask;
+use crate::orchestrator::pending::PendingOperation;
 use galfus_bytecode::instruction::{Reg, TypeIdx};
 use galfus_contract::{
-    BoundaryValue, ExecutionFailure, ExecutionFailureKind, HostProvider, MessageInjector,
-    Providers, RunnableTask, TaskAffinity, ThreadResult,
+    BoundaryValue, ExecutionFailure, ExecutionFailureKind, HostProvider, KernelTask,
+    MessageInjector, Providers, RunnableTask, TaskAffinity, ThreadResult,
 };
 use galfus_core::{CoordinatorId, FutureId, ModuleId, ThreadId};
 use std::sync::{
@@ -60,7 +61,7 @@ impl MessageInjector for FailureInjector {
     }
 }
 
-fn provider_dispatch_task(called: Arc<AtomicBool>) -> ProviderDispatchTask {
+pub(super) fn provider_dispatch_task(called: Arc<AtomicBool>) -> ProviderDispatchTask {
     ProviderDispatchTask {
         providers: Arc::new(Mutex::new(Providers::with_host(Box::new(
             RecordingProvider(called),
@@ -75,7 +76,7 @@ fn provider_dispatch_task(called: Arc<AtomicBool>) -> ProviderDispatchTask {
 }
 
 #[test]
-fn provider_dispatch_tasks_use_the_declared_driver_lane() {
+pub(super) fn provider_dispatch_tasks_use_the_declared_driver_lane() {
     let called = Arc::new(AtomicBool::new(false));
     let task = provider_dispatch_task(called.clone());
     let KernelTask::Main(task) = task.into_kernel_task(TaskAffinity::Main) else {
@@ -92,7 +93,7 @@ fn provider_dispatch_tasks_use_the_declared_driver_lane() {
 }
 
 #[test]
-fn provider_dispatch_reports_a_poisoned_registry_without_panicking() {
+pub(super) fn provider_dispatch_reports_a_poisoned_registry_without_panicking() {
     let providers = Arc::new(Mutex::new(Providers::default()));
     let poisoned = providers.clone();
     assert!(
@@ -126,7 +127,7 @@ fn provider_dispatch_reports_a_poisoned_registry_without_panicking() {
 }
 
 #[test]
-fn cancelled_provider_dispatch_tasks_do_not_start_adapter_work() {
+pub(super) fn cancelled_provider_dispatch_tasks_do_not_start_adapter_work() {
     let called = Arc::new(AtomicBool::new(false));
     let task = provider_dispatch_task(called.clone());
     task.active.store(false, Ordering::Release);
@@ -136,7 +137,7 @@ fn cancelled_provider_dispatch_tasks_do_not_start_adapter_work() {
 }
 
 #[test]
-fn spawned_event_is_registered_and_queued_by_the_execution_owner() {
+pub(super) fn spawned_event_is_registered_and_queued_by_the_execution_owner() {
     let mut orchestrator = Orchestrator::test_new();
     orchestrator.submit_event(RuntimeEvent::ThreadSpawned {
         thread: galfus_vm::thread::VmThreadState::test_new(),
@@ -149,7 +150,7 @@ fn spawned_event_is_registered_and_queued_by_the_execution_owner() {
 }
 
 #[test]
-fn race_winner_uses_event_sequence_then_member_index() {
+pub(super) fn race_winner_uses_event_sequence_then_member_index() {
     let mut orchestrator = Orchestrator::test_new();
     let coordinator_id = CoordinatorId::new(1);
     let thread_id = ThreadId::new(1);
@@ -191,7 +192,7 @@ fn race_winner_uses_event_sequence_then_member_index() {
 }
 
 #[test]
-fn cancellation_event_removes_a_queued_thread() {
+pub(super) fn cancellation_event_removes_a_queued_thread() {
     let mut orchestrator = Orchestrator::test_new();
     let thread_id = {
         let kernel = orchestrator.kernel_mut();
@@ -213,7 +214,7 @@ fn cancellation_event_removes_a_queued_thread() {
 }
 
 #[test]
-fn owner_exit_removes_all_of_its_future_records() {
+pub(super) fn owner_exit_removes_all_of_its_future_records() {
     let mut orchestrator = Orchestrator::test_new();
     let thread_id = orchestrator
         .kernel_mut()
@@ -254,7 +255,7 @@ fn owner_exit_removes_all_of_its_future_records() {
 }
 
 #[test]
-fn execution_cancellation_removes_every_thread_and_returns_a_structured_failure() {
+pub(super) fn execution_cancellation_removes_every_thread_and_returns_a_structured_failure() {
     let mut orchestrator = Orchestrator::test_new();
     for _ in 0..2 {
         let kernel = orchestrator.kernel_mut();
@@ -275,7 +276,7 @@ fn execution_cancellation_removes_every_thread_and_returns_a_structured_failure(
 }
 
 #[test]
-fn late_provider_completions_after_thread_cancellation_are_ignored() {
+pub(super) fn late_provider_completions_after_thread_cancellation_are_ignored() {
     let mut orchestrator = Orchestrator::test_new();
     let thread_id = orchestrator
         .kernel_mut()
@@ -301,7 +302,7 @@ fn late_provider_completions_after_thread_cancellation_are_ignored() {
 }
 
 #[test]
-fn execution_drops_orchestrator_and_sets_failed_state_on_error() {
+pub(super) fn execution_drops_orchestrator_and_sets_failed_state_on_error() {
     let mut orchestrator = Orchestrator::test_new();
     let thread_quota = Arc::new(Mutex::new(galfus_vm::quota::ThreadQuota::new(
         orchestrator.quota.lock().unwrap().limits().clone(),
@@ -313,7 +314,7 @@ fn execution_drops_orchestrator_and_sets_failed_state_on_error() {
 }
 
 #[test]
-fn max_kernel_tasks_exhaustion_cancels_thread() {
+pub(super) fn max_kernel_tasks_exhaustion_cancels_thread() {
     let mut limits = galfus_contract::LimitsMetadata::default();
     limits.max_kernel_tasks = 0; // Trigger exhaustion immediately
     let quota = Arc::new(Mutex::new(galfus_vm::quota::GlobalQuota::new(
@@ -346,7 +347,7 @@ fn max_kernel_tasks_exhaustion_cancels_thread() {
 }
 
 #[test]
-fn max_runnable_threads_exhaustion_cancels_thread_on_unblock() {
+pub(super) fn max_runnable_threads_exhaustion_cancels_thread_on_unblock() {
     let mut limits = galfus_contract::LimitsMetadata::default();
     limits.max_runnable_threads = 0; // Trigger exhaustion immediately
     let quota = Arc::new(Mutex::new(galfus_vm::quota::GlobalQuota::new(
@@ -381,7 +382,7 @@ fn max_runnable_threads_exhaustion_cancels_thread_on_unblock() {
 }
 
 #[test]
-fn max_timers_exhaustion_fails_to_block() {
+pub(super) fn max_timers_exhaustion_fails_to_block() {
     let mut limits = galfus_contract::LimitsMetadata::default();
     limits.max_timers = 0; // Trigger exhaustion immediately
     let quota = Arc::new(Mutex::new(galfus_vm::quota::GlobalQuota::new(
@@ -409,7 +410,7 @@ fn max_timers_exhaustion_fails_to_block() {
 }
 
 #[test]
-fn orchestrator_id_domains_fail_without_wrapping() {
+pub(super) fn orchestrator_id_domains_fail_without_wrapping() {
     let mut orchestrator = Orchestrator::test_new();
     let thread_id = galfus_core::ThreadId::new(1);
     let thread = galfus_vm::thread::VmThreadState::test_new();
@@ -482,7 +483,7 @@ fn orchestrator_id_domains_fail_without_wrapping() {
 }
 
 #[test]
-fn generations_prevent_reuse_collisions() {
+pub(super) fn generations_prevent_reuse_collisions() {
     let mut orchestrator = Orchestrator::test_new();
     let thread_id = galfus_core::ThreadId::new(1);
     let thread = galfus_vm::thread::VmThreadState::test_new();
