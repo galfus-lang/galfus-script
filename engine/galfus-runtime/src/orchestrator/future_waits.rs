@@ -10,6 +10,13 @@ pub(crate) struct MailboxFutureWait {
     pub deadline_ms: Option<u64>,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct TimerFutureWait {
+    pub waiting_thread_id: crate::registry::ThreadId,
+    pub future_lease: galfus_core::FutureLease,
+    pub deadline_ms: u64,
+}
+
 impl Orchestrator {
     pub(super) fn register_thread_exit_future(
         &mut self,
@@ -120,6 +127,45 @@ impl Orchestrator {
             }
             !waits.is_empty()
         });
+        for wait in expired {
+            self.complete_future(
+                wait.waiting_thread_id,
+                wait.future_lease.id,
+                Ok(BoundaryValue::Null),
+            );
+        }
+    }
+
+    pub(super) fn register_timer_future_wait(
+        &mut self,
+        thread_id: crate::registry::ThreadId,
+        future_id: galfus_core::FutureId,
+        timeout_ms: u64,
+    ) {
+        self.timer_future_waits.push(TimerFutureWait {
+            waiting_thread_id: thread_id,
+            future_lease: galfus_core::FutureLease::new(
+                future_id,
+                self.future_generations
+                    .get(&future_id.raw())
+                    .copied()
+                    .unwrap_or(0),
+            ),
+            deadline_ms: self.virtual_time_ms.saturating_add(timeout_ms),
+        });
+    }
+
+    pub(super) fn expire_timer_future_waits(&mut self, _delta_ms: u64) {
+        // We do NOT increment virtual_time_ms here because expire_mailbox_future_waits already did.
+        let mut expired = Vec::new();
+        let mut index = 0;
+        while index < self.timer_future_waits.len() {
+            if self.timer_future_waits[index].deadline_ms <= self.virtual_time_ms {
+                expired.push(self.timer_future_waits.remove(index));
+            } else {
+                index += 1;
+            }
+        }
         for wait in expired {
             self.complete_future(
                 wait.waiting_thread_id,

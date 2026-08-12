@@ -271,6 +271,15 @@ impl Orchestrator {
                 };
                 Some(Ok(BoundaryValue::I64(id)))
             }
+            "__internal_thread_sleep" => {
+                let ms = args.get(0).and_then(|v| match v {
+                    BoundaryValue::I32(m) if *m >= 0 => Some(*m as u64),
+                    BoundaryValue::I64(m) if *m >= 0 => Some(*m as u64),
+                    _ => None,
+                }).unwrap_or(0);
+                self.register_timer_future_wait(thread_id, future_id, ms);
+                None
+            }
             "__internal_thread_spawn" => {
                 let success = thread_arg(0).is_some_and(|target_id| {
                     let Some(mut target_thread) = self.kernel.take_created_thread(target_id) else {

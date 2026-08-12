@@ -158,6 +158,7 @@ impl Orchestrator {
         self.startup_plans.clear();
         self.thread_exit_waits.clear();
         self.mailbox_future_waits.clear();
+        self.timer_future_waits.clear();
         self.quota
             .lock()
             .unwrap()

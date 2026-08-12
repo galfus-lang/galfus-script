@@ -1,0 +1,5 @@
+fn(async) __provider_time_now(): i64
+
+export fn now(): i64 {
+  return await __provider_time_now()
+}

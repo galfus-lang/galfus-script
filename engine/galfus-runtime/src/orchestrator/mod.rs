@@ -37,7 +37,7 @@ pub(crate) mod lifecycle;
 pub(crate) mod state;
 
 pub(crate) use aggregates::{AggregateCoordinator, AggregateMode};
-pub(crate) use future_waits::MailboxFutureWait;
+pub(crate) use future_waits::{MailboxFutureWait, TimerFutureWait};
 pub(crate) struct Orchestrator {
     kernel: VirtualKernel,
     driver: Option<Rc<dyn ExecutionDriver>>,
@@ -72,6 +72,7 @@ pub(crate) struct Orchestrator {
         Vec<(crate::registry::ThreadId, galfus_core::FutureLease)>,
     >,
     mailbox_future_waits: HashMap<crate::registry::ThreadId, Vec<MailboxFutureWait>>,
+    timer_future_waits: Vec<TimerFutureWait>,
     virtual_time_ms: u64,
     pub(crate) future_registry: FutureRegistry,
     aggregate_coordinators: HashMap<galfus_core::CoordinatorId, AggregateCoordinator>,

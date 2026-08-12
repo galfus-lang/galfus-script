@@ -43,6 +43,7 @@ impl Orchestrator {
             future_workers: HashMap::new(),
             thread_exit_waits: HashMap::new(),
             mailbox_future_waits: HashMap::new(),
+            timer_future_waits: Vec::new(),
             virtual_time_ms: 0,
             future_registry: FutureRegistry::new(),
             aggregate_coordinators: HashMap::new(),

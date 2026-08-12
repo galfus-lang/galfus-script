@@ -227,6 +227,7 @@ impl Orchestrator {
                     }
                 }
                 self.expire_mailbox_future_waits(delta_ms);
+                self.expire_timer_future_waits(delta_ms);
             }
             RuntimeEvent::CancelExecution => {
                 self.shutdown();
