@@ -1,0 +1,50 @@
+fn(async) __provider_fs_read(path: [u8]): [u8] | null
+fn(async) __provider_fs_write(path: [u8], data: [u8]): bool
+fn(async) __provider_fs_exists(path: [u8]): bool
+fn(async) __provider_fs_delete(path: [u8]): bool
+fn(async) __provider_fs_is_directory(path: [u8]): bool
+fn(async) __provider_fs_is_file(path: [u8]): bool
+fn(async) __provider_fs_size(path: [u8]): i64
+fn(async) __provider_fs_list(path: [u8]): [[u8]] | null
+fn(async) __provider_fs_mkdir(path: [u8]): bool
+fn(async) __provider_fs_normalize_path(path: [u8]): [u8]
+
+export fn read(path: [u8]): [u8] | null {
+  return await __provider_fs_read(path)
+}
+
+export fn write(path: [u8], data: [u8]): bool {
+  return await __provider_fs_write(path, data)
+}
+
+export fn exists(path: [u8]): bool {
+  return await __provider_fs_exists(path)
+}
+
+export fn delete(path: [u8]): bool {
+  return await __provider_fs_delete(path)
+}
+
+export fn is_directory(path: [u8]): bool {
+  return await __provider_fs_is_directory(path)
+}
+
+export fn is_file(path: [u8]): bool {
+  return await __provider_fs_is_file(path)
+}
+
+export fn size(path: [u8]): i64 {
+  return await __provider_fs_size(path)
+}
+
+export fn list(path: [u8]): [[u8]] | null {
+  return await __provider_fs_list(path)
+}
+
+export fn mkdir(path: [u8]): bool {
+  return await __provider_fs_mkdir(path)
+}
+
+export fn normalize_path(path: [u8]): [u8] {
+  return await __provider_fs_normalize_path(path)
+}
