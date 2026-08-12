@@ -1,7 +1,7 @@
 use std::sync;
 
 use galfus_contract::{
-    ExecutionFailure, ExecutorStepResult, KernelDriver, KernelTask, ThreadResult,
+    ExecutionFailure, ExecutorStepResult, KernelDriver, KernelTask, LimitsMetadata, ThreadResult,
 };
 use galfus_runtime::driver::{ExecutionDriver, NativeEventBridge, RuntimeEventSink};
 use std::collections::VecDeque;
@@ -106,6 +106,13 @@ impl ExecutionDriver for PlaygroundExecutor {
 
     fn has_pending_events(&self) -> bool {
         self.events.has_pending()
+    }
+
+    fn configure_limits(
+        &self,
+        limits: &LimitsMetadata,
+    ) -> Result<(), galfus_runtime::driver::EventDeliveryError> {
+        self.events.configure_limit(limits.max_event_queue)
     }
 }
 

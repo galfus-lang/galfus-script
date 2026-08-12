@@ -6,14 +6,8 @@ use std::sync::Arc;
 
 fn io_catalog() -> Arc<CapabilityCatalog> {
     Arc::new(
-        CapabilityCatalog::new(
-            vec![galfus_contract::BridgeModule::new(
-                "std/io",
-                galfus_contract::STD_IO_SOURCE,
-            )],
-            Vec::new(),
-        )
-        .expect("the std/io provider catalog is valid"),
+        CapabilityCatalog::new(Vec::new(), Vec::new())
+            .expect("the std/io provider catalog is valid"),
     )
 }
 
@@ -471,10 +465,7 @@ fn check_reports_required_builtins_in_canonical_path_order() {
         .iter()
         .map(|path| path.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(
-        required,
-        ["format.gfs", "format/ansi.gfs", "std/io.gfs", "text.gfs"]
-    );
+    assert_eq!(required, ["format.gfs", "format/ansi.gfs", "text.gfs"]);
 }
 
 #[test]

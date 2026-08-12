@@ -4,7 +4,7 @@ mod tests;
 use galfus_contract::{
     AdapterModuleRequirement, BoundaryAbiVersion, CURRENT_BOUNDARY_ABI_VERSION,
     CURRENT_NUMERIC_SEMANTICS_VERSION, CURRENT_PRODUCER_VERSION, ContentHash, ExecutionTarget,
-    NumericSemanticsVersion, ProducerVersion, ProviderModuleRequirement,
+    LimitsMetadata, NumericSemanticsVersion, ProducerVersion, ProviderModuleRequirement,
 };
 use galfus_core::{ModuleId, ModulePath};
 use std::collections::BTreeSet;
@@ -37,6 +37,15 @@ impl PackageEntryPoint {
     pub fn function_name(&self) -> &str {
         self.function_name.as_str()
     }
+}
+
+/// Metadata describing the published package.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PackageMetadata {
+    pub name: String,
+    pub version: Option<String>,
+    pub author: Option<String>,
+    pub description: Option<String>,
 }
 
 /// Version contracts recorded with a package image.
@@ -90,6 +99,8 @@ pub struct PackageImage {
     graph: BytecodeGraph,
     target: ExecutionTarget,
     entry_point: Option<PackageEntryPoint>,
+    metadata: PackageMetadata,
+    limits: LimitsMetadata,
     adapter_requirements: Vec<AdapterModuleRequirement>,
     provider_requirements: Vec<ProviderModuleRequirement>,
     versions: PackageVersions,
@@ -106,6 +117,8 @@ pub enum PackageValidationError {
     UnexpectedAdapterRequirement { proxy_module: String },
     #[error("provider requirement for `{module_path}` is duplicated")]
     DuplicateProviderRequirement { module_path: String },
+    #[error("provider alias `{alias}` is duplicated")]
+    DuplicateProviderAlias { alias: String },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -138,14 +151,23 @@ impl PackageImage {
         graph: BytecodeGraph,
         target: ExecutionTarget,
         entry_point: Option<PackageEntryPoint>,
+        metadata: PackageMetadata,
+        limits: LimitsMetadata,
         mut adapter_requirements: Vec<AdapterModuleRequirement>,
         mut provider_requirements: Vec<ProviderModuleRequirement>,
     ) -> Result<Self, PackageValidationError> {
         for requirement in &mut adapter_requirements {
             requirement.descriptor.canonicalize();
         }
+        for requirement in &mut provider_requirements {
+            requirement.canonicalize();
+        }
         adapter_requirements.sort_by(|left, right| left.proxy_module.cmp(&right.proxy_module));
-        provider_requirements.sort_by(|left, right| left.module_path.cmp(&right.module_path));
+        provider_requirements.sort_by(|left, right| {
+            left.module_path
+                .cmp(&right.module_path)
+                .then_with(|| left.alias.cmp(&right.alias))
+        });
         Self::validate_adapter_requirements(&graph, entry_point.as_ref(), &adapter_requirements)?;
         Self::validate_provider_requirements(&provider_requirements)?;
 
@@ -154,6 +176,8 @@ impl PackageImage {
             graph,
             target,
             entry_point,
+            metadata,
+            limits,
             adapter_requirements,
             provider_requirements,
         })
@@ -231,10 +255,16 @@ impl PackageImage {
         provider_requirements: &[ProviderModuleRequirement],
     ) -> Result<(), PackageValidationError> {
         let mut paths = BTreeSet::new();
+        let mut aliases = BTreeSet::new();
         for requirement in provider_requirements {
             if !paths.insert(requirement.module_path.as_str()) {
                 return Err(PackageValidationError::DuplicateProviderRequirement {
                     module_path: requirement.module_path.clone(),
+                });
+            }
+            if !aliases.insert(requirement.alias.as_str()) {
+                return Err(PackageValidationError::DuplicateProviderAlias {
+                    alias: requirement.alias.clone(),
                 });
             }
         }
@@ -251,6 +281,14 @@ impl PackageImage {
 
     pub fn entry_point(&self) -> Option<&PackageEntryPoint> {
         self.entry_point.as_ref()
+    }
+
+    pub fn metadata(&self) -> &PackageMetadata {
+        &self.metadata
+    }
+
+    pub fn limits(&self) -> &LimitsMetadata {
+        &self.limits
     }
 
     pub fn adapter_requirements(&self) -> &[AdapterModuleRequirement] {

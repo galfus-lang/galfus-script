@@ -1,3 +1,6 @@
+use super::*;
+use crate::state::{CompileBlocked, RunBlocked};
+
 #[test]
 fn workspace_package_loader_checks_and_compiles_its_loaded_sources() {
     let mut workspace = Workspace::new();
@@ -7,7 +10,8 @@ fn workspace_package_loader_checks_and_compiles_its_loaded_sources() {
             [module]
             name = "package-loader"
             target = "app"
-            entry = "main.gfs"
+            [entry]
+            path = "main.gfs"
             "#,
         )
         .expect("valid configuration");
@@ -34,7 +38,8 @@ fn check_includes_configured_entry_and_exports_as_semantic_roots() {
             [module]
             name = "semantic-roots"
             target = "app"
-            entry = "main.gfs"
+            [entry]
+            path = "main.gfs"
 
             [exports]
             library = "library.gfs"
@@ -75,7 +80,8 @@ fn compile_emits_one_module_per_source_module_with_import_slots() {
             [module]
             name = "module-images"
             target = "app"
-            entry = "main.gfs"
+            [entry]
+            path = "main.gfs"
             "#,
         )
         .expect("valid configuration");
@@ -153,7 +159,8 @@ fn check_accepts_imported_adapter_proxy_declarations() {
             [module]
             name = "external-proxy"
             target = "app"
-            entry = "main.gfs"
+            [entry]
+            path = "main.gfs"
             "#,
         )
         .expect("valid configuration");
@@ -259,7 +266,8 @@ fn compile_updates_changed_modules_and_removes_deleted_modules() {
             [module]
             name = "incremental-compile"
             target = "app"
-            entry = "main.gfs"
+            [entry]
+            path = "main.gfs"
             
             [exports]
             helper = "helper.gfs"
@@ -367,7 +375,8 @@ fn compile_rebuilds_only_changed_modules_and_transitive_dependents() {
             [module]
             name = "dependent-compile"
             target = "app"
-            entry = "main.gfs"
+            [entry]
+            path = "main.gfs"
             "#,
         )
         .expect("valid configuration");
@@ -478,7 +487,8 @@ fn compile_removes_unreachable_modules() {
             [module]
             name = "test"
             target = "app"
-            entry = "main.gfs"
+            [entry]
+            path = "main.gfs"
         "#
             )
             .unwrap(),
@@ -515,7 +525,9 @@ fn run_requires_compile_and_executes_the_configured_entry() {
     let mut workspace = Workspace::new();
     assert!(matches!(
         workspace.run(&[], None, std::rc::Rc::new(CooperativeDriver::new())),
-        Err(crate::state::WorkspaceRunError::Blocked(RunBlocked::CompileRequired))
+        Err(crate::state::WorkspaceRunError::Blocked(
+            RunBlocked::CompileRequired
+        ))
     ));
 
     workspace
@@ -524,7 +536,8 @@ fn run_requires_compile_and_executes_the_configured_entry() {
             [module]
             name = "run-entry"
             target = "app"
-            entry = "main.gfs"
+            [entry]
+            path = "main.gfs"
             "#,
         )
         .expect("valid configuration");
@@ -565,7 +578,8 @@ fn run_rejects_a_missing_required_io_provider_before_execution() {
             [module]
             name = "missing-io-provider"
             target = "app"
-            entry = "main.gfs"
+            [entry]
+            path = "main.gfs"
             "#,
         )
         .expect("valid configuration");
@@ -607,7 +621,8 @@ fn compile_produces_identical_bytecode_regardless_of_module_load_order() {
         [module]
         name = "determinism-test"
         target = "app"
-        entry = "main.gfs"
+        [entry]
+            path = "main.gfs"
     "#;
     let main_src = br#"
         import { add } from "./math"
@@ -686,7 +701,8 @@ fn package_is_reproducible_across_all_module_load_permutations() {
         [module]
         name = "permutation-determinism"
         target = "app"
-        entry = "main.gfs"
+        [entry]
+            path = "main.gfs"
     "#;
     let modules = [
         (
@@ -719,7 +735,9 @@ fn package_is_reproducible_across_all_module_load_permutations() {
         workspace.load_config(config).expect("valid configuration");
         for index in permutation {
             let (path, source) = modules[index];
-            workspace.load_module(path, source).expect("valid source module");
+            workspace
+                .load_module(path, source)
+                .expect("valid source module");
         }
         let diagnostics = format!("{:?}", workspace.check().diagnostics);
         let report = workspace.compile().expect("permutation compiles");
@@ -732,7 +750,9 @@ fn package_is_reproducible_across_all_module_load_permutations() {
             diagnostics,
             package.adapter_requirements().to_vec(),
             package.provider_requirements().to_vec(),
-            package.canonical_bytes().expect("canonical package encoding"),
+            package
+                .canonical_bytes()
+                .expect("canonical package encoding"),
             package.content_hash().expect("package hash"),
         );
         if let Some(expected) = &expected {
@@ -743,7 +763,7 @@ fn package_is_reproducible_across_all_module_load_permutations() {
     }
 }
 
-fn io_catalog(source: &str) -> std::sync::Arc<galfus_contract::CapabilityCatalog> {
+pub(super) fn io_catalog(source: &str) -> std::sync::Arc<galfus_contract::CapabilityCatalog> {
     std::sync::Arc::new(
         galfus_contract::CapabilityCatalog::new(
             vec![galfus_contract::BridgeModule::new("std/io", source)],
@@ -761,7 +781,8 @@ fn workspace_importing_io() -> Workspace {
             [module]
             name = "provider-catalog"
             target = "app"
-            entry = "main.gfs"
+            [entry]
+            path = "main.gfs"
             "#,
         )
         .expect("valid configuration");
@@ -863,7 +884,8 @@ fn compile_nullable_exports_with_nullable_boundary_type() {
             [module]
             name = "nullable-test"
             target = "app"
-            entry = "main.gfs"
+            [entry]
+            path = "main.gfs"
             "#,
         )
         .expect("valid configuration");
@@ -948,7 +970,8 @@ fn compiled_adapter_handles_are_qualified_and_do_not_collide() {
             [module]
             name = "qualified-handles"
             target = "app"
-            entry = "main.gfs"
+            [entry]
+            path = "main.gfs"
             "#,
         )
         .expect("valid configuration");

@@ -227,6 +227,7 @@ pub(crate) fn encode_into_thread_heap(
             let elements = bytes.into_iter().map(galfus_vm::VmValue::Uint8).collect();
             let reference = heap
                 .alloc(galfus_vm::HeapObject::Array {
+                    module_id,
                     element_ty: *element_type,
                     elements,
                 })
@@ -251,6 +252,7 @@ pub(crate) fn encode_into_thread_heap(
                 .collect::<Result<Vec<_>, _>>()?;
             let reference = heap
                 .alloc(galfus_vm::HeapObject::Array {
+                    module_id,
                     element_ty: *element_type,
                     elements,
                 })
@@ -308,6 +310,36 @@ pub struct RuntimeTask {
     pub vm: Arc<VirtualMachine>,
     pub events: Arc<dyn RuntimeEventSink>,
     pub future_completion: Option<(registry::ThreadId, galfus_core::FutureLease)>,
+}
+
+pub(crate) struct QuotaTask<T: galfus_contract::RunnableTask> {
+    inner: Option<T>,
+    quota: Arc<std::sync::Mutex<galfus_vm::quota::GlobalQuota>>,
+}
+
+impl<T: galfus_contract::RunnableTask> QuotaTask<T> {
+    pub(crate) fn new(
+        inner: T,
+        quota: Arc<std::sync::Mutex<galfus_vm::quota::GlobalQuota>>,
+    ) -> Self {
+        Self {
+            inner: Some(inner),
+            quota,
+        }
+    }
+}
+
+impl<T: galfus_contract::RunnableTask> galfus_contract::RunnableTask for QuotaTask<T> {
+    fn run(mut self: Box<Self>, budget: usize) -> galfus_contract::ThreadResult {
+        let inner = self.inner.take().unwrap();
+        Box::new(inner).run(budget)
+    }
+}
+
+impl<T: galfus_contract::RunnableTask> Drop for QuotaTask<T> {
+    fn drop(&mut self) {
+        self.quota.lock().unwrap().release_kernel_tasks(1);
+    }
 }
 
 impl RuntimeTask {

@@ -4,10 +4,7 @@ mod tests;
 use std::fs;
 use std::sync;
 
-use crate::native_io::NativeIoProvider;
 use anyhow::{Context, Result, bail};
-use galfus_contract::Providers;
-use galfus_runtime::{CooperativeDriver, ExecutionHost};
 use galfus_workspace::{LoadResult, Workspace};
 use std::path::Path;
 
@@ -35,40 +32,47 @@ pub fn compile_workspace(root: &str, target: &str, out: &str, profile: &str) -> 
     if !report.is_valid {
         bail!("workspace validation failed: {:?}", report.diagnostics);
     }
-    
+
     let compile_report = workspace
         .compile()
         .map_err(|error| anyhow::anyhow!("workspace compilation failed: {error:?}"))?;
-        
-    let bytecode = compile_report.package.to_bytecode()
+
+    let bytecode = compile_report
+        .package
+        .to_bytecode()
         .map_err(|error| anyhow::anyhow!("failed to encode bytecode: {:?}", error))?;
-        
+
     let mut host_name = format!("galfus-{}-{}", target, profile);
     if target.contains("windows") {
         host_name.push_str(".exe");
     }
-    
+
     let host_path = Path::new("build").join(host_name);
     if !host_path.exists() {
-        bail!("Host executable not found at {:?}. Please build it first using `bun cmd hosts build --target {} -p {}`", host_path, target, profile);
+        bail!(
+            "Host executable not found at {:?}. Please build it first using `bun cmd hosts build --target {} -p {}`",
+            host_path,
+            target,
+            profile
+        );
     }
-    
+
     let host_bytes = fs::read(&host_path)
         .with_context(|| format!("failed to read host binary at {:?}", host_path))?;
-        
+
     let mut out_file = fs::File::create(out)
         .with_context(|| format!("failed to create output file at {}", out))?;
-        
+
     use std::io::Write;
     out_file.write_all(&host_bytes)?;
     out_file.write_all(&bytecode)?;
-    
+
     let payload_size = bytecode.len() as u64;
     out_file.write_all(&payload_size.to_le_bytes())?;
-    
+
     const MAGIC_MARKER: &[u8; 8] = b"GLFS_PKG";
     out_file.write_all(MAGIC_MARKER)?;
-    
+
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -76,9 +80,9 @@ pub fn compile_workspace(root: &str, target: &str, out: &str, profile: &str) -> 
         perms.set_mode(0o755);
         out_file.set_permissions(perms)?;
     }
-    
+
     println!("Successfully compiled standalone executable to {}", out);
-    
+
     Ok(())
 }
 
@@ -95,50 +99,18 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
         .iter()
         .map(|argument| argument.as_bytes().to_vec())
         .collect::<Vec<_>>();
-    let executor = std::rc::Rc::new(CooperativeDriver::new());
 
-    let mut properties = std::collections::BTreeMap::new();
-    properties.insert("os".to_string(), std::env::consts::OS.to_string());
-    properties.insert("arch".to_string(), std::env::consts::ARCH.to_string());
-    properties.insert("family".to_string(), std::env::consts::FAMILY.to_string());
-    // Construct a fallback target triple since env!("TARGET") isn't available
-    let target_env = if cfg!(target_env = "msvc") {
-        "msvc"
-    } else if cfg!(target_env = "musl") {
-        "musl"
-    } else {
-        "gnu"
-    };
-    let target_triple = format!(
-        "{}-unknown-{}-{}",
-        std::env::consts::ARCH,
-        std::env::consts::OS,
-        target_env
+    let providers =
+        galfus_host_native::providers::default_providers(compile_report.package.metadata().clone());
+    let driver = std::rc::Rc::new(galfus_host_native::driver::NativeDriver::new());
+
+    let host = galfus_host_native::ExecutionHost::new(
+        providers,
+        galfus_contract::AdapterBindings::default(),
+        driver,
     );
-    properties.insert("target_triple".to_string(), target_triple);
 
-    let context = galfus_contract::AdapterLoadContext {
-        target: galfus_contract::ExecutionTarget::new("default").expect("default target is valid"),
-        properties,
-    };
-
-    let host = ExecutionHost::new(context)
-        .with_providers(Providers::with_host(Box::new(NativeIoProvider)));
-    let mut execution = host
-        .start(
-            sync::Arc::clone(&compile_report.package),
-            args.as_slice(),
-            executor.clone(),
-        )
-        .map_err(|error| anyhow::anyhow!("package execution failed: {error}"))?;
-    let result = execution
-        .run_sync_to_completion()
-        .map_err(|error| anyhow::anyhow!("package execution failed: {error}"))?;
-
-    let code = match result {
-        galfus_contract::BoundaryValue::I32(c) => c,
-        _ => 0,
-    };
+    let code = host.run(compile_report.package.clone(), args.as_slice())?;
     Ok(code)
 }
 
@@ -152,7 +124,7 @@ fn load_workspace(root: &Path) -> Result<Workspace> {
         .context("workspace root does not exist")?;
     let config = fs::read(root.join("galfus.toml"))?;
 
-    let mut workspace = workspace_with_native_io_catalog();
+    let mut workspace = workspace_with_native_catalog();
     if let LoadResult::Diagnostics(diagnostics) = workspace
         .load_config(config.as_slice())
         .map_err(|error| anyhow::anyhow!("workspace configuration error: {error:?}"))?
@@ -176,9 +148,10 @@ fn load_source_file(file: &Path) -> Result<Workspace> {
         .context("source file name is not valid UTF-8")?;
     let source = fs::read(file.as_path())?;
 
-    let mut workspace = workspace_with_native_io_catalog();
-    let config =
-        format!("[module]\nname = \"single-file\"\ntarget = \"app\"\nentry = \"{module_path}\"\n");
+    let mut workspace = workspace_with_native_catalog();
+    let config = format!(
+        "[module]\nname = \"single-file\"\ntarget = \"app\"\n[entry]\npath = \"{module_path}\"\n"
+    );
     if let LoadResult::Diagnostics(diagnostics) = workspace
         .load_config(config.as_bytes())
         .map_err(|error| anyhow::anyhow!("workspace configuration error: {error:?}"))?
@@ -192,17 +165,9 @@ fn load_source_file(file: &Path) -> Result<Workspace> {
     Ok(workspace)
 }
 
-fn workspace_with_native_io_catalog() -> Workspace {
+fn workspace_with_native_catalog() -> Workspace {
     let mut workspace = Workspace::new();
-    let catalog = galfus_contract::CapabilityCatalog::new(
-        vec![galfus_contract::BridgeModule::new(
-            "std/io",
-            galfus_contract::STD_IO_SOURCE,
-        )],
-        Vec::new(),
-    )
-    .expect("the built-in std/io provider catalog is valid");
-    workspace.set_catalog(sync::Arc::new(catalog));
+    workspace.set_catalog(sync::Arc::new(galfus_host_native::native_catalog()));
     workspace
 }
 

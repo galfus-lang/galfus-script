@@ -130,13 +130,13 @@ impl VirtualMachine {
                 }
 
                 // Save destination register inside call frame to write return value back
-                thread.call_stack.push(CallFrame {
+                thread.push_frame(CallFrame {
                     module_id: target_module_id,
                     func_idx: target_func_idx,
                     pc: 0,
                     registers: callee_regs,
                     return_dest: Some(dest),
-                });
+                })?;
             }
             Instruction::CallMethod {
                 dest,
@@ -328,13 +328,13 @@ impl VirtualMachine {
                     *dest = thread.read_reg(src_reg)?;
                 }
 
-                thread.call_stack.push(CallFrame {
+                thread.push_frame(CallFrame {
                     module_id: target_module_id,
                     func_idx: target_func_idx,
                     pc: 0,
                     registers: callee_regs,
                     return_dest: Some(dest),
-                });
+                })?;
             }
             Instruction::CallDynamic {
                 dest,
@@ -405,18 +405,18 @@ impl VirtualMachine {
                     *callee_reg = thread.read_reg(source)?;
                 }
 
-                thread.call_stack.push(CallFrame {
+                thread.push_frame(CallFrame {
                     module_id: target_module_id,
                     func_idx: target_func_idx,
                     pc: 0,
                     registers: callee_regs,
                     return_dest: Some(dest),
-                });
+                })?;
             }
 
             Instruction::Ret { src } => {
                 let val = thread.read_reg(src)?;
-                let completed_frame = thread.call_stack.pop().ok_or(VmError::EmptyCallStack)?;
+                let completed_frame = thread.pop_frame().ok_or(VmError::EmptyCallStack)?;
 
                 match completed_frame.return_dest {
                     Some(dest) => {
@@ -435,7 +435,7 @@ impl VirtualMachine {
                 }
             }
             Instruction::RetNull => {
-                let completed_frame = thread.call_stack.pop().ok_or(VmError::EmptyCallStack)?;
+                let completed_frame = thread.pop_frame().ok_or(VmError::EmptyCallStack)?;
 
                 match completed_frame.return_dest {
                     Some(dest) => {

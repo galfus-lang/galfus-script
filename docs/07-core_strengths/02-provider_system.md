@@ -15,9 +15,11 @@ import { println } from "std/io"
 
 println("Log!")
 ```
-Does not exist in the Galfus interpreter. The host must inject the `std::io` provider package into the *Workspace* during loading.
+Does not exist in the Galfus interpreter. The host registers the `std/io`
+bridge in the workspace capability catalog and supplies a compatible `io`
+provider for execution.
 
 ## Core Strengths
 
 - **Absolute Security (Sandboxing)**: The host running the VM has final control over which Providers to install. You can run an untrusted script by injecting an empty and fake `std::io`, creating an impenetrable sandbox (test-bed) environment with no computational cost (hooks/VM flags).
-- **No Injected Magic**: All internal properties are materialized in a host-agnostic way, so Galfus behaves exactly the same on a Web page as on a native desktop OS. If the Provider exists, the script runs. If it doesn't, compilation aborts early reporting the absence.
+- **No Injected Magic**: All internal properties are materialized in a host-agnostic way, so Galfus behaves exactly the same on a Web page as on a native desktop OS. If a package requires a provider that the host does not supply, execution preflight rejects it before its first instruction runs.

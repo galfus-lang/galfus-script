@@ -15,6 +15,7 @@ pub enum WorkspaceDiagnosticCode {
     UnsupportedWorkspaceTarget,
     InvalidAdapterProxy,
     ModuleCollision,
+    InvalidLimit,
 }
 
 impl DiagnosticCodeKind for WorkspaceDiagnosticCode {
@@ -33,6 +34,7 @@ impl DiagnosticCodeKind for WorkspaceDiagnosticCode {
             Self::UnsupportedWorkspaceTarget => "W0011",
             Self::InvalidAdapterProxy => "W0012",
             Self::ModuleCollision => "W0013",
+            Self::InvalidLimit => "W0014",
         }
     }
 
@@ -51,6 +53,7 @@ impl DiagnosticCodeKind for WorkspaceDiagnosticCode {
             Self::UnsupportedWorkspaceTarget => "unsupported project target",
             Self::InvalidAdapterProxy => "invalid external proxy",
             Self::ModuleCollision => "module collision detected",
+            Self::InvalidLimit => "invalid limit configuration",
         }
     }
 }

@@ -1,289 +1,23 @@
-#[cfg(test)]
-mod tests;
+use super::*;
 
-use std::str;
-
-use crate::config::{WORKSPACE_SOURCE_ID, WorkspaceConfig, parse_workspace_config};
 use crate::diagnostic::WorkspaceDiagnosticCode;
-use crate::source_store::{LoadModuleError, ModuleOrigin};
-use crate::state::{
-    BytecodeState, CheckState, CompileBlocked, CompileState, RunBlocked, SemanticState,
-    SourceState, WorkspaceError,
-};
-use galfus_bytecode::{BytecodeGraph, ImportEdge, PackageEntryPoint, PackageImage};
-use galfus_compiler::{CompiledModule, gfp::parse_gfp_frontmatter};
+use crate::source_store::ModuleOrigin;
+use crate::state::*;
+use galfus_bytecode::PackageImage;
+use galfus_bytecode::{BytecodeGraph, ImportEdge, PackageMetadata};
+use galfus_contract::BoundaryType;
 use galfus_contract::{
-    AdapterFunctionSignature, AdapterModuleDescriptor, AdapterModuleRequirement, BoundaryType,
-    CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget, ProviderFunctionSignature,
-    ProviderModuleRequirement, Providers, RuntimeCapabilities,
+    AdapterModuleRequirement, CURRENT_BOUNDARY_ABI_VERSION, ProviderFunctionSignature,
+    ProviderModuleRequirement,
 };
-use galfus_core::{Diagnostic, DiagnosticBag, ModulePath, OpaqueTypeId, SourceFile, Span, TypeId};
-use galfus_frontend::modules::{
-    FrontendModuleKind, FrontendRoots, FrontendSession, FrontendSnapshot, FrontendSource,
-    FrontendUpdate, SemanticRoot, SemanticRootKind,
-};
-use galfus_frontend::{
-    PrimitiveType, ResolutionLayer, StringTable, SymbolKind, TypeKind, TypeTable,
-};
-use galfus_runtime::{Execution, Runtime};
+use galfus_core::ModulePath;
+use galfus_core::{Diagnostic, DiagnosticBag, Span, TypeId};
+use galfus_frontend::modules::FrontendRoots;
+use galfus_frontend::{PrimitiveType, SymbolKind, TypeKind};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-pub struct Workspace {
-    pub config: Option<WorkspaceConfig>,
-    pub source_state: SourceState,
-    pub semantic_state: SemanticState,
-    pub bytecode_state: BytecodeState,
-    pub frontend: FrontendSession,
-    frontend_snapshot: Option<FrontendSnapshot>,
-    pub catalog: Arc<galfus_contract::CapabilityCatalog>,
-    pub adapter_descriptors: HashMap<ModulePath, AdapterModuleDescriptor>,
-}
-
-pub enum LoadResult {
-    Success,
-    Diagnostics(DiagnosticBag),
-}
-
-pub enum RemoveResult {
-    Success,
-    NotFound,
-}
-
-pub struct CheckReport<'a> {
-    pub is_valid: bool,
-    pub diagnostics: &'a DiagnosticBag,
-}
-
-/// Result of a successful `compile()` call.
-pub struct CompileReport {
-    /// The immutable compiled package, ready to be delivered to a host.
-    pub package: Arc<PackageImage>,
-}
-
-impl Default for Workspace {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Workspace {
-    pub fn new() -> Self {
-        Self {
-            config: None,
-            source_state: SourceState::new(),
-            semantic_state: SemanticState::new(),
-            bytecode_state: BytecodeState::new(),
-            frontend: FrontendSession::new(),
-            frontend_snapshot: None,
-            catalog: Arc::new(galfus_contract::CapabilityCatalog::default()),
-            adapter_descriptors: HashMap::new(),
-        }
-    }
-
-    pub fn set_catalog(&mut self, catalog: Arc<galfus_contract::CapabilityCatalog>) {
-        if self.catalog.fingerprint() != catalog.fingerprint() {
-            self.source_state.revision.next();
-            let removed = self
-                .source_state
-                .store
-                .remove_by_origin(ModuleOrigin::ProviderCatalog);
-            for entry in removed {
-                self.source_state.dirty_sources.remove(&entry.path);
-                self.source_state.removed_modules.push(entry.module_id);
-            }
-            self.catalog = catalog;
-            self.mark_dirty();
-        }
-    }
-
-    pub fn load_config(&mut self, config_toml: &[u8]) -> Result<LoadResult, WorkspaceError> {
-        let text = match str::from_utf8(config_toml) {
-            Ok(t) => t,
-            Err(_) => return Err(WorkspaceError::MissingConfiguration),
-        };
-
-        let mut diagnostics = DiagnosticBag::new();
-        if let Some(config) = parse_workspace_config(text, &mut diagnostics) {
-            self.config = Some(config);
-            self.mark_dirty();
-            Ok(LoadResult::Success)
-        } else {
-            Ok(LoadResult::Diagnostics(diagnostics))
-        }
-    }
-
-    pub fn load_module(
-        &mut self,
-        path: &str,
-        module_bytes: &[u8],
-    ) -> Result<LoadResult, WorkspaceError> {
-        let module_path = ModulePath::new(path).ok_or(WorkspaceError::InvalidPath)?;
-        if self.catalog.is_provider_module(
-            module_path
-                .as_str()
-                .strip_suffix(".gfs")
-                .unwrap_or(module_path.as_str()),
-        ) {
-            return Err(WorkspaceError::ReservedProviderModule(path.to_string()));
-        }
-        if !path.ends_with(".gfp")
-            && self
-                .source_state
-                .store
-                .get(&module_path)
-                .is_some_and(|entry| entry.bytes.as_ref() == module_bytes)
-        {
-            return Ok(LoadResult::Success);
-        }
-
-        let (source_bytes, origin, descriptor) = if path.ends_with(".gfp") {
-            let source = match str::from_utf8(module_bytes) {
-                Ok(source) => source,
-                Err(_) => return Ok(Self::invalid_adapter_proxy(".gfp source must be UTF-8")),
-            };
-            let (frontmatter, body) = match parse_gfp_frontmatter(source) {
-                Ok(parsed) => parsed,
-                Err(error) => return Ok(Self::invalid_adapter_proxy(error)),
-            };
-            (
-                Arc::from(body.as_bytes()),
-                ModuleOrigin::AdapterProxy,
-                Some(AdapterModuleDescriptor {
-                    adapter: frontmatter.adapter,
-                    config: frontmatter.config,
-                    targets: frontmatter.targets,
-                    exports: Vec::new(),
-                }),
-            )
-        } else {
-            (Arc::from(module_bytes), ModuleOrigin::User, None)
-        };
-
-        self.source_state.revision.next();
-        self.source_state
-            .store
-            .load_module(
-                module_path.clone(),
-                source_bytes,
-                origin,
-                self.source_state.revision,
-            )
-            .map_err(|err| match err {
-                LoadModuleError::Collision {
-                    attempted,
-                    existing,
-                    identity,
-                    id,
-                } => WorkspaceError::Collision {
-                    attempted: attempted.as_str().to_string(),
-                    existing: existing.as_str().to_string(),
-                    identity,
-                    id,
-                },
-            })?;
-        if let Some(descriptor) = descriptor {
-            self.adapter_descriptors
-                .insert(module_path.clone(), descriptor);
-        } else {
-            self.adapter_descriptors.remove(&module_path);
-        }
-        self.source_state.dirty_sources.insert(module_path);
-        self.mark_dirty();
-        Ok(LoadResult::Success)
-    }
-
-    pub fn register_bridge_module(
-        &mut self,
-        bridge: galfus_contract::BridgeModule,
-    ) -> Result<LoadResult, WorkspaceError> {
-        let module_path = ModulePath::new(&bridge.name).ok_or(WorkspaceError::InvalidPath)?;
-        self.source_state.revision.next();
-        self.source_state
-            .store
-            .load_module(
-                module_path.clone(),
-                Arc::from(bridge.source.as_bytes()),
-                ModuleOrigin::Builtin,
-                self.source_state.revision,
-            )
-            .map_err(|err| match err {
-                LoadModuleError::Collision {
-                    attempted,
-                    existing,
-                    identity,
-                    id,
-                } => WorkspaceError::Collision {
-                    attempted: attempted.as_str().to_string(),
-                    existing: existing.as_str().to_string(),
-                    identity,
-                    id,
-                },
-            })?;
-        self.source_state.dirty_sources.insert(module_path);
-        self.mark_dirty();
-        Ok(LoadResult::Success)
-    }
-
-    pub fn remove_module(&mut self, path: &str) -> Result<RemoveResult, WorkspaceError> {
-        let module_path = ModulePath::new(path).ok_or(WorkspaceError::InvalidPath)?;
-
-        if let Some(entry) = self.source_state.store.remove_module(&module_path) {
-            self.adapter_descriptors.remove(&module_path);
-            self.source_state.revision.next();
-            self.source_state.dirty_sources.remove(&module_path);
-            self.source_state.removed_modules.push(entry.module_id);
-            self.mark_dirty();
-            Ok(RemoveResult::Success)
-        } else {
-            Ok(RemoveResult::NotFound)
-        }
-    }
-
-    fn invalid_adapter_proxy(message: impl Into<String>) -> LoadResult {
-        let mut diagnostics = DiagnosticBag::new();
-        diagnostics.push(Diagnostic::error_with_message(
-            WorkspaceDiagnosticCode::InvalidAdapterProxy,
-            message,
-            Span::empty(WORKSPACE_SOURCE_ID, 0),
-        ));
-        LoadResult::Diagnostics(diagnostics)
-    }
-
-    pub fn is_dirty(&self) -> bool {
-        self.semantic_state.check_state.is_dirty()
-    }
-
-    fn mark_dirty(&mut self) {
-        let previous = match &self.semantic_state.check_state {
-            CheckState::Passed { revision, .. } | CheckState::Failed { revision, .. } => {
-                Some(*revision)
-            }
-            CheckState::Dirty {
-                previous_checked_revision,
-                ..
-            } => *previous_checked_revision,
-        };
-
-        self.semantic_state.check_state = CheckState::Dirty {
-            current_revision: self.source_state.revision,
-            previous_checked_revision: previous,
-        };
-        self.frontend_snapshot = None;
-
-        // Mark compile stale when check is invalidated.
-        if let CompileState::Ready {
-            semantic_revision,
-            package,
-        } = &self.bytecode_state.compile_state
-        {
-            self.bytecode_state.compile_state = CompileState::Stale {
-                semantic_revision: *semantic_revision,
-                package: Arc::clone(package),
-            };
-        }
-    }
-
     pub fn check(&mut self) -> CheckReport<'_> {
         let is_dirty = matches!(self.semantic_state.check_state, CheckState::Dirty { .. });
 
@@ -403,52 +137,7 @@ impl Workspace {
         }
     }
 
-    fn load_required_dependencies(&mut self, paths: &[ModulePath]) -> Result<bool, WorkspaceError> {
-        let mut loaded = false;
-        for path in paths {
-            if self.source_state.store.get(path).is_some() {
-                continue;
-            }
-            let builtin_name = path.as_str().strip_suffix(".gfs").unwrap_or(path.as_str());
-            let (source, origin) = if let Some((_, source)) = galfus_contract::BUILTIN_MODULES
-                .iter()
-                .find(|(name, _)| *name == builtin_name)
-            {
-                (*source, ModuleOrigin::Builtin)
-            } else if let Some(source) = self.catalog.provider_source(builtin_name) {
-                (source, ModuleOrigin::ProviderCatalog)
-            } else {
-                continue;
-            };
-            self.source_state.revision.next();
-            self.source_state
-                .store
-                .load_module(
-                    path.clone(),
-                    Arc::from(source.as_bytes()),
-                    origin,
-                    self.source_state.revision,
-                )
-                .map_err(|err| match err {
-                    LoadModuleError::Collision {
-                        attempted,
-                        existing,
-                        identity,
-                        id,
-                    } => WorkspaceError::Collision {
-                        attempted: attempted.as_str().to_string(),
-                        existing: existing.as_str().to_string(),
-                        identity,
-                        id,
-                    },
-                })?;
-            self.source_state.dirty_sources.insert(path.clone());
-            loaded = true;
-        }
-        Ok(loaded)
-    }
-
-    fn validate_registered_adapter_schemas(&self, diagnostics: &mut DiagnosticBag) {
+    pub(crate) fn validate_registered_adapter_schemas(&self, diagnostics: &mut DiagnosticBag) {
         for descriptor in self.adapter_descriptors.values() {
             let Some(adapter) = self.catalog.adapter_schema(&descriptor.adapter) else {
                 diagnostics.push(Diagnostic::error_with_message(
@@ -547,7 +236,7 @@ impl Workspace {
         }
     }
 
-    fn boundary_type(
+    pub(crate) fn boundary_type(
         table: &TypeTable,
         resolution: &ResolutionLayer,
         string_table: &StringTable,
@@ -627,7 +316,7 @@ impl Workspace {
         }
     }
 
-    fn frontend_roots(&self) -> FrontendRoots {
+    pub(crate) fn frontend_roots(&self) -> FrontendRoots {
         let Some(config) = &self.config else {
             return FrontendRoots::default();
         };
@@ -837,24 +526,57 @@ impl Workspace {
             .apply(transaction)
             .map_err(|error| CompileBlocked::CompilerError(error.to_string()))?;
         let adapter_requirements = self.adapter_requirements_for(&graph);
-        let provider_requirements = self.provider_requirements_for(&graph);
-        let entry_point = self.config.as_ref().and_then(|config| {
-            config
-                .entry
-                .clone()
-                .map(|entry| PackageEntryPoint::new(entry, config.run_entry.clone()))
-        });
+        let provider_requirements = self
+            .provider_requirements_for(&graph)
+            .map_err(CompileBlocked::CompilerError)?;
+        let entry_point = match self
+            .config
+            .as_ref()
+            .and_then(|c| c.run_entry.as_str().into())
+        {
+            Some(run_entry) => self
+                .config
+                .as_ref()
+                .and_then(|c| c.entry.as_ref())
+                .map(|p| PackageEntryPoint::new(p.clone(), run_entry)),
+            None => None,
+        };
+
+        let metadata = self
+            .config
+            .as_ref()
+            .map(|c| PackageMetadata {
+                name: c.name().to_string(),
+                version: c.version().map(String::from),
+                author: c.author().map(String::from),
+                description: c.description().map(String::from),
+            })
+            .unwrap_or_else(|| PackageMetadata {
+                name: "unknown".to_string(),
+                version: None,
+                author: None,
+                description: None,
+            });
+
+        let limits = self
+            .config
+            .as_ref()
+            .map(|c| c.limits().clone())
+            .unwrap_or_default();
+
         let package = Arc::new(
             PackageImage::try_new(
                 graph,
                 self.config
                     .as_ref()
-                    .map(WorkspaceConfig::execution_target)
+                    .map(WorkspaceConfig::compile_target)
                     .cloned()
                     .unwrap_or_else(|| {
                         ExecutionTarget::new("default").expect("default target is valid")
                     }),
                 entry_point,
+                metadata,
+                limits,
                 adapter_requirements,
                 provider_requirements,
             )
@@ -868,7 +590,10 @@ impl Workspace {
         Ok(CompileReport { package })
     }
 
-    fn adapter_requirements_for(&self, graph: &BytecodeGraph) -> Vec<AdapterModuleRequirement> {
+    pub(crate) fn adapter_requirements_for(
+        &self,
+        graph: &BytecodeGraph,
+    ) -> Vec<AdapterModuleRequirement> {
         let mut requirements = graph
             .modules()
             .filter_map(|module| {
@@ -886,7 +611,10 @@ impl Workspace {
         requirements
     }
 
-    fn provider_requirements_for(&self, graph: &BytecodeGraph) -> Vec<ProviderModuleRequirement> {
+    fn provider_requirements_for(
+        &self,
+        graph: &BytecodeGraph,
+    ) -> Result<Vec<ProviderModuleRequirement>, String> {
         graph
             .modules()
             .filter_map(|module| {
@@ -897,32 +625,40 @@ impl Workspace {
                     .unwrap_or(module.path().as_str());
                 self.catalog
                     .provider_schema_fingerprint(provider_path)
-                    .map(|schema_fingerprint| ProviderModuleRequirement {
-                        module_path: provider_path.to_string(),
-                        schema_fingerprint,
-                        boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
-                        exports: self.provider_exports_for(module.path()),
+                    .map(|schema_fingerprint| {
+                        self.provider_interface_for(module.path())
+                            .map(|(alias, exports)| ProviderModuleRequirement {
+                                alias,
+                                module_path: provider_path.to_string(),
+                                schema_fingerprint,
+                                boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
+                                exports,
+                            })
                     })
             })
-            .collect()
+            .collect::<Result<Vec<_>, _>>()
     }
 
-    fn provider_exports_for(&self, path: &ModulePath) -> Vec<ProviderFunctionSignature> {
+    fn provider_interface_for(
+        &self,
+        path: &ModulePath,
+    ) -> Result<(String, Vec<ProviderFunctionSignature>), String> {
         let Some(module) = self
             .frontend
             .modules()
             .iter()
             .find(|module| module.path() == path)
         else {
-            return Vec::new();
+            return Err(format!("provider module '{}' is not loaded", path));
         };
         let Some(type_result) = module.type_result() else {
-            return Vec::new();
+            return Err(format!("provider module '{}' has no type result", path));
         };
         let Some(resolution) = module.graph().resolution() else {
-            return Vec::new();
+            return Err(format!("provider module '{}' has no resolution", path));
         };
         let table = type_result.layer().table();
+        let mut aliases = std::collections::BTreeSet::new();
         let mut exports = resolution
             .symbols()
             .iter()
@@ -930,6 +666,8 @@ impl Workspace {
             .filter_map(|symbol| {
                 let name = self.frontend.string_table().resolve(symbol.name())?;
                 let name = name.strip_prefix("__provider_")?;
+                let alias = galfus_contract::provider_alias_from_operation(name)?;
+                aliases.insert(alias.to_string());
                 let TypeKind::Function(function) =
                     table.kind(type_result.layer().symbol_type(symbol.id())?)?
                 else {
@@ -965,97 +703,13 @@ impl Workspace {
             })
             .collect::<Vec<_>>();
         exports.sort();
-        exports
-    }
-
-    /// Starts the configured entry as a persistent execution.
-    pub fn start_execution(
-        &mut self,
-        args: &[Vec<u8>],
-        providers: Option<Providers>,
-        driver: std::rc::Rc<dyn galfus_runtime::driver::ExecutionDriver>,
-    ) -> Result<Execution, crate::state::WorkspaceRunError> {
-        let package = match &self.bytecode_state.compile_state {
-            CompileState::Ready { package, .. } => Arc::clone(package),
-            _ => {
-                return Err(crate::state::WorkspaceRunError::Blocked(
-                    RunBlocked::CompileRequired,
-                ));
-            }
+        let aliases = aliases.into_iter().collect::<Vec<_>>();
+        let [alias] = aliases.as_slice() else {
+            return Err(format!(
+                "provider module '{}' must declare external operations with one valid alias",
+                path
+            ));
         };
-        Runtime::new(
-            Arc::clone(&package),
-            providers
-                .map_or_else(RuntimeCapabilities::builder, |providers| {
-                    RuntimeCapabilities::builder().with_providers(providers)
-                })
-                .build(),
-        )
-        .start(args, driver.clone())
-        .map_err(crate::state::WorkspaceRunError::RuntimeStart)
-    }
-
-    pub fn start_execution_with_bindings(
-        &mut self,
-        args: &[Vec<u8>],
-        providers: Option<Providers>,
-        bindings: galfus_contract::AdapterBindings,
-        driver: std::rc::Rc<dyn galfus_runtime::driver::ExecutionDriver>,
-    ) -> Result<Execution, crate::state::WorkspaceRunError> {
-        let package = match &self.bytecode_state.compile_state {
-            CompileState::Ready { package, .. } => Arc::clone(package),
-            _ => {
-                return Err(crate::state::WorkspaceRunError::Blocked(
-                    RunBlocked::CompileRequired,
-                ));
-            }
-        };
-        Runtime::new(
-            Arc::clone(&package),
-            providers
-                .map_or_else(RuntimeCapabilities::builder, |providers| {
-                    RuntimeCapabilities::builder().with_providers(providers)
-                })
-                .with_adapter_bindings(bindings)
-                .build(),
-        )
-        .start(args, driver.clone())
-        .map_err(crate::state::WorkspaceRunError::RuntimeStart)
-    }
-
-    /// Compatibility helper that drives the returned execution through the supplied driver.
-    pub fn run(
-        &mut self,
-        args: &[Vec<u8>],
-        providers: Option<Providers>,
-        driver: std::rc::Rc<dyn galfus_runtime::driver::ExecutionDriver>,
-    ) -> Result<galfus_contract::BoundaryValue, crate::state::WorkspaceRunError> {
-        let mut execution = self.start_execution(args, providers, driver)?;
-        execution
-            .run_sync_to_completion()
-            .map_err(crate::state::WorkspaceRunError::ExecutionFailed)
-    }
-
-    pub fn run_with_bindings(
-        &mut self,
-        args: &[Vec<u8>],
-        providers: Option<Providers>,
-        bindings: galfus_contract::AdapterBindings,
-        driver: std::rc::Rc<dyn galfus_runtime::driver::ExecutionDriver>,
-    ) -> Result<galfus_contract::BoundaryValue, crate::state::WorkspaceRunError> {
-        let mut execution =
-            self.start_execution_with_bindings(args, providers, bindings, driver)?;
-        execution
-            .run_sync_to_completion()
-            .map_err(crate::state::WorkspaceRunError::ExecutionFailed)
-    }
-}
-
-impl galfus_bytecode::PackageLoader for Workspace {
-    type Error = CompileBlocked;
-
-    fn load(&mut self) -> Result<Arc<PackageImage>, Self::Error> {
-        self.check();
-        self.compile().map(|report| report.package)
+        Ok((alias.clone(), exports))
     }
 }

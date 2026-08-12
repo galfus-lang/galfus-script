@@ -41,15 +41,17 @@ impl Default for Playground {
 impl Playground {
     pub fn new() -> Self {
         let mut workspace = Workspace::new();
-        let catalog = galfus_contract::CapabilityCatalog::new(
-            vec![galfus_contract::builtins::BridgeModule::new(
-                "std/io",
-                galfus_contract::builtins::STD_IO_SOURCE,
-            )],
-            vec![],
-        )
-        .expect("the built-in std/io provider catalog is valid");
-        workspace.set_catalog(std::sync::Arc::new(catalog));
+        let catalog = std::sync::Arc::new(
+            galfus_contract::CapabilityCatalog::new(
+                vec![galfus_contract::BridgeModule::new(
+                    "std/io",
+                    galfus_contract::builtins::STD_IO_SOURCE,
+                )],
+                Vec::new(),
+            )
+            .expect("the built-in std/io provider catalog is valid"),
+        );
+        workspace.set_catalog(catalog);
         Self {
             workspace,
             io: BufferIoProvider::default(),
@@ -108,7 +110,7 @@ impl Playground {
             .workspace
             .start_execution(
                 args,
-                Some(Providers::with_host(Box::new(self.io.clone()))),
+                Some(Providers::new().with_host("io", Box::new(self.io.clone()))),
                 executor.clone(),
             )
             .map_err(|error| anyhow::anyhow!("playground execution failed: {error:?}"))?;
@@ -124,7 +126,7 @@ impl Playground {
             .workspace
             .start_execution(
                 args,
-                Some(Providers::with_host(Box::new(self.io.clone()))),
+                Some(Providers::new().with_host("io", Box::new(self.io.clone()))),
                 executor.clone(),
             )
             .map_err(|error| anyhow::anyhow!("playground execution failed: {error:?}"))?;
@@ -195,4 +197,4 @@ fn run_source_inner(code: &str, args: &[&str]) -> Result<PlaygroundResult> {
 }
 
 pub const PLAYGROUND_CONFIG: &str =
-    "[module]\nname = \"playground\"\ntarget = \"app\"\nentry = \"src/main.gfs\"\n";
+    "[module]\nname = \"playground\"\ntarget = \"app\"\n[entry]\npath = \"src/main.gfs\"\n";

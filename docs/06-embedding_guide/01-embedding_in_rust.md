@@ -87,38 +87,15 @@ workspace.run(&[], None, driver)?;
 
 ## Add host capabilities
 
-Galfus source accesses native host capabilities through `HostProvider`. Providers process requests dispatched by Galfus code using a `MessageInjector`.
+Galfus source accesses native host capabilities through `HostProvider` instances
+stored in `Providers`. Each registration has an alias; bridge operations use
+that alias in the form `__provider_<alias>_<operation>`. The runtime validates
+the provider's `ProviderDescriptor` against the bridge surface before execution
+starts.
 
-```rust
-use std::sync::Arc;
-use galfus_contract::{BoundaryValue, HostProvider, MessageInjector, Providers};
-
-struct Host;
-
-impl HostProvider for Host {
-    fn dispatch(
-        &mut self,
-        thread_id: galfus_core::ThreadId,
-        request_lease: galfus_core::RequestLease,
-        name: &str,
-        _args: &[BoundaryValue],
-        injector: Arc<dyn MessageInjector>,
-    ) {
-        if name == "answer" {
-            let _ = injector.inject_system_response(
-                thread_id,
-                request_lease,
-                Ok(BoundaryValue::I32(42)),
-            );
-        }
-    }
-}
-
-let providers = Providers::with_host(Box::new(Host));
-let mut execution = workspace.start_execution(&[], Some(providers), driver)?;
-```
-
-Host providers default to main-thread affinity (`TaskAffinity::Main`). Override `HostProvider::affinity` to return `TaskAffinity::Any` only when the provider can safely run on worker executor lanes.
+See [Creating and Registering Providers](./02-creating_providers.md) for the
+current bridge, descriptor, dispatch, asynchronous completion, and
+multi-provider registration APIs.
 
 ## Cancellation and external completion
 

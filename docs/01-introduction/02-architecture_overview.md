@@ -134,7 +134,10 @@ without busy-waiting:
 Providers represent the boundary between Galfus and the host platform.
 The provider surface is asynchronous and message-based. Concrete capabilities
 are supplied by the embedding host.
-If a provider is not supplied, related builtin calls will fail deterministically, allowing trivial sandboxing.
+Before execution begins, the runtime validates every provider requirement
+recorded by the package. A missing or incompatible provider rejects startup,
+while packages with no provider requirements can run in a sandbox without
+providers.
 
 ---
 

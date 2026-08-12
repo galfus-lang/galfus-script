@@ -88,10 +88,11 @@ Example configuration:
 
 Basic console and standard input/output stream interaction.
 
-`std/io` is resolved at execution time through the optional `HostProvider` via asynchronous native calls.
-The compiler does not require a provider. If execution reaches a native `std/io` call with
-no host provider configured, it fails at runtime. This permits hosts to run
-code without providers as a sandbox.
+`std/io` is resolved through an optional `HostProvider` via asynchronous native
+calls. Compilation records its provider requirement; execution preflight then
+requires a compatible `io` provider before the first instruction runs. Hosts
+can still run packages without providers when those packages do not import a
+provider bridge.
 
 ```galfus
 # Read bytes from standard input until the delimiter is reached or EOF.

@@ -37,7 +37,7 @@ fn vm_rejects_an_unsupported_bytecode_format_before_execution() {
         galfus_bytecode::BytecodeFormatVersion::new(1, 0, 0),
     );
     let vm = VirtualMachine::new(sync::Arc::new(graph));
-    let mut thread = thread::VmThreadState::new();
+    let mut thread = thread::VmThreadState::test_new();
 
     let panic = vm
         .prepare_function(

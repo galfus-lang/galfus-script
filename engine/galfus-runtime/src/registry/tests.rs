@@ -11,7 +11,9 @@ fn registry_preserves_the_executor_assigned_identity() {
     let id = galfus_core::ThreadId::new(42);
     let mut registry = ThreadRegistry::new();
 
-    registry.register(id, VmThreadState::new(), None).unwrap();
+    registry
+        .register(id, VmThreadState::test_new(), None)
+        .unwrap();
 
     assert!(registry.contains(id));
     assert_eq!(id.raw(), 42);
@@ -20,7 +22,7 @@ fn registry_preserves_the_executor_assigned_identity() {
 #[test]
 fn registry_keeps_the_mailbox_and_key_while_a_thread_is_running() {
     let id = galfus_core::ThreadId::new(1);
-    let thread = VmThreadState::new();
+    let thread = VmThreadState::test_new();
     let key = Some("worker".to_string());
     let mut registry = ThreadRegistry::new();
 
@@ -52,7 +54,9 @@ fn registry_tracks_state_after_the_thread_body_is_taken() {
     let id = galfus_core::ThreadId::new(1);
     let mut registry = ThreadRegistry::new();
 
-    registry.register(id, VmThreadState::new(), None).unwrap();
+    registry
+        .register(id, VmThreadState::test_new(), None)
+        .unwrap();
     assert!(registry.mark_running(id));
     let _running_thread = registry.take(id).expect("thread is available to run");
 
@@ -66,11 +70,31 @@ fn registry_tracks_state_after_the_thread_body_is_taken() {
 }
 
 #[test]
+fn registry_reports_an_exited_spawned_thread_on_its_first_observation() {
+    let id = galfus_core::ThreadId::new(1);
+    let mut registry = ThreadRegistry::new();
+
+    registry
+        .register(id, VmThreadState::test_new(), None)
+        .unwrap();
+    registry.mark_spawned(id).unwrap();
+    assert!(registry.mark_running(id));
+    let _thread = registry.take(id).expect("thread is available to run");
+
+    assert!(registry.mark_exited(id, Ok(galfus_contract::BoundaryValue::I32(7))));
+    assert!(!registry.is_running(id));
+    assert!(registry.is_exited(id));
+    assert!(registry.is_exited(id));
+}
+
+#[test]
 fn exited_threads_keep_only_terminal_metadata() {
     let id = galfus_core::ThreadId::new(1);
     let mut registry = ThreadRegistry::new();
 
-    registry.register(id, VmThreadState::new(), None).unwrap();
+    registry
+        .register(id, VmThreadState::test_new(), None)
+        .unwrap();
     assert!(registry.mark_exited(id, Ok(galfus_contract::BoundaryValue::Null)));
 
     assert!(registry.take(id).is_none());
@@ -83,7 +107,9 @@ fn exited_tombstones_have_bounded_retention() {
     let mut registry = ThreadRegistry::new();
     for raw_id in 1..=1025 {
         let id = galfus_core::ThreadId::new(raw_id);
-        registry.register(id, VmThreadState::new(), None).unwrap();
+        registry
+            .register(id, VmThreadState::test_new(), None)
+            .unwrap();
         assert!(registry.mark_exited(id, Ok(galfus_contract::BoundaryValue::Null)));
     }
 
@@ -96,7 +122,9 @@ fn registry_only_releases_a_created_thread_once_for_spawn() {
     let id = galfus_core::ThreadId::new(1);
     let mut registry = ThreadRegistry::new();
 
-    registry.register(id, VmThreadState::new(), None).unwrap();
+    registry
+        .register(id, VmThreadState::test_new(), None)
+        .unwrap();
 
     assert!(registry.take_created(id).is_some());
     assert!(registry.take_created(id).is_none());
@@ -109,10 +137,14 @@ fn registry_rejects_a_duplicate_nominal_key_without_replacing_the_thread() {
     let mut registry = ThreadRegistry::new();
 
     registry
-        .register(first, VmThreadState::new(), Some("worker".to_string()))
+        .register(first, VmThreadState::test_new(), Some("worker".to_string()))
         .unwrap();
     let error = registry
-        .register(second, VmThreadState::new(), Some("worker".to_string()))
+        .register(
+            second,
+            VmThreadState::test_new(),
+            Some("worker".to_string()),
+        )
         .unwrap_err();
 
     assert_eq!(

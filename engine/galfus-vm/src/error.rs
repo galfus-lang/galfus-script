@@ -41,6 +41,9 @@ pub enum VmError {
 
     #[error("Empty call stack")]
     EmptyCallStack,
+
+    #[error("Resource limit exceeded: {0:?}")]
+    ResourceLimitExceeded(galfus_contract::ExecutionFailureKind),
     #[error("Unresolved host block")]
     UnresolvedHostBlocked,
     #[error("Invalid object reference")]

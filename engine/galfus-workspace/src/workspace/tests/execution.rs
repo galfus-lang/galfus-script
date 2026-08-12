@@ -1,3 +1,6 @@
+use super::compilation::io_catalog;
+use super::*;
+
 #[test]
 fn run_passes_read_terminator_to_the_io_provider() {
     let mut workspace = Workspace::new();
@@ -8,7 +11,8 @@ fn run_passes_read_terminator_to_the_io_provider() {
             [module]
             name = "read-terminator"
             target = "app"
-            entry = "main.gfs"
+            [entry]
+            path = "main.gfs"
             "#,
         )
         .expect("valid configuration");
@@ -30,9 +34,12 @@ fn run_passes_read_terminator_to_the_io_provider() {
     workspace.compile().expect("workspace compiles");
 
     let terminator = Arc::new(Mutex::new(Vec::new()));
-    let providers = Providers::with_host(Box::new(TerminatorIo {
-        terminator: Arc::clone(&terminator),
-    }));
+    let providers = Providers::new().with_host(
+        "io",
+        Box::new(TerminatorIo {
+            terminator: Arc::clone(&terminator),
+        }),
+    );
     let executor = std::rc::Rc::new(CooperativeDriver::new());
     let code = workspace
         .run(&[], Some(providers), executor)
@@ -50,7 +57,8 @@ fn run_specializes_nested_generic_types_across_modules() {
             [module]
             name = "cross-module-nested-generics"
             target = "app"
-            entry = "main.gfs"
+            [entry]
+            path = "main.gfs"
             "#,
         )
         .expect("valid configuration");
@@ -95,7 +103,8 @@ fn run_specializes_explicit_imported_generic_typeof_parameter() {
             [module]
             name = "cross-module-typeof"
             target = "app"
-            entry = "main.gfs"
+            [entry]
+            path = "main.gfs"
             "#,
         )
         .expect("valid configuration");
@@ -142,7 +151,8 @@ fn run_specializes_generic_anchored_range_iterator_methods() {
             [module]
             name = "generic-range-method"
             target = "app"
-            entry = "main.gfs"
+            [entry]
+            path = "main.gfs"
             "#,
         )
         .expect("valid configuration");
@@ -178,7 +188,8 @@ fn run_synchronizes_the_runtime_module_graph() {
             [module]
             name = "runtime-sync"
             target = "app"
-            entry = "main.gfs"
+            [entry]
+            path = "main.gfs"
             "#,
         )
         .expect("valid configuration");
@@ -233,7 +244,8 @@ fn run_propagates_runtime_start_error_on_entry_signature_mismatch() {
             [module]
             name = "bad-entry"
             target = "app"
-            entry = "main.gfs"
+            [entry]
+            path = "main.gfs"
             "#,
         )
         .expect("valid configuration");
@@ -256,6 +268,8 @@ fn run_propagates_runtime_start_error_on_entry_signature_mismatch() {
 
     assert!(matches!(
         result,
-        Err(crate::state::WorkspaceRunError::RuntimeStart(galfus_runtime::RuntimeError::EntryArityMismatch { .. }))
+        Err(crate::state::WorkspaceRunError::RuntimeStart(
+            galfus_runtime::RuntimeError::EntryArityMismatch { .. }
+        ))
     ));
 }

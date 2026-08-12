@@ -4,6 +4,7 @@
 //! for authoritative details on the lifecycle and ownership of VM-level thread states and objects.
 
 pub mod error;
+pub mod quota;
 pub mod runtime;
 #[cfg(test)]
 mod tests;

@@ -310,6 +310,13 @@ fn adapter_package(graph: Arc<BytecodeGraph>) -> Arc<PackageImage> {
                 ModulePath::new("main.gfs").expect("valid module path"),
                 "main",
             )),
+            galfus_bytecode::PackageMetadata {
+                name: "test".into(),
+                version: None,
+                author: None,
+                description: None,
+            },
+            galfus_contract::LimitsMetadata::default(),
             vec![AdapterModuleRequirement {
                 proxy_module: "graphics.gfp".to_string(),
                 descriptor: demo_adapter_descriptor(),
@@ -335,12 +342,20 @@ fn adapter_package_with_provider(graph: Arc<BytecodeGraph>) -> Arc<PackageImage>
                 ModulePath::new("main.gfs").expect("valid module path"),
                 "main",
             )),
+            galfus_bytecode::PackageMetadata {
+                name: "test".into(),
+                version: None,
+                author: None,
+                description: None,
+            },
+            galfus_contract::LimitsMetadata::default(),
             vec![AdapterModuleRequirement {
                 proxy_module: "graphics.gfp".to_string(),
                 descriptor: demo_adapter_descriptor(),
                 boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
             }],
             vec![ProviderModuleRequirement {
+                alias: "io".to_string(),
                 module_path: provider.module_path,
                 schema_fingerprint: provider.schema_fingerprint,
                 boundary_abi: provider.boundary_abi,
@@ -408,7 +423,7 @@ fn execution_host_bootstraps_a_compiled_package_with_provider_and_adapter() {
         target: context.target.clone(),
         properties: Default::default(),
     })
-    .with_providers(Providers::with_host(Box::new(DeclaredProvider)))
+    .with_providers(Providers::new().with_host("io", Box::new(DeclaredProvider)))
     .start(Arc::clone(&package), &[], driver.clone());
     assert!(matches!(
         missing_loader,
@@ -418,7 +433,7 @@ fn execution_host_bootstraps_a_compiled_package_with_provider_and_adapter() {
 
     let state = Arc::new(Mutex::new(DemoAdapterState::default()));
     let mut host = ExecutionHost::new(context)
-        .with_providers(Providers::with_host(Box::new(DeclaredProvider)));
+        .with_providers(Providers::new().with_host("io", Box::new(DeclaredProvider)));
     host.register_adapter_loader(
         "demo",
         Box::new(DemoAdapterLoader {

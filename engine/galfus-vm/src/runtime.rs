@@ -161,6 +161,7 @@ pub enum HeapObject {
         fields: Vec<Value>,
     },
     Array {
+        module_id: ModuleId,
         element_ty: TypeIdx,
         elements: Vec<Value>,
     },
@@ -178,6 +179,23 @@ pub enum HeapObject {
         type_id: OpaqueTypeId,
         id: HandleId,
     },
+}
+
+impl HeapObject {
+    pub fn heap_bytes(&self) -> usize {
+        match self {
+            Self::Struct { fields, .. } => {
+                std::mem::size_of::<Self>() + fields.capacity() * std::mem::size_of::<Value>()
+            }
+            Self::Array { elements, .. } => {
+                std::mem::size_of::<Self>() + elements.capacity() * std::mem::size_of::<Value>()
+            }
+            Self::Tuple { elements } => {
+                std::mem::size_of::<Self>() + elements.capacity() * std::mem::size_of::<Value>()
+            }
+            Self::Choice { .. } | Self::AdapterHandle { .. } => std::mem::size_of::<Self>(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -314,13 +332,15 @@ impl VirtualMachine {
             }
             (BytecodeType::Array(element_type), Value::Object(reference)) => {
                 let Ok(HeapObject::Array {
+                    module_id: value_module,
                     element_ty,
                     elements,
                 }) = thread.heap.get_object(reference)
                 else {
                     return false;
                 };
-                element_ty == element_type
+                *value_module == module_id
+                    && element_ty == element_type
                     && elements.iter().cloned().all(|value| {
                         self.value_matches_type(thread, value, module_id, *element_type)
                     })
@@ -465,13 +485,18 @@ impl VirtualMachine {
             registers[i] = val;
         }
 
-        thread.call_stack.push(CallFrame {
-            module_id,
-            func_idx,
-            pc: 0,
-            registers,
-            return_dest: None,
-        });
+        thread
+            .push_frame(CallFrame {
+                module_id,
+                func_idx,
+                pc: 0,
+                registers,
+                return_dest: None,
+            })
+            .map_err(|error| VmPanic {
+                error,
+                stack_trace: vec![],
+            })?;
 
         Ok(())
     }
@@ -513,13 +538,18 @@ impl VirtualMachine {
             registers[i] = val;
         }
 
-        thread.call_stack.push(CallFrame {
-            module_id,
-            func_idx,
-            pc: 0,
-            registers,
-            return_dest: None,
-        });
+        thread
+            .push_frame(CallFrame {
+                module_id,
+                func_idx,
+                pc: 0,
+                registers,
+                return_dest: None,
+            })
+            .map_err(|error| VmPanic {
+                error,
+                stack_trace: vec![],
+            })?;
 
         match self.execute_loop(thread) {
             Ok(val) => Ok(val),

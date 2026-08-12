@@ -5,7 +5,7 @@ use std::thread;
 
 use crate::event::{EventSequence, RuntimeEvent};
 use galfus_contract::{
-    ExecutionFailure, ExecutorStepResult, KernelDriver, KernelTask, ThreadResult,
+    ExecutionFailure, ExecutorStepResult, KernelDriver, KernelTask, LimitsMetadata, ThreadResult,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -28,24 +28,47 @@ pub trait ExecutionDriver: KernelDriver {
     fn drain_events(&self) -> Vec<(EventSequence, RuntimeEvent)>;
 
     fn has_pending_events(&self) -> bool;
+
+    fn configure_limits(&self, _limits: &LimitsMetadata) -> Result<(), EventDeliveryError> {
+        Ok(())
+    }
 }
 
 pub struct NativeEventBridge {
-    sender: std::sync::mpsc::Sender<(EventSequence, RuntimeEvent)>,
+    sender: std::sync::mpsc::SyncSender<(EventSequence, RuntimeEvent)>,
     receiver: Mutex<std::sync::mpsc::Receiver<(EventSequence, RuntimeEvent)>>,
     next_sequence: Mutex<EventSequence>,
     pending: Mutex<usize>,
+    capacity: usize,
+    limit: Mutex<usize>,
 }
 
 impl NativeEventBridge {
     pub fn new() -> Self {
-        let (sender, receiver) = std::sync::mpsc::channel();
+        Self::with_capacity(LimitsMetadata::default().max_event_queue)
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(capacity);
         Self {
             sender,
             receiver: Mutex::new(receiver),
             next_sequence: Mutex::new(EventSequence::FIRST),
             pending: Mutex::new(0),
+            capacity,
+            limit: Mutex::new(capacity),
         }
+    }
+
+    pub fn configure_limit(&self, limit: usize) -> Result<(), EventDeliveryError> {
+        if limit > self.capacity {
+            return Err(EventDeliveryError::QueueUnavailable);
+        }
+        *self
+            .limit
+            .lock()
+            .map_err(|_| EventDeliveryError::QueueUnavailable)? = limit;
+        Ok(())
     }
 
     pub fn drain(&self) -> Vec<(EventSequence, RuntimeEvent)> {
@@ -70,15 +93,29 @@ impl RuntimeEventSink for NativeEventBridge {
         let next = current
             .next()
             .ok_or(EventDeliveryError::SequenceExhausted)?;
+
         let mut pending = self
             .pending
             .lock()
             .map_err(|_| EventDeliveryError::QueueUnavailable)?;
-        *pending += 1;
-        if self.sender.send((current, event)).is_err() {
-            *pending -= 1;
-            return Err(EventDeliveryError::ReceiverClosed);
+        let limit = *self
+            .limit
+            .lock()
+            .map_err(|_| EventDeliveryError::QueueUnavailable)?;
+        if *pending >= limit {
+            return Err(EventDeliveryError::QueueUnavailable);
         }
+
+        self.sender
+            .try_send((current, event))
+            .map_err(|e| match e {
+                std::sync::mpsc::TrySendError::Full(_) => EventDeliveryError::QueueUnavailable,
+                std::sync::mpsc::TrySendError::Disconnected(_) => {
+                    EventDeliveryError::QueueUnavailable
+                }
+            })?;
+
+        *pending += 1;
         *sequence = next;
         Ok(())
     }
@@ -94,9 +131,13 @@ pub struct CooperativeDriver {
 
 impl CooperativeDriver {
     pub fn new() -> Self {
+        Self::with_event_queue_capacity(LimitsMetadata::default().max_event_queue)
+    }
+
+    pub fn with_event_queue_capacity(event_queue_capacity: usize) -> Self {
         Self {
             queue: Mutex::new(VecDeque::new()),
-            events: std::sync::Arc::new(NativeEventBridge::new()),
+            events: std::sync::Arc::new(NativeEventBridge::with_capacity(event_queue_capacity)),
             exit_result: sync::Mutex::new(None),
             exit_callback: Mutex::new(None),
         }
@@ -222,6 +263,10 @@ impl ExecutionDriver for CooperativeDriver {
     fn has_pending_events(&self) -> bool {
         self.events.has_pending()
     }
+
+    fn configure_limits(&self, limits: &LimitsMetadata) -> Result<(), EventDeliveryError> {
+        self.events.configure_limit(limits.max_event_queue)
+    }
 }
 
 impl Default for CooperativeDriver {
@@ -264,5 +309,20 @@ mod tests {
             stored_result.unwrap_err().kind,
             ExecutionFailureKind::VmPanic
         );
+    }
+
+    #[test]
+    fn event_bridge_enforces_the_configured_limit_and_recovers_after_drain() {
+        let bridge = NativeEventBridge::with_capacity(2);
+        bridge.configure_limit(1).unwrap();
+
+        bridge.submit(RuntimeEvent::Tick { delta_ms: 1 }).unwrap();
+        assert!(matches!(
+            bridge.submit(RuntimeEvent::Tick { delta_ms: 1 }),
+            Err(EventDeliveryError::QueueUnavailable)
+        ));
+
+        assert_eq!(bridge.drain().len(), 1);
+        bridge.submit(RuntimeEvent::Tick { delta_ms: 1 }).unwrap();
     }
 }

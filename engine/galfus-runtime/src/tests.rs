@@ -1,3 +1,4 @@
+use galfus_contract::LimitsMetadata;
 mod adapters;
 
 use std::collections;
@@ -8,7 +9,7 @@ use galfus_bytecode::instruction::{ConstIdx, FuncIdx, GlobalIdx, Instruction, Re
 use galfus_bytecode::{
     BytecodeFunction, BytecodeGraph, BytecodeModule, BytecodeNode, BytecodeType, Constant,
     ConstantPool, ExecutionMetadata, ExportSlot, ImportEdge, ImportSlot, PackageEntryPoint,
-    PackageImage,
+    PackageImage, PackageMetadata,
 };
 use galfus_contract::{
     AdapterLoadContext, CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget, ProviderModuleRequirement,
@@ -48,7 +49,7 @@ impl galfus_contract::HostProvider for StartupProvider {
         injector: sync::Arc<dyn galfus_contract::MessageInjector>,
     ) {
         self.calls.lock().unwrap().push(name.to_string());
-        if name == "initialize" && self.fail_initializer {
+        if name == "main_initialize" && self.fail_initializer {
             let _ = injector.inject_system_response(
                 thread_id,
                 request_lease,
@@ -57,7 +58,7 @@ impl galfus_contract::HostProvider for StartupProvider {
                     "initializer rejected",
                 )),
             );
-        } else if name == "initialize" {
+        } else if name == "main_initialize" {
             *self.pending.lock().unwrap() = Some((thread_id, request_lease, injector));
         } else {
             let _ = injector.inject_system_response(
@@ -135,7 +136,7 @@ fn startup_graph() -> (sync::Arc<BytecodeGraph>, ModuleId) {
                 ],
             },
             BytecodeFunction {
-                name: "__provider_initialize".to_string(),
+                name: "__provider_main_initialize".to_string(),
                 param_count: 0,
                 local_count: 0,
                 temp_count: 0,
@@ -144,7 +145,7 @@ fn startup_graph() -> (sync::Arc<BytecodeGraph>, ModuleId) {
                 instructions: vec![Instruction::RetNull],
             },
             BytecodeFunction {
-                name: "__provider_entry".to_string(),
+                name: "__provider_main_entry".to_string(),
                 param_count: 0,
                 local_count: 0,
                 temp_count: 0,
@@ -192,6 +193,13 @@ fn package_with_entry(
             (*graph).clone(),
             target(),
             Some(PackageEntryPoint::new(module_path, "main")),
+            galfus_bytecode::PackageMetadata {
+                name: "test".into(),
+                version: None,
+                author: None,
+                description: None,
+            },
+            galfus_contract::LimitsMetadata::default(),
             Vec::new(),
             Vec::new(),
         )
@@ -213,8 +221,16 @@ fn package_with_required_provider(
             (*graph).clone(),
             target(),
             Some(PackageEntryPoint::new(module_path, "main")),
+            galfus_bytecode::PackageMetadata {
+                name: "test".into(),
+                version: None,
+                author: None,
+                description: None,
+            },
+            galfus_contract::LimitsMetadata::default(),
             Vec::new(),
             vec![ProviderModuleRequirement {
+                alias: "main".to_string(),
                 module_path: "std/io".to_string(),
                 schema_fingerprint: 1,
                 boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
@@ -230,7 +246,7 @@ fn start_with_provider(provider: StartupProvider) -> Execution {
     Runtime::new(
         package_with_entry(graph, module_id),
         RuntimeCapabilities::builder()
-            .with_providers(Providers::with_host(Box::new(provider)))
+            .with_providers(Providers::new().with_host("main", Box::new(provider)))
             .build(),
     )
     .start(&[], std::rc::Rc::new(CooperativeDriver::new()))
@@ -243,8 +259,21 @@ fn runtime_rejects_an_unsupported_bytecode_format_before_loading_the_entry_modul
         BytecodeGraph::with_format_version(galfus_bytecode::BytecodeFormatVersion::new(1, 0, 0));
 
     let package = sync::Arc::new(
-        PackageImage::try_new(graph, target(), None, Vec::new(), Vec::new())
-            .expect("graph has no adapter proxies"),
+        PackageImage::try_new(
+            graph,
+            target(),
+            None,
+            PackageMetadata {
+                name: "test".into(),
+                version: None,
+                author: None,
+                description: None,
+            },
+            LimitsMetadata::default(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("graph has no adapter proxies"),
     );
     let result = Runtime::new(package, RuntimeCapabilities::builder().build())
         .start(&[], std::rc::Rc::new(CooperativeDriver::new()));
@@ -386,7 +415,7 @@ fn pending_initializer_delays_entry_until_its_completion() {
         }
         execution.poll(100).expect("startup polling succeeds");
     }
-    assert_eq!(*calls.lock().unwrap(), vec!["initialize"]);
+    assert_eq!(*calls.lock().unwrap(), vec!["main_initialize"]);
     let (thread_id, request_lease, injector) = pending
         .lock()
         .unwrap()
@@ -403,7 +432,7 @@ fn pending_initializer_delays_entry_until_its_completion() {
     execution
         .poll(100)
         .expect("cross-thread completion is ignored safely");
-    assert_eq!(*calls.lock().unwrap(), vec!["initialize"]);
+    assert_eq!(*calls.lock().unwrap(), vec!["main_initialize"]);
     injector
         .inject_system_response(
             thread_id,
@@ -421,7 +450,10 @@ fn pending_initializer_delays_entry_until_its_completion() {
         execution.result(),
         Some(&Ok(galfus_contract::BoundaryValue::I32(42)))
     );
-    assert_eq!(*calls.lock().unwrap(), vec!["initialize", "entry"]);
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec!["main_initialize", "main_entry"]
+    );
 }
 
 #[test]
@@ -649,6 +681,13 @@ fn run_initializes_dependencies_before_the_entry_module() {
                 ModulePath::new("main.gfs").expect("valid module path"),
                 "main",
             )),
+            galfus_bytecode::PackageMetadata {
+                name: "test".into(),
+                version: None,
+                author: None,
+                description: None,
+            },
+            galfus_contract::LimitsMetadata::default(),
             Vec::new(),
             Vec::new(),
         )
@@ -657,7 +696,7 @@ fn run_initializes_dependencies_before_the_entry_module() {
     let mut task = Runtime::new(
         package,
         RuntimeCapabilities::builder()
-            .with_providers(Providers::with_host(Box::new(ImmediateProvider)))
+            .with_providers(Providers::new().with_host("io", Box::new(ImmediateProvider)))
             .build(),
     )
     .start(&[], executor.clone())

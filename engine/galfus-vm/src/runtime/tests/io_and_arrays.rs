@@ -127,7 +127,7 @@ fn test_len_and_copy_array() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VmThreadState::new();
+    let mut thread = thread::VmThreadState::test_new();
     let res = vm
         .run_function(
             &mut thread,
@@ -239,7 +239,7 @@ fn test_load_index_accepts_negative_index() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VmThreadState::new();
+    let mut thread = thread::VmThreadState::test_new();
     let res = vm
         .run_function(
             &mut thread,
@@ -286,7 +286,7 @@ fn test_load_index_out_of_bounds_returns_null() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VmThreadState::new();
+    let mut thread = thread::VmThreadState::test_new();
     let res = vm
         .run_function(
             &mut thread,
@@ -354,7 +354,7 @@ fn test_store_index_accepts_negative_index() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VmThreadState::new();
+    let mut thread = thread::VmThreadState::test_new();
     let res = vm
         .run_function(
             &mut thread,
@@ -408,7 +408,7 @@ fn test_store_index_out_of_bounds_returns_error() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VmThreadState::new();
+    let mut thread = thread::VmThreadState::test_new();
     let err = vm
         .run_function(
             &mut thread,

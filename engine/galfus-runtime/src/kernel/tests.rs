@@ -5,9 +5,9 @@ use galfus_vm::thread::VmThreadState;
 #[test]
 fn expired_timers_are_enqueued_in_deterministic_order() {
     let mut kernel = VirtualKernel::new();
-    let first = kernel.spawn(VmThreadState::new(), None).unwrap();
-    let second = kernel.spawn(VmThreadState::new(), None).unwrap();
-    let earlier = kernel.spawn(VmThreadState::new(), None).unwrap();
+    let first = kernel.spawn(VmThreadState::test_new(), None).unwrap();
+    let second = kernel.spawn(VmThreadState::test_new(), None).unwrap();
+    let earlier = kernel.spawn(VmThreadState::test_new(), None).unwrap();
 
     for (thread_id, timeout_ms) in [(first, 10), (second, 10), (earlier, 5)] {
         let thread = kernel
@@ -16,9 +16,9 @@ fn expired_timers_are_enqueued_in_deterministic_order() {
         kernel.block(thread_id, thread, Some(timeout_ms)).unwrap();
     }
 
-    assert_eq!(kernel.tick(5), vec![earlier]);
+    assert_eq!(kernel.tick(5), vec![(earlier, Ok(()))]);
     assert_eq!(kernel.next_runnable(), Some(earlier));
-    assert_eq!(kernel.tick(5), vec![first, second]);
+    assert_eq!(kernel.tick(5), vec![(first, Ok(())), (second, Ok(()))]);
     assert_eq!(kernel.next_runnable(), Some(first));
     assert_eq!(kernel.next_runnable(), Some(second));
 }
@@ -26,8 +26,8 @@ fn expired_timers_are_enqueued_in_deterministic_order() {
 #[test]
 fn mailbox_wakeups_keep_their_arrival_order() {
     let mut kernel = VirtualKernel::new();
-    let first = kernel.spawn(VmThreadState::new(), None).unwrap();
-    let second = kernel.spawn(VmThreadState::new(), None).unwrap();
+    let first = kernel.spawn(VmThreadState::test_new(), None).unwrap();
+    let second = kernel.spawn(VmThreadState::test_new(), None).unwrap();
 
     for thread_id in [first, second] {
         let thread = kernel
@@ -46,7 +46,7 @@ fn mailbox_wakeups_keep_their_arrival_order() {
                 sender_id: galfus_core::ThreadId::new(0),
                 data: vec![thread_id.raw() as u8],
             });
-        assert!(kernel.unblock(thread_id));
+        assert!(kernel.unblock(thread_id).unwrap());
     }
 
     assert_eq!(kernel.next_runnable(), Some(second));
@@ -59,10 +59,10 @@ fn thread_id_exhaustion_does_not_register_a_partial_thread() {
     kernel.thread_id_manager.set_next_id_for_test(u32::MAX);
 
     assert_eq!(
-        kernel.spawn(VmThreadState::new(), None).unwrap().raw(),
+        kernel.spawn(VmThreadState::test_new(), None).unwrap().raw(),
         u32::MAX
     );
-    let error = kernel.spawn(VmThreadState::new(), None).unwrap_err();
+    let error = kernel.spawn(VmThreadState::test_new(), None).unwrap_err();
 
     assert_eq!(
         error.kind,
@@ -75,11 +75,11 @@ fn thread_id_exhaustion_does_not_register_a_partial_thread() {
 fn duplicate_thread_key_does_not_consume_an_id_and_can_be_reused_after_cancellation() {
     let mut kernel = VirtualKernel::new();
     let first = kernel
-        .spawn(VmThreadState::new(), Some("worker".to_string()))
+        .spawn(VmThreadState::test_new(), Some("worker".to_string()))
         .unwrap();
 
     let error = kernel
-        .spawn(VmThreadState::new(), Some("worker".to_string()))
+        .spawn(VmThreadState::test_new(), Some("worker".to_string()))
         .unwrap_err();
     assert_eq!(
         error.kind,
@@ -89,7 +89,7 @@ fn duplicate_thread_key_does_not_consume_an_id_and_can_be_reused_after_cancellat
 
     assert!(kernel.cancel(first));
     let reused = kernel
-        .spawn(VmThreadState::new(), Some("worker".to_string()))
+        .spawn(VmThreadState::test_new(), Some("worker".to_string()))
         .unwrap();
     assert_eq!(reused, first);
 }

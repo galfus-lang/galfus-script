@@ -11,7 +11,7 @@ use galfus_vm::{HeapObject, VmValue};
 
 #[test]
 fn execution_stack_preserves_the_suspended_call_chain() {
-    let mut thread = galfus_vm::thread::VmThreadState::new();
+    let mut thread = galfus_vm::thread::VmThreadState::test_new();
     thread.call_stack = vec![
         galfus_vm::runtime::CallFrame {
             module_id: galfus_core::ModuleId::new(1),
@@ -91,8 +91,9 @@ fn module(types: Vec<BytecodeType>) -> BytecodeModule {
 #[test]
 fn codec_preserves_the_declared_type_of_an_empty_array() {
     let module = module(vec![BytecodeType::Int32, BytecodeType::Array(TypeIdx(0))]);
-    let mut heap = galfus_vm::thread::PrivateHeap::new();
+    let mut heap = galfus_vm::thread::PrivateHeap::test_new();
     let reference = heap.alloc(HeapObject::Array {
+        module_id: galfus_core::ModuleId::new(0),
         element_ty: TypeIdx(0),
         elements: vec![],
     });
@@ -117,7 +118,7 @@ fn codec_preserves_the_declared_type_of_an_empty_array() {
 #[test]
 fn codec_encodes_an_array_with_its_expected_element_type() {
     let module = module(vec![BytecodeType::Int32, BytecodeType::Array(TypeIdx(0))]);
-    let mut heap = galfus_vm::thread::PrivateHeap::new();
+    let mut heap = galfus_vm::thread::PrivateHeap::test_new();
 
     let VmValue::Object(reference) = encode_into_thread_heap(
         &mut heap,
@@ -133,6 +134,7 @@ fn codec_encodes_an_array_with_its_expected_element_type() {
         panic!("array codec must allocate an object");
     };
     let HeapObject::Array {
+        module_id: _,
         element_ty,
         elements,
     } = heap.get_object(reference).expect("array exists")
@@ -146,7 +148,7 @@ fn codec_encodes_an_array_with_its_expected_element_type() {
 #[test]
 fn codec_rejects_an_array_with_a_different_declared_element_type() {
     let module = module(vec![BytecodeType::Int32, BytecodeType::Array(TypeIdx(0))]);
-    let mut heap = galfus_vm::thread::PrivateHeap::new();
+    let mut heap = galfus_vm::thread::PrivateHeap::test_new();
 
     assert!(
         encode_into_thread_heap(
@@ -169,7 +171,7 @@ fn codec_round_trips_nullable_values() {
         BytecodeType::Int32,
         BytecodeType::Nullable(TypeIdx(0)),
     ]);
-    let mut heap = galfus_vm::thread::PrivateHeap::new();
+    let mut heap = galfus_vm::thread::PrivateHeap::test_new();
 
     for value in [BoundaryValue::I32(7), BoundaryValue::Null] {
         let encoded = encode_into_thread_heap(
@@ -191,7 +193,7 @@ fn codec_round_trips_nullable_values() {
 #[test]
 fn codec_normalizes_float_values_at_the_host_boundary() {
     let module = module(vec![BytecodeType::Float64]);
-    let mut heap = galfus_vm::thread::PrivateHeap::new();
+    let mut heap = galfus_vm::thread::PrivateHeap::test_new();
 
     let negative_zero = encode_into_thread_heap(
         &mut heap,
@@ -235,7 +237,7 @@ fn codec_encodes_a_choice_with_its_declared_variant_payload() {
             BytecodeType::Choice(galfus_bytecode::ChoiceLayoutIdx(0)),
         ])
     };
-    let mut heap = galfus_vm::thread::PrivateHeap::new();
+    let mut heap = galfus_vm::thread::PrivateHeap::test_new();
 
     let VmValue::Object(reference) = encode_into_thread_heap(
         &mut heap,
@@ -269,7 +271,7 @@ fn codec_encodes_a_choice_with_its_declared_variant_payload() {
 fn codec_round_trips_nominal_adapter_handles() {
     let type_id = OpaqueTypeId::new("file", "File").unwrap();
     let module = module(vec![BytecodeType::AdapterHandle(type_id.clone())]);
-    let mut heap = galfus_vm::thread::PrivateHeap::new();
+    let mut heap = galfus_vm::thread::PrivateHeap::test_new();
     let value = BoundaryValue::Handle {
         type_id,
         binding_id: Some(BindingId::new(1)),
@@ -296,7 +298,7 @@ fn codec_round_trips_function_references() {
         params: vec![],
         ret: TypeIdx(0),
     }]);
-    let mut heap = galfus_vm::thread::PrivateHeap::new();
+    let mut heap = galfus_vm::thread::PrivateHeap::test_new();
     let value = BoundaryValue::Function {
         module_id: 3,
         func_idx: 7,
@@ -321,7 +323,7 @@ fn codec_rejects_adapter_handles_with_the_wrong_kind() {
     let module = module(vec![BytecodeType::AdapterHandle(
         OpaqueTypeId::new("file", "File").unwrap(),
     )]);
-    let mut heap = galfus_vm::thread::PrivateHeap::new();
+    let mut heap = galfus_vm::thread::PrivateHeap::test_new();
     assert!(
         encode_into_thread_heap(
             &mut heap,

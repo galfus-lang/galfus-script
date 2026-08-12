@@ -60,7 +60,7 @@ fn test_dynamic_call_returns_to_destination() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VmThreadState::new();
+    let mut thread = thread::VmThreadState::test_new();
     let result = vm
         .run_function(
             &mut thread,
@@ -121,7 +121,7 @@ fn test_dynamic_call_uses_the_function_value_module() {
         ],
     );
     let vm = VirtualMachine::new(sync::Arc::new(graph));
-    let mut thread = thread::VmThreadState::new();
+    let mut thread = thread::VmThreadState::test_new();
 
     let result = vm
         .run_function(

@@ -9,6 +9,7 @@ galfus-core = { path = "../../engine/galfus-core" }
 galfus-contract = { path = "../../engine/galfus-contract" }
 galfus-runtime = { path = "../../engine/galfus-runtime" }
 galfus-workspace = { path = "../../engine/galfus-workspace" }
+galfus-host-native = { path = "../galfus-host-native" }
 
 anyhow.workspace = true
 tracing.workspace = true

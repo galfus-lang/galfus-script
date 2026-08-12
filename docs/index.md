@@ -90,6 +90,8 @@ Welcome to the official documentation. Choose a topic below to get started.
 
 - [Creating a Custom Kernel Driver](./06-embedding_guide/04-custom_kernel_driver.md)
 
+- [Capability Catalog](./06-embedding_guide/05-capability_catalog.md)
+
 
 
 ## 07-Core Strengths
@@ -103,5 +105,4 @@ Welcome to the official documentation. Choose a topic below to get started.
 - [Virtual Thread](./07-core_strengths/04-virtual_thread.md)
 
 - [Virtual Kernel](./07-core_strengths/05-virtual_kernel.md)
-
 

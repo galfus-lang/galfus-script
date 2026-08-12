@@ -9,6 +9,7 @@ fn(async) __internal_thread_receive(id: i64, timeout: i32): [u8] | null
 fn(async) __internal_thread_has_messages(): bool
 fn(async) __internal_thread_get_message(): [u8] | null
 fn(async) __internal_thread_wait(id: i64): i32 | null
+fn(async) __internal_thread_sleep(ms: i32): null
 
 export struct Thread {
     id: i64,
@@ -64,4 +65,8 @@ fn Thread::tryReceiveMessage(self, timeout: i32): [u8] | null {
 
 fn Thread::wait(self): i32 | null {
     return await __internal_thread_wait(self.id)
+}
+
+export fn sleep(ms: i32): null {
+    await __internal_thread_sleep(ms)
 }
