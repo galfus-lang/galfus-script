@@ -77,17 +77,9 @@ impl HostProvider for NativeEnvProvider {
                         Ok(BoundaryValue::Bool(val.is_some())),
                     );
                 } else {
-                    let response = if let Some(s) = val {
-                        BoundaryValue::Choice {
-                            variant: 0,
-                            payload: Some(Box::new(BoundaryValue::Bytes(s.into_bytes()))),
-                        }
-                    } else {
-                        BoundaryValue::Choice {
-                            variant: 1,
-                            payload: Some(Box::new(BoundaryValue::Null)),
-                        }
-                    };
+                    let response = val.map_or(BoundaryValue::Null, |value| {
+                        BoundaryValue::Bytes(value.into_bytes())
+                    });
 
                     let _ = injector.inject_system_response(thread_id, request_lease, Ok(response));
                 }

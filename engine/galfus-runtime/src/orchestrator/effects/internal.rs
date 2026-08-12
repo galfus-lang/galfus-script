@@ -334,6 +334,7 @@ impl Orchestrator {
                                                     galfus_vm::VmValue::Object(
                                                         target_thread.heap.alloc(
                                                             galfus_vm::HeapObject::Array {
+                                                                module_id: target_thread.call_stack.last().expect("spawned thread has an entry frame").module_id,
                                                                 element_ty: byte_type,
                                                                 elements: bytes
                                                                     .iter()
@@ -352,6 +353,7 @@ impl Orchestrator {
                                                 target_thread
                                                     .heap
                                                     .alloc(galfus_vm::HeapObject::Array {
+                                                        module_id: target_thread.call_stack.last().expect("spawned thread has an entry frame").module_id,
                                                         element_ty: bytes_type,
                                                         elements: arrays,
                                                     })

@@ -227,6 +227,7 @@ pub(crate) fn encode_into_thread_heap(
             let elements = bytes.into_iter().map(galfus_vm::VmValue::Uint8).collect();
             let reference = heap
                 .alloc(galfus_vm::HeapObject::Array {
+                    module_id,
                     element_ty: *element_type,
                     elements,
                 })
@@ -251,6 +252,7 @@ pub(crate) fn encode_into_thread_heap(
                 .collect::<Result<Vec<_>, _>>()?;
             let reference = heap
                 .alloc(galfus_vm::HeapObject::Array {
+                    module_id,
                     element_ty: *element_type,
                     elements,
                 })
