@@ -4,8 +4,22 @@ use galfus_bytecode::PackageImage;
 use galfus_contract::{AdapterBindings, ExecutionFailure, Providers, RuntimeCapabilities};
 use galfus_runtime::Runtime;
 use galfus_runtime::driver::ExecutionDriver;
+use galfus_contract::CapabilityCatalog;
 use std::rc::Rc;
 use std::sync::Arc;
+
+pub fn native_catalog() -> CapabilityCatalog {
+    galfus_contract::CapabilityCatalog::new(
+        vec![
+            galfus_contract::BridgeModule::new("std/io", galfus_contract::builtins::STD_IO_SOURCE),
+            galfus_contract::BridgeModule::new("std/env", galfus_contract::builtins::STD_ENV_SOURCE),
+            galfus_contract::BridgeModule::new("std/time", galfus_contract::builtins::STD_TIME_SOURCE),
+            galfus_contract::BridgeModule::new("std/fs", galfus_contract::builtins::STD_FS_SOURCE),
+        ],
+        Vec::new(),
+    )
+    .expect("the native provider catalog is valid")
+}
 
 pub struct PackageLoader {
     // Defines paths and mechanisms to load dynamic libraries for adapters
