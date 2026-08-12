@@ -49,7 +49,6 @@ pub use galfus_core::ThreadId;
 pub struct ThreadRegistry {
     tcbs: HashMap<ThreadId, ThreadControlBlock>,
     keys: HashMap<String, ThreadId>,
-    spawned_since_observation: std::collections::HashSet<ThreadId>,
     exited_order: VecDeque<ThreadId>,
 }
 
@@ -60,7 +59,6 @@ impl ThreadRegistry {
         Self {
             tcbs: HashMap::new(),
             keys: HashMap::new(),
-            spawned_since_observation: std::collections::HashSet::new(),
             exited_order: VecDeque::new(),
         }
     }
@@ -181,18 +179,15 @@ impl ThreadRegistry {
                 thread.mark_spawned()?;
             }
         }
-        self.spawned_since_observation.insert(id);
         Ok(())
     }
 
     pub fn is_running(&self, id: ThreadId) -> bool {
-        self.spawned_since_observation.contains(&id)
-            || self.state(id).is_some_and(|state| state.is_running())
+        self.state(id).is_some_and(|state| state.is_running())
     }
 
-    pub fn is_exited(&mut self, id: ThreadId) -> bool {
+    pub fn is_exited(&self, id: ThreadId) -> bool {
         self.state(id).is_some_and(|state| state.is_exited())
-            && !self.spawned_since_observation.remove(&id)
     }
 
     pub fn mark_running(&mut self, id: ThreadId) -> bool {
@@ -240,7 +235,6 @@ impl ThreadRegistry {
                     if let Some(key) = expired.key {
                         self.keys.remove(&key);
                     }
-                    self.spawned_since_observation.remove(&expired_id);
                 }
             }
             return true;
@@ -255,7 +249,6 @@ impl ThreadRegistry {
     }
 
     pub fn cancel(&mut self, id: ThreadId) -> bool {
-        self.spawned_since_observation.remove(&id);
         self.exited_order.retain(|exited_id| *exited_id != id);
         if let Some(tcb) = self.tcbs.remove(&id) {
             if let Some(key) = tcb.key {
