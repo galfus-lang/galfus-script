@@ -157,6 +157,7 @@ jobs:
           # The structure requested is: {component}/{tag}/{version}/{os}/{arch}/{filename}
           TAG="${{ steps.version.outputs.tag }}"
           VERSION="${{ steps.version.outputs.version }}"
+          STORAGE_ID="${{ secrets.STORAGE_ID }}"
           STORAGE_ENDPOINT="${{ secrets.STORAGE_ENDPOINT }}"
           STORAGE_KEY="${{ secrets.STORAGE_KEY }}"
 
@@ -197,17 +198,11 @@ jobs:
               continue
             fi
             
-            # Upload to Storage via S3 API
-            # aws-cli is pre-installed on GitHub Actions ubuntu runners
-            # Ensure AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are set in your GitHub repository secrets if needed,
-            # or map STORAGE_KEY appropriately if your S3 provider uses a single key.
-            # Here we assume the bucket name is part of the endpoint or use a placeholder 'galfus-releases'.
-            # You may need to adjust the s3:// bucket name based on your provider.
-            echo "Uploading $FILENAME to s3://storage/$COMPONENT/$TAG/$VERSION/$OS/$ARCH/"
+            echo "Uploading $FILENAME to s3://$STORAGE_ID/$COMPONENT/$TAG/$VERSION/$OS/$ARCH/"
             
             # Using AWS CLI with custom endpoint
             aws s3 cp "$file" \
-              "s3://storage/$COMPONENT/$TAG/$VERSION/$OS/$ARCH/$FILENAME" \
+              "s3://$STORAGE_ID/$COMPONENT/$TAG/$VERSION/$OS/$ARCH/$FILENAME" \
               --endpoint-url "$STORAGE_ENDPOINT" \
               --no-progress
           done
