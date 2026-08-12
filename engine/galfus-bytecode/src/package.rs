@@ -159,6 +159,9 @@ impl PackageImage {
         for requirement in &mut adapter_requirements {
             requirement.descriptor.canonicalize();
         }
+        for requirement in &mut provider_requirements {
+            requirement.canonicalize();
+        }
         adapter_requirements.sort_by(|left, right| left.proxy_module.cmp(&right.proxy_module));
         provider_requirements.sort_by(|left, right| {
             left.module_path

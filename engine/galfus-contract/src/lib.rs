@@ -1036,6 +1036,12 @@ pub struct ProviderModuleRequirement {
     pub exports: Vec<ProviderFunctionSignature>,
 }
 
+impl ProviderModuleRequirement {
+    pub fn canonicalize(&mut self) {
+        self.exports.sort();
+    }
+}
+
 /// Concrete provider surface for one declarative bridge module.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderModuleDescriptor {
@@ -1045,6 +1051,12 @@ pub struct ProviderModuleDescriptor {
     pub exports: Vec<ProviderFunctionSignature>,
 }
 
+impl ProviderModuleDescriptor {
+    pub fn canonicalize(&mut self) {
+        self.exports.sort();
+    }
+}
+
 /// Immutable provider capability table supplied by one host.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ProviderDescriptor {
@@ -1052,8 +1064,20 @@ pub struct ProviderDescriptor {
 }
 
 impl ProviderDescriptor {
+    pub fn canonicalize(&mut self) {
+        for module in &mut self.modules {
+            module.canonicalize();
+        }
+        self.modules
+            .sort_by(|left, right| left.module_path.cmp(&right.module_path));
+    }
+
     pub fn validates(&self, requirement: &ProviderModuleRequirement) -> bool {
-        self.modules.iter().any(|module| {
+        let mut requirement = requirement.clone();
+        requirement.canonicalize();
+        let mut descriptor = self.clone();
+        descriptor.canonicalize();
+        descriptor.modules.iter().any(|module| {
             module.module_path == requirement.module_path
                 && module.schema_fingerprint == requirement.schema_fingerprint
                 && module.boundary_abi == requirement.boundary_abi

@@ -78,17 +78,9 @@ impl HostProvider for NativeFsProvider {
 
         match name {
             "fs_read" => {
-                let result = std::fs::read(&path);
-                let response = match result {
-                    Ok(bytes) => BoundaryValue::Choice {
-                        variant: 0,
-                        payload: Some(Box::new(BoundaryValue::Bytes(bytes))),
-                    },
-                    Err(_) => BoundaryValue::Choice {
-                        variant: 1,
-                        payload: Some(Box::new(BoundaryValue::Null)),
-                    },
-                };
+                let response = std::fs::read(&path)
+                    .map(BoundaryValue::Bytes)
+                    .unwrap_or(BoundaryValue::Null);
                 let _ = injector.inject_system_response(thread_id, request_lease, Ok(response));
             }
             "fs_write" => {
@@ -171,20 +163,20 @@ impl HostProvider for NativeFsProvider {
                                 arr.push(BoundaryValue::Bytes(s.as_bytes().to_vec()));
                             }
                         }
-                        BoundaryValue::Choice {
-                            variant: 0,
-                            payload: Some(Box::new(BoundaryValue::Array {
-                                element_type: galfus_contract::BoundaryType::Array(Box::new(
-                                    galfus_contract::BoundaryType::U8,
-                                )),
-                                values: arr,
-                            })),
+                        arr.sort_by(|left, right| match (left, right) {
+                            (BoundaryValue::Bytes(left), BoundaryValue::Bytes(right)) => {
+                                left.cmp(right)
+                            }
+                            _ => std::cmp::Ordering::Equal,
+                        });
+                        BoundaryValue::Array {
+                            element_type: galfus_contract::BoundaryType::Array(Box::new(
+                                galfus_contract::BoundaryType::U8,
+                            )),
+                            values: arr,
                         }
                     }
-                    Err(_) => BoundaryValue::Choice {
-                        variant: 1,
-                        payload: Some(Box::new(BoundaryValue::Null)),
-                    },
+                    Err(_) => BoundaryValue::Null,
                 };
                 let _ = injector.inject_system_response(thread_id, request_lease, Ok(response));
             }

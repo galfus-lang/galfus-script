@@ -187,6 +187,29 @@ fn provider_descriptors_validate_the_complete_compiled_requirement() {
 }
 
 #[test]
+fn provider_descriptors_canonicalize_export_order_before_validation() {
+    let descriptor = std_io_provider_descriptor();
+    let module = descriptor
+        .modules
+        .first()
+        .expect("std/io descriptor has a module");
+    let mut requirement = ProviderModuleRequirement {
+        alias: "io".to_string(),
+        module_path: module.module_path.clone(),
+        schema_fingerprint: module.schema_fingerprint,
+        boundary_abi: module.boundary_abi,
+        exports: module.exports.clone(),
+    };
+    requirement.exports.reverse();
+
+    assert!(
+        Providers::new()
+            .with_host("io", Box::new(IoHost))
+            .validates(&requirement)
+    );
+}
+
+#[test]
 fn adapter_bindings_are_registered_by_nominal_proxy_module() {
     let mut bindings = AdapterBindings::default();
     bindings
