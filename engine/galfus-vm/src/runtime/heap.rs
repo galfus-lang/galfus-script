@@ -145,8 +145,14 @@ impl VirtualMachine {
                 }
             }
             (Value::Object(obj_ref), BytecodeType::Array(expected_el_ty)) => {
-                if let Ok(HeapObject::Array { element_ty, .. }) = thread.heap.get_object(*obj_ref) {
-                    self.type_idx_matches(thread, *element_ty, *expected_el_ty)
+                if let Ok(HeapObject::Array {
+                    module_id,
+                    element_ty,
+                    ..
+                }) = thread.heap.get_object(*obj_ref)
+                {
+                    let expected_module = thread.call_stack.last().unwrap().module_id;
+                    self.type_idx_matches(*module_id, *element_ty, expected_module, *expected_el_ty)
                 } else {
                     false
                 }
@@ -233,49 +239,75 @@ impl VirtualMachine {
 
     fn type_idx_matches(
         &self,
-        thread: &thread::VmThreadState,
+        actual_module: ModuleId,
         actual: TypeIdx,
+        expected_module: ModuleId,
         expected: TypeIdx,
     ) -> bool {
-        self.type_idx_matches_inner(thread, actual, expected, &mut collections::HashSet::new())
+        self.type_idx_matches_inner(
+            actual_module,
+            actual,
+            expected_module,
+            expected,
+            &mut collections::HashSet::new(),
+        )
     }
 
     fn type_idx_matches_inner(
         &self,
-        thread: &thread::VmThreadState,
+        actual_module: ModuleId,
         actual: TypeIdx,
+        expected_module: ModuleId,
         expected: TypeIdx,
-        seen: &mut collections::HashSet<(u16, u16)>,
+        seen: &mut collections::HashSet<(ModuleId, TypeIdx, ModuleId, TypeIdx)>,
     ) -> bool {
-        if actual == expected {
+        if actual_module == expected_module && actual == expected {
             return true;
         }
-        if !seen.insert((actual.raw(), expected.raw())) {
+        if !seen.insert((actual_module, actual, expected_module, expected)) {
             return true;
         }
 
-        let Ok(image) = self.current_image(thread) else {
+        let Ok(actual_image) = self.get_module(actual_module) else {
             return false;
         };
-        let Some(actual_ty) = image.types.get(actual.raw() as usize) else {
+        let Ok(expected_image) = self.get_module(expected_module) else {
             return false;
         };
-        let Some(expected_ty) = image.types.get(expected.raw() as usize) else {
+        let Some(actual_ty) = actual_image.types.get(actual.raw() as usize) else {
+            return false;
+        };
+        let Some(expected_ty) = expected_image.types.get(expected.raw() as usize) else {
             return false;
         };
 
         match (actual_ty, expected_ty) {
-            (_, BytecodeType::Nullable(expected_inner)) => {
-                self.type_idx_matches_inner(thread, actual, *expected_inner, seen)
-            }
-            (BytecodeType::Array(actual_el), BytecodeType::Array(expected_el)) => {
-                self.type_idx_matches_inner(thread, *actual_el, *expected_el, seen)
-            }
+            (_, BytecodeType::Nullable(expected_inner)) => self.type_idx_matches_inner(
+                actual_module,
+                actual,
+                expected_module,
+                *expected_inner,
+                seen,
+            ),
+            (BytecodeType::Array(actual_el), BytecodeType::Array(expected_el)) => self
+                .type_idx_matches_inner(
+                    actual_module,
+                    *actual_el,
+                    expected_module,
+                    *expected_el,
+                    seen,
+                ),
             (BytecodeType::Tuple(actual_elements), BytecodeType::Tuple(expected_elements)) => {
                 actual_elements.len() == expected_elements.len()
                     && actual_elements.iter().zip(expected_elements.iter()).all(
                         |(&actual_el, &expected_el)| {
-                            self.type_idx_matches_inner(thread, actual_el, expected_el, seen)
+                            self.type_idx_matches_inner(
+                                actual_module,
+                                actual_el,
+                                expected_module,
+                                expected_el,
+                                seen,
+                            )
                         },
                     )
             }

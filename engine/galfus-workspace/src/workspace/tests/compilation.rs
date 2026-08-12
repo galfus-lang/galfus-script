@@ -1,3 +1,6 @@
+use super::*;
+use crate::state::{CompileBlocked, RunBlocked};
+
 #[test]
 fn workspace_package_loader_checks_and_compiles_its_loaded_sources() {
     let mut workspace = Workspace::new();
@@ -522,7 +525,9 @@ fn run_requires_compile_and_executes_the_configured_entry() {
     let mut workspace = Workspace::new();
     assert!(matches!(
         workspace.run(&[], None, std::rc::Rc::new(CooperativeDriver::new())),
-        Err(crate::state::WorkspaceRunError::Blocked(RunBlocked::CompileRequired))
+        Err(crate::state::WorkspaceRunError::Blocked(
+            RunBlocked::CompileRequired
+        ))
     ));
 
     workspace
@@ -730,7 +735,9 @@ fn package_is_reproducible_across_all_module_load_permutations() {
         workspace.load_config(config).expect("valid configuration");
         for index in permutation {
             let (path, source) = modules[index];
-            workspace.load_module(path, source).expect("valid source module");
+            workspace
+                .load_module(path, source)
+                .expect("valid source module");
         }
         let diagnostics = format!("{:?}", workspace.check().diagnostics);
         let report = workspace.compile().expect("permutation compiles");
@@ -743,7 +750,9 @@ fn package_is_reproducible_across_all_module_load_permutations() {
             diagnostics,
             package.adapter_requirements().to_vec(),
             package.provider_requirements().to_vec(),
-            package.canonical_bytes().expect("canonical package encoding"),
+            package
+                .canonical_bytes()
+                .expect("canonical package encoding"),
             package.content_hash().expect("package hash"),
         );
         if let Some(expected) = &expected {
@@ -754,7 +763,7 @@ fn package_is_reproducible_across_all_module_load_permutations() {
     }
 }
 
-fn io_catalog(source: &str) -> std::sync::Arc<galfus_contract::CapabilityCatalog> {
+pub(super) fn io_catalog(source: &str) -> std::sync::Arc<galfus_contract::CapabilityCatalog> {
     std::sync::Arc::new(
         galfus_contract::CapabilityCatalog::new(
             vec![galfus_contract::BridgeModule::new("std/io", source)],

@@ -32,6 +32,7 @@ impl VirtualMachine {
                     Constant::String(s) => {
                         let element_ty = self.uint8_type_idx(thread)?;
                         let obj = HeapObject::Array {
+                            module_id: thread.call_stack.last().unwrap().module_id,
                             element_ty,
                             elements: s.bytes().map(Value::Uint8).collect(),
                         };
@@ -40,6 +41,7 @@ impl VirtualMachine {
                     Constant::Bytes(b) => {
                         let element_ty = self.uint8_type_idx(thread)?;
                         let obj = HeapObject::Array {
+                            module_id: thread.call_stack.last().unwrap().module_id,
                             element_ty,
                             elements: b.iter().map(|&x| Value::Uint8(x)).collect(),
                         };

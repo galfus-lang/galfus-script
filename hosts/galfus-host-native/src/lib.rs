@@ -1,11 +1,21 @@
 pub mod driver;
 pub mod providers;
 use galfus_bytecode::PackageImage;
+use galfus_contract::CapabilityCatalog;
 use galfus_contract::{AdapterBindings, ExecutionFailure, Providers, RuntimeCapabilities};
 use galfus_runtime::Runtime;
 use galfus_runtime::driver::ExecutionDriver;
 use std::rc::Rc;
 use std::sync::Arc;
+
+pub fn native_catalog() -> CapabilityCatalog {
+    let providers = galfus_contract::builtins::BRIDGE_TEMPLATES
+        .iter()
+        .map(|(name, source)| galfus_contract::BridgeModule::new(*name, *source))
+        .collect();
+    galfus_contract::CapabilityCatalog::new(providers, Vec::new())
+        .expect("the native provider catalog is valid")
+}
 
 pub struct PackageLoader {
     // Defines paths and mechanisms to load dynamic libraries for adapters

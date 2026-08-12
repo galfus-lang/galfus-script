@@ -35,19 +35,28 @@ export fn main(_args: [[u8]]): i32 {
     return 4
   }
 
-  // Wait for the worker to finish before inspecting its exit state.
   const exitCode = thread::wait()
 
-  if !thread::isExited() || thread::isRunning() || thread::exitReason() == null {
+  const exited = thread::isExited()
+  const running = thread::isRunning()
+  const exitReason = thread::exitReason()
+  
+  if !exited {
+    println("thread is not marked exited after wait")
+    return 5
+  }
+  if running {
+    println("thread is still marked running after wait")
+    return 5
+  }
+  if exitReason == null {
+    println("thread exit reason is absent after wait")
     return 5
   }
 
   if thread::spawn() {
+    println("an exited thread can be spawned again")
     return 6
-  }
-
-  if !thread::send("message stored in the mailbox") {
-    return 7
   }
 
   println("thread showcase completed")

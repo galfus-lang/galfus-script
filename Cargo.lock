@@ -263,6 +263,7 @@ dependencies = [
  "clap",
  "galfus-contract",
  "galfus-core",
+ "galfus-host-native",
  "galfus-runtime",
  "galfus-workspace",
  "tracing",

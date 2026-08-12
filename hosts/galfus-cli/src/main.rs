@@ -1,4 +1,3 @@
-mod native_io;
 mod workspace;
 
 use std::process;

@@ -70,6 +70,24 @@ fn registry_tracks_state_after_the_thread_body_is_taken() {
 }
 
 #[test]
+fn registry_reports_an_exited_spawned_thread_on_its_first_observation() {
+    let id = galfus_core::ThreadId::new(1);
+    let mut registry = ThreadRegistry::new();
+
+    registry
+        .register(id, VmThreadState::test_new(), None)
+        .unwrap();
+    registry.mark_spawned(id).unwrap();
+    assert!(registry.mark_running(id));
+    let _thread = registry.take(id).expect("thread is available to run");
+
+    assert!(registry.mark_exited(id, Ok(galfus_contract::BoundaryValue::I32(7))));
+    assert!(!registry.is_running(id));
+    assert!(registry.is_exited(id));
+    assert!(registry.is_exited(id));
+}
+
+#[test]
 fn exited_threads_keep_only_terminal_metadata() {
     let id = galfus_core::ThreadId::new(1);
     let mut registry = ThreadRegistry::new();

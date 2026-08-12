@@ -93,6 +93,7 @@ fn codec_preserves_the_declared_type_of_an_empty_array() {
     let module = module(vec![BytecodeType::Int32, BytecodeType::Array(TypeIdx(0))]);
     let mut heap = galfus_vm::thread::PrivateHeap::test_new();
     let reference = heap.alloc(HeapObject::Array {
+        module_id: galfus_core::ModuleId::new(0),
         element_ty: TypeIdx(0),
         elements: vec![],
     });
@@ -133,6 +134,7 @@ fn codec_encodes_an_array_with_its_expected_element_type() {
         panic!("array codec must allocate an object");
     };
     let HeapObject::Array {
+        module_id: _,
         element_ty,
         elements,
     } = heap.get_object(reference).expect("array exists")

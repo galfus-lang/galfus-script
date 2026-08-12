@@ -161,6 +161,7 @@ pub enum HeapObject {
         fields: Vec<Value>,
     },
     Array {
+        module_id: ModuleId,
         element_ty: TypeIdx,
         elements: Vec<Value>,
     },
@@ -331,13 +332,15 @@ impl VirtualMachine {
             }
             (BytecodeType::Array(element_type), Value::Object(reference)) => {
                 let Ok(HeapObject::Array {
+                    module_id: value_module,
                     element_ty,
                     elements,
                 }) = thread.heap.get_object(reference)
                 else {
                     return false;
                 };
-                element_ty == element_type
+                *value_module == module_id
+                    && element_ty == element_type
                     && elements.iter().cloned().all(|value| {
                         self.value_matches_type(thread, value, module_id, *element_type)
                     })

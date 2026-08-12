@@ -257,7 +257,7 @@ impl VirtualKernel {
         self.registry.is_running(id)
     }
 
-    pub fn is_exited(&mut self, id: ThreadId) -> bool {
+    pub fn is_exited(&self, id: ThreadId) -> bool {
         self.registry.is_exited(id)
     }
 

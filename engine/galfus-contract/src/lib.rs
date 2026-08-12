@@ -322,6 +322,23 @@ pub trait HostProvider: Send {
     }
 }
 
+/// Returns the provider alias encoded in an external operation name.
+///
+/// Provider operations have the form `<alias>_<operation>`. Aliases contain
+/// only lowercase ASCII letters and digits, keeping the first underscore
+/// unambiguous.
+pub fn provider_alias_from_operation(operation: &str) -> Option<&str> {
+    let (alias, operation) = operation.split_once('_')?;
+    (!operation.is_empty() && is_valid_provider_alias(alias)).then_some(alias)
+}
+
+pub fn is_valid_provider_alias(alias: &str) -> bool {
+    !alias.is_empty()
+        && alias
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+}
+
 /// A bound external module invoked by Runtime on the main thread.
 ///
 /// Implementations may create and coordinate arbitrary internal workers. Those workers must
@@ -727,7 +744,8 @@ fn type_id_belongs_to_proxy(type_id: &OpaqueTypeId, proxy_module: &str) -> bool 
 /// Optional host capabilities supplied for one execution.
 #[derive(Default)]
 pub struct Providers {
-    host: Option<Box<dyn HostProvider>>,
+    hosts:
+        std::collections::HashMap<String, std::sync::Arc<std::sync::Mutex<Box<dyn HostProvider>>>>,
 }
 
 impl Providers {
@@ -735,28 +753,32 @@ impl Providers {
         Self::default()
     }
 
-    pub fn with_host(host: Box<dyn HostProvider>) -> Self {
-        Self { host: Some(host) }
+    pub fn with_host(mut self, alias: impl Into<String>, host: Box<dyn HostProvider>) -> Self {
+        let alias = alias.into();
+        assert!(
+            is_valid_provider_alias(&alias),
+            "provider alias must contain only lowercase ASCII letters and digits"
+        );
+        assert!(
+            !self.hosts.contains_key(&alias),
+            "provider alias is already registered: {alias}"
+        );
+        self.hosts
+            .insert(alias, std::sync::Arc::new(std::sync::Mutex::new(host)));
+        self
     }
 
-    /// Temporarily removes the host provider for an external callback.
-    ///
-    /// The caller must restore it after dispatch or cancellation completes.
-    pub fn take_host(&mut self) -> Option<Box<dyn HostProvider>> {
-        self.host.take()
-    }
-
-    pub fn restore_host(&mut self, host: Box<dyn HostProvider>) {
-        self.host = Some(host);
-    }
-
-    pub fn host_mut(&mut self) -> Option<&mut (dyn HostProvider + 'static)> {
-        self.host.as_deref_mut()
+    pub fn get_host(
+        &self,
+        alias: &str,
+    ) -> Option<std::sync::Arc<std::sync::Mutex<Box<dyn HostProvider>>>> {
+        self.hosts.get(alias).cloned()
     }
 
     pub fn validates(&self, requirement: &ProviderModuleRequirement) -> bool {
-        self.host
-            .as_deref()
+        self.hosts
+            .get(&requirement.alias)
+            .and_then(|host| host.lock().ok())
             .is_some_and(|host| host.descriptor().validates(requirement))
     }
 }
@@ -1007,10 +1029,17 @@ pub struct SelectedAdapterTarget {
 /// A provider schema required by a package image.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProviderModuleRequirement {
+    pub alias: String,
     pub module_path: String,
     pub schema_fingerprint: u64,
     pub boundary_abi: BoundaryAbiVersion,
     pub exports: Vec<ProviderFunctionSignature>,
+}
+
+impl ProviderModuleRequirement {
+    pub fn canonicalize(&mut self) {
+        self.exports.sort();
+    }
 }
 
 /// Concrete provider surface for one declarative bridge module.
@@ -1022,6 +1051,12 @@ pub struct ProviderModuleDescriptor {
     pub exports: Vec<ProviderFunctionSignature>,
 }
 
+impl ProviderModuleDescriptor {
+    pub fn canonicalize(&mut self) {
+        self.exports.sort();
+    }
+}
+
 /// Immutable provider capability table supplied by one host.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ProviderDescriptor {
@@ -1029,8 +1064,20 @@ pub struct ProviderDescriptor {
 }
 
 impl ProviderDescriptor {
+    pub fn canonicalize(&mut self) {
+        for module in &mut self.modules {
+            module.canonicalize();
+        }
+        self.modules
+            .sort_by(|left, right| left.module_path.cmp(&right.module_path));
+    }
+
     pub fn validates(&self, requirement: &ProviderModuleRequirement) -> bool {
-        self.modules.iter().any(|module| {
+        let mut requirement = requirement.clone();
+        requirement.canonicalize();
+        let mut descriptor = self.clone();
+        descriptor.canonicalize();
+        descriptor.modules.iter().any(|module| {
             module.module_path == requirement.module_path
                 && module.schema_fingerprint == requirement.schema_fingerprint
                 && module.boundary_abi == requirement.boundary_abi

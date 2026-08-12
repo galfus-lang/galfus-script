@@ -1,0 +1,15 @@
+import { println } from "std/io"
+import { now } from "std/time"
+import { concat } from 'text'
+import { stringify } from 'format'
+
+export fn main(_args: [[u8]]): i32 {
+    println("--- std/time showcase ---")
+    
+    const timestamp = now()
+    
+    println(concat("Got current timestamp:", stringify(timestamp)))
+    
+    println("-------------------------")
+    return 0
+}

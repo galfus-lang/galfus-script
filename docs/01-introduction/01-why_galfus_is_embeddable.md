@@ -28,8 +28,9 @@ of execution state. Every provider interaction is represented by a lazy
 future activation; a host may complete that activation synchronously or later
 through its injector.
 
-The absence of a provider is also explicit. Programs without native calls can
-run without one. A reached native call fails with a structured missing-provider
+The absence of a provider is also explicit. Packages without native provider
+requirements can run without one. A package that requires an unavailable
+provider fails startup preflight with a structured missing-provider
 error rather than silently gaining host access.
 
 ## Host-controlled scheduling

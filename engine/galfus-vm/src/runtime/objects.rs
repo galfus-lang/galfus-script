@@ -129,6 +129,11 @@ impl VirtualMachine {
                 let zero = self.zero_value_for_type(thread, element_ty)?;
                 let elements = vec![zero; len];
                 let obj_ref = thread.heap.alloc(HeapObject::Array {
+                    module_id: thread
+                        .call_stack
+                        .last()
+                        .ok_or(VmError::EmptyCallStack)?
+                        .module_id,
                     element_ty,
                     elements,
                 })?;
@@ -181,6 +186,7 @@ impl VirtualMachine {
                             HeapObject::Array {
                                 element_ty,
                                 elements,
+                                ..
                             } => {
                                 let index = self
                                     .resolve_raw_array_index(raw_index, elements.len())
@@ -458,7 +464,12 @@ impl VirtualMachine {
                         fields: vec![Value::Null; fields.len()],
                     }
                 }
-                HeapObject::Array { element_ty, .. } => HeapObject::Array {
+                HeapObject::Array {
+                    module_id,
+                    element_ty,
+                    ..
+                } => HeapObject::Array {
+                    module_id,
                     element_ty,
                     elements: Vec::new(),
                 },

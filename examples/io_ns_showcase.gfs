@@ -1,0 +1,11 @@
+import io from "std/io"
+
+export fn main(_args: [[u8]]): i32 {
+    io::println("Hello from std/io provider!")
+    io::print("Please enter something (press enter): ")
+    const input = io::read()
+    io::print("You typed: ")
+    io::print(input)
+    io::println("")
+    return 0
+}
