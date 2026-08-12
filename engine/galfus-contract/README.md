@@ -12,7 +12,8 @@ execution. It contains no target selection and no concrete platform adapter.
 - **Adapters**: Optional nominal adapter registry with affinity, cancellation,
   and external-handle release hooks.
 
-Hosts construct `Providers` and pass them to `Runtime::new` or
-`Workspace::start_execution`. If no host provider is supplied, only executions
-that reach native calls fail at runtime; compilation and executions without
-native calls remain valid.
+Hosts construct `Providers`, add them to `RuntimeCapabilities`, and start a
+`Runtime` from a compiled package (or use an `ExecutionHost`). A package records
+the descriptors of its provider bridges, and runtime startup preflight rejects
+missing or incompatible providers. Packages without provider requirements remain
+valid without host capabilities.

@@ -42,16 +42,20 @@ The runtime never performs parsing, semantic checking, or compilation, and there
 ## Host-provider boundary
 
 `galfus-contract` defines optional host contracts independently of the workspace,
-runtime, and VM. A host constructs `Providers` with concrete implementations
-and composes `Runtime::new(graph, providers)` directly, or passes them to
-`Workspace::start_execution` when source management is needed. The workspace remains the
-development facade and does not expose its internal runtime or VM state.
+runtime, and VM. A host constructs `Providers` with concrete implementations,
+adds them to `RuntimeCapabilities`, and starts a `Runtime` from a compiled
+package; `ExecutionHost` is the corresponding convenience facade. The workspace
+remains the development facade and does not expose its internal runtime or VM
+state.
 
-Providers are execution-scoped. The compiler does not inspect or validate
-them. The runtime passes them to the VM, which reports a runtime error only if
-an instruction requires a missing provider. Consequently, running without
-providers is a valid sandbox configuration for programs that do not reach
-host-backed builtins.
+Providers are execution-scoped. Compilation records the complete requirement
+for every provider bridge used by a package, including its alias, module path,
+schema fingerprint, ABI, and exported signatures. Before the first instruction
+runs, runtime preflight validates each requirement against the providers
+installed by the host. A missing alias or incompatible descriptor rejects the
+execution during startup. Consequently, running without providers remains a
+valid sandbox configuration only for packages that do not require provider
+bridges.
 
 The current `HostProvider` supports asynchronous payload dispatching
 through message injection. It is intentionally independent of native, WASM, or
