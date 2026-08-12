@@ -32,9 +32,9 @@ impl VirtualKernel {
         mut thread: VmThreadState,
         key: Option<String>,
     ) -> Result<ThreadId, ExecutionFailure> {
-        thread.mark_spawned().map_err(|kind| {
-            ExecutionFailure::new(kind, "max threads limit exceeded")
-        })?;
+        thread
+            .mark_spawned()
+            .map_err(|kind| ExecutionFailure::new(kind, "max threads limit exceeded"))?;
         if !self.registry.key_is_available(key.as_deref()) {
             return Err(ExecutionFailure::new(
                 ExecutionFailureKind::DuplicateThreadKey,
@@ -58,16 +58,32 @@ impl VirtualKernel {
     }
 
     /// Parks a currently running thread without blocking it.
-    pub fn enqueue_runnable(&mut self, id: ThreadId, mut thread: VmThreadState) -> Result<(), galfus_contract::ExecutionFailureKind> {
-        let result = thread.quota().lock().unwrap().try_reserve_runnable_threads(1);
+    pub fn enqueue_runnable(
+        &mut self,
+        id: ThreadId,
+        mut thread: VmThreadState,
+    ) -> Result<(), galfus_contract::ExecutionFailureKind> {
+        let result = thread
+            .global_quota()
+            .lock()
+            .unwrap()
+            .try_reserve_runnable_threads(1);
         self.registry.restore_vm_state(id, thread);
         result?;
         self.runnable.enqueue(id);
         Ok(())
     }
 
-    pub fn enqueue_runnable_front(&mut self, id: ThreadId, mut thread: VmThreadState) -> Result<(), galfus_contract::ExecutionFailureKind> {
-        let result = thread.quota().lock().unwrap().try_reserve_runnable_threads(1);
+    pub fn enqueue_runnable_front(
+        &mut self,
+        id: ThreadId,
+        mut thread: VmThreadState,
+    ) -> Result<(), galfus_contract::ExecutionFailureKind> {
+        let result = thread
+            .global_quota()
+            .lock()
+            .unwrap()
+            .try_reserve_runnable_threads(1);
         self.registry.restore_vm_state(id, thread);
         result?;
         self.runnable.enqueue_front(id);
@@ -84,33 +100,54 @@ impl VirtualKernel {
         thread: VmThreadState,
         timeout: Option<u64>,
     ) -> Result<(), ExecutionFailure> {
+        let reserve_states = thread
+            .global_quota()
+            .lock()
+            .unwrap()
+            .try_reserve_pending_states(1);
+        if let Err(e) = reserve_states {
+            self.registry.restore_vm_state(id, thread);
+            return Err(
+                ExecutionFailure::new(e, "pending states limit exceeded").with_thread_id(id)
+            );
+        }
+
         if let Some(ms) = timeout {
-            let reserve_result = thread.quota().lock().unwrap().try_reserve_timers(1);
+            let reserve_result = thread.global_quota().lock().unwrap().try_reserve_timers(1);
             if let Err(e) = reserve_result {
+                thread
+                    .global_quota()
+                    .lock()
+                    .unwrap()
+                    .release_pending_states(1);
                 self.registry.restore_vm_state(id, thread);
                 return Err(ExecutionFailure::new(e, "timers limit exceeded").with_thread_id(id));
             }
             let had_timer = self.blocked.block_with_timeout(id, ms)?;
             if had_timer {
-                thread.quota().lock().unwrap().release_timers(1);
+                thread.global_quota().lock().unwrap().release_timers(1);
             }
         } else {
             let had_timer = self.blocked.block(id);
             if had_timer {
-                thread.quota().lock().unwrap().release_timers(1);
+                thread.global_quota().lock().unwrap().release_timers(1);
             }
         }
         self.registry.restore_vm_state(id, thread);
         Ok(())
     }
 
-    /// Unblocks a thread and makes it runnable again.
     pub fn unblock(&mut self, id: ThreadId) -> Result<bool, galfus_contract::ExecutionFailureKind> {
         let (was_blocked, had_timer) = self.blocked.unblock(id);
         if was_blocked {
             if let Some(thread) = self.registry.take(id) {
+                thread
+                    .global_quota()
+                    .lock()
+                    .unwrap()
+                    .release_pending_states(1);
                 if had_timer {
-                    thread.quota().lock().unwrap().release_timers(1);
+                    thread.global_quota().lock().unwrap().release_timers(1);
                 }
                 self.enqueue_runnable(id, thread)?;
                 return Ok(true);
@@ -119,10 +156,24 @@ impl VirtualKernel {
         Ok(false)
     }
 
-    /// Removes a thread from every schedulable state.
     pub fn cancel(&mut self, id: ThreadId) -> bool {
-        self.runnable.remove(id);
-        self.blocked.remove(id);
+        let was_runnable = self.runnable.remove(id);
+        let blocked_info = self.blocked.remove(id);
+        let thread_opt = self.registry.take(id);
+
+        if let Some(thread) = thread_opt {
+            let mut gq = thread.global_quota().lock().unwrap();
+            if was_runnable {
+                gq.release_runnable_threads(1);
+            }
+            if let Some(had_timer) = blocked_info {
+                gq.release_pending_states(1);
+                if had_timer {
+                    gq.release_timers(1);
+                }
+            }
+        }
+
         let removed = self.registry.cancel(id);
         if removed {
             self.thread_id_manager.free(id);
@@ -150,12 +201,15 @@ impl VirtualKernel {
     }
 
     /// Ticks timeouts and makes threads runnable if their timers expire.
-    pub fn tick(&mut self, delta_ms: u64) -> Vec<(ThreadId, Result<(), galfus_contract::ExecutionFailureKind>)> {
+    pub fn tick(
+        &mut self,
+        delta_ms: u64,
+    ) -> Vec<(ThreadId, Result<(), galfus_contract::ExecutionFailureKind>)> {
         let woke_up = self.blocked.tick_timeouts(delta_ms);
         let mut results = Vec::new();
         for &id in &woke_up {
             if let Some(thread) = self.registry.take(id) {
-                thread.quota().lock().unwrap().release_timers(1);
+                thread.global_quota().lock().unwrap().release_timers(1);
                 let result = self.enqueue_runnable(id, thread);
                 results.push((id, result));
             }
@@ -168,7 +222,7 @@ impl VirtualKernel {
     pub fn take_thread(&mut self, id: ThreadId) -> Option<VmThreadState> {
         let thread = self.registry.take(id);
         if let Some(ref t) = thread {
-            t.quota().lock().unwrap().release_runnable_threads(1);
+            t.global_quota().lock().unwrap().release_runnable_threads(1);
         }
         thread
     }
@@ -181,7 +235,10 @@ impl VirtualKernel {
         self.registry.state(id)
     }
 
-    pub fn mark_spawned(&mut self, id: ThreadId) -> Result<(), galfus_contract::ExecutionFailureKind> {
+    pub fn mark_spawned(
+        &mut self,
+        id: ThreadId,
+    ) -> Result<(), galfus_contract::ExecutionFailureKind> {
         self.registry.mark_spawned(id)
     }
 
@@ -213,6 +270,13 @@ impl VirtualKernel {
 
     pub fn get_mailbox(&self, id: ThreadId) -> Option<Arc<Mutex<VecDeque<MailboxMessage>>>> {
         self.registry.get_mailbox(id)
+    }
+
+    pub fn get_thread_quota(
+        &self,
+        id: ThreadId,
+    ) -> Option<Arc<Mutex<galfus_vm::quota::ThreadQuota>>> {
+        self.registry.get_thread_quota(id)
     }
 
     pub fn debug_states(&self) -> Vec<(ThreadId, ThreadState)> {

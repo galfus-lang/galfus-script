@@ -312,12 +312,18 @@ pub struct RuntimeTask {
 
 pub(crate) struct QuotaTask<T: galfus_contract::RunnableTask> {
     inner: Option<T>,
-    quota: Arc<std::sync::Mutex<galfus_vm::quota::RuntimeQuota>>,
+    quota: Arc<std::sync::Mutex<galfus_vm::quota::GlobalQuota>>,
 }
 
 impl<T: galfus_contract::RunnableTask> QuotaTask<T> {
-    pub(crate) fn new(inner: T, quota: Arc<std::sync::Mutex<galfus_vm::quota::RuntimeQuota>>) -> Self {
-        Self { inner: Some(inner), quota }
+    pub(crate) fn new(
+        inner: T,
+        quota: Arc<std::sync::Mutex<galfus_vm::quota::GlobalQuota>>,
+    ) -> Self {
+        Self {
+            inner: Some(inner),
+            quota,
+        }
     }
 }
 

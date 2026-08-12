@@ -6,7 +6,9 @@ use galfus_contract::{
 };
 use galfus_core::{ModuleId, ModulePath, SemanticRevision};
 
-use super::{PackageDecodingError, PackageEntryPoint, PackageImage, PackageMetadata, PackageValidationError};
+use super::{
+    PackageDecodingError, PackageEntryPoint, PackageImage, PackageMetadata, PackageValidationError,
+};
 use crate::{
     BytecodeGraph, BytecodeModule, BytecodeNode, CURRENT_BYTECODE_FORMAT_VERSION,
     CURRENT_PACKAGE_FORMAT_VERSION, ConstantPool, ImportEdge,
@@ -69,7 +71,12 @@ fn package_image_owns_its_graph_manifest_and_versions() {
         crate::BytecodeGraph::new(),
         target(),
         Some(entry),
-        crate::PackageMetadata { name: "test".into(), version: None, author: None, description: None },
+        crate::PackageMetadata {
+            name: "test".into(),
+            version: None,
+            author: None,
+            description: None,
+        },
         galfus_contract::LimitsMetadata::default(),
         Vec::new(),
         Vec::new(),
@@ -179,7 +186,12 @@ fn package_image_canonicalizes_adapter_requirement_and_export_order() {
         graph(&["alpha.gfp", "beta.gfp"], Vec::new()),
         target(),
         None,
-        crate::PackageMetadata { name: "test".into(), version: None, author: None, description: None },
+        crate::PackageMetadata {
+            name: "test".into(),
+            version: None,
+            author: None,
+            description: None,
+        },
         galfus_contract::LimitsMetadata::default(),
         vec![beta.clone(), requirement("alpha.gfp")],
         Vec::new(),
@@ -208,7 +220,12 @@ fn package_image_canonicalizes_adapter_requirement_and_export_order() {
         graph(&["alpha.gfp", "beta.gfp"], Vec::new()),
         target(),
         None,
-        crate::PackageMetadata { name: "test".into(), version: None, author: None, description: None },
+        crate::PackageMetadata {
+            name: "test".into(),
+            version: None,
+            author: None,
+            description: None,
+        },
         galfus_contract::LimitsMetadata::default(),
         vec![requirement("alpha.gfp"), beta],
         Vec::new(),
@@ -226,7 +243,12 @@ fn package_content_hash_changes_for_execution_relevant_data() {
         graph(&["main.gfs"], Vec::new()),
         target(),
         None,
-        crate::PackageMetadata { name: "test".into(), version: None, author: None, description: None },
+        crate::PackageMetadata {
+            name: "test".into(),
+            version: None,
+            author: None,
+            description: None,
+        },
         galfus_contract::LimitsMetadata::default(),
         Vec::new(),
         Vec::new(),
@@ -236,7 +258,12 @@ fn package_content_hash_changes_for_execution_relevant_data() {
         graph(&["main.gfs"], Vec::new()),
         ExecutionTarget::new("other").expect("valid target"),
         None,
-        crate::PackageMetadata { name: "test".into(), version: None, author: None, description: None },
+        crate::PackageMetadata {
+            name: "test".into(),
+            version: None,
+            author: None,
+            description: None,
+        },
         galfus_contract::LimitsMetadata::default(),
         Vec::new(),
         Vec::new(),
@@ -261,7 +288,12 @@ fn package_bytecode_round_trip_rebuilds_graph_indexes() {
         ),
         target(),
         None,
-        crate::PackageMetadata { name: "test".into(), version: None, author: None, description: None },
+        crate::PackageMetadata {
+            name: "test".into(),
+            version: None,
+            author: None,
+            description: None,
+        },
         galfus_contract::LimitsMetadata::default(),
         Vec::new(),
         Vec::new(),

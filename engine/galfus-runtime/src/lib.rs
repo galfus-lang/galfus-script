@@ -140,7 +140,9 @@ impl Runtime {
             .map_err(RuntimeError::NumericSemantics)?;
         preflight_capabilities(&package, providers.as_ref(), &adapter_bindings)?;
 
-        let quota = std::sync::Arc::new(std::sync::Mutex::new(galfus_vm::quota::RuntimeQuota::new(package.limits().clone())));
+        let quota = std::sync::Arc::new(std::sync::Mutex::new(galfus_vm::quota::GlobalQuota::new(
+            package.limits().clone(),
+        )));
         let mut orchestrator = crate::orchestrator::Orchestrator::new(quota.clone());
         let entry = package
             .entry_point()
@@ -184,7 +186,10 @@ impl Runtime {
             });
         }
 
-        let mut thread = galfus_vm::thread::VmThreadState::new(quota.clone());
+        let thread_quota = std::sync::Arc::new(std::sync::Mutex::new(
+            galfus_vm::quota::ThreadQuota::new(package.limits().clone()),
+        ));
+        let mut thread = galfus_vm::thread::VmThreadState::new(quota.clone(), thread_quota);
         let vm = VirtualMachine::new(graph.clone()).with_provider_handle(providers);
 
         let mut initializers = VecDeque::new();
@@ -246,7 +251,8 @@ impl Runtime {
         orchestrator.set_driver(driver.clone());
         orchestrator
             .kernel_mut()
-            .enqueue_runnable(root_thread_id, root_thread).unwrap();
+            .enqueue_runnable(root_thread_id, root_thread)
+            .unwrap();
 
         let initialization_complete = orchestrator.initialization_complete();
         Ok(Execution::new(

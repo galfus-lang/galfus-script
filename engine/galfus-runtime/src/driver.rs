@@ -31,7 +31,7 @@ pub trait ExecutionDriver: KernelDriver {
 }
 
 pub struct NativeEventBridge {
-    sender: std::sync::mpsc::Sender<(EventSequence, RuntimeEvent)>,
+    sender: std::sync::mpsc::SyncSender<(EventSequence, RuntimeEvent)>,
     receiver: Mutex<std::sync::mpsc::Receiver<(EventSequence, RuntimeEvent)>>,
     next_sequence: Mutex<EventSequence>,
     pending: Mutex<usize>,
@@ -39,7 +39,7 @@ pub struct NativeEventBridge {
 
 impl NativeEventBridge {
     pub fn new() -> Self {
-        let (sender, receiver) = std::sync::mpsc::channel();
+        let (sender, receiver) = std::sync::mpsc::sync_channel(16_384);
         Self {
             sender,
             receiver: Mutex::new(receiver),
@@ -70,15 +70,17 @@ impl RuntimeEventSink for NativeEventBridge {
         let next = current
             .next()
             .ok_or(EventDeliveryError::SequenceExhausted)?;
-        let mut pending = self
-            .pending
-            .lock()
-            .map_err(|_| EventDeliveryError::QueueUnavailable)?;
-        *pending += 1;
-        if self.sender.send((current, event)).is_err() {
-            *pending -= 1;
-            return Err(EventDeliveryError::ReceiverClosed);
-        }
+
+        self.sender
+            .try_send((current, event))
+            .map_err(|e| match e {
+                std::sync::mpsc::TrySendError::Full(_) => EventDeliveryError::QueueUnavailable,
+                std::sync::mpsc::TrySendError::Disconnected(_) => {
+                    EventDeliveryError::QueueUnavailable
+                }
+            })?;
+
+        *self.pending.lock().unwrap() += 1;
         *sequence = next;
         Ok(())
     }

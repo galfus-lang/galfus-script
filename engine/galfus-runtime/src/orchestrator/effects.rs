@@ -155,7 +155,15 @@ impl Orchestrator {
                             args,
                             arg_types,
                         } => {
-                            let mut worker_thread = galfus_vm::thread::VmThreadState::new(self.quota.clone());
+                            let thread_quota = std::sync::Arc::new(std::sync::Mutex::new(
+                                galfus_vm::quota::ThreadQuota::new(
+                                    self.quota.lock().unwrap().limits().clone(),
+                                ),
+                            ));
+                            let mut worker_thread = galfus_vm::thread::VmThreadState::new(
+                                self.quota.clone(),
+                                thread_quota,
+                            );
                             let module = &self
                                 .vm
                                 .as_ref()
@@ -246,8 +254,12 @@ impl Orchestrator {
                                 ),
                             );
                             let spawned_thread = self.kernel.take_thread(worker_id).unwrap();
-                            if let Err(e) = self.kernel.enqueue_runnable(worker_id, spawned_thread) {
-                                self.failure = Some(ExecutionFailure::new(e, "runnable threads limit exceeded").with_thread_id(worker_id));
+                            if let Err(e) = self.kernel.enqueue_runnable(worker_id, spawned_thread)
+                            {
+                                self.failure = Some(
+                                    ExecutionFailure::new(e, "runnable threads limit exceeded")
+                                        .with_thread_id(worker_id),
+                                );
                                 self.kernel.cancel(worker_id);
                             }
                         }
@@ -347,14 +359,22 @@ impl Orchestrator {
                                     .expect("active future has a registry record"),
                             };
                             if let Err(e) = self.quota.lock().unwrap().try_reserve_kernel_tasks(1) {
-                                self.failure = Some(ExecutionFailure::new(e, "kernel tasks limit exceeded").with_thread_id(thread_id).with_future_id(future_id));
+                                self.failure = Some(
+                                    ExecutionFailure::new(e, "kernel tasks limit exceeded")
+                                        .with_thread_id(thread_id)
+                                        .with_future_id(future_id),
+                                );
                                 self.kernel.cancel(thread_id);
                                 return;
                             }
                             let quota_task = crate::task::QuotaTask::new(task, self.quota.clone());
                             let kernel_task = match affinity {
-                                galfus_contract::TaskAffinity::Main => KernelTask::Main(Box::new(quota_task)),
-                                galfus_contract::TaskAffinity::Any => KernelTask::Any(Box::new(quota_task)),
+                                galfus_contract::TaskAffinity::Main => {
+                                    KernelTask::Main(Box::new(quota_task))
+                                }
+                                galfus_contract::TaskAffinity::Any => {
+                                    KernelTask::Any(Box::new(quota_task))
+                                }
                             };
                             self.driver
                                 .as_ref()
@@ -451,11 +471,16 @@ impl Orchestrator {
                                     .expect("active future has a registry record"),
                             };
                             if let Err(e) = self.quota.lock().unwrap().try_reserve_kernel_tasks(1) {
-                                self.failure = Some(ExecutionFailure::new(e, "kernel tasks limit exceeded").with_thread_id(thread_id).with_future_id(future_id));
+                                self.failure = Some(
+                                    ExecutionFailure::new(e, "kernel tasks limit exceeded")
+                                        .with_thread_id(thread_id)
+                                        .with_future_id(future_id),
+                                );
                                 self.kernel.cancel(thread_id);
                                 return;
                             }
-                            let task = Box::new(crate::task::QuotaTask::new(task, self.quota.clone()));
+                            let task =
+                                Box::new(crate::task::QuotaTask::new(task, self.quota.clone()));
                             self.driver
                                 .as_ref()
                                 .expect("driver is configured before execution")
@@ -526,27 +551,44 @@ impl Orchestrator {
                                                 self.kernel.get_mailbox(target_id)
                                             {
                                                 let message_bytes = data.len();
-                                                let mut quota = self.quota.lock().unwrap();
-                                                if quota.try_reserve_mailbox_messages(1).is_ok() {
-                                                    if quota.try_reserve_mailbox_bytes(message_bytes).is_ok() {
-                                                        mailbox.lock().unwrap().push_back(
-                                                            crate::registry::MailboxMessage {
-                                                                sender_id: thread_id,
-                                                                data: data.clone(),
-                                                            },
-                                                        );
-                                                        drop(quota);
-                                                        if let Err(e) = self.kernel.unblock(target_id) {
-                                                            self.failure = Some(galfus_contract::ExecutionFailure::new(e, "runnable threads limit exceeded").with_thread_id(target_id));
-                                                            self.kernel.cancel(target_id);
-                                                            // We don't return here because we are in an iterator. The failure will abort execution on the next loop.
+                                                let mut ok = false;
+                                                if let Some(target_quota) =
+                                                    self.kernel.get_thread_quota(target_id)
+                                                {
+                                                    let mut quota = target_quota.lock().unwrap();
+                                                    if quota.try_reserve_mailbox_messages(1).is_ok()
+                                                    {
+                                                        if quota
+                                                            .try_reserve_mailbox_bytes(
+                                                                message_bytes,
+                                                            )
+                                                            .is_ok()
+                                                        {
+                                                            ok = true;
+                                                        } else {
+                                                            quota.release_mailbox_messages(1);
                                                         }
-                                                        self.complete_mailbox_future_waits(target_id);
-                                                        true
-                                                    } else {
-                                                        quota.release_mailbox_messages(1);
-                                                        false
                                                     }
+                                                }
+                                                if ok {
+                                                    mailbox.lock().unwrap().push_back(
+                                                        crate::registry::MailboxMessage {
+                                                            sender_id: thread_id,
+                                                            data: data.clone(),
+                                                        },
+                                                    );
+                                                    if let Err(e) = self.kernel.unblock(target_id) {
+                                                        self.failure = Some(
+                                                            galfus_contract::ExecutionFailure::new(
+                                                                e,
+                                                                "runnable threads limit exceeded",
+                                                            )
+                                                            .with_thread_id(target_id),
+                                                        );
+                                                        self.kernel.cancel(target_id);
+                                                    }
+                                                    self.complete_mailbox_future_waits(target_id);
+                                                    true
                                                 } else {
                                                     false
                                                 }
@@ -568,9 +610,13 @@ impl Orchestrator {
                                     .get_mailbox(thread_id)
                                     .and_then(|mailbox| mailbox.lock().unwrap().pop_front())
                                     .map(|message| {
-                                        let mut quota = self.quota.lock().unwrap();
-                                        quota.release_mailbox_messages(1);
-                                        quota.release_mailbox_bytes(message.data.len());
+                                        if let Some(target_quota) =
+                                            self.kernel.get_thread_quota(thread_id)
+                                        {
+                                            let mut tq = target_quota.lock().unwrap();
+                                            tq.release_mailbox_messages(1);
+                                            tq.release_mailbox_bytes(message.data.len());
+                                        }
                                         BoundaryValue::Bytes(message.data)
                                     })
                                     .unwrap_or(BoundaryValue::Null))),
@@ -611,9 +657,13 @@ impl Orchestrator {
                                             )?;
                                             let msg = mailbox.remove(index);
                                             if let Some(ref m) = msg {
-                                                let mut quota = self.quota.lock().unwrap();
-                                                quota.release_mailbox_messages(1);
-                                                quota.release_mailbox_bytes(m.data.len());
+                                                if let Some(target_quota) =
+                                                    self.kernel.get_thread_quota(thread_id)
+                                                {
+                                                    let mut tq = target_quota.lock().unwrap();
+                                                    tq.release_mailbox_messages(1);
+                                                    tq.release_mailbox_bytes(m.data.len());
+                                                }
                                             }
                                             msg
                                         });
@@ -703,7 +753,18 @@ impl Orchestrator {
                                             func_idx,
                                         }) => {
                                             let mut new_thread =
-                                                galfus_vm::thread::VmThreadState::new(self.quota.clone());
+                                                galfus_vm::thread::VmThreadState::new(
+                                                    self.quota.clone(),
+                                                    std::sync::Arc::new(std::sync::Mutex::new(
+                                                        galfus_vm::quota::ThreadQuota::new(
+                                                            self.quota
+                                                                .lock()
+                                                                .unwrap()
+                                                                .limits()
+                                                                .clone(),
+                                                        ),
+                                                    )),
+                                                );
                                             new_thread.entry_func =
                                                 Some(galfus_vm::VmValue::Function {
                                                     module_id: ModuleId::new(*module_id),
@@ -1121,9 +1182,12 @@ impl Orchestrator {
                 return;
             };
             self.aggregate_registration = Some((coordinator_id, index));
+            let thread_quota = std::sync::Arc::new(std::sync::Mutex::new(
+                galfus_vm::quota::ThreadQuota::new(self.quota.lock().unwrap().limits().clone()),
+            ));
             self.handle_effect(
                 thread_id,
-                galfus_vm::thread::VmThreadState::new(self.quota.clone()),
+                galfus_vm::thread::VmThreadState::new(self.quota.clone(), thread_quota),
                 galfus_vm::VmEffect::FutureWait {
                     future_id,
                     module_id,
@@ -1177,9 +1241,9 @@ impl Orchestrator {
         if let Err(e) = self.quota.lock().unwrap().try_reserve_pending_requests(1) {
             self.failure = Some(
                 galfus_contract::ExecutionFailure::new(e, "request quota exceeded")
-                .with_thread_id(thread_id)
-                .with_future_id(future_id)
-                .with_stack(crate::orchestrator::execution_stack(thread))
+                    .with_thread_id(thread_id)
+                    .with_future_id(future_id)
+                    .with_stack(crate::orchestrator::execution_stack(thread)),
             );
             self.kernel.cancel(thread_id);
             return None;
@@ -1216,8 +1280,8 @@ impl Orchestrator {
         if let Err(e) = self.quota.lock().unwrap().try_reserve_futures(1) {
             self.failure = Some(
                 galfus_contract::ExecutionFailure::new(e, "future quota exceeded")
-                .with_thread_id(thread_id)
-                .with_stack(crate::orchestrator::execution_stack(thread))
+                    .with_thread_id(thread_id)
+                    .with_stack(crate::orchestrator::execution_stack(thread)),
             );
             self.kernel.cancel(thread_id);
             return None;

@@ -45,9 +45,11 @@ impl RunnableQueue {
         self.queue.len()
     }
 
-    pub fn remove(&mut self, id: ThreadId) {
+    pub fn remove(&mut self, id: ThreadId) -> bool {
+        let initial_len = self.queue.len();
         self.queue.retain(|(queued, _)| *queued != id);
         self.queued.remove(&id);
+        initial_len != self.queue.len()
     }
 }
 
@@ -118,9 +120,10 @@ impl BlockedQueue {
         (was_blocked, had_timer)
     }
 
-    pub fn remove(&mut self, id: ThreadId) {
-        self.remove_timer(id);
-        self.blocked.remove(&id);
+    pub fn remove(&mut self, id: ThreadId) -> Option<bool> {
+        let had_timer = self.remove_timer(id).is_some();
+        let was_blocked = self.blocked.remove(&id);
+        if was_blocked { Some(had_timer) } else { None }
     }
 
     fn remove_timer(&mut self, id: ThreadId) -> Option<TimerEntry> {

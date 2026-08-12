@@ -158,7 +158,10 @@ impl Orchestrator {
         self.startup_plans.clear();
         self.thread_exit_waits.clear();
         self.mailbox_future_waits.clear();
-        self.quota.lock().unwrap().release_event_queue(self.pending_events.len());
+        self.quota
+            .lock()
+            .unwrap()
+            .release_event_queue(self.pending_events.len());
         self.pending_events.clear();
         self.pending_aggregate_finishes.clear();
         for coordinator_id in self.aggregate_coordinators.drain().map(|(id, _)| id) {

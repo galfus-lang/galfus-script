@@ -10,12 +10,14 @@ use crate::state::{
     BytecodeState, CheckState, CompileBlocked, CompileState, RunBlocked, SemanticState,
     SourceState, WorkspaceError,
 };
-use galfus_bytecode::{BytecodeGraph, ImportEdge, PackageEntryPoint, PackageImage, PackageMetadata};
+use galfus_bytecode::{
+    BytecodeGraph, ImportEdge, PackageEntryPoint, PackageImage, PackageMetadata,
+};
 use galfus_compiler::{CompiledModule, gfp::parse_gfp_frontmatter};
 use galfus_contract::{
     AdapterFunctionSignature, AdapterModuleDescriptor, AdapterModuleRequirement, BoundaryType,
     CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget, ProviderFunctionSignature,
-    ProviderModuleRequirement, Providers, RuntimeCapabilities, LimitsMetadata,
+    ProviderModuleRequirement, Providers, RuntimeCapabilities,
 };
 use galfus_core::{Diagnostic, DiagnosticBag, ModulePath, OpaqueTypeId, SourceFile, Span, TypeId};
 use galfus_frontend::modules::{
@@ -838,10 +840,16 @@ impl Workspace {
             .map_err(|error| CompileBlocked::CompilerError(error.to_string()))?;
         let adapter_requirements = self.adapter_requirements_for(&graph);
         let provider_requirements = self.provider_requirements_for(&graph);
-        let entry_point = match self.config.as_ref().and_then(|c| c.run_entry.as_str().into()) {
-            Some(run_entry) => self.config.as_ref().and_then(|c| c.entry.as_ref()).map(|p| {
-                PackageEntryPoint::new(p.clone(), run_entry)
-            }),
+        let entry_point = match self
+            .config
+            .as_ref()
+            .and_then(|c| c.run_entry.as_str().into())
+        {
+            Some(run_entry) => self
+                .config
+                .as_ref()
+                .and_then(|c| c.entry.as_ref())
+                .map(|p| PackageEntryPoint::new(p.clone(), run_entry)),
             None => None,
         };
 

@@ -482,16 +482,18 @@ impl VirtualMachine {
             registers[i] = val;
         }
 
-        thread.push_frame(CallFrame {
-            module_id,
-            func_idx,
-            pc: 0,
-            registers,
-            return_dest: None,
-        }).map_err(|error| VmPanic {
-            error,
-            stack_trace: vec![],
-        })?;
+        thread
+            .push_frame(CallFrame {
+                module_id,
+                func_idx,
+                pc: 0,
+                registers,
+                return_dest: None,
+            })
+            .map_err(|error| VmPanic {
+                error,
+                stack_trace: vec![],
+            })?;
 
         Ok(())
     }
@@ -533,16 +535,18 @@ impl VirtualMachine {
             registers[i] = val;
         }
 
-        thread.push_frame(CallFrame {
-            module_id,
-            func_idx,
-            pc: 0,
-            registers,
-            return_dest: None,
-        }).map_err(|error| VmPanic {
-            error,
-            stack_trace: vec![],
-        })?;
+        thread
+            .push_frame(CallFrame {
+                module_id,
+                func_idx,
+                pc: 0,
+                registers,
+                return_dest: None,
+            })
+            .map_err(|error| VmPanic {
+                error,
+                stack_trace: vec![],
+            })?;
 
         match self.execute_loop(thread) {
             Ok(val) => Ok(val),

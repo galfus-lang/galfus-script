@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use crate::diagnostic::WorkspaceDiagnosticCode;
 use galfus_contract::{ExecutionTarget, LimitsMetadata};
 use galfus_core::{Diagnostic, DiagnosticBag, ModulePath, SourceId, Span};

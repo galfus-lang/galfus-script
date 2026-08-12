@@ -247,7 +247,8 @@ fn execution_remains_initializing_until_the_orchestrator_signal() {
     let thread = orchestrator.kernel_mut().take_thread(thread_id).unwrap();
     orchestrator
         .kernel_mut()
-        .enqueue_runnable(thread_id, thread).unwrap();
+        .enqueue_runnable(thread_id, thread)
+        .unwrap();
 
     let driver = Rc::new(IdleDriver::new());
     orchestrator.set_vm(Arc::new(galfus_vm::VirtualMachine::new(Default::default())));

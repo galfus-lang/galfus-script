@@ -62,13 +62,15 @@ fn create_future_for_missing_module_returns_module_not_found_error() {
     let vm = VirtualMachine::new(sync::Arc::new(graph));
     let mut thread = crate::thread::VmThreadState::test_new();
 
-    thread.push_frame(crate::CallFrame {
-        module_id: ModuleId::new(99),
-        func_idx: FuncIdx(0),
-        pc: 0,
-        return_dest: None,
-        registers: vec![],
-    }).unwrap();
+    thread
+        .push_frame(crate::CallFrame {
+            module_id: ModuleId::new(99),
+            func_idx: FuncIdx(0),
+            pc: 0,
+            return_dest: None,
+            registers: vec![],
+        })
+        .unwrap();
 
     let step = vm.execute_system_instruction(
         &mut thread,
@@ -96,13 +98,15 @@ fn ret_from_missing_module_returns_module_not_found_error() {
     let vm = VirtualMachine::new(sync::Arc::new(graph));
     let mut thread = crate::thread::VmThreadState::test_new();
 
-    thread.push_frame(crate::CallFrame {
-        module_id: ModuleId::new(99),
-        func_idx: FuncIdx(0),
-        pc: 0,
-        return_dest: None,
-        registers: vec![],
-    }).unwrap();
+    thread
+        .push_frame(crate::CallFrame {
+            module_id: ModuleId::new(99),
+            func_idx: FuncIdx(0),
+            pc: 0,
+            return_dest: None,
+            registers: vec![],
+        })
+        .unwrap();
 
     let step = vm.execute_control_instruction(&mut thread, Instruction::RetNull);
     assert!(

@@ -107,7 +107,18 @@ impl ThreadRegistry {
     }
 
     pub fn get_mailbox(&self, id: ThreadId) -> Option<Arc<Mutex<VecDeque<MailboxMessage>>>> {
-        self.tcbs.get(&id).and_then(|tcb| tcb.mailbox.clone())
+        self.tcbs
+            .get(&id)
+            .and_then(|tcb| tcb.mailbox.as_ref().cloned())
+    }
+
+    pub fn get_thread_quota(
+        &self,
+        id: ThreadId,
+    ) -> Option<Arc<Mutex<galfus_vm::quota::ThreadQuota>>> {
+        self.tcbs
+            .get(&id)
+            .and_then(|tcb| tcb.vm_state.as_ref().map(|vm| vm.thread_quota().clone()))
     }
 
     pub fn active_count(&self) -> usize {
@@ -161,7 +172,10 @@ impl ThreadRegistry {
         self.tcbs.get(&id).map(|tcb| tcb.state.clone())
     }
 
-    pub fn mark_spawned(&mut self, id: ThreadId) -> Result<(), galfus_contract::ExecutionFailureKind> {
+    pub fn mark_spawned(
+        &mut self,
+        id: ThreadId,
+    ) -> Result<(), galfus_contract::ExecutionFailureKind> {
         if let Some(tcb) = self.tcbs.get_mut(&id) {
             if let Some(ref mut thread) = tcb.vm_state {
                 thread.mark_spawned()?;
@@ -209,11 +223,11 @@ impl ThreadRegistry {
                 }
             }
             if let Some(ref vm_state) = tcb.vm_state {
-                let mut quota = vm_state.quota().lock().unwrap();
+                let mut quota = vm_state.thread_quota().lock().unwrap();
                 quota.release_mailbox_messages(released_messages);
                 quota.release_mailbox_bytes(released_bytes);
             }
-            
+
             tcb.vm_state = None;
             tcb.mailbox = None;
             tcb.state = ThreadState::Exited(result);

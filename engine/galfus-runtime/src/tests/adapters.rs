@@ -1,11 +1,11 @@
-use galfus_contract::LimitsMetadata;
 use super::*;
 use galfus_bytecode::instruction::{ConstIdx, FuncIdx, Instruction, Reg, TypeIdx};
 use galfus_bytecode::{
     BytecodeFunction, BytecodeGraph, BytecodeModule, BytecodeNode, BytecodeType, Constant,
-    ConstantPool, ExportKind, ExportSlot, ImportEdge, PackageEntryPoint, PackageImage, PackageMetadata,
-    PackageLoader,
+    ConstantPool, ExportKind, ExportSlot, ImportEdge, PackageEntryPoint, PackageImage,
+    PackageLoader, PackageMetadata,
 };
+use galfus_contract::LimitsMetadata;
 use galfus_contract::{
     AdapterArtifact, AdapterBindings, AdapterLoadContext, AdapterLoadError, AdapterModuleBinding,
     AdapterModuleDescriptor, AdapterModuleLoader, AdapterModuleRequirement, AdapterTarget,
@@ -311,7 +311,12 @@ fn adapter_package(graph: Arc<BytecodeGraph>) -> Arc<PackageImage> {
                 ModulePath::new("main.gfs").expect("valid module path"),
                 "main",
             )),
-            galfus_bytecode::PackageMetadata { name: "test".into(), version: None, author: None, description: None },
+            galfus_bytecode::PackageMetadata {
+                name: "test".into(),
+                version: None,
+                author: None,
+                description: None,
+            },
             galfus_contract::LimitsMetadata::default(),
             vec![AdapterModuleRequirement {
                 proxy_module: "graphics.gfp".to_string(),
@@ -338,7 +343,12 @@ fn adapter_package_with_provider(graph: Arc<BytecodeGraph>) -> Arc<PackageImage>
                 ModulePath::new("main.gfs").expect("valid module path"),
                 "main",
             )),
-            galfus_bytecode::PackageMetadata { name: "test".into(), version: None, author: None, description: None },
+            galfus_bytecode::PackageMetadata {
+                name: "test".into(),
+                version: None,
+                author: None,
+                description: None,
+            },
             galfus_contract::LimitsMetadata::default(),
             vec![AdapterModuleRequirement {
                 proxy_module: "graphics.gfp".to_string(),
