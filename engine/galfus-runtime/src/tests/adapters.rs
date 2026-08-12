@@ -3,9 +3,8 @@ use galfus_bytecode::instruction::{ConstIdx, FuncIdx, Instruction, Reg, TypeIdx}
 use galfus_bytecode::{
     BytecodeFunction, BytecodeGraph, BytecodeModule, BytecodeNode, BytecodeType, Constant,
     ConstantPool, ExportKind, ExportSlot, ImportEdge, PackageEntryPoint, PackageImage,
-    PackageLoader, PackageMetadata,
+    PackageLoader,
 };
-use galfus_contract::LimitsMetadata;
 use galfus_contract::{
     AdapterArtifact, AdapterBindings, AdapterLoadContext, AdapterLoadError, AdapterModuleBinding,
     AdapterModuleDescriptor, AdapterModuleLoader, AdapterModuleRequirement, AdapterTarget,

@@ -306,8 +306,7 @@ fn execution_drops_orchestrator_and_sets_failed_state_on_error() {
     let thread_quota = Arc::new(Mutex::new(galfus_vm::quota::ThreadQuota::new(
         orchestrator.quota.lock().unwrap().limits().clone(),
     )));
-    let mut thread =
-        galfus_vm::thread::VmThreadState::new(orchestrator.quota.clone(), thread_quota);
+    let thread = galfus_vm::thread::VmThreadState::new(orchestrator.quota.clone(), thread_quota);
     let _owner = orchestrator.kernel.spawn(thread, None).unwrap();
 
     // Test logic here...

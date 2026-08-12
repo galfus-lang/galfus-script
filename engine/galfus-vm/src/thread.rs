@@ -1,6 +1,3 @@
-use crate::VmValue;
-use crate::runtime;
-
 use crate::error::VmError;
 use crate::runtime::Value;
 use crate::runtime::{CallFrame, HeapObject, RuntimeModuleState, VisitRoots, VmObjectRef};
