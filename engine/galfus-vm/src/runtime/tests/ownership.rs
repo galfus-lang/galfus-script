@@ -75,7 +75,7 @@ fn test_ownership_deterministic_release() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VmThreadState::new();
+    let mut thread = thread::VmThreadState::test_new();
     let res = vm
         .run_function(
             &mut thread,
@@ -195,7 +195,7 @@ fn test_ownership_cycle_release() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VmThreadState::new();
+    let mut thread = thread::VmThreadState::test_new();
     let res = vm
         .run_function(
             &mut thread,
@@ -308,7 +308,7 @@ fn test_ownership_weak_invalidation() {
         metadata: None,
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
-    let mut thread = thread::VmThreadState::new();
+    let mut thread = thread::VmThreadState::test_new();
     let res = vm
         .run_function(
             &mut thread,
@@ -335,7 +335,7 @@ fn test_ownership_weak_invalidation() {
 
 #[test]
 fn test_obsolete_reference_returns_invalid_object() {
-    let mut thread = thread::VmThreadState::new();
+    let mut thread = thread::VmThreadState::test_new();
     let obj_ref = thread
         .heap
         .alloc(HeapObject::Tuple { elements: vec![] })
@@ -355,7 +355,7 @@ fn test_obsolete_reference_returns_invalid_object() {
 
 #[test]
 fn test_alloc_returns_id_exhausted() {
-    let mut thread = thread::VmThreadState::new();
+    let mut thread = thread::VmThreadState::test_new();
     thread.heap.exhaust_id_counter();
     let err = thread
         .heap
@@ -366,7 +366,7 @@ fn test_alloc_returns_id_exhausted() {
 
 #[test]
 fn test_gc_fails_on_invalid_reference() {
-    let mut thread = thread::VmThreadState::new();
+    let mut thread = thread::VmThreadState::test_new();
     let graph = graph_with_node(galfus_bytecode::BytecodeNode {
         id: galfus_core::ModuleId::new(0),
         path: galfus_core::ModulePath::new("test.gfs").unwrap(),
@@ -401,7 +401,7 @@ fn test_gc_fails_on_invalid_reference() {
 
 #[test]
 fn test_deterministic_order_of_released_handles() {
-    let mut thread = thread::VmThreadState::new();
+    let mut thread = thread::VmThreadState::test_new();
     let graph = graph_with_node(galfus_bytecode::BytecodeNode {
         id: galfus_core::ModuleId::new(0),
         path: galfus_core::ModulePath::new("test.gfs").unwrap(),
@@ -447,7 +447,7 @@ fn test_deterministic_order_of_released_handles() {
 
 #[test]
 fn test_visit_roots_includes_entry_func_and_system_response() {
-    let mut thread = thread::VmThreadState::new();
+    let mut thread = thread::VmThreadState::test_new();
     let graph = graph_with_node(galfus_bytecode::BytecodeNode {
         id: galfus_core::ModuleId::new(0),
         path: galfus_core::ModulePath::new("test.gfs").unwrap(),

@@ -178,7 +178,7 @@ fn load_source_file(file: &Path) -> Result<Workspace> {
 
     let mut workspace = workspace_with_native_io_catalog();
     let config =
-        format!("[module]\nname = \"single-file\"\ntarget = \"app\"\nentry = \"{module_path}\"\n");
+        format!("[module]\nname = \"single-file\"\ntarget = \"app\"\n[entry]\npath = \"{module_path}\"\n");
     if let LoadResult::Diagnostics(diagnostics) = workspace
         .load_config(config.as_bytes())
         .map_err(|error| anyhow::anyhow!("workspace configuration error: {error:?}"))?

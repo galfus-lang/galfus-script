@@ -140,7 +140,8 @@ impl Runtime {
             .map_err(RuntimeError::NumericSemantics)?;
         preflight_capabilities(&package, providers.as_ref(), &adapter_bindings)?;
 
-        let mut orchestrator = crate::orchestrator::Orchestrator::new();
+        let quota = std::sync::Arc::new(std::sync::Mutex::new(galfus_vm::quota::RuntimeQuota::new(package.limits().clone())));
+        let mut orchestrator = crate::orchestrator::Orchestrator::new(quota.clone());
         let entry = package
             .entry_point()
             .ok_or(RuntimeError::MissingPackageEntry)?;
@@ -183,7 +184,7 @@ impl Runtime {
             });
         }
 
-        let mut thread = galfus_vm::thread::VmThreadState::new();
+        let mut thread = galfus_vm::thread::VmThreadState::new(quota.clone());
         let vm = VirtualMachine::new(graph.clone()).with_provider_handle(providers);
 
         let mut initializers = VecDeque::new();

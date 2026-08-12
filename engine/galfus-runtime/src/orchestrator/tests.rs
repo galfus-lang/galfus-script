@@ -137,9 +137,9 @@ fn cancelled_provider_dispatch_tasks_do_not_start_adapter_work() {
 
 #[test]
 fn spawned_event_is_registered_and_queued_by_the_execution_owner() {
-    let mut orchestrator = Orchestrator::new();
+    let mut orchestrator = Orchestrator::test_new();
     orchestrator.submit_event(RuntimeEvent::ThreadSpawned {
-        thread: galfus_vm::thread::VmThreadState::new(),
+        thread: galfus_vm::thread::VmThreadState::test_new(),
     });
 
     orchestrator.process_events();
@@ -150,7 +150,7 @@ fn spawned_event_is_registered_and_queued_by_the_execution_owner() {
 
 #[test]
 fn race_winner_uses_event_sequence_then_member_index() {
-    let mut orchestrator = Orchestrator::new();
+    let mut orchestrator = Orchestrator::test_new();
     let coordinator_id = CoordinatorId::new(1);
     let thread_id = ThreadId::new(1);
     let module_id = ModuleId::new(1);
@@ -192,11 +192,11 @@ fn race_winner_uses_event_sequence_then_member_index() {
 
 #[test]
 fn cancellation_event_removes_a_queued_thread() {
-    let mut orchestrator = Orchestrator::new();
+    let mut orchestrator = Orchestrator::test_new();
     let thread_id = {
         let kernel = orchestrator.kernel_mut();
         let thread_id = kernel
-            .spawn(galfus_vm::thread::VmThreadState::new(), None)
+            .spawn(galfus_vm::thread::VmThreadState::test_new(), None)
             .unwrap();
         let thread = kernel
             .take_thread(thread_id)
@@ -214,10 +214,10 @@ fn cancellation_event_removes_a_queued_thread() {
 
 #[test]
 fn owner_exit_removes_all_of_its_future_records() {
-    let mut orchestrator = Orchestrator::new();
+    let mut orchestrator = Orchestrator::test_new();
     let thread_id = orchestrator
         .kernel_mut()
-        .spawn(galfus_vm::thread::VmThreadState::new(), None)
+        .spawn(galfus_vm::thread::VmThreadState::test_new(), None)
         .unwrap();
     let future_id = FutureId::new(1);
     orchestrator
@@ -255,11 +255,11 @@ fn owner_exit_removes_all_of_its_future_records() {
 
 #[test]
 fn execution_cancellation_removes_every_thread_and_returns_a_structured_failure() {
-    let mut orchestrator = Orchestrator::new();
+    let mut orchestrator = Orchestrator::test_new();
     for _ in 0..2 {
         let kernel = orchestrator.kernel_mut();
         let thread_id = kernel
-            .spawn(galfus_vm::thread::VmThreadState::new(), None)
+            .spawn(galfus_vm::thread::VmThreadState::test_new(), None)
             .unwrap();
         let thread = kernel
             .take_thread(thread_id)
@@ -276,10 +276,10 @@ fn execution_cancellation_removes_every_thread_and_returns_a_structured_failure(
 
 #[test]
 fn late_provider_completions_after_thread_cancellation_are_ignored() {
-    let mut orchestrator = Orchestrator::new();
+    let mut orchestrator = Orchestrator::test_new();
     let thread_id = orchestrator
         .kernel_mut()
-        .spawn(galfus_vm::thread::VmThreadState::new(), None)
+        .spawn(galfus_vm::thread::VmThreadState::test_new(), None)
         .unwrap();
     orchestrator.submit_event(RuntimeEvent::CancelThread { thread_id });
     for _ in 0..2 {
@@ -303,9 +303,9 @@ fn late_provider_completions_after_thread_cancellation_are_ignored() {
 
 #[test]
 fn orchestrator_id_domains_fail_without_wrapping() {
-    let mut orchestrator = Orchestrator::new();
+    let mut orchestrator = Orchestrator::test_new();
     let thread_id = galfus_core::ThreadId::new(1);
-    let thread = galfus_vm::thread::VmThreadState::new();
+    let thread = galfus_vm::thread::VmThreadState::test_new();
 
     assert!(
         orchestrator
@@ -376,9 +376,9 @@ fn orchestrator_id_domains_fail_without_wrapping() {
 
 #[test]
 fn generations_prevent_reuse_collisions() {
-    let mut orchestrator = Orchestrator::new();
+    let mut orchestrator = Orchestrator::test_new();
     let thread_id = galfus_core::ThreadId::new(1);
-    let thread = galfus_vm::thread::VmThreadState::new();
+    let thread = galfus_vm::thread::VmThreadState::test_new();
 
     // Allocate first time
     let lease1 = orchestrator

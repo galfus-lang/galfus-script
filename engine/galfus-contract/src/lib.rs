@@ -112,6 +112,63 @@ pub struct AdapterReleaseError {
     pub message: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ResourceLimitKind {
+    HeapObjects,
+    HeapBytes,
+    CallDepth,
+    Threads,
+    Futures,
+    PendingRequests,
+    MailboxMessages,
+    MailboxBytes,
+    EventQueue,
+    KernelTasks,
+    RunnableThreads,
+    ExternalHandles,
+    Timers,
+    PendingStates,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LimitsMetadata {
+    pub max_heap_objects: usize,
+    pub max_heap_bytes: usize,
+    pub max_call_depth: usize,
+    pub max_threads: usize,
+    pub max_futures: usize,
+    pub max_pending_requests: usize,
+    pub max_mailbox_messages: usize,
+    pub max_mailbox_bytes: usize,
+    pub max_event_queue: usize,
+    pub max_kernel_tasks: usize,
+    pub max_runnable_threads: usize,
+    pub max_external_handles: usize,
+    pub max_timers: usize,
+    pub max_pending_states: usize,
+}
+
+impl Default for LimitsMetadata {
+    fn default() -> Self {
+        Self {
+            max_heap_objects: 10_000_000,
+            max_heap_bytes: 268_435_456, // 256MB
+            max_call_depth: 1024,
+            max_threads: 1024,
+            max_futures: 16_384,
+            max_pending_requests: 4096,
+            max_mailbox_messages: 1024,
+            max_mailbox_bytes: 8_388_608, // 8MB
+            max_event_queue: 16_384,
+            max_kernel_tasks: 4096,
+            max_runnable_threads: 2048,
+            max_external_handles: 1024,
+            max_timers: 1024,
+            max_pending_states: 8192,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExecutionFailureKind {
     VmPanic,
@@ -133,6 +190,12 @@ pub enum ExecutionFailureKind {
     DriverFailure,
     InternalRuntimeFailure,
     IdSpaceExhausted,
+    ResourceLimitExceeded {
+        resource: ResourceLimitKind,
+        current: usize,
+        requested: usize,
+        limit: usize,
+    },
 }
 
 /// A VM frame preserved across an asynchronous suspension boundary.

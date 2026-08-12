@@ -107,7 +107,7 @@ fn provider_continuation_rejects_a_result_that_violates_its_declared_type() {
         metadata: None,
     });
     let vm = VirtualMachine::new(std::sync::Arc::new(graph));
-    let mut thread = thread::VmThreadState::new();
+    let mut thread = thread::VmThreadState::test_new();
     vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![])
         .expect("function is valid");
 
@@ -161,7 +161,7 @@ fn await_future_suspends_and_resumes_through_a_vm_owned_continuation() {
         metadata: None,
     });
     let vm = VirtualMachine::new(std::sync::Arc::new(graph));
-    let mut thread = thread::VmThreadState::new();
+    let mut thread = thread::VmThreadState::test_new();
     vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![])
         .expect("function is valid");
     thread
@@ -216,7 +216,7 @@ fn dropping_the_last_future_handle_notifies_the_orchestrator() {
         metadata: None,
     });
     let vm = VirtualMachine::new(std::sync::Arc::new(graph));
-    let mut thread = thread::VmThreadState::new();
+    let mut thread = thread::VmThreadState::test_new();
     vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![])
         .expect("function is valid");
     thread
@@ -253,7 +253,7 @@ fn dropping_one_of_multiple_future_handles_keeps_the_future_alive() {
         metadata: None,
     });
     let vm = VirtualMachine::new(std::sync::Arc::new(graph));
-    let mut thread = thread::VmThreadState::new();
+    let mut thread = thread::VmThreadState::test_new();
     vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![])
         .expect("function is valid");
     thread

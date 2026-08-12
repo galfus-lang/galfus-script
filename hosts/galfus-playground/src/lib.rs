@@ -195,4 +195,4 @@ fn run_source_inner(code: &str, args: &[&str]) -> Result<PlaygroundResult> {
 }
 
 pub const PLAYGROUND_CONFIG: &str =
-    "[module]\nname = \"playground\"\ntarget = \"app\"\nentry = \"src/main.gfs\"\n";
+    "[module]\nname = \"playground\"\ntarget = \"app\"\n[entry]\npath = \"src/main.gfs\"\n";

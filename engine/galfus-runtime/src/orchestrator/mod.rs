@@ -120,6 +120,7 @@ pub(crate) struct Orchestrator {
     pub(crate) future_registry: FutureRegistry,
     aggregate_coordinators: HashMap<galfus_core::CoordinatorId, AggregateCoordinator>,
     aggregate_registration: Option<(galfus_core::CoordinatorId, usize)>,
+    quota: std::sync::Arc<std::sync::Mutex<galfus_vm::quota::RuntimeQuota>>,
 }
 
 #[derive(Clone, Copy)]
@@ -150,7 +151,12 @@ pub(crate) struct MailboxFutureWait {
 }
 
 impl Orchestrator {
-    pub(crate) fn new() -> Self {
+    #[cfg(test)]
+    pub(crate) fn test_new() -> Self {
+        Self::new(std::sync::Arc::new(std::sync::Mutex::new(galfus_vm::quota::RuntimeQuota::new(galfus_contract::LimitsMetadata::default()))))
+    }
+
+    pub(crate) fn new(quota: std::sync::Arc<std::sync::Mutex<galfus_vm::quota::RuntimeQuota>>) -> Self {
         Self {
             kernel: VirtualKernel::new(),
             driver: None,
@@ -184,6 +190,7 @@ impl Orchestrator {
             future_registry: FutureRegistry::new(),
             aggregate_coordinators: HashMap::new(),
             aggregate_registration: None,
+            quota,
         }
     }
 
@@ -493,7 +500,7 @@ impl Orchestrator {
                 .get(payload_module_id)
                 .expect("future payload module is loaded")
                 .module;
-            let mut payload_heap = galfus_vm::thread::PrivateHeap::new();
+            let mut payload_heap = galfus_vm::thread::PrivateHeap::new(self.quota.clone());
             if let Err(error) = crate::task::encode_into_thread_heap(
                 &mut payload_heap,
                 value.clone(),

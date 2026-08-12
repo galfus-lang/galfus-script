@@ -20,7 +20,7 @@ fn load_workspace_reads_all_nested_source_files() {
     fs::create_dir_all(workspace_root.join("nested")).expect("temporary workspace");
     fs::write(
         workspace_root.join("galfus.toml"),
-        "[module]\nname = \"runner-test\"\ntarget = \"app\"\nentry = \"main.gfs\"\n",
+        "[module]\nname = \"runner-test\"\ntarget = \"app\"\n[entry]\npath = \"main.gfs\"\n",
     )
     .expect("configuration");
     fs::write(

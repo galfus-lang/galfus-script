@@ -180,6 +180,23 @@ pub enum HeapObject {
     },
 }
 
+impl HeapObject {
+    pub fn heap_bytes(&self) -> usize {
+        match self {
+            Self::Struct { fields, .. } => {
+                std::mem::size_of::<Self>() + fields.capacity() * std::mem::size_of::<Value>()
+            }
+            Self::Array { elements, .. } => {
+                std::mem::size_of::<Self>() + elements.capacity() * std::mem::size_of::<Value>()
+            }
+            Self::Tuple { elements } => {
+                std::mem::size_of::<Self>() + elements.capacity() * std::mem::size_of::<Value>()
+            }
+            Self::Choice { .. } | Self::AdapterHandle { .. } => std::mem::size_of::<Self>(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct VmContext {
     providers: Option<Arc<Mutex<Providers>>>,

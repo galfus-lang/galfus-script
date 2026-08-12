@@ -13,7 +13,7 @@ fn formats_are_read_from_workspace_metadata() {
     );
     assert_eq!(
         CURRENT_PACKAGE_FORMAT_VERSION,
-        PackageFormatVersion::new(1, 0, 0)
+        PackageFormatVersion::new(2, 0, 0)
     );
 }
 

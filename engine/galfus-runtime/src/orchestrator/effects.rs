@@ -155,7 +155,7 @@ impl Orchestrator {
                             args,
                             arg_types,
                         } => {
-                            let mut worker_thread = galfus_vm::thread::VmThreadState::new();
+                            let mut worker_thread = galfus_vm::thread::VmThreadState::new(self.quota.clone());
                             let module = &self
                                 .vm
                                 .as_ref()
@@ -657,7 +657,7 @@ impl Orchestrator {
                                             func_idx,
                                         }) => {
                                             let mut new_thread =
-                                                galfus_vm::thread::VmThreadState::new();
+                                                galfus_vm::thread::VmThreadState::new(self.quota.clone());
                                             new_thread.entry_func =
                                                 Some(galfus_vm::VmValue::Function {
                                                     module_id: ModuleId::new(*module_id),
@@ -1068,7 +1068,7 @@ impl Orchestrator {
             self.aggregate_registration = Some((coordinator_id, index));
             self.handle_effect(
                 thread_id,
-                galfus_vm::thread::VmThreadState::new(),
+                galfus_vm::thread::VmThreadState::new(self.quota.clone()),
                 galfus_vm::VmEffect::FutureWait {
                     future_id,
                     module_id,

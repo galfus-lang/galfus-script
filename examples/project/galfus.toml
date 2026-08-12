@@ -1,4 +1,10 @@
 [module]
 name = "my-app"
+version = "0.1.0"
+author = "Galfus Team"
+description = "Example App"
 target = "app"
-entry = "src/main.gfs"
+
+[entry]
+path = "src/main.gfs"
+function = "main"

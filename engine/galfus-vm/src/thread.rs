@@ -14,26 +14,29 @@ pub struct PrivateHeap {
     allocations_since_release: usize,
     next_id: u64,
     object_to_slot: HashMap<VmObjectRef, usize>,
-}
-
-impl Default for PrivateHeap {
-    fn default() -> Self {
-        Self::new()
-    }
+    pub(crate) quota: std::sync::Arc<std::sync::Mutex<crate::quota::RuntimeQuota>>,
 }
 
 impl PrivateHeap {
-    pub fn new() -> Self {
+    pub fn test_new() -> Self {
+        Self::new(std::sync::Arc::new(std::sync::Mutex::new(crate::quota::RuntimeQuota::new(galfus_contract::LimitsMetadata::default()))))
+    }
+
+    pub fn new(quota: std::sync::Arc<std::sync::Mutex<crate::quota::RuntimeQuota>>) -> Self {
         Self {
             objects: Vec::new(),
             free_slots: Vec::new(),
             allocations_since_release: 0,
             next_id: 1,
             object_to_slot: HashMap::new(),
+            quota,
         }
     }
 
     pub fn alloc(&mut self, obj: HeapObject) -> Result<VmObjectRef, VmError> {
+        self.quota.lock().unwrap().try_reserve_heap_objects(1).map_err(VmError::ResourceLimitExceeded)?;
+        self.quota.lock().unwrap().try_reserve_heap_bytes(obj.heap_bytes()).map_err(VmError::ResourceLimitExceeded)?;
+
         self.allocations_since_release += 1;
 
         let id = self.next_id;
@@ -89,7 +92,13 @@ impl PrivateHeap {
             .object_to_slot
             .remove(&obj_ref)
             .ok_or(VmError::InvalidObjectReference)?;
-        self.objects[idx] = None;
+            
+        if let Some((_, obj)) = self.objects[idx].take() {
+            let mut q = self.quota.lock().unwrap();
+            q.release_heap_objects(1);
+            q.release_heap_bytes(obj.heap_bytes());
+        }
+        
         self.free_slots.push(idx);
         Ok(())
     }
@@ -151,6 +160,18 @@ impl PrivateHeap {
     }
 }
 
+impl Drop for PrivateHeap {
+    fn drop(&mut self) {
+        let mut q = self.quota.lock().unwrap();
+        for slot in &mut self.objects {
+            if let Some((_, obj)) = slot.take() {
+                q.release_heap_objects(1);
+                q.release_heap_bytes(obj.heap_bytes());
+            }
+        }
+    }
+}
+
 pub struct VmThreadState {
     pub call_stack: Vec<CallFrame>,
     pub system_response: Option<VmValue>,
@@ -165,25 +186,33 @@ pub struct VmThreadState {
         galfus_core::OpaqueTypeId,
         galfus_core::HandleId,
     )>,
-}
-
-impl Default for VmThreadState {
-    fn default() -> Self {
-        Self::new()
-    }
+    pub is_spawned: bool,
 }
 
 impl VmThreadState {
-    pub fn new() -> Self {
+    pub fn test_new() -> Self {
+        Self::new(std::sync::Arc::new(std::sync::Mutex::new(crate::quota::RuntimeQuota::new(galfus_contract::LimitsMetadata::default()))))
+    }
+
+    pub fn new(quota: std::sync::Arc<std::sync::Mutex<crate::quota::RuntimeQuota>>) -> Self {
         Self {
             call_stack: Vec::new(),
             system_response: None,
-            heap: PrivateHeap::new(),
+            heap: PrivateHeap::new(quota),
             module_states: HashMap::new(),
             entry_func: None,
             initializing_module: None,
             pending_adapter_handle_drops: Vec::new(),
+            is_spawned: false,
         }
+    }
+
+    pub fn mark_spawned(&mut self) {
+        self.is_spawned = true;
+    }
+
+    pub fn quota(&self) -> &std::sync::Arc<std::sync::Mutex<crate::quota::RuntimeQuota>> {
+        &self.heap.quota
     }
 
     pub fn module_state(&self, module_id: ModuleId) -> Option<&RuntimeModuleState> {

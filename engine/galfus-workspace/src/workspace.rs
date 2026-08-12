@@ -10,12 +10,12 @@ use crate::state::{
     BytecodeState, CheckState, CompileBlocked, CompileState, RunBlocked, SemanticState,
     SourceState, WorkspaceError,
 };
-use galfus_bytecode::{BytecodeGraph, ImportEdge, PackageEntryPoint, PackageImage};
+use galfus_bytecode::{BytecodeGraph, ImportEdge, PackageEntryPoint, PackageImage, PackageMetadata};
 use galfus_compiler::{CompiledModule, gfp::parse_gfp_frontmatter};
 use galfus_contract::{
     AdapterFunctionSignature, AdapterModuleDescriptor, AdapterModuleRequirement, BoundaryType,
     CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget, ProviderFunctionSignature,
-    ProviderModuleRequirement, Providers, RuntimeCapabilities,
+    ProviderModuleRequirement, Providers, RuntimeCapabilities, LimitsMetadata,
 };
 use galfus_core::{Diagnostic, DiagnosticBag, ModulePath, OpaqueTypeId, SourceFile, Span, TypeId};
 use galfus_frontend::modules::{
@@ -838,23 +838,48 @@ impl Workspace {
             .map_err(|error| CompileBlocked::CompilerError(error.to_string()))?;
         let adapter_requirements = self.adapter_requirements_for(&graph);
         let provider_requirements = self.provider_requirements_for(&graph);
-        let entry_point = self.config.as_ref().and_then(|config| {
-            config
-                .entry
-                .clone()
-                .map(|entry| PackageEntryPoint::new(entry, config.run_entry.clone()))
-        });
+        let entry_point = match self.config.as_ref().and_then(|c| c.run_entry.as_str().into()) {
+            Some(run_entry) => self.config.as_ref().and_then(|c| c.entry.as_ref()).map(|p| {
+                PackageEntryPoint::new(p.clone(), run_entry)
+            }),
+            None => None,
+        };
+
+        let metadata = self
+            .config
+            .as_ref()
+            .map(|c| PackageMetadata {
+                name: c.name().to_string(),
+                version: c.version().map(String::from),
+                author: c.author().map(String::from),
+                description: c.description().map(String::from),
+            })
+            .unwrap_or_else(|| PackageMetadata {
+                name: "unknown".to_string(),
+                version: None,
+                author: None,
+                description: None,
+            });
+
+        let limits = self
+            .config
+            .as_ref()
+            .map(|c| c.limits().clone())
+            .unwrap_or_default();
+
         let package = Arc::new(
             PackageImage::try_new(
                 graph,
                 self.config
                     .as_ref()
-                    .map(WorkspaceConfig::execution_target)
+                    .map(WorkspaceConfig::compile_target)
                     .cloned()
                     .unwrap_or_else(|| {
                         ExecutionTarget::new("default").expect("default target is valid")
                     }),
                 entry_point,
+                metadata,
+                limits,
                 adapter_requirements,
                 provider_requirements,
             )

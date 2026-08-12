@@ -1,3 +1,4 @@
+use galfus_contract::LimitsMetadata;
 use super::*;
 use galfus_bytecode::{BytecodeGraph, BytecodeModule, BytecodeNode, ConstantPool, PackageImage};
 use galfus_contract::{
@@ -175,6 +176,8 @@ fn create_package(requirements: Vec<AdapterModuleRequirement>) -> PackageImage {
         graph,
         ExecutionTarget::new("test").expect("valid target"),
         None,
+        galfus_bytecode::PackageMetadata { name: "test".into(), version: None, author: None, description: None },
+        galfus_contract::LimitsMetadata::default(),
         requirements,
         Vec::new(),
     )

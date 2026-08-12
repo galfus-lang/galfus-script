@@ -32,6 +32,9 @@ impl VirtualKernel {
         thread: VmThreadState,
         key: Option<String>,
     ) -> Result<ThreadId, ExecutionFailure> {
+        thread.quota().lock().unwrap().try_reserve_threads(1).map_err(|kind| {
+            ExecutionFailure::new(kind, "max threads limit exceeded")
+        })?;
         if !self.registry.key_is_available(key.as_deref()) {
             return Err(ExecutionFailure::new(
                 ExecutionFailureKind::DuplicateThreadKey,
