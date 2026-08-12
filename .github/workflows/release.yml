@@ -146,3 +146,68 @@ jobs:
           files: artifacts/*
           draft: false
           prerelease: ${{ !startsWith(github.ref_name, 'stable/') }}
+
+      - name: Upload to Storage
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.STORAGE_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.STORAGE_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.STORAGE_REGION }}
+        run: |
+          # The structure requested is: {component}/{tag}/{version}/{os}/{arch}/{filename}
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          STORAGE_ENDPOINT="${{ secrets.STORAGE_ENDPOINT }}"
+          STORAGE_KEY="${{ secrets.STORAGE_KEY }}"
+
+          for file in artifacts/*; do
+            if [ ! -f "$file" ]; then continue; fi
+            FILENAME=$(basename "$file")
+            
+            # Extract component based on filename
+            COMPONENT="host-native"
+            if [[ "$FILENAME" == galfus-cli* ]]; then
+              COMPONENT="cli"
+            fi
+            
+            # Extract OS and Arch
+            OS="unknown"
+            ARCH="unknown"
+            
+            if [[ "$FILENAME" == *"-linux-x64"* ]]; then
+              OS="linux"
+              ARCH="x64"
+            elif [[ "$FILENAME" == *"-linux-arm64"* ]]; then
+              OS="linux"
+              ARCH="arm64"
+            elif [[ "$FILENAME" == *"-macos-x64"* ]]; then
+              OS="macos"
+              ARCH="x64"
+            elif [[ "$FILENAME" == *"-macos-arm64"* ]]; then
+              OS="macos"
+              ARCH="arm64"
+            elif [[ "$FILENAME" == *"-windows-x64"* ]]; then
+              OS="windows"
+              ARCH="x64"
+            fi
+            
+            # If the platform was not identified, skip it to prevent bad uploads
+            if [ "$OS" == "unknown" ]; then
+              echo "Skipping unknown file format: $FILENAME"
+              continue
+            fi
+            
+            # Upload to Storage via S3 API
+            # aws-cli is pre-installed on GitHub Actions ubuntu runners
+            # Ensure AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are set in your GitHub repository secrets if needed,
+            # or map STORAGE_KEY appropriately if your S3 provider uses a single key.
+            # Here we assume the bucket name is part of the endpoint or use a placeholder 'galfus-releases'.
+            # You may need to adjust the s3:// bucket name based on your provider.
+            echo "Uploading $FILENAME to s3://storage/$COMPONENT/$TAG/$VERSION/$OS/$ARCH/"
+            
+            # Using AWS CLI with custom endpoint
+            aws s3 cp "$file" \
+              "s3://storage/$COMPONENT/$TAG/$VERSION/$OS/$ARCH/$FILENAME" \
+              --endpoint-url "$STORAGE_ENDPOINT" \
+              --no-progress
+          done
