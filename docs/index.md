@@ -92,6 +92,8 @@ Welcome to the official documentation. Choose a topic below to get started.
 
 - [Capability Catalog](./06-embedding_guide/05-capability_catalog.md)
 
+- [Web Playground Integration](./06-embedding_guide/06-web_playground.md)
+
 
 
 ## 07-Core Strengths

@@ -28,10 +28,14 @@ type BuildHostOptions = {
 };
 
 export async function buildHostPackages(options: BuildHostOptions): Promise<void> {
-  // Check if the user passed an alias (e.g. 'linux-x64'). If not, use what they passed or auto-detect.
   const rawTarget = options.target || (await getNativeTarget());
   const rustTarget = ALIAS_TO_TARGET[rawTarget] || rawTarget;
   const buildName = TARGET_MAP[rustTarget] || rustTarget;
+
+  if (rustTarget === 'web') {
+    await buildWebHostPackage(options);
+    return;
+  }
 
   console.log(`Building host package for target: ${rustTarget} (${buildName})`);
 
@@ -93,4 +97,58 @@ async function run(command: string, args: string[]): Promise<void> {
   if (exitCode !== 0) {
     throw new Error(`${command} exited with code ${exitCode}.`);
   }
+}
+
+async function buildWebHostPackage(options: BuildHostOptions): Promise<void> {
+  const profile = options.profile || 'release';
+  console.log(`Building host package for target: web (${profile})`);
+
+  let cargoProfile = 'dev';
+  if (profile === 'fastest') {
+    cargoProfile = 'release';
+  } else if (profile === 'minimal') {
+    cargoProfile = 'release-min';
+  } else if (profile === 'release') {
+    cargoProfile = 'release';
+  }
+
+  const cargoArgs = [
+    'build',
+    '-p',
+    'galfus-host-web',
+    '--target',
+    'wasm32-unknown-unknown',
+    '--locked',
+  ];
+
+  if (cargoProfile !== 'dev') {
+    cargoArgs.push('--profile', cargoProfile);
+  }
+
+  await run('cargo', cargoArgs);
+
+  const wasmBindgenVersion = '0.2.122';
+  await run('cargo', [
+    'install',
+    'wasm-bindgen-cli',
+    '--version',
+    wasmBindgenVersion,
+    '--locked',
+  ]);
+
+  const profileDir = cargoProfile === 'dev' ? 'debug' : cargoProfile;
+  const sourceWasm = join(repositoryRoot, 'target', 'wasm32-unknown-unknown', profileDir, 'galfus_host_web.wasm');
+  const outDir = join(repositoryRoot, 'build', `galfus-host-web-${profile}`);
+
+  await run('wasm-bindgen', [
+    '--target',
+    'web',
+    '--out-dir',
+    outDir,
+    '--out-name',
+    'galfus_host_web',
+    sourceWasm,
+  ]);
+  
+  console.log(`Built ExecutionHostPackage (Web): ${outDir}`);
 }

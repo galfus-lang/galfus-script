@@ -53,7 +53,7 @@ export async function setVersion(options: SetVersionOptions): Promise<void> {
 
   const githubOutput = process.env.GITHUB_OUTPUT;
   if (githubOutput) {
-    const outputs = [`version=${finalVersion}`, `tag=${finalVersion}`].join('\n') + '\n';
+    const outputs = [`version=${rawVersion}`, `tag=${channel}`].join('\n') + '\n';
 
     await writeFile(githubOutput, outputs, { flag: 'a' });
     console.log(`Wrote version and tag to GITHUB_OUTPUT`);

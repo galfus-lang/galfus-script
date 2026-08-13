@@ -4,7 +4,30 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+crate-type = ["cdylib", "rlib"]
 [dependencies]
+galfus-core = { path = "../../engine/galfus-core" }
 galfus-bytecode = { path = "../../engine/galfus-bytecode" }
 galfus-contract = { path = "../../engine/galfus-contract" }
 galfus-runtime = { path = "../../engine/galfus-runtime" }
+wasm-bindgen = { workspace = true }
+js-sys = { workspace = true }
+
+wasm-bindgen-futures = "0.4"
+
+[dependencies.web-sys]
+version = "0.3"
+features = [
+    "Worker",
+    "MessageEvent",
+    "console",
+    "ReadableStream",
+    "ReadableStreamDefaultReader",
+    "WritableStream",
+    "WritableStreamDefaultWriter",
+]
+
+[features]
+default = []
+multi_thread = []
