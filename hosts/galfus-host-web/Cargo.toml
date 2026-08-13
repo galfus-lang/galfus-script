@@ -12,9 +12,19 @@ galfus-runtime = { path = "../../engine/galfus-runtime" }
 wasm-bindgen = { workspace = true }
 js-sys = { workspace = true }
 
+wasm-bindgen-futures = "0.4"
+
 [dependencies.web-sys]
 version = "0.3"
-features = ["Worker", "MessageEvent", "console"]
+features = [
+    "Worker",
+    "MessageEvent",
+    "console",
+    "ReadableStream",
+    "ReadableStreamDefaultReader",
+    "WritableStream",
+    "WritableStreamDefaultWriter",
+]
 
 [features]
 default = []

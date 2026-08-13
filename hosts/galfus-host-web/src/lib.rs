@@ -7,47 +7,7 @@ use galfus_runtime::driver::ExecutionDriver;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 
-const MAGIC_MARKER: &[u8; 8] = b"GLFS_PKG";
-
-pub struct PackageLoader {
-    // Web-specific loader state (e.g. tracking fetch requests for secondary wasm)
-}
-
-impl PackageLoader {
-    pub fn new() -> Self {
-        Self {}
-    }
-
-    /// Procura pelo pacote anexado no final de um slice de bytes (ex: o próprio .wasm carregado via JS).
-    pub fn extract_appended(binary: &[u8]) -> Option<Vec<u8>> {
-        let len = binary.len();
-        if len >= 16 {
-            let magic_start = len - 8;
-            let size_start = len - 16;
-            let magic_buf = &binary[magic_start..len];
-
-            if magic_buf == MAGIC_MARKER {
-                let mut size_arr = [0u8; 8];
-                size_arr.copy_from_slice(&binary[size_start..magic_start]);
-                let payload_size = u64::from_le_bytes(size_arr) as usize;
-
-                if len >= 16 + payload_size {
-                    let payload_start = len - 16 - payload_size;
-                    let payload = &binary[payload_start..payload_start + payload_size];
-                    return Some(payload.to_vec());
-                }
-            }
-        }
-        None
-    }
-
-    pub fn load_from_bytes(&self, bytes: &[u8]) -> Result<PackageImage, String> {
-        // Se houver um pacote anexado aos bytes recebidos, extraia-o.
-        // Caso contrário, tenta processar os bytes diretamente como bytecode Galfus puro.
-        let package_bytes = Self::extract_appended(bytes).unwrap_or_else(|| bytes.to_vec());
-        PackageImage::from_bytecode(&package_bytes).map_err(|e| e.to_string())
-    }
-}
+// No PackageLoader needed anymore.
 
 use galfus_contract::RuntimeCapabilities;
 use galfus_runtime::Runtime;
@@ -108,22 +68,82 @@ impl ExecutionHost {
 /// Ponto de entrada exportado para o Javascript.
 /// Simula a execução nativa, aguardando (bloqueando ou rodando em loop) a execução até o fim.
 #[wasm_bindgen]
-pub fn start(bytecode: &[u8], js_args: js_sys::Array) -> Result<i32, JsValue> {
-    let loader = PackageLoader::new();
-    let package = loader
-        .load_from_bytes(bytecode)
-        .map_err(|e| JsValue::from_str(&e))?;
+pub fn start(options: js_sys::Object) -> Result<i32, JsValue> {
+    // 1. Extrair o 'blob'
+    let blob_val = js_sys::Reflect::get(&options, &JsValue::from_str("blob"))
+        .map_err(|_| JsValue::from_str("Missing 'blob' property in options"))?;
 
+    if blob_val.is_undefined() || blob_val.is_null() {
+        return Err(JsValue::from_str("'blob' property is required"));
+    }
+
+    let uint8_arr = js_sys::Uint8Array::new(&blob_val);
+    let bytecode = uint8_arr.to_vec();
+
+    let package =
+        PackageImage::from_bytecode(&bytecode).map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    // 2. Extrair 'args'
     let mut args: Vec<Vec<u8>> = Vec::new();
-    for i in 0..js_args.length() {
-        if let Some(s) = js_args.get(i).as_string() {
-            args.push(s.into_bytes());
+    if let Ok(args_val) = js_sys::Reflect::get(&options, &JsValue::from_str("args")) {
+        if !args_val.is_undefined() && !args_val.is_null() {
+            let js_args = js_sys::Array::from(&args_val);
+            for i in 0..js_args.length() {
+                if let Some(s) = js_args.get(i).as_string() {
+                    args.push(s.into_bytes());
+                }
+            }
+        }
+    }
+
+    // 3. Extrair 'envs'
+    let mut env_vars = std::collections::HashMap::new();
+    if let Ok(env_val) = js_sys::Reflect::get(&options, &JsValue::from_str("envs")) {
+        if !env_val.is_undefined() && !env_val.is_null() {
+            if let Ok(keys) = js_sys::Reflect::own_keys(&env_val) {
+                for i in 0..keys.length() {
+                    let key = keys.get(i);
+                    if let Ok(value) = js_sys::Reflect::get(&env_val, &key) {
+                        if let (Some(k), Some(v)) = (key.as_string(), value.as_string()) {
+                            env_vars.insert(k, v);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Extrair 'stdin' e 'stdout'
+    let mut stdin_stream = None;
+    if let Ok(stdin_val) = js_sys::Reflect::get(&options, &JsValue::from_str("stdin")) {
+        if !stdin_val.is_undefined() && !stdin_val.is_null() {
+            stdin_stream = Some(web_sys::ReadableStream::from(stdin_val));
+        }
+    }
+
+    let mut stdout_stream = None;
+    if let Ok(stdout_val) = js_sys::Reflect::get(&options, &JsValue::from_str("stdout")) {
+        if !stdout_val.is_undefined() && !stdout_val.is_null() {
+            stdout_stream = Some(web_sys::WritableStream::from(stdout_val));
         }
     }
 
     // A integração real dos Providers virá na etapa seguinte.
     let providers = Providers::new()
-        .with_host("io", Box::new(providers::io::WebIoProvider))
+        .with_host(
+            "env",
+            Box::new(providers::env::WebEnvProvider::new(
+                package.metadata().clone(),
+                env_vars,
+            )),
+        )
+        .with_host(
+            "io",
+            Box::new(providers::io::WebIoProvider::new(
+                stdin_stream,
+                stdout_stream,
+            )),
+        )
         .with_host("time", Box::new(providers::time::WebTimeProvider::new()));
     let adapters = AdapterBindings::default();
 
