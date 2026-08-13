@@ -8,3 +8,13 @@ license.workspace = true
 galfus-bytecode = { path = "../../engine/galfus-bytecode" }
 galfus-contract = { path = "../../engine/galfus-contract" }
 galfus-runtime = { path = "../../engine/galfus-runtime" }
+wasm-bindgen = { workspace = true }
+js-sys = { workspace = true }
+
+[dependencies.web-sys]
+version = "0.3"
+features = ["Worker", "MessageEvent"]
+
+[features]
+default = []
+multi_thread = []
