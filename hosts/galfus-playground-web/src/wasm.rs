@@ -137,6 +137,7 @@ impl WasmPlayground {
             name: "playground".to_string(),
             version: Some("1.0.0".to_string()),
             author: None,
+            email: None,
             description: None,
         };
 
