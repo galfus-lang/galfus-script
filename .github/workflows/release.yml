@@ -204,8 +204,8 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: Release ${{ steps.version.outputs.version }}
+          tag_name: 'v${{ steps.version.outputs.version }}-${{ steps.version.outputs.tag }}'
+          name: Release "v${{ steps.version.outputs.version }}-${{ steps.version.outputs.tag }}"
           files: artifacts/*
           draft: false
           prerelease: ${{ !startsWith(github.ref_name, 'stable/') }}
@@ -285,6 +285,17 @@ jobs:
                 --no-progress
             fi
           done
+
+      - name: Update Global Manifest
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.STORAGE_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.STORAGE_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.STORAGE_REGION }}
+          STORAGE_ID: ${{ secrets.STORAGE_ID }}
+          STORAGE_ENDPOINT: ${{ secrets.STORAGE_ENDPOINT }}
+        working-directory: scripts
+        run: |
+          bun cmd github update-manifest --tag ${{ steps.version.outputs.tag }} --version ${{ steps.version.outputs.version }} --component cli
 
       - name: Cleanup Old Releases
         env:

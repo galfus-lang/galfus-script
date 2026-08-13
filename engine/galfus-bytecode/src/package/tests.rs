@@ -75,6 +75,7 @@ fn package_image_owns_its_graph_manifest_and_versions() {
             name: "test".into(),
             version: None,
             author: None,
+            email: None,
             description: None,
         },
         galfus_contract::LimitsMetadata::default(),
@@ -123,7 +124,7 @@ fn package_image_rejects_a_missing_reachable_adapter_requirement() {
     );
 
     assert!(matches!(
-        PackageImage::try_new(graph, target(), Some(entry), PackageMetadata { name: "test".into(), version: None, author: None, description: None }, LimitsMetadata::default(), Vec::new(), Vec::new()),
+        PackageImage::try_new(graph, target(), Some(entry), PackageMetadata { name: "test".into(), version: None, author: None, email: None, description: None }, LimitsMetadata::default(), Vec::new(), Vec::new()),
         Err(PackageValidationError::MissingAdapterRequirement { proxy_module })
             if proxy_module == "graphics.gfp"
     ));
@@ -142,7 +143,7 @@ fn package_image_rejects_unreachable_and_duplicate_adapter_requirements() {
             graph.clone(),
             target(),
             Some(entry.clone()),
-            crate::PackageMetadata { name: "test".into(), version: None, author: None, description: None },
+            crate::PackageMetadata { name: "test".into(), version: None, author: None, email: None, description: None },
             galfus_contract::LimitsMetadata::default(),
             vec![requirement("graphics.gfp")],
             Vec::new(),
@@ -155,7 +156,7 @@ fn package_image_rejects_unreachable_and_duplicate_adapter_requirements() {
             graph,
             target(),
             Some(entry),
-            PackageMetadata { name: "test".into(), version: None, author: None, description: None },
+            PackageMetadata { name: "test".into(), version: None, author: None, email: None, description: None },
             LimitsMetadata::default(),
             vec![requirement("graphics.gfp"), requirement("graphics.gfp")],
             Vec::new(),
@@ -190,6 +191,7 @@ fn package_image_canonicalizes_adapter_requirement_and_export_order() {
             name: "test".into(),
             version: None,
             author: None,
+            email: None,
             description: None,
         },
         galfus_contract::LimitsMetadata::default(),
@@ -224,6 +226,7 @@ fn package_image_canonicalizes_adapter_requirement_and_export_order() {
             name: "test".into(),
             version: None,
             author: None,
+            email: None,
             description: None,
         },
         galfus_contract::LimitsMetadata::default(),
@@ -247,6 +250,7 @@ fn package_content_hash_changes_for_execution_relevant_data() {
             name: "test".into(),
             version: None,
             author: None,
+            email: None,
             description: None,
         },
         galfus_contract::LimitsMetadata::default(),
@@ -262,6 +266,7 @@ fn package_content_hash_changes_for_execution_relevant_data() {
             name: "test".into(),
             version: None,
             author: None,
+            email: None,
             description: None,
         },
         galfus_contract::LimitsMetadata::default(),
@@ -292,6 +297,7 @@ fn package_bytecode_round_trip_rebuilds_graph_indexes() {
             name: "test".into(),
             version: None,
             author: None,
+            email: None,
             description: None,
         },
         galfus_contract::LimitsMetadata::default(),

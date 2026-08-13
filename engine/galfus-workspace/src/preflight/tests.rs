@@ -179,6 +179,7 @@ fn create_package(requirements: Vec<AdapterModuleRequirement>) -> PackageImage {
             name: "test".into(),
             version: None,
             author: None,
+            email: None,
             description: None,
         },
         galfus_contract::LimitsMetadata::default(),

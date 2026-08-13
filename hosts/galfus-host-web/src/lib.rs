@@ -85,8 +85,25 @@ impl ExecutionHost {
     }
 }
 
+#[wasm_bindgen(typescript_custom_section)]
+const TS_APPEND_CONTENT: &'static str = r#"
+export interface GalfusWebOptions {
+    blob: Uint8Array;
+    args?: string[];
+    envs?: Record<string, string>;
+    stdin?: any;
+    stdout?: any;
+}
+"#;
+
 #[wasm_bindgen]
-pub async fn start(options: js_sys::Object) -> Result<JsValue, JsValue> {
+extern "C" {
+    #[wasm_bindgen(typescript_type = "GalfusWebOptions")]
+    pub type GalfusWebOptions;
+}
+
+#[wasm_bindgen]
+pub async fn start(options: GalfusWebOptions) -> Result<JsValue, JsValue> {
     CURRENT_EXECUTION.with(|exec| {
         let mut exec_opt = exec.borrow_mut();
         if let Some(existing) = exec_opt.take() {

@@ -45,6 +45,7 @@ pub struct PackageMetadata {
     pub name: String,
     pub version: Option<String>,
     pub author: Option<String>,
+    pub email: Option<String>,
     pub description: Option<String>,
 }
 

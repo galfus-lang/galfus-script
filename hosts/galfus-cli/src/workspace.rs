@@ -10,87 +10,33 @@ use std::path::Path;
 
 pub fn check_workspace_root(root: &str) -> Result<()> {
     let mut workspace = load_workspace(Path::new(root))?;
-    let report = workspace.check();
-    for diagnostic in report.diagnostics.iter() {
+    let (is_valid, diagnostics) = {
+        let report = workspace.check();
+        (report.is_valid, report.diagnostics.clone())
+    };
+    crate::diagnostics::print_diagnostics(&diagnostics, &workspace.source_state.store);
+    if is_valid {
         println!(
-            "{:?} {}: {}",
-            diagnostic.severity(),
-            diagnostic.code().as_str(),
-            diagnostic.message()
+            "{}",
+            dialoguer::console::style("✔ Workspace is valid!")
+                .green()
+                .bold()
         );
-    }
-    if report.is_valid {
         Ok(())
     } else {
         bail!("workspace validation failed")
     }
 }
 
-pub fn compile_workspace(root: &str, target: &str, out: &str, profile: &str) -> Result<()> {
-    let mut workspace = load_workspace(Path::new(root))?;
-    let report = workspace.check();
-    if !report.is_valid {
-        bail!("workspace validation failed: {:?}", report.diagnostics);
-    }
-
-    let compile_report = workspace
-        .compile()
-        .map_err(|error| anyhow::anyhow!("workspace compilation failed: {error:?}"))?;
-
-    let bytecode = compile_report
-        .package
-        .to_bytecode()
-        .map_err(|error| anyhow::anyhow!("failed to encode bytecode: {:?}", error))?;
-
-    let mut host_name = format!("galfus-{}-{}", target, profile);
-    if target.contains("windows") {
-        host_name.push_str(".exe");
-    }
-
-    let host_path = Path::new("build").join(host_name);
-    if !host_path.exists() {
-        bail!(
-            "Host executable not found at {:?}. Please build it first using `bun cmd hosts build --target {} -p {}`",
-            host_path,
-            target,
-            profile
-        );
-    }
-
-    let host_bytes = fs::read(&host_path)
-        .with_context(|| format!("failed to read host binary at {:?}", host_path))?;
-
-    let mut out_file = fs::File::create(out)
-        .with_context(|| format!("failed to create output file at {}", out))?;
-
-    use std::io::Write;
-    out_file.write_all(&host_bytes)?;
-    out_file.write_all(&bytecode)?;
-
-    let payload_size = bytecode.len() as u64;
-    out_file.write_all(&payload_size.to_le_bytes())?;
-
-    const MAGIC_MARKER: &[u8; 8] = b"GLFS_PKG";
-    out_file.write_all(MAGIC_MARKER)?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = out_file.metadata()?.permissions();
-        perms.set_mode(0o755);
-        out_file.set_permissions(perms)?;
-    }
-
-    println!("Successfully compiled standalone executable to {}", out);
-
-    Ok(())
-}
-
 pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
     let mut workspace = load_workspace(Path::new(root))?;
-    let report = workspace.check();
-    if !report.is_valid {
-        bail!("workspace validation failed: {:?}", report.diagnostics);
+    let (is_valid, diagnostics) = {
+        let report = workspace.check();
+        (report.is_valid, report.diagnostics.clone())
+    };
+    if !is_valid {
+        crate::diagnostics::print_diagnostics(&diagnostics, &workspace.source_state.store);
+        bail!("workspace validation failed");
     }
     let compile_report = workspace
         .compile()
@@ -110,11 +56,36 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
         driver,
     );
 
-    let code = host.run(compile_report.package.clone(), args.as_slice())?;
+    let code = match host.run(compile_report.package.clone(), args.as_slice()) {
+        Ok(code) => code,
+        Err(failure) => {
+            let style = dialoguer::console::style;
+            eprintln!(
+                "{}: {}",
+                style("Runtime Error").red().bold(),
+                failure.message
+            );
+            if !failure.stack.is_empty() {
+                eprintln!("\n{}", style("Stack trace:").yellow().bold());
+                for frame in &failure.stack {
+                    let module_id = galfus_core::ModuleId::new(frame.module_id as u32);
+                    let module_name = match compile_report.package.graph().get(module_id) {
+                        Some(m) => m.path().as_str().to_string(),
+                        None => format!("<module {}>", frame.module_id),
+                    };
+                    eprintln!(
+                        "  at \x1b[36m{}\x1b[0m offset {}",
+                        module_name, frame.instruction_offset
+                    );
+                }
+            }
+            bail!("execution failed");
+        }
+    };
     Ok(code)
 }
 
-fn load_workspace(root: &Path) -> Result<Workspace> {
+pub fn load_workspace(root: &Path) -> Result<Workspace> {
     if root.is_file() {
         return load_source_file(root);
     }

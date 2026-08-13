@@ -1,3 +1,6 @@
+mod compile;
+mod diagnostics;
+mod init;
 mod workspace;
 
 use std::process;
@@ -7,6 +10,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
 #[command(name = "galfus")]
+#[command(version)]
 #[command(about = "Galfus Script tooling")]
 struct Cli {
     #[command(subcommand)]
@@ -20,16 +24,17 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    Init,
     Check {
         workspace: String,
     },
     Compile {
         workspace: String,
         #[arg(short, long)]
-        target: String,
+        target: Option<String>,
         #[arg(short, long)]
-        out: String,
-        #[arg(short, long, default_value = "debug")]
+        out: Option<String>,
+        #[arg(short, long, default_value = "fastest")]
         profile: String,
     },
 }
@@ -41,12 +46,13 @@ fn main() -> Result<()> {
             let exit_code = workspace::run_project(&workspace, &args)?;
             process::exit(exit_code);
         }
+        Command::Init => init::run_init(),
         Command::Check { workspace } => workspace::check_workspace_root(&workspace),
         Command::Compile {
             workspace,
             target,
             out,
             profile,
-        } => workspace::compile_workspace(&workspace, &target, &out, &profile),
+        } => compile::run_compile(&workspace, target, out, &profile),
     }
 }

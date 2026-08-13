@@ -1,0 +1,115 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Galfus Project Configuration",
+  "type": "object",
+  "properties": {
+    "module": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The name of the module."
+        },
+        "version": {
+          "type": "string",
+          "description": "The version of the module."
+        },
+        "author": {
+          "type": "string",
+          "description": "The author of the module."
+        },
+        "email": {
+          "type": "string",
+          "description": "The email of the author."
+        },
+        "description": {
+          "type": "string",
+          "description": "A description of the module."
+        },
+        "target": {
+          "type": "string",
+          "enum": ["app", "lib"],
+          "description": "The compilation target (app or lib)."
+        }
+      },
+      "required": ["name", "target"]
+    },
+    "entry": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path to the entrypoint source file (.gfs)."
+        },
+        "function": {
+          "type": "string",
+          "description": "The name of the exported function to run (default: main)."
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Arguments to pass to the run function."
+        }
+      }
+    },
+    "compile": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "enum": ["web", "linux", "macos", "windows"],
+          "description": "The default target OS for compilation (e.g. web, linux, macos, windows)."
+        },
+        "arch": {
+          "type": "string",
+          "enum": ["x64", "arm64", "wasm32"],
+          "description": "The target architecture."
+        },
+        "profile": {
+          "type": "string",
+          "enum": ["debug", "fastest", "minimal"],
+          "description": "The compilation profile (e.g. debug, fastest, minimal)."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "target": { "const": "web" } } },
+          "then": { "properties": { "arch": { "enum": ["wasm32"] } } }
+        },
+        {
+          "if": { "properties": { "target": { "enum": ["linux", "macos", "windows"] } } },
+          "then": { "properties": { "arch": { "enum": ["x64", "arm64"] } } }
+        }
+      ]
+    },
+    "limits": {
+      "type": "object",
+      "description": "Runtime resource limits.",
+      "properties": {
+        "max_heap_objects": { "type": "integer" },
+        "max_heap_bytes": { "type": "integer" },
+        "max_call_depth": { "type": "integer" },
+        "max_threads": { "type": "integer" },
+        "max_futures": { "type": "integer" },
+        "max_pending_requests": { "type": "integer" },
+        "max_mailbox_messages": { "type": "integer" },
+        "max_mailbox_bytes": { "type": "integer" },
+        "max_event_queue": { "type": "integer" },
+        "max_kernel_tasks": { "type": "integer" },
+        "max_runnable_threads": { "type": "integer" },
+        "max_external_handles": { "type": "integer" },
+        "max_timers": { "type": "integer" },
+        "max_pending_states": { "type": "integer" }
+      }
+    },
+    "exports": {
+      "type": "object",
+      "description": "Exported modules mapping.",
+      "additionalProperties": {
+        "type": "string",
+        "description": "Path to the exported module file."
+      }
+    }
+  },
+  "required": ["module"]
+}

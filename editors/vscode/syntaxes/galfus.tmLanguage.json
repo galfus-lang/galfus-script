@@ -45,7 +45,13 @@
         {
           "name": "string.quoted.double.gfs",
           "begin": "\"",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.string.begin.gfs" }
+          },
           "end": "\"",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.gfs" }
+          },
           "patterns": [
             {
               "name": "constant.character.escape.gfs",
@@ -133,11 +139,15 @@
       "patterns": [
         {
           "name": "keyword.control.gfs",
-          "match": "\\b(if|else|for|loop|break|continue|return|match|instanceof|typeof|transaction|rollback|async|await)\\b"
+          "match": "\\b(if|else|for|loop|break|continue|return|match|instanceof|typeof|async|await)\\b"
         },
         {
           "name": "keyword.control.import.gfs",
-          "match": "\\b(import|from|export)\\b"
+          "match": "\\b(import|from)\\b"
+        },
+        {
+          "name": "keyword.control.export.gfs",
+          "match": "\\b(export)\\b"
         },
         {
           "name": "storage.type.gfs",
@@ -208,8 +218,12 @@
           "match": "\\.\\.\\."
         },
         {
+          "name": "punctuation.separator.namespace.gfs",
+          "match": "::"
+        },
+        {
           "name": "keyword.operator.range.gfs",
-          "match": "\\.\\.|::"
+          "match": "\\.\\."
         },
         {
           "name": "keyword.operator.assignment.gfs",
