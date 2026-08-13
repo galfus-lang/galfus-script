@@ -1,4 +1,5 @@
 mod compile;
+mod diagnostics;
 mod init;
 mod workspace;
 

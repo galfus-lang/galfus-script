@@ -10,16 +10,18 @@ use std::path::Path;
 
 pub fn check_workspace_root(root: &str) -> Result<()> {
     let mut workspace = load_workspace(Path::new(root))?;
-    let report = workspace.check();
-    for diagnostic in report.diagnostics.iter() {
+    let (is_valid, diagnostics) = {
+        let report = workspace.check();
+        (report.is_valid, report.diagnostics.clone())
+    };
+    crate::diagnostics::print_diagnostics(&diagnostics, &workspace.source_state.store);
+    if is_valid {
         println!(
-            "{:?} {}: {}",
-            diagnostic.severity(),
-            diagnostic.code().as_str(),
-            diagnostic.message()
+            "{}",
+            dialoguer::console::style("✔ Workspace is valid!")
+                .green()
+                .bold()
         );
-    }
-    if report.is_valid {
         Ok(())
     } else {
         bail!("workspace validation failed")
@@ -28,9 +30,13 @@ pub fn check_workspace_root(root: &str) -> Result<()> {
 
 pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
     let mut workspace = load_workspace(Path::new(root))?;
-    let report = workspace.check();
-    if !report.is_valid {
-        bail!("workspace validation failed: {:?}", report.diagnostics);
+    let (is_valid, diagnostics) = {
+        let report = workspace.check();
+        (report.is_valid, report.diagnostics.clone())
+    };
+    if !is_valid {
+        crate::diagnostics::print_diagnostics(&diagnostics, &workspace.source_state.store);
+        bail!("workspace validation failed");
     }
     let compile_report = workspace
         .compile()
