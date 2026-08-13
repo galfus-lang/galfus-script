@@ -10,7 +10,27 @@ use wasm_bindgen::prelude::*;
 // No PackageLoader needed anymore.
 
 use galfus_contract::RuntimeCapabilities;
+use galfus_runtime::Execution;
 use galfus_runtime::Runtime;
+use std::cell::RefCell;
+use wasm_bindgen_futures::JsFuture;
+
+thread_local! {
+    static CURRENT_EXECUTION: RefCell<Option<Rc<RefCell<Execution>>>> = RefCell::new(None);
+}
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_name = setTimeout)]
+    fn set_timeout(callback: &js_sys::Function, delay: i32);
+}
+
+async fn yield_macro_task() {
+    let promise = js_sys::Promise::new(&mut |resolve, _| {
+        set_timeout(&resolve, 0);
+    });
+    let _ = JsFuture::from(promise).await;
+}
 
 pub struct ExecutionHost {
     providers: Providers,
@@ -65,11 +85,14 @@ impl ExecutionHost {
     }
 }
 
-/// Ponto de entrada exportado para o Javascript.
-/// Simula a execução nativa, aguardando (bloqueando ou rodando em loop) a execução até o fim.
 #[wasm_bindgen]
-pub fn start(options: js_sys::Object) -> Result<i32, JsValue> {
-    // 1. Extrair o 'blob'
+pub async fn start(options: js_sys::Object) -> Result<JsValue, JsValue> {
+    CURRENT_EXECUTION.with(|exec| {
+        let mut exec_opt = exec.borrow_mut();
+        if let Some(existing) = exec_opt.take() {
+            existing.borrow_mut().shutdown();
+        }
+    });
     let blob_val = js_sys::Reflect::get(&options, &JsValue::from_str("blob"))
         .map_err(|_| JsValue::from_str("Missing 'blob' property in options"))?;
 
@@ -83,7 +106,6 @@ pub fn start(options: js_sys::Object) -> Result<i32, JsValue> {
     let package =
         PackageImage::from_bytecode(&bytecode).map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-    // 2. Extrair 'args'
     let mut args: Vec<Vec<u8>> = Vec::new();
     if let Ok(args_val) = js_sys::Reflect::get(&options, &JsValue::from_str("args")) {
         if !args_val.is_undefined() && !args_val.is_null() {
@@ -96,7 +118,6 @@ pub fn start(options: js_sys::Object) -> Result<i32, JsValue> {
         }
     }
 
-    // 3. Extrair 'envs'
     let mut env_vars = std::collections::HashMap::new();
     if let Ok(env_val) = js_sys::Reflect::get(&options, &JsValue::from_str("envs")) {
         if !env_val.is_undefined() && !env_val.is_null() {
@@ -113,7 +134,6 @@ pub fn start(options: js_sys::Object) -> Result<i32, JsValue> {
         }
     }
 
-    // 4. Extrair 'stdin' e 'stdout'
     let mut stdin_stream = None;
     if let Ok(stdin_val) = js_sys::Reflect::get(&options, &JsValue::from_str("stdin")) {
         if !stdin_val.is_undefined() && !stdin_val.is_null() {
@@ -128,7 +148,6 @@ pub fn start(options: js_sys::Object) -> Result<i32, JsValue> {
         }
     }
 
-    // A integração real dos Providers virá na etapa seguinte.
     let providers = Providers::new()
         .with_host(
             "env",
@@ -155,8 +174,59 @@ pub fn start(options: js_sys::Object) -> Result<i32, JsValue> {
 
     let host = ExecutionHost::new(providers, adapters, driver);
 
-    match host.run(std::sync::Arc::new(package), &args) {
-        Ok(code) => Ok(code),
-        Err(e) => Err(JsValue::from_str(&format!("Execution failed: {:?}", e))),
+    let capabilities = RuntimeCapabilities::builder()
+        .with_providers(host.providers)
+        .with_adapter_bindings(host.adapters)
+        .build();
+
+    let runtime = Runtime::new(std::sync::Arc::new(package), capabilities);
+
+    let execution = runtime
+        .start(&args, host.driver)
+        .map_err(|e| JsValue::from_str(&format!("Initialization failure: {:?}", e)))?;
+
+    let exec_rc = Rc::new(RefCell::new(execution));
+
+    CURRENT_EXECUTION.with(|exec| {
+        *exec.borrow_mut() = Some(exec_rc.clone());
+    });
+
+    loop {
+        let state = {
+            let mut exec = exec_rc.borrow_mut();
+            exec.poll(100)
+                .map_err(|e| JsValue::from_str(&format!("Execution failure: {:?}", e)))?
+        };
+
+        match state {
+            galfus_contract::ExecutorStepResult::Completed(_) => {
+                let result = {
+                    let mut exec = exec_rc.borrow_mut();
+                    exec.run_sync_to_completion()
+                        .map_err(|e| JsValue::from_str(&format!("Completion failure: {:?}", e)))?
+                };
+
+                CURRENT_EXECUTION.with(|exec| {
+                    let mut exec_opt = exec.borrow_mut();
+                    if let Some(e) = exec_opt.as_ref() {
+                        if Rc::ptr_eq(e, &exec_rc) {
+                            *exec_opt = None;
+                        }
+                    }
+                });
+
+                if let galfus_contract::BoundaryValue::I32(code) = result {
+                    return Ok(JsValue::from(code));
+                } else {
+                    return Ok(JsValue::from(0));
+                }
+            }
+            galfus_contract::ExecutorStepResult::Blocked { .. } => {
+                yield_macro_task().await;
+            }
+            galfus_contract::ExecutorStepResult::Running => {
+                yield_macro_task().await;
+            }
+        }
     }
 }
