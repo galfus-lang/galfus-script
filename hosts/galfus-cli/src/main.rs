@@ -10,6 +10,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
 #[command(name = "galfus")]
+#[command(version)]
 #[command(about = "Galfus Script tooling")]
 struct Cli {
     #[command(subcommand)]
