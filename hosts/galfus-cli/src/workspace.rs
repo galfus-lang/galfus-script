@@ -60,7 +60,11 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
         Ok(code) => code,
         Err(failure) => {
             let style = dialoguer::console::style;
-            eprintln!("{}: {}", style("Runtime Error").red().bold(), failure.message);
+            eprintln!(
+                "{}: {}",
+                style("Runtime Error").red().bold(),
+                failure.message
+            );
             if !failure.stack.is_empty() {
                 eprintln!("\n{}", style("Stack trace:").yellow().bold());
                 for frame in &failure.stack {
@@ -69,7 +73,10 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
                         Some(m) => m.path().as_str().to_string(),
                         None => format!("<module {}>", frame.module_id),
                     };
-                    eprintln!("  at \x1b[36m{}\x1b[0m offset {}", module_name, frame.instruction_offset);
+                    eprintln!(
+                        "  at \x1b[36m{}\x1b[0m offset {}",
+                        module_name, frame.instruction_offset
+                    );
                 }
             }
             bail!("execution failed");

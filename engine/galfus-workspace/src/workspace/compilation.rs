@@ -549,12 +549,14 @@ impl Workspace {
                 name: c.name().to_string(),
                 version: c.version().map(String::from),
                 author: c.author().map(String::from),
+                email: c.email().map(String::from),
                 description: c.description().map(String::from),
             })
             .unwrap_or_else(|| PackageMetadata {
                 name: "unknown".to_string(),
                 version: None,
                 author: None,
+                email: None,
                 description: None,
             });
 

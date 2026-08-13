@@ -46,6 +46,7 @@ pub struct WorkspaceConfig {
     name: String,
     version: Option<String>,
     author: Option<String>,
+    email: Option<String>,
     description: Option<String>,
     target: ModuleTarget,
     pub(super) entry: Option<ModulePath>,
@@ -53,7 +54,8 @@ pub struct WorkspaceConfig {
     pub(super) run_args: Vec<String>,
     exports: Vec<WorkspaceExport>,
     compile_target: ExecutionTarget,
-    compile_mode: String,
+    compile_arch: String,
+    compile_profile: String,
     limits: LimitsMetadata,
 }
 
@@ -68,6 +70,10 @@ impl WorkspaceConfig {
 
     pub fn author(&self) -> Option<&str> {
         self.author.as_deref()
+    }
+
+    pub fn email(&self) -> Option<&str> {
+        self.email.as_deref()
     }
 
     pub fn description(&self) -> Option<&str> {
@@ -98,8 +104,12 @@ impl WorkspaceConfig {
         &self.compile_target
     }
 
-    pub fn compile_mode(&self) -> &str {
-        self.compile_mode.as_str()
+    pub fn compile_arch(&self) -> &str {
+        self.compile_arch.as_str()
+    }
+
+    pub fn compile_profile(&self) -> &str {
+        self.compile_profile.as_str()
     }
 
     pub fn limits(&self) -> &LimitsMetadata {
@@ -123,6 +133,7 @@ struct RawModuleConfig {
     name: Option<String>,
     version: Option<String>,
     author: Option<String>,
+    email: Option<String>,
     description: Option<String>,
     target: Option<String>,
 }
@@ -137,7 +148,8 @@ struct RawEntryConfig {
 #[derive(Debug, Deserialize)]
 struct RawCompileConfig {
     target: Option<String>,
-    mode: Option<String>,
+    arch: Option<String>,
+    profile: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -265,10 +277,16 @@ pub(super) fn parse_workspace_config(
         return None;
     };
 
-    let compile_mode = raw
+    let compile_arch = raw
         .compile
         .as_ref()
-        .and_then(|c| c.mode.clone())
+        .and_then(|c| c.arch.clone())
+        .unwrap_or_else(|| "x64".to_string());
+
+    let compile_profile = raw
+        .compile
+        .as_ref()
+        .and_then(|c| c.profile.clone())
         .unwrap_or_else(|| "debug".to_string());
 
     let mut limits = LimitsMetadata::default();
@@ -315,6 +333,7 @@ pub(super) fn parse_workspace_config(
         name,
         version: module.version,
         author: module.author,
+        email: module.email,
         description: module.description,
         target,
         entry,
@@ -322,7 +341,8 @@ pub(super) fn parse_workspace_config(
         run_args,
         exports,
         compile_target,
-        compile_mode,
+        compile_arch,
+        compile_profile,
         limits,
     })
 }
