@@ -109,6 +109,51 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  build-web:
+    name: Build Web Targets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install script dependencies
+        working-directory: scripts
+        run: bun install --frozen-lockfile
+
+      - name: Apply version from release branch
+        id: version
+        working-directory: scripts
+        run: bun cmd github set-version --component web
+
+      - name: Update Cargo lockfile
+        run: cargo generate-lockfile
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Build Playground Web
+        working-directory: scripts
+        run: bun cmd playground build -t web
+
+      - name: Build Host Web
+        working-directory: scripts
+        run: bun cmd hosts build -t web -p release
+
+      - name: Upload Web Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: galfus-web-artifacts
+          path: build/*
+          if-no-files-found: error
+          retention-days: 1
+
   release:
     name: Create GitHub Release
     needs: build
@@ -135,7 +180,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: galfus-hosts-*
+          pattern: galfus-*
           merge-multiple: true
 
       - name: Publish GitHub Release
@@ -161,14 +206,18 @@ jobs:
           STORAGE_ENDPOINT="${{ secrets.STORAGE_ENDPOINT }}"
           STORAGE_KEY="${{ secrets.STORAGE_KEY }}"
 
-          for file in artifacts/*; do
-            if [ ! -f "$file" ]; then continue; fi
-            FILENAME=$(basename "$file")
+          for item in artifacts/*; do
+            if [ ! -e "$item" ]; then continue; fi
+            FILENAME=$(basename "$item")
             
             # Extract component based on filename
             COMPONENT="host-native"
             if [[ "$FILENAME" == galfus-cli* ]]; then
               COMPONENT="cli"
+            elif [[ "$FILENAME" == galfus-playground-web* ]]; then
+              COMPONENT="playground-web"
+            elif [[ "$FILENAME" == galfus-host-web* ]]; then
+              COMPONENT="host-web"
             fi
             
             # Extract OS and Arch
@@ -190,6 +239,9 @@ jobs:
             elif [[ "$FILENAME" == *"-windows-x64"* ]]; then
               OS="windows"
               ARCH="x64"
+            elif [[ "$COMPONENT" == *"web"* ]]; then
+              OS="web"
+              ARCH="wasm32"
             fi
             
             # If the platform was not identified, skip it to prevent bad uploads
@@ -198,11 +250,20 @@ jobs:
               continue
             fi
             
-            echo "Uploading $FILENAME to s3://$STORAGE_ID/$COMPONENT/$TAG/$VERSION/$OS/$ARCH/"
-            
-            # Using AWS CLI with custom endpoint
-            aws s3 cp "$file" \
-              "s3://$STORAGE_ID/$COMPONENT/$TAG/$VERSION/$OS/$ARCH/$FILENAME" \
-              --endpoint-url "$STORAGE_ENDPOINT" \
-              --no-progress
+            if [ -d "$item" ]; then
+              echo "Uploading directory $FILENAME to s3://$STORAGE_ID/$COMPONENT/$TAG/$VERSION/$OS/$ARCH/$FILENAME/"
+              
+              aws s3 cp "$item/" \
+                "s3://$STORAGE_ID/$COMPONENT/$TAG/$VERSION/$OS/$ARCH/$FILENAME/" \
+                --recursive \
+                --endpoint-url "$STORAGE_ENDPOINT" \
+                --no-progress
+            else
+              echo "Uploading $FILENAME to s3://$STORAGE_ID/$COMPONENT/$TAG/$VERSION/$OS/$ARCH/"
+              
+              aws s3 cp "$item" \
+                "s3://$STORAGE_ID/$COMPONENT/$TAG/$VERSION/$OS/$ARCH/$FILENAME" \
+                --endpoint-url "$STORAGE_ENDPOINT" \
+                --no-progress
+            fi
           done

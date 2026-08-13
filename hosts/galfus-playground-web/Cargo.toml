@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 galfus-core = { path = "../../engine/galfus-core" }
+galfus-bytecode = { path = "../../engine/galfus-bytecode" }
 galfus-contract = { path = "../../engine/galfus-contract" }
 galfus-runtime = { path = "../../engine/galfus-runtime" }
 galfus-workspace = { path = "../../engine/galfus-workspace" }

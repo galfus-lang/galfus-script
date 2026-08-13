@@ -355,6 +355,7 @@ name = "galfus-playground-web"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "galfus-bytecode",
  "galfus-contract",
  "galfus-core",
  "galfus-host-web",

@@ -2,18 +2,11 @@ import { join, resolve } from 'path';
 
 const repositoryRoot = join(import.meta.dir, '..', '..', '..');
 const wasmBindgenVersion = '0.2.122';
-const wasmModulePath = join(
-  repositoryRoot,
-  'build',
-  'cargo-target',
-  'wasm32-unknown-unknown',
-  'release',
-  'galfus_playground.wasm',
-);
 
 type BuildPlaygroundOptions = {
   outDir?: string;
   target?: string;
+  profile?: string;
 };
 
 export async function buildPlayground(
@@ -23,7 +16,7 @@ export async function buildPlayground(
   await run('cargo', [
     'build',
     '-p',
-    'galfus-playground',
+    'galfus-playground-web',
     '--target',
     'wasm32-unknown-unknown',
     '--features',
@@ -33,17 +26,19 @@ export async function buildPlayground(
   ]);
 
   const target = options.target ?? 'web';
+  const profile = options.profile ?? 'release';
   const outDir = options.outDir
     ? resolve(options.outDir)
-    : join(repositoryRoot, 'dist/playground-web');
+    : join(repositoryRoot, 'build', `galfus-playground-web-${profile}`);
+
   await run('wasm-bindgen', [
     '--target',
     target,
     '--out-dir',
     outDir,
     '--out-name',
-    'galfus_playground',
-    wasmModulePath,
+    'galfus_playground_web',
+    join(repositoryRoot, 'target', 'wasm32-unknown-unknown', 'release', 'galfus_playground_web.wasm'),
   ]);
 }
 

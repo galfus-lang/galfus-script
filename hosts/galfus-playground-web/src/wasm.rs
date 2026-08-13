@@ -135,9 +135,9 @@ impl WasmPlayground {
         // Inicializar os Providers usando o galfus-host-web
         let metadata = PackageMetadata {
             name: "playground".to_string(),
-            version: "1.0.0".to_string(),
-            target: galfus_bytecode::TargetMode::App,
-            entry: Some("src/main.gfs".to_string()),
+            version: Some("1.0.0".to_string()),
+            author: None,
+            description: None,
         };
 
         let providers = Providers::new()
