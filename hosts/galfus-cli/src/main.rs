@@ -1,3 +1,4 @@
+mod init;
 mod workspace;
 
 use std::process;
@@ -20,6 +21,7 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    Init,
     Check {
         workspace: String,
     },
@@ -41,6 +43,7 @@ fn main() -> Result<()> {
             let exit_code = workspace::run_project(&workspace, &args)?;
             process::exit(exit_code);
         }
+        Command::Init => init::run_init(),
         Command::Check { workspace } => workspace::check_workspace_root(&workspace),
         Command::Compile {
             workspace,
