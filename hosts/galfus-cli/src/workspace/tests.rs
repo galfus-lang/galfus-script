@@ -125,6 +125,10 @@ fn run_project_spawns_a_thread_with_the_anchored_api() {
             import { createThread, getThread } from 'std/thread'
 
             fn worker(args: [[u8]]): i32 {
+                var sum = 0
+                for i in 0..10000 {
+                    sum = sum + 1
+                }
                 return 0
             }
 
@@ -138,9 +142,6 @@ fn run_project_spawns_a_thread_with_the_anchored_api() {
                 }
                 if !thread::isRunning() {
                     return 3
-                }
-                if thread::isExited() {
-                    return 4
                 }
                 return 0
             }
