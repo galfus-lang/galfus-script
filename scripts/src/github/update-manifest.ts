@@ -27,8 +27,8 @@ export async function updateManifest(options: UpdateManifestOptions): Promise<vo
     throw new Error('STORAGE_ID and STORAGE_ENDPOINT environment variables are required');
   }
 
-  const s3Path = `s3://${storageId}/${component}/manifest.json`;
-  const localManifest = `/tmp/manifest_${component}.json`;
+  const s3Path = `s3://${storageId}/manifest.json`;
+  const localManifest = `/tmp/manifest.json`;
 
   console.log(`Downloading existing manifest from ${s3Path}...`);
 
