@@ -351,17 +351,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "galfus-playground"
+name = "galfus-playground-web"
 version = "0.0.0"
 dependencies = [
  "anyhow",
  "galfus-contract",
  "galfus-core",
+ "galfus-host-web",
  "galfus-runtime",
  "galfus-workspace",
  "js-sys",
  "serde_json",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
