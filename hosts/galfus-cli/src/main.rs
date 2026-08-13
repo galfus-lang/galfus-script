@@ -1,3 +1,4 @@
+mod compile;
 mod init;
 mod workspace;
 
@@ -28,10 +29,10 @@ enum Command {
     Compile {
         workspace: String,
         #[arg(short, long)]
-        target: String,
+        target: Option<String>,
         #[arg(short, long)]
-        out: String,
-        #[arg(short, long, default_value = "debug")]
+        out: Option<String>,
+        #[arg(short, long, default_value = "fastest")]
         profile: String,
     },
 }
@@ -50,6 +51,6 @@ fn main() -> Result<()> {
             target,
             out,
             profile,
-        } => workspace::compile_workspace(&workspace, &target, &out, &profile),
+        } => compile::run_compile(&workspace, target, out, &profile),
     }
 }
