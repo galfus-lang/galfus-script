@@ -18,8 +18,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test:
+    name: Run Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Update Cargo lockfile
+        run: cargo generate-lockfile
+
+      - name: Run Tests
+        run: cargo test --workspace
+
   build:
     name: Build ${{ matrix.alias }}
+    needs: test
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -111,6 +128,7 @@ jobs:
 
   build-web:
     name: Build Web Targets
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -156,7 +174,7 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: build
+    needs: [build, build-web]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -267,3 +285,13 @@ jobs:
                 --no-progress
             fi
           done
+
+      - name: Cleanup Old Releases
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.STORAGE_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.STORAGE_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.STORAGE_REGION }}
+          STORAGE_ID: ${{ secrets.STORAGE_ID }}
+          STORAGE_ENDPOINT: ${{ secrets.STORAGE_ENDPOINT }}
+        working-directory: scripts
+        run: bun cmd github cleanup-s3 --tag ${{ steps.version.outputs.tag }}
