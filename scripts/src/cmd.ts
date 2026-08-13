@@ -6,6 +6,7 @@ import { buildPlayground } from './playground/build';
 import { setupExtension } from './setup/extension';
 
 import { setVersion } from './github/set-version';
+import { cleanupS3 } from './github/cleanup-s3';
 
 const program = new Command();
 program
@@ -47,6 +48,13 @@ github
   .description('Set workspace version and Github Action outputs based on the current branch')
   .option('--component <name>', 'Component to deploy')
   .action(setVersion);
+
+github
+  .command('cleanup-s3')
+  .description('Cleanup old versions in S3 storage bucket')
+  .option('--tag <tag>', 'The release tag to clean up versions for')
+  .action(cleanupS3);
+
 
 check
   .command('dependencies')
