@@ -343,6 +343,7 @@ version = "0.0.0"
 dependencies = [
  "galfus-bytecode",
  "galfus-contract",
+ "galfus-core",
  "galfus-runtime",
  "js-sys",
  "wasm-bindgen",

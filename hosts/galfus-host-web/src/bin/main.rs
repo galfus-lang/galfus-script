@@ -36,7 +36,15 @@ fn main() {
         }
     };
 
-    let providers = Providers::new(); // Futuro: instanciar providers do web
+    let providers = Providers::new()
+        .with_host(
+            "io",
+            Box::new(galfus_host_web::providers::io::WebIoProvider),
+        )
+        .with_host(
+            "time",
+            Box::new(galfus_host_web::providers::time::WebTimeProvider::new()),
+        );
     let adapters = AdapterBindings::default();
 
     #[cfg(feature = "multi_thread")]

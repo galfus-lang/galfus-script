@@ -1,4 +1,5 @@
 pub mod driver;
+pub mod providers;
 
 use galfus_bytecode::PackageImage;
 use galfus_contract::{AdapterBindings, ExecutionFailure, Providers};
@@ -121,7 +122,9 @@ pub fn start(bytecode: &[u8], js_args: js_sys::Array) -> Result<i32, JsValue> {
     }
 
     // A integração real dos Providers virá na etapa seguinte.
-    let providers = Providers::new();
+    let providers = Providers::new()
+        .with_host("io", Box::new(providers::io::WebIoProvider))
+        .with_host("time", Box::new(providers::time::WebTimeProvider::new()));
     let adapters = AdapterBindings::default();
 
     #[cfg(feature = "multi_thread")]

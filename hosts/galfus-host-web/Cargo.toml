@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+galfus-core = { path = "../../engine/galfus-core" }
 galfus-bytecode = { path = "../../engine/galfus-bytecode" }
 galfus-contract = { path = "../../engine/galfus-contract" }
 galfus-runtime = { path = "../../engine/galfus-runtime" }
@@ -13,7 +14,7 @@ js-sys = { workspace = true }
 
 [dependencies.web-sys]
 version = "0.3"
-features = ["Worker", "MessageEvent"]
+features = ["Worker", "MessageEvent", "console"]
 
 [features]
 default = []
