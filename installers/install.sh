@@ -54,7 +54,7 @@ MANIFEST_JSON=$(curl -sSL "$MANIFEST_URL")
 
 if [ -z "$TAG" ]; then
     # Extract latest_tag from JSON manually (since jq might not be available)
-    LATEST_TAG=$(echo "$MANIFEST_JSON" | grep '"latest_tag"' | sed -E 's/.*"latest_tag"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+    LATEST_TAG=$(echo "$MANIFEST_JSON" | grep '"latest_tag"' | sed -n -E 's/.*"latest_tag"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p')
     if [ -z "$LATEST_TAG" ]; then
         echo "Error: Could not determine latest_tag from manifest."
         exit 1
@@ -66,7 +66,7 @@ else
 fi
 
 # Extract version for the selected tag
-VERSION=$(echo "$MANIFEST_JSON" | grep -A 10 '"tags"' | grep "\"$TAG\"" | sed -E 's/.*"'"$TAG"'"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+VERSION=$(echo "$MANIFEST_JSON" | grep -A 10 '"tags"' | sed -n -E 's/.*"'"$TAG"'"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p')
 
 if [ -z "$VERSION" ]; then
     echo "Error: Tag '${TAG}' not found in the manifest."
@@ -99,8 +99,10 @@ echo "=> Installed galfus to ${BIN_DIR}/galfus"
 PROFILE_ADDED=""
 for profile in "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.profile"; do
     if [ -f "$profile" ]; then
-        if ! grep -q "galfus/bin" "$profile"; then
-            echo "export PATH=\"\$HOME/.galfus/bin:\$PATH\"" >> "$profile"
+        if ! grep -q "GALFUS_HOME" "$profile"; then
+            echo "" >> "$profile"
+            echo 'export GALFUS_HOME="$HOME/.galfus"' >> "$profile"
+            echo 'export PATH="$GALFUS_HOME/bin:$PATH"' >> "$profile"
             PROFILE_ADDED="$profile"
         fi
     fi

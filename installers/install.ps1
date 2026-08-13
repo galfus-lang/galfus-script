@@ -71,6 +71,10 @@ Move-Item -Path $TmpPath -Destination $DestPath -Force
 
 Write-Host "=> Installed galfus to $DestPath"
 
+# Add GALFUS_HOME
+[Environment]::SetEnvironmentVariable("GALFUS_HOME", $GalfusDir, "User")
+Write-Host "=> Added GALFUS_HOME to your environment."
+
 # Add to PATH
 $UserPath = [Environment]::GetEnvironmentVariable("PATH", "User")
 if ($UserPath -notmatch [regex]::Escape($BinDir)) {
@@ -78,12 +82,13 @@ if ($UserPath -notmatch [regex]::Escape($BinDir)) {
     if (-not $NewPath.EndsWith(";")) {
         $NewPath += ";"
     }
-    $NewPath += $BinDir
+    # Using the resolved $BinDir in PATH is safer in Windows, but we could also use %GALFUS_HOME%\bin
+    $NewPath += "%GALFUS_HOME%\bin"
     [Environment]::SetEnvironmentVariable("PATH", $NewPath, "User")
-    Write-Host "=> Added $BinDir to your PATH."
+    Write-Host "=> Added %GALFUS_HOME%\bin to your PATH."
     Write-Host "=> Please restart your terminal to use Galfus."
 } else {
-    Write-Host "=> $BinDir is already in your PATH."
+    Write-Host "=> %GALFUS_HOME%\bin is already in your PATH."
 }
 
 Write-Host "=> Galfus installation complete!"
