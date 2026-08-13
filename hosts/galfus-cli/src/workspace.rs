@@ -56,7 +56,25 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
         driver,
     );
 
-    let code = host.run(compile_report.package.clone(), args.as_slice())?;
+    let code = match host.run(compile_report.package.clone(), args.as_slice()) {
+        Ok(code) => code,
+        Err(failure) => {
+            let style = dialoguer::console::style;
+            eprintln!("{}: {}", style("Runtime Error").red().bold(), failure.message);
+            if !failure.stack.is_empty() {
+                eprintln!("\n{}", style("Stack trace:").yellow().bold());
+                for frame in &failure.stack {
+                    let module_id = galfus_core::ModuleId::new(frame.module_id as u32);
+                    let module_name = match compile_report.package.graph().get(module_id) {
+                        Some(m) => m.path().as_str().to_string(),
+                        None => format!("<module {}>", frame.module_id),
+                    };
+                    eprintln!("  at \x1b[36m{}\x1b[0m offset {}", module_name, frame.instruction_offset);
+                }
+            }
+            bail!("execution failed");
+        }
+    };
     Ok(code)
 }
 
