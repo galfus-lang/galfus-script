@@ -82,6 +82,11 @@ pub fn run_init() -> Result<()> {
         .with_context(|| format!("Failed to write {}", entry_path))?;
     println!("Created {}", entry_path);
 
+    let gitignore_content = "# output\nbuild/\ndist/\n\n# metadata\n.DS_Store\n";
+    let gitignore_path = path.join(".gitignore");
+    fs::write(&gitignore_path, gitignore_content).context("Failed to write .gitignore")?;
+    println!("Created .gitignore");
+
     println!("\n🎉 Project '{}' created successfully!", project_name);
     println!("\nTo get started:");
 
