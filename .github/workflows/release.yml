@@ -174,7 +174,7 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: build
+    needs: [build, build-web]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
