@@ -286,6 +286,17 @@ jobs:
             fi
           done
 
+      - name: Update Global Manifest
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.STORAGE_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.STORAGE_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.STORAGE_REGION }}
+          STORAGE_ID: ${{ secrets.STORAGE_ID }}
+          STORAGE_ENDPOINT: ${{ secrets.STORAGE_ENDPOINT }}
+        working-directory: scripts
+        run: |
+          bun cmd github update-manifest --tag ${{ steps.version.outputs.tag }} --version ${{ steps.version.outputs.version }} --component cli
+
       - name: Cleanup Old Releases
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.STORAGE_ID }}

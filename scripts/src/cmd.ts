@@ -7,6 +7,7 @@ import { setupExtension } from './setup/extension';
 
 import { setVersion } from './github/set-version';
 import { cleanupS3 } from './github/cleanup-s3';
+import { updateManifest } from './github/update-manifest';
 
 const program = new Command();
 program
@@ -54,6 +55,14 @@ github
   .description('Cleanup old versions in S3 storage bucket')
   .option('--tag <tag>', 'The release tag to clean up versions for')
   .action(cleanupS3);
+
+github
+  .command('update-manifest')
+  .description('Update component manifest.json on S3')
+  .requiredOption('--tag <tag>', 'The release tag')
+  .requiredOption('--version <version>', 'The version string')
+  .requiredOption('--component <component>', 'The component name (e.g. cli)')
+  .action(updateManifest);
 
 
 check
