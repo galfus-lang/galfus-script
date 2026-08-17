@@ -362,7 +362,7 @@ impl<'a> DeclarationTypeChecker<'a> {
         self.layer.symbol_type(symbol)
     }
 
-    fn find_initializer_for_symbol(
+    pub(super) fn find_initializer_for_symbol(
         &self,
         node: NodeId,
         symbol: SymbolId,

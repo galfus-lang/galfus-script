@@ -1,6 +1,7 @@
 use super::DeclarationTypeChecker;
-use crate::{ImportedMemberKey, PrimitiveType, SymbolKind, TypeKind};
+use crate::{ImportedMemberKey, PrimitiveType, SymbolKind, SyntaxNodeKind, TypeKind};
 use galfus_core::{NodeId, SymbolId, TypeId};
+use std::collections::HashSet;
 
 impl<'a> DeclarationTypeChecker<'a> {
     pub(super) fn infer_member_expression_type(
@@ -78,14 +79,73 @@ impl<'a> DeclarationTypeChecker<'a> {
             return Some(error);
         };
 
-        let null_type = self.layer.table().primitive(PrimitiveType::Null);
-        let ty = self
-            .layer
-            .table_mut()
-            .intern_union([element_type, null_type]);
+        let ty = if self.is_statically_in_bounds_array_index(target, index) {
+            element_type
+        } else {
+            let null_type = self.layer.table().primitive(PrimitiveType::Null);
+            self.layer
+                .table_mut()
+                .intern_union([element_type, null_type])
+        };
 
         self.layer.bind_node_type(node, ty);
         Some(ty)
+    }
+
+    fn is_statically_in_bounds_array_index(&self, target: NodeId, index: NodeId) -> bool {
+        let Some(index) = self.static_integer_value(index) else {
+            return false;
+        };
+        let Some(length) = self.static_array_length(target, &mut HashSet::new()) else {
+            return false;
+        };
+
+        let index = if index < 0 {
+            length as i64 + index
+        } else {
+            index
+        };
+
+        index >= 0 && (index as usize) < length
+    }
+
+    fn static_integer_value(&self, node: NodeId) -> Option<i64> {
+        self.node_text(node).replace('_', "").parse().ok()
+    }
+
+    fn static_array_length(&self, node: NodeId, visited: &mut HashSet<SymbolId>) -> Option<usize> {
+        let syntax_node = self.graph.syntax().node(node)?;
+
+        match syntax_node.kind() {
+            SyntaxNodeKind::ArrayLiteral => {
+                syntax_node
+                    .children()
+                    .iter()
+                    .try_fold(0usize, |len, child| {
+                        let child_node = self.graph.syntax().node(*child)?;
+                        let child_len = match child_node.kind() {
+                            SyntaxNodeKind::ArrayElement => 1,
+                            SyntaxNodeKind::SpreadArrayElement => self.static_array_length(
+                                self.graph.syntax().child(*child, 0)?,
+                                visited,
+                            )?,
+                            _ => return None,
+                        };
+                        len.checked_add(child_len)
+                    })
+            }
+            SyntaxNodeKind::NameExpression => {
+                let resolution = self.graph.resolution()?;
+                let symbol = resolution.reference_symbol(node)?;
+                if !visited.insert(symbol) {
+                    return None;
+                }
+                let initializer =
+                    self.find_initializer_for_symbol(self.graph.syntax().root()?, symbol)?;
+                self.static_array_length(initializer.0, visited)
+            }
+            _ => None,
+        }
     }
 
     pub(super) fn member_type_for_target_type(

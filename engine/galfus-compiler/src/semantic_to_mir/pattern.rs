@@ -677,27 +677,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     let element = syntax.node(*element_id).unwrap();
                     if element.kind() == SyntaxNodeKind::RestBindingPattern {
                         let rest_target = element.first_child().unwrap();
-                        let temp_ty = TypeId::new(0);
-                        let temp_local = self.declare_local(None, temp_ty);
-
-                        let _idx_operand = Operand::Constant(Constant::Int32(i as i32));
-                        let len_operand = self.declare_local(None, temp_ty);
-                        self.current_instructions.push((
-                            Instruction::Assign(len_operand, RValue::Len(operand.clone())),
-                            None,
-                        ));
-
-                        // Note: A full slice implementation would need more complex runtime slicing.
-                        // Here we just extract it conceptually or emit a specific instruction if we had it.
-                        // For now we map it to length (just as a stub for rest pattern).
-                        self.current_instructions.push((
-                            Instruction::Assign(
-                                temp_local,
-                                RValue::Use(Operand::Local(len_operand)),
-                            ),
-                            None,
-                        ));
-                        self.lower_destructuring_binding(rest_target, Operand::Local(temp_local));
+                        self.lower_static_array_rest_binding(rest_target, operand.clone(), i);
                         break;
                     } else {
                         let temp_ty = TypeId::new(0);
@@ -719,5 +699,97 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 // Wildcard or other
             }
         }
+    }
+
+    fn lower_static_array_rest_binding(
+        &mut self,
+        rest_target: NodeId,
+        operand: Operand,
+        start: usize,
+    ) {
+        let Some(length) = self.static_array_length_for_operand(&operand) else {
+            return;
+        };
+        let Some(rest_type) = self
+            .node_type(rest_target)
+            .or_else(|| self.binding_symbol_type(rest_target))
+        else {
+            return;
+        };
+        let Some(TypeKind::Array {
+            element: element_type,
+        }) = self.builder.type_result.layer().table().kind(rest_type)
+        else {
+            return;
+        };
+
+        let mut elements = Vec::new();
+        for index in start..length {
+            let element_local = self.declare_local(None, *element_type);
+            self.current_instructions.push((
+                Instruction::Assign(
+                    element_local,
+                    RValue::ArrayIndex(
+                        operand.clone(),
+                        Operand::Constant(Constant::Int32(index as i32)),
+                    ),
+                ),
+                None,
+            ));
+            elements.push(Operand::Local(element_local));
+        }
+
+        let rest_local = self.declare_local(None, rest_type);
+        self.current_instructions.push((
+            Instruction::Assign(rest_local, RValue::NewArray(rest_type, elements)),
+            None,
+        ));
+        self.lower_destructuring_binding(rest_target, Operand::Local(rest_local));
+    }
+
+    fn static_array_length_for_operand(&self, operand: &Operand) -> Option<usize> {
+        let Operand::Local(local) = operand else {
+            return None;
+        };
+        let rvalue = self
+            .current_instructions
+            .iter()
+            .rev()
+            .find_map(|(instruction, _)| {
+                let Instruction::Assign(destination, rvalue) = instruction else {
+                    return None;
+                };
+                (*destination == *local).then_some(rvalue)
+            })?;
+
+        match rvalue {
+            RValue::Use(operand) => self.static_array_length_for_operand(operand),
+            RValue::NewArray(_, elements) => Some(elements.len()),
+            RValue::NewArrayDynamic(_, elements) => {
+                elements.iter().try_fold(0usize, |length, element| {
+                    let element_length = match element {
+                        ArrayLiteralElement::Single(_) => 1,
+                        ArrayLiteralElement::Spread(operand) => {
+                            self.static_array_length_for_operand(operand)?
+                        }
+                    };
+                    length.checked_add(element_length)
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn binding_symbol_type(&self, node: NodeId) -> Option<TypeId> {
+        let resolution = self.builder.graph.resolution()?;
+        if let Some(symbol) = resolution.declaration_symbol(node) {
+            return self.symbol_type(symbol);
+        }
+
+        let syntax_node = self.builder.graph.syntax().node(node)?;
+        syntax_node
+            .children()
+            .iter()
+            .find_map(|child| self.binding_symbol_type(*child))
     }
 }
