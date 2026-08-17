@@ -14,7 +14,11 @@ struct VariantPayload {
 }
 
 impl<'a> DeclarationTypeChecker<'a> {
-    pub(super) fn infer_path_variant_expression_type(&mut self, node: NodeId) -> Option<TypeId> {
+    pub(super) fn infer_path_variant_expression_type(
+        &mut self,
+        node: NodeId,
+        expected: Option<TypeId>,
+    ) -> Option<TypeId> {
         let resolution = self.graph.resolution()?;
         let Some(kind) = resolution.path_reference_kind(node) else {
             return self.infer_value_anchor_path_type(node);
@@ -22,7 +26,7 @@ impl<'a> DeclarationTypeChecker<'a> {
 
         match kind {
             PathReferenceKind::EnumVariant => self.infer_enum_variant_path_type(node),
-            PathReferenceKind::ChoiceVariant => self.infer_choice_variant_path_type(node),
+            PathReferenceKind::ChoiceVariant => self.infer_choice_variant_path_type(node, expected),
             PathReferenceKind::AnchorFunction => self.infer_anchor_function_path_type(node),
             PathReferenceKind::ConstraintMember => self.infer_constraint_member_path_type(node),
             PathReferenceKind::LocalMember => {
@@ -82,6 +86,15 @@ impl<'a> DeclarationTypeChecker<'a> {
             &mut payload,
         );
 
+        // Multi-value choice payloads are represented by a tuple at runtime.
+        // Materialize that tuple type while the type table is still mutable so
+        // MIR and bytecode lowering can reference the same payload layout.
+        if payload.payload_types.len() > 1 {
+            self.layer
+                .table_mut()
+                .intern_tuple(payload.payload_types.clone());
+        }
+
         for (index, argument) in argument_nodes.iter().copied().enumerate() {
             let Some(expected) = payload.payload_types.get(index).copied() else {
                 continue;
@@ -128,8 +141,12 @@ impl<'a> DeclarationTypeChecker<'a> {
         Some(ty)
     }
 
-    fn infer_choice_variant_path_type(&mut self, node: NodeId) -> Option<TypeId> {
-        let payload = self.choice_variant_payload(node)?;
+    fn infer_choice_variant_path_type(
+        &mut self,
+        node: NodeId,
+        expected: Option<TypeId>,
+    ) -> Option<TypeId> {
+        let mut payload = self.choice_variant_payload(node)?;
 
         if !payload.payload_types.is_empty() {
             self.report_choice_payload_required(node, payload.variant_name.as_str());
@@ -139,6 +156,8 @@ impl<'a> DeclarationTypeChecker<'a> {
 
             return Some(error);
         }
+
+        self.specialize_choice_variant_payload_from_expected(node, expected, &mut payload);
 
         self.layer.bind_node_type(node, payload.owner_type);
         Some(payload.owner_type)
@@ -307,9 +326,15 @@ impl<'a> DeclarationTypeChecker<'a> {
 
             let contextual_payload =
                 self.substitute_generic_expression_type(expected_payload, &substitutions);
-            let Some(actual) =
-                self.infer_expression_type_with_expected(argument, Some(contextual_payload))
-            else {
+            let expected = if self
+                .generic_parameter_symbols_from_type(contextual_payload)
+                .is_empty()
+            {
+                Some(contextual_payload)
+            } else {
+                None
+            };
+            let Some(actual) = self.infer_expression_type_with_expected(argument, expected) else {
                 continue;
             };
 

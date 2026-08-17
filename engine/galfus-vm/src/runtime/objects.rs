@@ -51,6 +51,12 @@ impl VirtualMachine {
                             .cloned()
                             .ok_or(VmError::FieldOutOfBounds { index: field })?;
                         thread.write_reg(dest, val)?;
+                    } else if let HeapObject::Tuple { elements } = heap_obj {
+                        let val = elements
+                            .get(field.raw() as usize)
+                            .cloned()
+                            .ok_or(VmError::FieldOutOfBounds { index: field })?;
+                        thread.write_reg(dest, val)?;
                     } else if let HeapObject::Choice { payload, .. } = heap_obj {
                         thread.write_reg(dest, payload.clone())?;
                     } else {

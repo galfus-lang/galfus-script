@@ -1,0 +1,19 @@
+import { println } from "std/io"
+
+type Scalar = i32 | bool | null
+
+fn classify<T: Scalar>(): i32 {
+  return typeof T {
+    i32 => 1,
+    bool => 2,
+    null => 3,
+  }
+}
+
+export fn main(_args: [[u8]]): i32 {
+  if classify<i32>() != 1 { return 1 }
+  if classify<bool>() != 2 { return 2 }
+  if classify<null>() != 3 { return 3 }
+  println("ok")
+  return 0
+}

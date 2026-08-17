@@ -1,0 +1,7 @@
+choice Result<T> { Ok(T), Err(i32) }
+
+export fn main(_args: [[u8]]): i32 {
+  return match Result::Ok(1) {
+    Result::Ok(value) => value,
+  }
+}

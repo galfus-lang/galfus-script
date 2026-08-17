@@ -119,7 +119,7 @@ pub fn validate_bytecode_module(
         }
     }
 
-    // 3. Helper to determine max fields in any struct or choice variant
+    // 3. Helper to determine max fields in any aggregate value.
     let max_struct_fields = module
         .struct_layouts
         .iter()
@@ -138,7 +138,18 @@ pub fn validate_bytecode_module(
         })
         .max()
         .unwrap_or(0);
-    let max_fields = max_struct_fields.max(max_choice_payloads);
+    let max_tuple_fields = module
+        .types
+        .iter()
+        .filter_map(|ty| match ty {
+            BytecodeType::Tuple(elements) => Some(elements.len()),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0);
+    let max_fields = max_struct_fields
+        .max(max_choice_payloads)
+        .max(max_tuple_fields);
 
     // 4. Validate instructions of each function
     for func in &module.functions {

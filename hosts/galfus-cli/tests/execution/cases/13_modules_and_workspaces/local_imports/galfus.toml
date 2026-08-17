@@ -1,0 +1,7 @@
+[module]
+name = "execution-local-imports"
+target = "app"
+
+[entry]
+path = "src/main.gfs"
+function = "start"

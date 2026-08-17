@@ -8,7 +8,10 @@ export fn main(_args: [[u8]]): i32 {
   
   var a = match parse<i32>(trim(read())) {
     ParseResult::Ok(v) => v,
-    ParseResult::Err(e) => 0,
+    ParseResult::Err(e) {
+      println('INTERNAL')
+      return 0
+    },
   }
 
   println(green()::apply("Enter another number:"))

@@ -1,0 +1,5 @@
+export fn main(_args: [[u8]]): i32 {
+  const value = 1
+  value = 2
+  return 0
+}

@@ -1,0 +1,18 @@
+import { println } from "std/io"
+
+struct Pair { left: i32, right: i32 }
+
+export fn main(_args: [[u8]]): i32 {
+  const initial = [1, 2, 3]
+  const values = [...initial, 4, 5]
+  const [first, ...rest] = values
+  const pair = new(Pair) { left: first, right: values[1] }
+
+  if values.length != 5 { return 1 }
+  if values[0] != 1 || values[-1] != 5 { return 2 }
+  if values[5] != null || values[-6] != null { return 3 }
+  if pair.left != 1 || pair.right != 2 { return 4 }
+  if rest.length != 4 { return 5 }
+  println("ok")
+  return 0
+}

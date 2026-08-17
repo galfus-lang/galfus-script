@@ -289,6 +289,37 @@ var [head, ...tail] = [1, 2, 3]
 }
 
 #[test]
+fn check_binds_array_destructuring_types_in_function_body() {
+    let (_source, graph, result, string_table) = check_source(
+        r#"
+fn main(): null {
+  const initial = [1, 2, 3]
+  const values: [i32] = [...initial, 4, 5]
+  const [head, ...tail] = values
+}
+"#,
+    );
+
+    let head = symbol_by_name_and_kind(&graph, "head", SymbolKind::Const, &string_table);
+    let tail = symbol_by_name_and_kind(&graph, "tail", SymbolKind::Const, &string_table);
+
+    assert_eq!(
+        result
+            .layer()
+            .table()
+            .kind(result.layer().symbol_type(head).unwrap()),
+        Some(&TypeKind::Primitive(PrimitiveType::Int32))
+    );
+    assert!(matches!(
+        result
+            .layer()
+            .table()
+            .kind(result.layer().symbol_type(tail).unwrap()),
+        Some(TypeKind::Array { .. })
+    ));
+}
+
+#[test]
 fn check_binds_self_symbol_type_in_simple_anchored_function() {
     let (_source, graph, result, string_table) = check_source(
         r#"

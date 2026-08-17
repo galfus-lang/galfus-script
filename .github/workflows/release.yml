@@ -164,6 +164,11 @@ jobs:
         working-directory: scripts
         run: bun cmd hosts build -t web -p release
 
+      - name: Run Web Provider Suite
+        run: |
+          cargo test -p galfus-host-web --test provider_fixture
+          bun test hosts/galfus-host-web/tests/web_provider_suite.test.ts
+
       - name: Upload Web Artifacts
         uses: actions/upload-artifact@v4
         with:

@@ -202,13 +202,13 @@ fn compile_single_module(
         for func_id in targets {
             if let Some(&resolved) = specialized_targets.get(&func_id) {
                 cross_module_calls.insert(func_id, resolved);
-            } else if let Some(resolved) = resolve_import_target(modules, mod_idx, func_id) {
-                cross_module_calls.insert(func_id, resolved);
             } else if let Some(local_id) =
                 resolve_local_call_target(modules, mod_idx, mir_mod, func_id)
             {
                 // Local call — no import needed.
                 let _ = local_id;
+            } else if let Some(resolved) = resolve_import_target(modules, mod_idx, func_id) {
+                cross_module_calls.insert(func_id, resolved);
             }
         }
     }

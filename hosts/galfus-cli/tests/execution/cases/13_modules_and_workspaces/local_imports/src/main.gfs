@@ -1,0 +1,8 @@
+import { add } from "./math.gfs"
+import { println } from "std/io"
+
+export fn start(_args: [[u8]]): i32 {
+  if add(20, 22) != 42 { return 1 }
+  println("ok")
+  return 0
+}

@@ -39,16 +39,17 @@ impl<'a> Resolver<'a> {
 
         self.resolve_function_parameter_defaults(function, function_scope);
 
-        let Some(block) = self
+        let Some(body) = self
             .syntax
-            .first_child_of_kind(function, SyntaxNodeKind::Block)
+            .node(function)
+            .and_then(|node| node.last_child())
         else {
             return;
         };
 
-        let block_scope = self.resolution.node_scope(block).unwrap_or(function_scope);
+        let body_scope = self.resolution.node_scope(body).unwrap_or(function_scope);
 
-        self.resolve_node_references(block, block_scope);
+        self.resolve_node_references(body, body_scope);
     }
 
     fn resolve_function_parameter_defaults(&mut self, function: NodeId, function_scope: ScopeId) {

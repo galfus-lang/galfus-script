@@ -1,0 +1,21 @@
+import { println } from "std/io"
+
+fn indexed_value(values: [i32], index: i32): i32 {
+  return instanceof values[index] {
+    i32 value => value,
+    null => -1,
+  }
+}
+
+export fn main(_args: [[u8]]): i32 {
+  const initial = [1, 2, 3]
+  const values = [...initial, 4, 5]
+
+  if values.length != 5 { return 1 }
+  if indexed_value(values, 0) != 1 { return 2 }
+  if indexed_value(values, -1) != 5 { return 3 }
+  if indexed_value(values, 5) != -1 { return 4 }
+  if indexed_value(values, -6) != -1 { return 5 }
+  println("ok")
+  return 0
+}

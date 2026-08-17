@@ -1,0 +1,19 @@
+import { println } from "std/io"
+
+export fn main(_args: [[u8]]): i32 {
+  const arithmetic = 2 + 3 * 4
+  const division = 6 / 3
+  const remainder = 8 % 3
+  const grouped = (2 + 3) * (4 - 1)
+  const logical = !(false || false) && arithmetic == 14 && grouped >= 15 && grouped <= 15
+  const narrowed = <i32> <u8> 42
+
+  if arithmetic != 14 { return 1 }
+  if division != 2 || remainder != 2 { return 2 }
+  if grouped != 15 { return 3 }
+  if !logical { return 4 }
+  if narrowed != 42 { return 5 }
+
+  println("ok")
+  return 0
+}

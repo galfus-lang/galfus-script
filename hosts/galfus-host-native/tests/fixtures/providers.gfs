@@ -1,0 +1,46 @@
+import { get, has } from "std/env"
+import { delete, exists, is_directory, is_file, list, mkdir, normalize_path, read, size, write } from "std/fs"
+import { println } from "std/io"
+import { now } from "std/time"
+
+export fn main(_args: [[u8]]): i32 {
+  const directory = "target/host-native-provider-suite"
+  const file = "target/host-native-provider-suite/value.txt"
+
+  if !has("pkg.name") { return 1 }
+  const package_name = get("pkg.name")
+  const package_name_length = instanceof package_name {
+    [u8] value => value.length,
+    null => 0,
+  }
+  if package_name_length == 0 { return 2 }
+  if now() <= 0 { return 4 }
+
+  if !mkdir(directory) { return 5 }
+  if !is_directory(directory) { return 6 }
+  if !write(file, "galfus") { return 7 }
+  if !exists(file) { return 8 }
+  if !is_file(file) { return 9 }
+  if size(file) != 6 { return 10 }
+
+  const contents = read(file)
+  const contents_length = instanceof contents {
+    [u8] value => value.length,
+    null => 0,
+  }
+  if contents_length != 6 { return 11 }
+  if normalize_path(file).length == 0 { return 12 }
+
+  const entries = list(directory)
+  const entry_count = instanceof entries {
+    [[u8]] values => values.length,
+    null => 0,
+  }
+  if entry_count != 1 { return 13 }
+
+  if !delete(file) { return 14 }
+  if !delete(directory) { return 15 }
+
+  println("native providers ok")
+  return 0
+}

@@ -150,6 +150,35 @@ pub(super) fn resolve_import_target(
     let mut import_symbol = symbol_id;
 
     if let Some(node_id) = path_call_target_node(func_id) {
+        if let Some(symbol) = module
+            .graph()
+            .resolution()?
+            .reference_symbol(node_id)
+            .or_else(|| {
+                module
+                    .graph()
+                    .syntax()
+                    .first_child_of_kind(node_id, SyntaxNodeKind::Identifier)
+                    .and_then(|identifier| resolution.reference_symbol(identifier))
+            })
+            && let Some(import) = resolution
+                .imports()
+                .iter()
+                .find(|import| import.local_symbol() == symbol)
+            && let Some(imported_name) = import.imported_name()
+        {
+            let target_idx = import_target_index(modules, mod_idx, import.source())?;
+            let target_mod = &modules[target_idx];
+            let target_resolution = target_mod.graph().resolution()?;
+            if let Some(export) = target_resolution
+                .exports()
+                .iter()
+                .find(|export| export.name() == imported_name)
+            {
+                return Some((target_mod.id(), FunctionId::new(export.symbol().raw())));
+            }
+        }
+
         if let Some(syntax_node) = module.graph().syntax().node(node_id)
             && syntax_node.kind() == SyntaxNodeKind::PathExpression
             && let Some(root_node) = syntax_node.first_child()
@@ -267,6 +296,14 @@ pub(super) fn resolve_local_call_target(
     mir_mod: &galfus_ir::mir::MirModule,
     func_id: FunctionId,
 ) -> Option<FunctionId> {
+    if mir_mod
+        .functions
+        .iter()
+        .any(|function| function.id == func_id)
+    {
+        return Some(func_id);
+    }
+
     let module = &modules[mod_idx];
     let node_id = path_call_target_node(func_id)?;
     let node = module.graph().syntax().node(node_id)?;

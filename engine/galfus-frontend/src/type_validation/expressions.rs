@@ -17,6 +17,11 @@ impl<'a> DeclarationTypeChecker<'a> {
 
         if let Some(existing) = self.layer.node_type(node) {
             match syntax_node.kind() {
+                SyntaxNodeKind::PathExpression
+                    if expected.is_some() && self.is_choice_variant_call_target(node) =>
+                {
+                    return self.infer_path_variant_expression_type(node, expected);
+                }
                 SyntaxNodeKind::IntegerLiteral => {
                     if let Some(expected) = self.expected_integer_literal_type(expected) {
                         let ty = self.checked_integer_literal_type(node, expected);
@@ -86,7 +91,9 @@ impl<'a> DeclarationTypeChecker<'a> {
 
             SyntaxNodeKind::NameExpression => self.infer_name_expression_type(node),
 
-            SyntaxNodeKind::PathExpression => self.infer_path_variant_expression_type(node),
+            SyntaxNodeKind::PathExpression => {
+                self.infer_path_variant_expression_type(node, expected)
+            }
 
             SyntaxNodeKind::GenericExpression => self.infer_generic_expression_type(node),
 
@@ -340,18 +347,26 @@ impl<'a> DeclarationTypeChecker<'a> {
 
     pub(super) fn infer_unbound_symbol_type(&mut self, symbol: SymbolId) -> Option<TypeId> {
         let root = self.graph.syntax().root()?;
-        let initializer = self.find_initializer_for_symbol(root, symbol)?;
+        let (initializer, pattern) = self.find_initializer_for_symbol(root, symbol)?;
 
         let error = self.layer.table_mut().error();
         self.layer.bind_symbol_type(symbol, error);
 
         let ty = self.infer_expression_type(initializer)?;
-        self.layer.bind_symbol_type(symbol, ty);
+        if let Some(pattern) = pattern {
+            self.bind_binding_pattern_type(pattern, ty);
+        } else {
+            self.layer.bind_symbol_type(symbol, ty);
+        }
 
-        Some(ty)
+        self.layer.symbol_type(symbol)
     }
 
-    fn find_initializer_for_symbol(&self, node: NodeId, symbol: SymbolId) -> Option<NodeId> {
+    pub(super) fn find_initializer_for_symbol(
+        &self,
+        node: NodeId,
+        symbol: SymbolId,
+    ) -> Option<(NodeId, Option<NodeId>)> {
         let syntax_node = self.graph.syntax().node(node)?;
 
         if matches!(
@@ -377,7 +392,12 @@ impl<'a> DeclarationTypeChecker<'a> {
                     .syntax()
                     .first_child_of_kind(node, SyntaxNodeKind::Initializer)?;
 
-                return self.graph.syntax().child(initializer, 0);
+                let expression = self.graph.syntax().child(initializer, 0)?;
+                let pattern = self
+                    .graph
+                    .syntax()
+                    .first_child_of_kind(node, SyntaxNodeKind::BindingPattern);
+                return Some((expression, pattern));
             }
         }
 

@@ -1,0 +1,23 @@
+import { println } from "std/io"
+
+choice Option<T> { Some(T), None }
+struct Box<T> { value: T }
+
+fn identity<T>(value: T): T { return value }
+
+fn unwrap<T>(value: Option<T>, fallback: T): T {
+  return match value {
+    Option::Some(item) => item,
+    Option::None => fallback,
+  }
+}
+
+export fn main(_args: [[u8]]): i32 {
+  const number: Box<i32> = new { value: identity<i32>(42) }
+  const present = unwrap(Option::Some(7), 0)
+  const absent = unwrap(Option::None, 9)
+  if number.value != 42 { return 1 }
+  if present != 7 || absent != 9 { return 2 }
+  println("ok")
+  return 0
+}

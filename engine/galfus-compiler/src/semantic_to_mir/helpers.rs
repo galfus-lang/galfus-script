@@ -244,7 +244,8 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     .builder
                     .graph
                     .syntax()
-                    .first_child_of_kind(variant_node, SyntaxNodeKind::IntegerLiteral)
+                    .first_child_of_kind(variant_node, SyntaxNodeKind::EnumDiscriminant)
+                    .and_then(|discriminant| self.builder.graph.syntax().child(discriminant, 0))
                 {
                     let text = self.builder.node_text(val_node);
                     current_value = parse_int(text).unwrap_or(current_value);

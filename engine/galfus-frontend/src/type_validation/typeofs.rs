@@ -152,7 +152,9 @@ impl<'a> DeclarationTypeChecker<'a> {
         let body_node = self.graph.syntax().node(body)?;
 
         if body_node.kind() == SyntaxNodeKind::Block {
-            return Some(self.layer.table().primitive(PrimitiveType::Null));
+            return Some(
+                expected.unwrap_or_else(|| self.layer.table().primitive(PrimitiveType::Null)),
+            );
         }
 
         let mut pushed = false;

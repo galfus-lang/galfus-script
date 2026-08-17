@@ -1,0 +1,11 @@
+import { println } from "std/io"
+
+export fn main(_args: [[u8]]): i32 {
+  var total = 0
+  if true { total += 2 }
+  if false { return 1 }
+  if total == 0 { return 2 } else { total += 3 }
+  if total != 5 { return 3 }
+  println("ok")
+  return 0
+}

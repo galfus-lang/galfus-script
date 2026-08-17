@@ -56,9 +56,17 @@ impl<'a> DeclarationTypeChecker<'a> {
                     let expected_param_ty = param.ty();
                     let contextual_param_ty =
                         self.substitute_generic_expression_type(expected_param_ty, &substitutions);
+                    let expected = if self
+                        .generic_parameter_symbols_from_type(contextual_param_ty)
+                        .is_empty()
+                    {
+                        Some(contextual_param_ty)
+                    } else {
+                        None
+                    };
 
-                    if let Some(actual_arg_ty) = self
-                        .infer_expression_type_with_expected(expression, Some(contextual_param_ty))
+                    if let Some(actual_arg_ty) =
+                        self.infer_expression_type_with_expected(expression, expected)
                     {
                         self.infer_substitutions_from_types(
                             &generic_params,

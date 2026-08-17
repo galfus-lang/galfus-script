@@ -583,7 +583,15 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     if let Some(child_node) = clause_node.first_child() {
                         self.blocks.last_mut().unwrap().id = else_block;
                         self.current_block = else_block;
-                        self.lower_block(child_node);
+                        if syntax
+                            .node(child_node)
+                            .is_some_and(|node| node.kind() == SyntaxNodeKind::Block)
+                        {
+                            self.lower_block(child_node);
+                        } else {
+                            // `else if` is represented as a nested IfStatement, not a block.
+                            self.lower_statement(child_node);
+                        }
                         if !self.is_terminated() {
                             self.terminate_block(Terminator::Jump {
                                 target: merge_block,

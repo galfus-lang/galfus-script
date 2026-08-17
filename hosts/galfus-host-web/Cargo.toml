@@ -31,3 +31,6 @@ features = [
 [features]
 default = []
 multi_thread = []
+
+[dev-dependencies]
+galfus-workspace = { path = "../../engine/galfus-workspace" }

@@ -153,13 +153,6 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     return Operand::Constant(Constant::Null);
                 };
 
-                if matches!(
-                    self.builder.type_result.layer().table().kind(subject_type),
-                    Some(TypeKind::GenericParameter { .. })
-                ) {
-                    return Operand::Constant(Constant::Null);
-                }
-
                 for arm in syntax
                     .node(arms)
                     .into_iter()
@@ -209,9 +202,9 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                                 res.symbol(sym).map(|symbol| symbol.kind()),
                                 Some(SymbolKind::Function)
                             ) {
-                                return Operand::Constant(Constant::Function(FunctionId::new(
-                                    sym.raw(),
-                                )));
+                                return Operand::Constant(Constant::Function(
+                                    self.function_id_for_symbol(sym, expr_id),
+                                ));
                             }
                             let is_global = matches!(
                                 res.symbol(sym).map(|s| s.kind()),
@@ -681,22 +674,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                             .unwrap_or_else(|| path_call_function_id(real_target))
                     } else {
                         target_symbol
-                            .map(|sym| {
-                                let func_id = FunctionId::new(sym.raw());
-                                let span = syntax.node(target_node).map(|n| n.span());
-                                let _source = span.and_then(|span| {
-                                    let start = span.start();
-                                    let end = span.end();
-                                    if start < self.builder.source_text.len()
-                                        && end <= self.builder.source_text.len()
-                                    {
-                                        Some(&self.builder.source_text[start..end])
-                                    } else {
-                                        None
-                                    }
-                                });
-                                func_id
-                            })
+                            .map(|sym| self.function_id_for_symbol(sym, real_target))
                             .unwrap_or_else(|| FunctionId::new(target_node.raw()))
                     };
 
@@ -985,11 +963,17 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     .node_type(expr_id)
                     .unwrap_or_else(|| galfus_core::TypeId::new(0));
 
+                let caller_next_local = self.builder.next_local_id;
+                let caller_next_block = self.builder.next_block_id;
                 if let Some(func) = self.builder.build_function_expression(expr_id, ty) {
                     let func_id = func.id;
                     self.builder.specialized_functions.push(func);
+                    self.builder.next_local_id = caller_next_local;
+                    self.builder.next_block_id = caller_next_block;
                     Operand::Constant(Constant::Function(func_id))
                 } else {
+                    self.builder.next_local_id = caller_next_local;
+                    self.builder.next_block_id = caller_next_block;
                     Operand::Constant(Constant::Null)
                 }
             }
@@ -1092,6 +1076,21 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
         generic_parameter_type.or_else(|| self.node_type(subject))
     }
 
+    fn function_id_for_symbol(&self, symbol: SymbolId, target: NodeId) -> FunctionId {
+        let is_import = self
+            .builder
+            .graph
+            .resolution()
+            .and_then(|resolution| resolution.import_for_symbol(symbol))
+            .is_some();
+
+        if is_import {
+            path_call_function_id(target)
+        } else {
+            FunctionId::new(symbol.raw())
+        }
+    }
+
     fn anchored_call_receiver(&self, target: NodeId) -> Option<NodeId> {
         if self.is_choice_variant_call_target(target) {
             return None;
@@ -1148,7 +1147,8 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
             return None;
         }
 
-        let function_name = format!("{}::{}", receiver_symbol.name(), member_name);
+        let receiver_name = self.builder.string_table.resolve(receiver_symbol.name())?;
+        let function_name = format!("{receiver_name}::{member_name}");
         resolution
             .symbols()
             .iter()
@@ -1210,6 +1210,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 .collect::<HashMap<_, _>>();
 
             let caller_next_local = self.builder.next_local_id;
+            let caller_next_block = self.builder.next_block_id;
             if let Some(mut function) = self.builder.build_function_with_substitutions(
                 function_item,
                 Some(specialized_id),
@@ -1219,6 +1220,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 self.builder.specialized_functions.push(function);
             }
             self.builder.next_local_id = caller_next_local;
+            self.builder.next_block_id = caller_next_block;
 
             self.builder.active_specialisations.remove(&key);
 

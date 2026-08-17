@@ -1,0 +1,22 @@
+import { println } from "std/io"
+
+fn nested_scope(value: i32): i32 {
+  var result: i32;
+  if true {
+    var value = 7
+    result = value
+  } else {
+    result = 0
+  }
+  return result + value
+}
+
+export fn main(_args: [[u8]]): i32 {
+  var count = 1
+  count += 2
+  if count != 3 { return 1 }
+  if nested_scope(5) != 12 { return 2 }
+
+  println("ok")
+  return 0
+}
