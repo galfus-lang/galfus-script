@@ -1,0 +1,6 @@
+export fn main(_args: [[u8]]): i32 {
+  loop {
+    break missing
+  }
+  return 0
+}

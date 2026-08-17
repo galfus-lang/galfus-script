@@ -1,0 +1,23 @@
+import { println } from "std/io"
+
+struct Point { x: i32, y: i32 }
+
+fn add(left: i32, right: i32): i32 => left + right
+
+fn Point::move(self, dx: i32, dy: i32): Point {
+  return new { x: self.x + dx, y: self.y + dy }
+}
+
+export fn main(_args: [[u8]]): i32 {
+  const double = fn(value: i32): i32 => value * 2
+  const increment = fn(value: i32): i32 {
+    return value + 1
+  }
+  const point = new(Point) { x: 1, y: 2 }
+  const moved = point::move(3, 4)
+
+  if add(increment(double(2)), 3) != 8 { return 1 }
+  if moved.x != 4 || moved.y != 6 { return 2 }
+  println("ok")
+  return 0
+}

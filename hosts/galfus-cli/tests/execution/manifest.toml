@@ -1,0 +1,191 @@
+# Positive cases print only `ok` after their internal assertions pass.
+# Negative cases validate stable diagnostic codes instead of rendered ANSI output.
+
+[[case]]
+name = "bindings, initialization, shadowing, and scope"
+path = "cases/02_bindings_and_scope/bindings_scope.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "operators, precedence, and casts"
+path = "cases/03_operators_and_casts/operators_casts.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "if and else control flow"
+path = "cases/04_branching/if_else.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "else-if selects its matching branch"
+path = "cases/04_branching/else_if.gfs"
+command = "run"
+exit_code = 0
+
+[[case]]
+name = "match expressions cover enum and choice variants"
+path = "cases/05_narrowing/match_expression.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "choices support empty and multi-value payload variants"
+path = "cases/10_enums_and_choices/choice_payloads.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "match blocks cover bindings and nested control flow"
+path = "cases/05_narrowing/match_blocks.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "instanceof expressions narrow every union member"
+path = "cases/05_narrowing/instanceof_expression.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "instanceof blocks preserve narrowed bindings"
+path = "cases/05_narrowing/instanceof_blocks.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "typeof expressions dispatch each generic specialization"
+path = "cases/05_narrowing/typeof_expression.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "typeof blocks execute each generic branch"
+path = "cases/05_narrowing/typeof_blocks.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "functions, lambdas, and anchored methods"
+path = "cases/07_functions/functions_methods.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "array destructuring binds the leading item and rest array"
+path = "cases/08_collections/arrays_destructuring.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "arrays, spreads, indexes, and nullable indexing"
+path = "cases/08_collections/arrays.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "struct defaults, spread, identity, and copy"
+path = "cases/09_structs_and_ownership/struct_copy.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "enums and generic choices"
+path = "cases/10_enums_and_choices/enums_choices.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "generic functions, structs, and constraints"
+path = "cases/11_generics_and_constraints/generics_constraints.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "generic choices, functions, and structs preserve their type arguments"
+path = "cases/11_generics_and_constraints/generic_forms.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "loops, named control targets, and ranges"
+path = "cases/12_iteration/loops_ranges.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "workspace local imports and configured entry"
+path = "cases/13_modules_and_workspaces/local_imports"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "CLI arguments reach the entry function as byte arrays"
+path = "cases/14_runtime_and_providers/cli_args.gfs"
+command = "run"
+args = ["first", "second"]
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "immutable bindings are rejected"
+path = "diagnostics/types/immutable_assignment.gfs"
+command = "check"
+exit_code = 1
+diagnostic = "T0005"
+
+[[case]]
+name = "function parameters are immutable"
+path = "diagnostics/types/function_parameter_immutable.gfs"
+command = "check"
+exit_code = 1
+diagnostic = "T0005"
+
+[[case]]
+name = "for bindings are immutable"
+path = "diagnostics/types/for_binding_immutable.gfs"
+command = "check"
+exit_code = 1
+diagnostic = "T0005"
+
+[[case]]
+name = "same-block shadowing is rejected"
+path = "diagnostics/resolver/same_scope_shadowing.gfs"
+command = "check"
+exit_code = 1
+diagnostic = "S0001"
+
+[[case]]
+name = "non-exhaustive matches are rejected"
+path = "diagnostics/types/non_exhaustive_match.gfs"
+command = "check"
+exit_code = 1
+diagnostic = "T0035"
+
+[[case]]
+name = "invalid control targets are rejected"
+path = "diagnostics/types/unresolved_control_target.gfs"
+command = "check"
+exit_code = 1
+diagnostic = "T0049"

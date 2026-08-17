@@ -1,0 +1,6 @@
+export fn main(_args: [[u8]]): i32 {
+  for value in [1, 2] {
+    value += 1
+  }
+  return 0
+}

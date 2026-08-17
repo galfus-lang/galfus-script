@@ -1,0 +1,25 @@
+import { println } from "std/io"
+
+type Scalar = i32 | bool | null
+
+fn boolean_value(value: bool): i32 {
+  if value { return 20 }
+  return 30
+}
+
+fn evaluate(value: Scalar): i32 {
+  return instanceof value {
+    i32 number => number + 1,
+    bool flag => boolean_value(flag),
+    null => 40,
+  }
+}
+
+export fn main(_args: [[u8]]): i32 {
+  if evaluate(4) != 5 { return 1 }
+  if evaluate(true) != 20 { return 2 }
+  if evaluate(false) != 30 { return 3 }
+  if evaluate(null) != 40 { return 4 }
+  println("ok")
+  return 0
+}

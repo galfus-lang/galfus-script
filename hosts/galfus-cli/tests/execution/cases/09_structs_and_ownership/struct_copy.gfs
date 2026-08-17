@@ -1,0 +1,21 @@
+import { println } from "std/io"
+
+struct Point { x: i32, y: i32 = 5 }
+struct Wrapper { point: Point }
+
+export fn main(_args: [[u8]]): i32 {
+  var original = new(Point) { x: 1 }
+  var alias = original
+  alias.x = 2
+  const cloned = copy original
+  original.x = 3
+  const changed = new(Point) { ...original, y: 9 }
+  const wrapper = new(Wrapper) { point: changed }
+
+  if alias.x != 3 { return 1 }
+  if cloned.x != 2 || cloned.y != 5 { return 2 }
+  if changed.x != 3 || changed.y != 9 { return 3 }
+  if wrapper.point.y != 9 { return 4 }
+  println("ok")
+  return 0
+}

@@ -1,0 +1,20 @@
+import { println } from "std/io"
+
+choice Asset {
+  Empty,
+  Image([u8], i32, i32),
+}
+
+fn measure(asset: Asset): i32 {
+  return match asset {
+    Asset::Empty => 0,
+    Asset::Image(_name, width, height) => width * height,
+  }
+}
+
+export fn main(_args: [[u8]]): i32 {
+  if measure(Asset::Empty) != 0 { return 1 }
+  if measure(Asset::Image("icon", 4, 8)) != 32 { return 2 }
+  println("ok")
+  return 0
+}

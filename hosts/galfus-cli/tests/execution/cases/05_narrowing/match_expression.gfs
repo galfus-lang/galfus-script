@@ -1,0 +1,33 @@
+import { println } from "std/io"
+
+enum Direction { North, South, East }
+
+choice Result<T> {
+  Ok(T),
+  Err(i32),
+}
+
+fn direction_value(value: Direction): i32 {
+  return match value {
+    Direction::North => 1,
+    Direction::South => 2,
+    Direction::East => 3,
+  }
+}
+
+fn result_value(value: Result<i32>): i32 {
+  return match value {
+    Result::Ok(number) => number,
+    Result::Err(code) => -code,
+  }
+}
+
+export fn main(_args: [[u8]]): i32 {
+  if direction_value(Direction::North) != 1 { return 1 }
+  if direction_value(Direction::South) != 2 { return 2 }
+  if direction_value(Direction::East) != 3 { return 3 }
+  if result_value(Result::Ok(8)) != 8 { return 4 }
+  if result_value(Result::Err(9)) != -9 { return 5 }
+  println("ok")
+  return 0
+}

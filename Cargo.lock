@@ -410,6 +410,8 @@ dependencies = [
  "galfus-host-native",
  "galfus-runtime",
  "galfus-workspace",
+ "serde",
+ "toml",
  "tracing",
  "tracing-subscriber",
  "ureq",

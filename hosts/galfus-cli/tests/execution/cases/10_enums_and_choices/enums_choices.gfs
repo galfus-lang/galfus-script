@@ -1,0 +1,20 @@
+import { println } from "std/io"
+
+enum(u8) Priority { Low(1), High(9) }
+choice Result<T> { Ok(T), Err(i32) }
+
+fn unwrap(value: Result<i32>): i32 {
+  return match value {
+    Result::Ok(number) => number,
+    Result::Err(error) => -error,
+  }
+}
+
+export fn main(_args: [[u8]]): i32 {
+  if <i32> Priority::Low != 1 { return 1 }
+  if <i32> Priority::High != 9 { return 2 }
+  if unwrap(Result::Ok(7)) != 7 { return 3 }
+  if unwrap(Result::Err(8)) != -8 { return 4 }
+  println("ok")
+  return 0
+}

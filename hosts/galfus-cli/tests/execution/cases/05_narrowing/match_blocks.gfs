@@ -1,0 +1,32 @@
+import { println } from "std/io"
+
+choice Result<T> {
+  Ok(T),
+  Err(i32),
+}
+
+fn finish(value: i32): i32 { return value }
+
+fn evaluate(value: Result<i32>): i32 {
+  return match value {
+    Result::Ok(number) {
+      var total = number;
+      total += 1
+      return finish(total - 1)
+    },
+    Result::Err(code) {
+      if code > 0 {
+        return finish(-code)
+      }
+      return finish(code)
+    },
+  }
+}
+
+export fn main(_args: [[u8]]): i32 {
+  if evaluate(Result::Ok(4)) != 4 { return 1 }
+  if evaluate(Result::Err(6)) != -6 { return 2 }
+  if evaluate(Result::Err(-3)) != -3 { return 3 }
+  println("ok")
+  return 0
+}

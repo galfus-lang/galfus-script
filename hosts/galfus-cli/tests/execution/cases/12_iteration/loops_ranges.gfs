@@ -1,0 +1,26 @@
+import { println } from "std/io"
+
+export fn main(_args: [[u8]]): i32 {
+  var range_total = 0
+  for value in 0..5 { range_total += value }
+
+  var quantity_total = 0
+  for value in 2::4%2 { quantity_total += value }
+
+  var count = 0
+  var loop_total = 0
+  loop(name: outer) {
+    loop {
+      count += 1
+      if count == 2 { continue }
+      loop_total += count
+      if count == 4 { break outer }
+    }
+  }
+
+  if range_total != 10 { return 1 }
+  if quantity_total != 20 { return 2 }
+  if loop_total != 8 { return 3 }
+  println("ok")
+  return 0
+}

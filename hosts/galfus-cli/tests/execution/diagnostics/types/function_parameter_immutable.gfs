@@ -1,0 +1,6 @@
+fn increment(value: i32): i32 {
+  value += 1
+  return value
+}
+
+export fn main(_args: [[u8]]): i32 { return increment(1) }

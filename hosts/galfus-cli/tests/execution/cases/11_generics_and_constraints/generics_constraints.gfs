@@ -1,0 +1,20 @@
+import { println } from "std/io"
+
+constraint Measurable {
+  fn measure(self): i32
+}
+
+struct Box<T> { value: T }
+struct Label satisfies Measurable { size: i32 }
+
+fn Label::measure(self): i32 { return self.size }
+fn identity<T>(value: T): T { return value }
+
+export fn main(_args: [[u8]]): i32 {
+  const boxed: Box<i32> = new { value: identity(42) }
+  const label = new(Label) { size: 9 }
+  if boxed.value != 42 { return 1 }
+  if label::measure() != 9 { return 2 }
+  println("ok")
+  return 0
+}

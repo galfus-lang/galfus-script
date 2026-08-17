@@ -1,0 +1,21 @@
+import { println } from "std/io"
+
+type Scalar = i32 | bool | null
+
+fn finish(value: i32): i32 { return value }
+
+fn classify<T: Scalar>(): i32 {
+  return typeof T {
+    i32 { var value = 10; return finish(value) },
+    bool { if true { return finish(20) } return finish(0) },
+    null { return finish(30) },
+  }
+}
+
+export fn main(_args: [[u8]]): i32 {
+  if classify<i32>() != 10 { return 1 }
+  if classify<bool>() != 20 { return 2 }
+  if classify<null>() != 30 { return 3 }
+  println("ok")
+  return 0
+}
