@@ -34,21 +34,27 @@ As the user types in the code editor, you must synchronize the files loaded in t
 playground.setSource("src/main.gfs", editor.getValue());
 ```
 
-### 3. Validation and Real-time Feedback
+### 3. Validation, Compilation, and Real-time Feedback
 
-To display error messages, diagnostics, and red squiggles in real-time in your editor, invoke the `compile()` method. It performs the lexical, syntactic, and semantic analysis steps, generates the `PackageImage` (binary), and caches it internally in the Playground.
+To display error messages, diagnostics, and red squiggles in real-time, invoke `check()` after every `setSource()` or `setConfig()` update. Only a successful check allows `compile()` to generate and cache the `PackageImage` binary.
 
 ```javascript
-// Always compile after modifying the source code!
+const checkResult = JSON.parse(playground.check());
+
+if (!checkResult.is_valid) {
+    console.error("Validation errors:", checkResult.diagnostics);
+    // Render the formatted diagnostics in the editor.
+    return;
+}
+
 const compResult = JSON.parse(playground.compile());
 
 if (!compResult.ok) {
     console.error("Build error:", compResult.error);
-    // Here you can extract the diagnostics to render in the editor
 }
 ```
 
-*Note: If the code has syntax errors or is not compiled beforehand, the `start()` method will block execution and return a `CompileRequired` error.*
+*Note: `setSource()` and `setConfig()` invalidate the previous check and compiled package. The required lifecycle is `setConfig`/`setSource` → `check` → `compile` → `start`. If the latest source was not successfully checked and compiled, `start()` blocks execution and returns a `CompileRequired` error.*
 
 ### 4. Execution (Clicking the "Run" button)
 
