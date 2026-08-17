@@ -34,6 +34,9 @@ impl Playground {
             .expect("the built-in std/io provider catalog is valid"),
         );
         workspace.set_catalog(catalog);
+        workspace
+            .load_config(PLAYGROUND_CONFIG.as_bytes())
+            .expect("the built-in playground configuration is valid");
         Self { workspace }
     }
 

@@ -27,21 +27,27 @@ As the user types in the code editor, you must update the files loaded in the vi
 playground.setSource("src/main.gfs", editor.getValue());
 ```
 
-### 3. Validation (Real Time)
+### 3. Validation and Compilation (Real Time)
 
-To display error messages and red squiggles in real time in your editor, simply execute the `compile()` method. It performs the lexical, syntactic, and semantic analysis of the code, and generates the binary in the Playground's internal cache.
+To display error messages and red squiggles in real time, call `check()` after every `setSource()` or `setConfig()` update. A successful check is required before `compile()` can generate and cache the binary.
 
 ```javascript
-// Always compile after modifying the code!
+const checkResult = JSON.parse(playground.check());
+
+if (!checkResult.is_valid) {
+    console.error("Validation errors:", checkResult.diagnostics);
+    // Render the formatted diagnostics in the editor.
+    return;
+}
+
 const compResult = JSON.parse(playground.compile());
 
 if (!compResult.ok) {
     console.error("Build error:", compResult.error);
-    // Extract the information and show it in the editor!
 }
 ```
 
-*Note: If you do not call `compile()` and attempt to execute unverified code (or if the code has errors), the `start()` method will block execution.*
+*Note: `setSource()` and `setConfig()` invalidate the previous check and compiled package. The required lifecycle is `setConfig`/`setSource` → `check` → `compile` → `start`. If the latest source was not successfully checked and compiled, `start()` blocks execution.*
 
 ### 4. Execution (Clicking the "Run" button)
 

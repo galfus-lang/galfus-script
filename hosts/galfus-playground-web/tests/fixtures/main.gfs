@@ -1,0 +1,18 @@
+import { println } from "std/io"
+
+export fn main(args: [[u8]]): i32 {
+  if args.length != 2 { return 1 }
+
+  const first_length = instanceof args[0] {
+    [u8] value => value.length,
+    null => 0,
+  }
+  const second_length = instanceof args[1] {
+    [u8] value => value.length,
+    null => 0,
+  }
+  if first_length != 5 || second_length != 6 { return 2 }
+
+  println("playground")
+  return 17
+}

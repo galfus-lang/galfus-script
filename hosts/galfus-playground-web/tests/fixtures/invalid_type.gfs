@@ -1,0 +1,4 @@
+export fn main(_args: [[u8]]): i32 {
+  const value: i32 = "not a number"
+  return value
+}
