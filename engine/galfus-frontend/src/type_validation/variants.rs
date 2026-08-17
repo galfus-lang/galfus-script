@@ -86,6 +86,15 @@ impl<'a> DeclarationTypeChecker<'a> {
             &mut payload,
         );
 
+        // Multi-value choice payloads are represented by a tuple at runtime.
+        // Materialize that tuple type while the type table is still mutable so
+        // MIR and bytecode lowering can reference the same payload layout.
+        if payload.payload_types.len() > 1 {
+            self.layer
+                .table_mut()
+                .intern_tuple(payload.payload_types.clone());
+        }
+
         for (index, argument) in argument_nodes.iter().copied().enumerate() {
             let Some(expected) = payload.payload_types.get(index).copied() else {
                 continue;
