@@ -10,3 +10,6 @@ galfus-bytecode = { path = "../../engine/galfus-bytecode" }
 galfus-contract = { path = "../../engine/galfus-contract" }
 galfus-runtime = { path = "../../engine/galfus-runtime" }
 crossbeam-channel = "0.5"
+
+[dev-dependencies]
+galfus-workspace = { path = "../../engine/galfus-workspace" }

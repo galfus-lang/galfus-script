@@ -1,0 +1,21 @@
+import { get, has } from "std/env"
+import { println, read } from "std/io"
+import { now } from "std/time"
+
+export fn main(_args: [[u8]]): i32 {
+  if !has("suite.value") { return 1 }
+
+  const value = get("suite.value")
+  const text = instanceof value {
+    [u8] item => item,
+    null => "",
+  }
+  if text.length != 3 { return 2 }
+
+  const input = read()
+  if input.length != 5 { return 3 }
+  if now() <= 0 { return 4 }
+
+  println(text)
+  return 0
+}

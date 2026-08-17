@@ -473,6 +473,7 @@ dependencies = [
  "galfus-contract",
  "galfus-core",
  "galfus-runtime",
+ "galfus-workspace",
 ]
 
 [[package]]
@@ -483,6 +484,7 @@ dependencies = [
  "galfus-contract",
  "galfus-core",
  "galfus-runtime",
+ "galfus-workspace",
  "js-sys",
  "wasm-bindgen",
  "wasm-bindgen-futures",
