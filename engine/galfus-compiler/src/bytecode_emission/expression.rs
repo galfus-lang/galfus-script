@@ -728,7 +728,25 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                 .position(|(name, _)| name == field_name)
                 .unwrap_or(0) as u16
         } else {
-            0
+            let mut matching_indices = self
+                .ctx
+                .struct_layouts
+                .iter()
+                .filter_map(|layout| {
+                    layout
+                        .fields
+                        .iter()
+                        .position(|field| field.name == field_name)
+                })
+                .map(|index| index as u16);
+            let Some(index) = matching_indices.next() else {
+                return FieldIdx(0);
+            };
+            if matching_indices.all(|candidate| candidate == index) {
+                index
+            } else {
+                0
+            }
         };
 
         FieldIdx(field_idx)

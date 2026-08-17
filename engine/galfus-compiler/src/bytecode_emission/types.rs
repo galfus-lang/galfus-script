@@ -107,17 +107,16 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: TypeId) -> TypeIdx {
                                             .is_some_and(|node| node.kind().is_type())
                                     })
                             });
-                    if let Some(base_type) = base_type {
-                        let ty = ctx
-                            .type_result
-                            .layer()
-                            .node_type(base_type)
-                            .unwrap_or_else(|| TypeId::new(0));
-                        let base_idx = crate::bytecode_emission::types::lower_type(ctx, ty);
-                        ctx.types[base_idx.raw() as usize].clone()
-                    } else {
-                        BytecodeType::Null
-                    }
+                    let base_type = base_type
+                        .and_then(|node| ctx.type_result.layer().node_type(node))
+                        .unwrap_or_else(|| {
+                            ctx.type_result
+                                .layer()
+                                .table()
+                                .primitive(PrimitiveType::Int32)
+                        });
+                    let base_idx = crate::bytecode_emission::types::lower_type(ctx, base_type);
+                    ctx.types[base_idx.raw() as usize].clone()
                 }
                 _ => BytecodeType::Null,
             }

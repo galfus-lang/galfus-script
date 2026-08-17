@@ -1147,7 +1147,8 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
             return None;
         }
 
-        let function_name = format!("{}::{}", receiver_symbol.name(), member_name);
+        let receiver_name = self.builder.string_table.resolve(receiver_symbol.name())?;
+        let function_name = format!("{receiver_name}::{member_name}");
         resolution
             .symbols()
             .iter()
@@ -1209,6 +1210,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 .collect::<HashMap<_, _>>();
 
             let caller_next_local = self.builder.next_local_id;
+            let caller_next_block = self.builder.next_block_id;
             if let Some(mut function) = self.builder.build_function_with_substitutions(
                 function_item,
                 Some(specialized_id),
@@ -1218,6 +1220,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 self.builder.specialized_functions.push(function);
             }
             self.builder.next_local_id = caller_next_local;
+            self.builder.next_block_id = caller_next_block;
 
             self.builder.active_specialisations.remove(&key);
 
