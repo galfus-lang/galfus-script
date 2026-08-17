@@ -78,6 +78,13 @@ exit_code = 0
 stdout = "ok\n"
 
 [[case]]
+name = "unions flow through aliases, structs, and function boundaries"
+path = "cases/05_narrowing/unions.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
 name = "functions, lambdas, and anchored methods"
 path = "cases/07_functions/functions_methods.gfs"
 command = "run"
@@ -121,6 +128,13 @@ stdout = "ok\n"
 [[case]]
 name = "generic choices, functions, and structs preserve their type arguments"
 path = "cases/11_generics_and_constraints/generic_forms.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "type aliases preserve enum, struct, and function behavior"
+path = "cases/11_generics_and_constraints/type_aliases.gfs"
 command = "run"
 exit_code = 0
 stdout = "ok\n"

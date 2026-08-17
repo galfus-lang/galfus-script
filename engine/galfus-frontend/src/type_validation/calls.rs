@@ -24,8 +24,9 @@ impl<'a> DeclarationTypeChecker<'a> {
 
         let arguments = self.graph.syntax().child(node, 1)?;
         let target_type = self.infer_expression_type(target)?;
+        let resolved_type = self.resolve_alias_type(target_type);
 
-        let function = match self.layer.table().kind(target_type).cloned() {
+        let function = match self.layer.table().kind(resolved_type).cloned() {
             Some(TypeKind::Function(function)) => function,
             Some(TypeKind::Error) => return Some(self.layer.table_mut().error()),
             _ => {
@@ -34,7 +35,7 @@ impl<'a> DeclarationTypeChecker<'a> {
             }
         };
 
-        let generic_params = self.generic_parameter_symbols_from_type(target_type);
+        let generic_params = self.generic_parameter_symbols_from_type(resolved_type);
         let substituted_function = if !generic_params.is_empty() {
             let mut substitutions = collections::HashMap::new();
 

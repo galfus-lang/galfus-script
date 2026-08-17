@@ -1,0 +1,45 @@
+import { println } from "std/io"
+
+type Value = i32 | bool | null
+
+struct State {
+  value: Value,
+}
+
+fn selected(enabled: bool): Value {
+  if enabled { return 7 }
+  return null
+}
+
+fn boolean_score(value: bool): i32 {
+  if value { return 20 }
+  return 30
+}
+
+fn score(value: Value): i32 {
+  return instanceof value {
+    i32 number => number,
+    bool flag => boolean_score(flag),
+    null => -1,
+  }
+}
+
+fn optional_score(value: i32 | null): i32 {
+  return instanceof value {
+    i32 number => number,
+    null => -1,
+  }
+}
+
+export fn main(_args: [[u8]]): i32 {
+  const state = new(State) { value: true }
+  const direct: i32 | null = 3
+
+  if score(selected(true)) != 7 { return 1 }
+  if score(selected(false)) != -1 { return 2 }
+  if score(state.value) != 20 { return 3 }
+  if optional_score(direct) != 3 { return 4 }
+
+  println("ok")
+  return 0
+}
