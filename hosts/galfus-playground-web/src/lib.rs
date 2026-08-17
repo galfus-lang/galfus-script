@@ -11,7 +11,7 @@ pub struct Playground {
 
 pub struct PlaygroundCheckResult {
     pub is_valid: bool,
-    pub diagnostics: String,
+    pub diagnostics: Vec<galfus_core::Diagnostic>,
 }
 
 impl Default for Playground {
@@ -70,7 +70,7 @@ impl Playground {
         let check = self.workspace.check();
         PlaygroundCheckResult {
             is_valid: check.is_valid,
-            diagnostics: format!("{:?}", check.diagnostics),
+            diagnostics: check.diagnostics.iter().cloned().collect(),
         }
     }
 

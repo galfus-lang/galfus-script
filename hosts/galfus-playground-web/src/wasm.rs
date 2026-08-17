@@ -62,9 +62,23 @@ impl WasmPlayground {
     #[wasm_bindgen(js_name = check)]
     pub fn check(&mut self) -> String {
         let result = self.playground.check();
+        
+        let diagnostics: Vec<serde_json::Value> = result.diagnostics.into_iter().map(|diag| {
+            serde_json::json!({
+                "severity": format!("{:?}", diag.severity()),
+                "code": diag.code().as_str(),
+                "message": diag.message(),
+                "span": {
+                    "source_id": diag.span().source_id().raw(),
+                    "start": diag.span().start(),
+                    "end": diag.span().end()
+                }
+            })
+        }).collect();
+
         serde_json::json!({
             "is_valid": result.is_valid,
-            "diagnostics": result.diagnostics,
+            "diagnostics": diagnostics,
         })
         .to_string()
     }
