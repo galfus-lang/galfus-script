@@ -43,6 +43,44 @@ fn empty_catalog_rejects_std_io_imports() {
 }
 
 #[test]
+fn check_binds_array_destructuring_types_in_entry_function() {
+    let main = SourceFile::new(
+        SourceId::new(1),
+        "main.gfs".to_string(),
+        r#"
+struct Pair { left: i32, right: i32 }
+
+export fn main(_args: [[u8]]): i32 {
+  const initial = [1, 2, 3]
+  const values: [i32] = [...initial, 4, 5]
+  const [first, second, ...rest] = values
+  const pair = new(Pair) { left: first, right: second }
+  if pair.left != 1 || pair.right != 2 { return 1 }
+  if rest.length != 4 { return 2 }
+  return 0
+}
+"#
+        .to_string(),
+    );
+    let sources = [FrontendSource {
+        module_id: ModuleId::new(1),
+        path: path("main.gfs"),
+        source: &main,
+        kind: FrontendModuleKind::Standard,
+    }];
+    let mut session = FrontendSession::new();
+    let report = session.check(FrontendUpdate {
+        catalog: io_catalog(),
+        source_revision: Revision::new(1),
+        sources: &sources,
+        removed_modules: &[],
+        roots: &FrontendRoots::default(),
+    });
+
+    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+}
+
+#[test]
 fn check_uses_the_module_ids_provided_by_the_host() {
     let utilities = SourceFile::new(
         SourceId::new(3),

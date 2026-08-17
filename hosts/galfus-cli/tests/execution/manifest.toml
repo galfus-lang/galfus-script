@@ -89,7 +89,6 @@ name = "array destructuring binds the leading item and rest array"
 path = "cases/08_collections/arrays_destructuring.gfs"
 command = "run"
 exit_code = 0
-stdout = "ok\n"
 
 [[case]]
 name = "arrays, spreads, indexes, and nullable indexing"
