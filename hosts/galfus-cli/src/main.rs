@@ -1,6 +1,7 @@
 mod compile;
 mod diagnostics;
 mod init;
+mod lsp;
 mod upgrade;
 mod workspace;
 
@@ -65,6 +66,8 @@ enum Command {
         #[arg(short, long, default_value = "latest")]
         tag: ReleaseTag,
     },
+    /// Run the Galfus Language Server Protocol (LSP) loop
+    Lsp,
 }
 
 fn main() -> Result<()> {
@@ -83,5 +86,6 @@ fn main() -> Result<()> {
             profile,
         } => compile::run_compile(&workspace, target, out, &profile),
         Command::Upgrade { tag } => upgrade::run_upgrade(tag),
+        Command::Lsp => lsp::run_lsp(),
     }
 }
