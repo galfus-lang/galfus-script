@@ -7,6 +7,7 @@ Welcome to the official documentation. Choose a topic below to get started.
 ## 00-Getting Started
 
 - [Conceptual Hello World](./00-getting_started/01-hello_world.md)
+- [CLI Reference](./00-getting_started/02-cli_reference.md)
 
 
 

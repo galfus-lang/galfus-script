@@ -108,7 +108,7 @@ export fn value(): i32 {
 Whole-module import:
 
 ```galfus
-import user from "./user"
+import user from "./user.gfs"
 
 var created = user::createUser()
 ```
@@ -116,7 +116,7 @@ var created = user::createUser()
 Named import:
 
 ```galfus
-import { User, createUser } from "./user"
+import { User, createUser } from "./user.gfs"
 
 var created = createUser()
 ```
@@ -190,7 +190,7 @@ fn value(): i32 {
 Import binding conflicts are invalid in the same module scope.
 
 ```galfus
-import { User } from "./user"
+import { User } from "./user.gfs"
 
 struct User {
   id: i64,

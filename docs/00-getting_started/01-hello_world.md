@@ -1,7 +1,7 @@
 # Conceptual Hello World
 
-This guide presents how Galfus sees the execution of your code.
-Since the command-line infrastructure (CLI) is still being consolidated, we will focus on the concept of execution through the **Workspace**.
+This guide presents how Galfus sees the execution of your code conceptually through the **Workspace**. 
+For practical day-to-day usage and command-line execution, refer to the [CLI Reference](./02-cli_reference.md).
 
 ## The `.gfs` Script
 
