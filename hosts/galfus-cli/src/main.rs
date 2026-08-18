@@ -21,7 +21,7 @@ pub enum ReleaseTag {
 #[derive(Debug, Parser)]
 #[command(name = "galfus")]
 #[command(version)]
-#[command(about = "Galfus Script tooling")]
+#[command(about = "Galfus Script Toolchain and Runtime")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -29,26 +29,39 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Run the current project
     Run {
+        /// Path to the project workspace directory (defaults to current directory)
         #[arg(default_value = ".")]
         workspace: String,
+        /// Additional arguments passed to the script or application
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Initialize a new Galfus project in the current directory
     Init,
+    /// Check the project for errors without running or compiling it
     Check {
+        /// Path to the project workspace directory
         workspace: String,
     },
+    /// Compile the project into an executable or binary format
     Compile {
+        /// Path to the project workspace directory
         workspace: String,
+        /// Target architecture or platform (e.g., x86_64-linux)
         #[arg(short, long)]
         target: Option<String>,
+        /// Output path for the compiled artifact
         #[arg(short, long)]
         out: Option<String>,
+        /// Optimization profile to use during compilation
         #[arg(short, long, default_value = "fastest")]
         profile: String,
     },
+    /// Upgrade the Galfus CLI binary to a newer version
     Upgrade {
+        /// Release channel or specific tag to download
         #[arg(short, long, default_value = "latest")]
         tag: ReleaseTag,
     },
