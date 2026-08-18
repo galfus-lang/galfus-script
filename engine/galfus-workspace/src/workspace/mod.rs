@@ -29,6 +29,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct Workspace {
+    pub root_path: Option<std::path::PathBuf>,
     pub config: Option<WorkspaceConfig>,
     pub source_state: SourceState,
     pub semantic_state: SemanticState,
@@ -69,6 +70,7 @@ impl Default for Workspace {
 impl Workspace {
     pub fn new() -> Self {
         Self {
+            root_path: None,
             config: None,
             source_state: SourceState::new(),
             semantic_state: SemanticState::new(),
@@ -145,5 +147,19 @@ impl Workspace {
 
     pub fn frontend_snapshot(&self) -> Option<&FrontendSnapshot> {
         self.frontend_snapshot.as_ref()
+    }
+
+    pub fn check_state(&self) -> &CheckState {
+        &self.semantic_state.check_state
+    }
+
+    pub fn source_file(&self, path: &ModulePath) -> Option<SourceFile> {
+        let entry = self.source_state.store.get(path)?;
+        let text = String::from_utf8_lossy(&entry.bytes).to_string();
+        Some(SourceFile::new(
+            entry.source_id,
+            entry.path.as_str().to_string(),
+            text,
+        ))
     }
 }

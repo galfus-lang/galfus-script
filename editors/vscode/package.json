@@ -1,6 +1,6 @@
 {
   "name": "galfus-language",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Syntax highlighting and basic editor support for Galfus Script.",
   "displayName": "Galfus Script",
   "publisher": "galfus",

@@ -1,9 +1,9 @@
 use anyhow::Result;
-use galfus_workspace::workspace::Workspace;
+
 use std::io::{self, BufRead, Read, Write};
 
 pub fn run_lsp() -> Result<()> {
-    let mut workspace = Workspace::new();
+    let mut workspace = crate::workspace::workspace_with_native_catalog();
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let mut reader = stdin.lock();

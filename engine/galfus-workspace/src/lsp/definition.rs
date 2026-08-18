@@ -91,12 +91,16 @@ pub fn goto_definition(workspace: &Workspace, path: &str, position: Position) ->
                                 if let Some(export_record) = to_resolution.export_record(export_id)
                                 {
                                     let dec_node = export_record.declaration();
-                                    return node_location(to_module, dec_node);
+                                    return node_location(workspace, to_module, dec_node);
                                 }
                             }
                         } else if symbol.kind() == SymbolKind::ImportNamespace {
                             // Point to the root of the file
-                            return node_location(to_module, to_module.graph().syntax().root()?);
+                            return node_location(
+                                workspace,
+                                to_module,
+                                to_module.graph().syntax().root()?,
+                            );
                         }
                     }
                 }
@@ -105,10 +109,11 @@ pub fn goto_definition(workspace: &Workspace, path: &str, position: Position) ->
     }
 
     // Default: Return the location of the declaration in the current module
-    node_location(semantic_module, symbol.declaration())
+    node_location(workspace, semantic_module, symbol.declaration())
 }
 
-fn node_location(
+pub(crate) fn node_location(
+    workspace: &Workspace,
     module: &galfus_frontend::modules::SemanticModule,
     node_id: galfus_core::NodeId,
 ) -> Option<Location> {
@@ -130,8 +135,22 @@ fn node_location(
         },
     };
 
-    let path = module.path().as_str();
-    let url = Url::parse(&format!("file:///{}", path)).ok()?;
+    let module_path = module.path();
+    let path = module_path.as_str();
+
+    let is_virtual = if let Some(root) = &workspace.root_path {
+        !root.join(path).exists()
+    } else {
+        !std::path::Path::new(path).exists()
+    };
+    let url = if is_virtual {
+        Url::parse(&format!("galfus://virtual/{}", path)).ok()?
+    } else if let Some(root) = &workspace.root_path {
+        let full_path = root.join(path);
+        Url::from_file_path(full_path).ok()?
+    } else {
+        Url::parse(&format!("file:///{}", path)).ok()?
+    };
 
     Some(Location { uri: url, range })
 }

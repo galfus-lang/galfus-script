@@ -31,12 +31,21 @@
         {
           "name": "comment.line.double-slash.gfs",
           "begin": "//",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.comment.gfs" }
+          },
           "end": "$"
         },
         {
           "name": "comment.block.gfs",
           "begin": "/\\*",
-          "end": "\\*/"
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.comment.begin.gfs" }
+          },
+          "end": "\\*/",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.comment.end.gfs" }
+          }
         }
       ]
     },
@@ -178,7 +187,7 @@
           "match": "\\b(bool|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64)\\b"
         },
         {
-          "name": "support.type.nominal.gfs",
+          "name": "entity.name.type.gfs",
           "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
         }
       ]

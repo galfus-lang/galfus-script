@@ -147,7 +147,7 @@ fn load_source_file(file: &Path) -> Result<Workspace> {
     Ok(workspace)
 }
 
-fn workspace_with_native_catalog() -> Workspace {
+pub fn workspace_with_native_catalog() -> Workspace {
     let mut workspace = Workspace::new();
     workspace.set_catalog(sync::Arc::new(galfus_host_native::native_catalog()));
     workspace

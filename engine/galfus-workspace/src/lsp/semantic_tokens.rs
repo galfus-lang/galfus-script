@@ -125,8 +125,8 @@ fn map_symbol_kind(kind: SymbolKind) -> Option<(u32, u32)> {
         SymbolKind::EnumVariant | SymbolKind::ChoiceVariant => 10,
         SymbolKind::ConstraintField => 9,
         SymbolKind::ConstraintFunction => 13,
-        SymbolKind::ImportNamespace => 0,
-        SymbolKind::ImportBinding => 8,
+        SymbolKind::ImportNamespace => return None,
+        SymbolKind::ImportBinding => return None,
         SymbolKind::BuiltinType => 1,
     };
 

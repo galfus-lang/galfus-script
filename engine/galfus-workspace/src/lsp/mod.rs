@@ -17,6 +17,29 @@ use rpc::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 use serde_json::Value;
 
 impl Workspace {
+    fn uri_to_module_path(&self, uri: &lsp_types::Url) -> Option<String> {
+        if uri.scheme() == "galfus" && uri.host_str() == Some("virtual") {
+            return Some(uri.path().trim_start_matches('/').to_string());
+        }
+
+        if let Ok(file_path) = uri.to_file_path() {
+            if let Some(root) = &self.root_path {
+                let root_path = root.canonicalize().unwrap_or_else(|_| root.clone());
+                let canonical_file = file_path
+                    .canonicalize()
+                    .unwrap_or_else(|_| file_path.clone());
+                if let Ok(stripped) = canonical_file.strip_prefix(&root_path) {
+                    return Some(stripped.to_string_lossy().replace('\\', "/"));
+                }
+            }
+            // fallback
+            let s = file_path.to_string_lossy().replace('\\', "/");
+            let s = s.trim_start_matches('/').to_string();
+            return Some(s);
+        }
+        None
+    }
+
     pub fn handle_lsp_message(&mut self, json: &str) -> Vec<String> {
         let mut responses = Vec::new();
         let request: JsonRpcRequest = match serde_json::from_str(json) {
@@ -51,6 +74,28 @@ impl Workspace {
     ) -> Option<JsonRpcResponse> {
         match method {
             "initialize" => {
+                if let Some(p) = params.as_ref() {
+                    if let Ok(init_params) =
+                        serde_json::from_value::<lsp_types::InitializeParams>(p.clone())
+                    {
+                        let root_uri = init_params
+                            .workspace_folders
+                            .and_then(|folders| folders.first().map(|f| f.uri.clone()));
+
+                        if let Some(uri) = root_uri {
+                            if let Ok(file_path) = uri.to_file_path() {
+                                self.root_path = Some(file_path.clone());
+                                let manifest_path = file_path.join("galfus.toml");
+                                if let Ok(manifest_str) = std::fs::read_to_string(manifest_path) {
+                                    if let Ok(manifest) = toml::from_str(&manifest_str) {
+                                        let _ = self.load_manifest(manifest);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 let result = serde_json::json!({
                     "capabilities": {
                         "hoverProvider": true,
@@ -82,16 +127,17 @@ impl Workspace {
                 if let Some(p) = params {
                     if let Ok(hover_params) = serde_json::from_value::<HoverParams>(p) {
                         let uri = &hover_params.text_document_position_params.text_document.uri;
-                        let path_str = uri.path().trim_start_matches('/').to_string();
-                        if let Some(hover) = hover::hover(
-                            self,
-                            &path_str,
-                            hover_params.text_document_position_params.position,
-                        ) {
-                            return Some(JsonRpcResponse::success(
-                                id,
-                                serde_json::to_value(hover).unwrap(),
-                            ));
+                        if let Some(path_str) = self.uri_to_module_path(uri) {
+                            if let Some(hover) = hover::hover(
+                                self,
+                                &path_str,
+                                hover_params.text_document_position_params.position,
+                            ) {
+                                return Some(JsonRpcResponse::success(
+                                    id,
+                                    serde_json::to_value(hover).unwrap(),
+                                ));
+                            }
                         }
                     }
                 }
@@ -101,16 +147,17 @@ impl Workspace {
                 if let Some(p) = params {
                     if let Ok(def_params) = serde_json::from_value::<GotoDefinitionParams>(p) {
                         let uri = &def_params.text_document_position_params.text_document.uri;
-                        let path_str = uri.path().trim_start_matches('/').to_string();
-                        if let Some(loc) = definition::goto_definition(
-                            self,
-                            &path_str,
-                            def_params.text_document_position_params.position,
-                        ) {
-                            return Some(JsonRpcResponse::success(
-                                id,
-                                serde_json::to_value(loc).unwrap(),
-                            ));
+                        if let Some(path_str) = self.uri_to_module_path(uri) {
+                            if let Some(loc) = definition::goto_definition(
+                                self,
+                                &path_str,
+                                def_params.text_document_position_params.position,
+                            ) {
+                                return Some(JsonRpcResponse::success(
+                                    id,
+                                    serde_json::to_value(loc).unwrap(),
+                                ));
+                            }
                         }
                     }
                 }
@@ -120,17 +167,42 @@ impl Workspace {
                 if let Some(p) = params {
                     if let Ok(st_params) = serde_json::from_value::<SemanticTokensParams>(p) {
                         let uri = &st_params.text_document.uri;
-                        let path_str = uri.path().trim_start_matches('/').to_string();
-                        if let Some(tokens) = semantic_tokens::semantic_tokens_full(self, &path_str)
-                        {
-                            return Some(JsonRpcResponse::success(
-                                id,
-                                serde_json::to_value(tokens).unwrap(),
-                            ));
+                        if let Some(path_str) = self.uri_to_module_path(uri) {
+                            if let Some(tokens) =
+                                semantic_tokens::semantic_tokens_full(self, &path_str)
+                            {
+                                return Some(JsonRpcResponse::success(
+                                    id,
+                                    serde_json::to_value(tokens).unwrap(),
+                                ));
+                            }
                         }
                     }
                 }
                 Some(JsonRpcResponse::success(id, Value::Null))
+            }
+            "galfus/virtualDocument" => {
+                if let Some(p) = params {
+                    if let Some(uri_str) = p.get("uri").and_then(|v| v.as_str()) {
+                        if let Ok(uri) = lsp_types::Url::parse(uri_str) {
+                            let path = uri.path().trim_start_matches("/virtual/");
+                            if let Some(module_path) = galfus_core::ModulePath::new(path) {
+                                if let Some(entry) = self.source_state.store.get(&module_path) {
+                                    let text = String::from_utf8_lossy(&entry.bytes).to_string();
+                                    return Some(JsonRpcResponse::success(
+                                        id,
+                                        serde_json::json!({ "text": text }),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+                Some(JsonRpcResponse::error(
+                    id,
+                    -32602,
+                    "Invalid URI or document not found".into(),
+                ))
             }
             _ => Some(JsonRpcResponse::error(
                 id,
@@ -152,12 +224,14 @@ impl Workspace {
                     if let Ok(open_params) = serde_json::from_value::<DidOpenTextDocumentParams>(p)
                     {
                         let uri = &open_params.text_document.uri;
-                        let path_str = uri.path().trim_start_matches('/').to_string();
-
-                        if let Some(_) = ModulePath::new(&path_str) {
-                            let _ = self
-                                .load_module(&path_str, open_params.text_document.text.as_bytes());
-                            self.check_and_publish_diagnostics(uri, &path_str, responses);
+                        if let Some(path_str) = self.uri_to_module_path(uri) {
+                            if let Some(_) = ModulePath::new(&path_str) {
+                                let _ = self.load_module(
+                                    &path_str,
+                                    open_params.text_document.text.as_bytes(),
+                                );
+                                self.check_and_publish_diagnostics(uri, &path_str, responses);
+                            }
                         }
                     }
                 }
@@ -168,12 +242,12 @@ impl Workspace {
                         serde_json::from_value::<DidChangeTextDocumentParams>(p)
                     {
                         let uri = &change_params.text_document.uri;
-                        let path_str = uri.path().trim_start_matches('/').to_string();
-
-                        if let Some(_) = ModulePath::new(&path_str) {
-                            if let Some(change) = change_params.content_changes.first() {
-                                let _ = self.load_module(&path_str, change.text.as_bytes());
-                                self.check_and_publish_diagnostics(uri, &path_str, responses);
+                        if let Some(path_str) = self.uri_to_module_path(uri) {
+                            if let Some(_) = ModulePath::new(&path_str) {
+                                if let Some(change) = change_params.content_changes.first() {
+                                    let _ = self.load_module(&path_str, change.text.as_bytes());
+                                    self.check_and_publish_diagnostics(uri, &path_str, responses);
+                                }
                             }
                         }
                     }
