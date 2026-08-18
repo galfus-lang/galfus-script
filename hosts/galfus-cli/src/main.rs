@@ -20,6 +20,7 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Run {
+        #[arg(default_value = ".")]
         workspace: String,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
