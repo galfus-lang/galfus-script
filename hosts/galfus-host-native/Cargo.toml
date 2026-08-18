@@ -13,3 +13,4 @@ crossbeam-channel = "0.5"
 
 [dev-dependencies]
 galfus-workspace = { path = "../../engine/galfus-workspace" }
+toml.workspace = true

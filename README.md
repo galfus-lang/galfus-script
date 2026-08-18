@@ -197,6 +197,16 @@ cargo clippy --workspace --all-targets
 cargo fmt --check
 ```
 
+### 7. Testing the WebAssembly LSP (Playground)
+
+To test the Galfus Language Server natively in the browser via WebAssembly, you can spin up the CodeMirror dev server:
+
+```bash
+bun cmd dev codemirror
+```
+
+This will automatically compile the `galfus-playground-web` WASM bindings and host a local web editor on `http://localhost:3000` connected to the engine via LSP JSON-RPC.
+
 ---
 
 ## Design Goals

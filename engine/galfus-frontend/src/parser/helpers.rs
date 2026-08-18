@@ -344,6 +344,7 @@ impl Parser {
 
     pub(super) fn parse_binding_after_keyword(
         &mut self,
+        keyword_span: Span,
         require_initializer: bool,
     ) -> Option<(Vec<NodeId>, Span)> {
         self.skip_newlines();
@@ -367,11 +368,11 @@ impl Parser {
             end_span = self.node_span(initializer);
             children.push(initializer);
         } else if require_initializer {
-            let token = self.current();
+            let error_span = Span::cover(keyword_span, end_span).unwrap_or(keyword_span);
 
             self.graph.push_diagnostic(Diagnostic::error(
                 ParserDiagnosticCode::ExpectedInitializer,
-                token.span(),
+                error_span,
             ));
 
             return None;
@@ -387,7 +388,7 @@ impl Parser {
         node_kind: SyntaxNodeKind,
     ) -> Option<NodeId> {
         let token = self.expect(keyword)?;
-        let (children, end_span) = self.parse_binding_after_keyword(is_const)?;
+        let (children, end_span) = self.parse_binding_after_keyword(token.span(), is_const)?;
 
         self.expect_statement_end();
 

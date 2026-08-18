@@ -6,14 +6,17 @@ fn run_passes_read_terminator_to_the_io_provider() {
     let mut workspace = Workspace::new();
     workspace.set_catalog(io_catalog(galfus_contract::STD_IO_SOURCE));
     workspace
-        .load_config(
-            br#"
+        .load_manifest(
+            toml::from_str(
+                r#"
             [module]
             name = "read-terminator"
             target = "app"
             [entry]
             path = "main.gfs"
             "#,
+            )
+            .unwrap(),
         )
         .expect("valid configuration");
     workspace
@@ -52,14 +55,17 @@ fn run_passes_read_terminator_to_the_io_provider() {
 fn run_specializes_nested_generic_types_across_modules() {
     let mut workspace = Workspace::new();
     workspace
-        .load_config(
-            br#"
+        .load_manifest(
+            toml::from_str(
+                r#"
             [module]
             name = "cross-module-nested-generics"
             target = "app"
             [entry]
             path = "main.gfs"
             "#,
+            )
+            .unwrap(),
         )
         .expect("valid configuration");
     workspace
@@ -98,14 +104,17 @@ fn run_specializes_nested_generic_types_across_modules() {
 fn run_specializes_explicit_imported_generic_typeof_parameter() {
     let mut workspace = Workspace::new();
     workspace
-        .load_config(
-            br#"
+        .load_manifest(
+            toml::from_str(
+                r#"
             [module]
             name = "cross-module-typeof"
             target = "app"
             [entry]
             path = "main.gfs"
             "#,
+            )
+            .unwrap(),
         )
         .expect("valid configuration");
     workspace
@@ -146,14 +155,17 @@ fn run_specializes_explicit_imported_generic_typeof_parameter() {
 fn run_specializes_generic_anchored_range_iterator_methods() {
     let mut workspace = Workspace::new();
     workspace
-        .load_config(
-            br#"
+        .load_manifest(
+            toml::from_str(
+                r#"
             [module]
             name = "generic-range-method"
             target = "app"
             [entry]
             path = "main.gfs"
             "#,
+            )
+            .unwrap(),
         )
         .expect("valid configuration");
     workspace
@@ -183,14 +195,17 @@ fn run_specializes_generic_anchored_range_iterator_methods() {
 fn run_synchronizes_the_runtime_module_graph() {
     let mut workspace = Workspace::new();
     workspace
-        .load_config(
-            br#"
+        .load_manifest(
+            toml::from_str(
+                r#"
             [module]
             name = "runtime-sync"
             target = "app"
             [entry]
             path = "main.gfs"
             "#,
+            )
+            .unwrap(),
         )
         .expect("valid configuration");
     workspace
@@ -239,14 +254,17 @@ fn run_synchronizes_the_runtime_module_graph() {
 fn run_propagates_runtime_start_error_on_entry_signature_mismatch() {
     let mut workspace = Workspace::new();
     workspace
-        .load_config(
-            br#"
+        .load_manifest(
+            toml::from_str(
+                r#"
             [module]
             name = "bad-entry"
             target = "app"
             [entry]
             path = "main.gfs"
             "#,
+            )
+            .unwrap(),
         )
         .expect("valid configuration");
     workspace

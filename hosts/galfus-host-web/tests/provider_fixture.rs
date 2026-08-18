@@ -19,8 +19,9 @@ fn compiles_web_provider_fixture() {
     let mut workspace = Workspace::new();
     workspace.set_catalog(Arc::new(provider_catalog()));
     workspace
-        .load_config(
-            br#"
+        .load_manifest(
+            toml::from_str(
+                r#"
             [module]
             name = "host-web-provider-suite"
             target = "app"
@@ -28,6 +29,8 @@ fn compiles_web_provider_fixture() {
             [entry]
             path = "main.gfs"
             "#,
+            )
+            .unwrap(),
         )
         .expect("fixture configuration is valid");
     workspace

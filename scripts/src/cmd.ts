@@ -21,6 +21,11 @@ const playground = program
 const hosts = program.command('hosts').description('Host binaries build and release commands');
 const github = program.command('github').description('GitHub Actions integration commands');
 const check = program.command('check').description('Repository validation commands');
+const dev = program.command('dev').description('Development workflows');
+
+import { devVscode } from './dev/vscode';
+
+import { devCodemirror } from './dev/codemirror';
 
 setup
   .command('extension')
@@ -29,6 +34,16 @@ setup
   .option('-a, --antigravity', 'Install to Antigravity IDE')
   .option('--all', 'Install to all editors (default)')
   .action(setupExtension);
+
+dev
+  .command('vscode')
+  .description('Build the local CLI and launch VS Code in extension development mode')
+  .action(devVscode);
+
+dev
+  .command('codemirror')
+  .description('Build and serve the WASM LSP wrapped in a local CodeMirror instance')
+  .action(devCodemirror);
 
 playground
   .command('build')

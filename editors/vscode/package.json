@@ -1,6 +1,6 @@
 {
   "name": "galfus-language",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Syntax highlighting and basic editor support for Galfus Script.",
   "displayName": "Galfus Script",
   "publisher": "galfus",
@@ -16,7 +16,7 @@
   },
   "license": "MIT",
   "engines": {
-    "vscode": "^1.107.0"
+    "vscode": "^1.86.0"
   },
   "categories": [
     "Programming Languages"
@@ -67,17 +67,26 @@
       }
     ]
   },
+  "main": "./dist/extension.cjs",
+  "activationEvents": [
+    "onLanguage:galfus"
+  ],
   "type": "module",
   "scripts": {
+    "compile": "bun build ./src/extension.ts --outfile=./dist/extension.cjs --external vscode --format=cjs --target=node",
     "check": "bun check:types && bun check:extension",
     "check:types": "tsc --noEmit",
     "check:extension": "bun scripts/check.ts",
-    "dev": "code --extensionDevelopmentPath=\"$(pwd)\" --new-window \"$(realpath ../../examples/project)\"",
+    "dev": "bun compile && code --extensionDevelopmentPath=\"$(pwd)\" --new-window \"$(realpath ../../examples/project)\"",
     "pkg:ls": "vsce ls --tree",
-    "pkg": "bun check && bun scripts/pack.ts"
+    "pkg": "bun compile && bun check && bun scripts/pack.ts"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^10.1.0"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",
+    "@types/vscode": "^1.86.0",
     "@vscode/vsce": "^3.9.2",
     "typescript": "^7.0.2"
   }

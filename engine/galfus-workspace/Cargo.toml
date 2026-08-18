@@ -11,5 +11,10 @@ galfus-core = { path = "../galfus-core" }
 galfus-frontend = { path = "../galfus-frontend" }
 galfus-contract = { path = "../galfus-contract" }
 galfus-runtime = { path = "../galfus-runtime" }
-serde = { workspace = true }
-toml = { workspace = true }
+serde.workspace = true
+postcard.workspace = true
+serde_json.workspace = true
+lsp-types = "0.95"
+toml.workspace = true
+
+[dev-dependencies]
