@@ -27,16 +27,40 @@ As the user types in the code editor, you must update the files loaded in the vi
 playground.setSource("src/main.gfs", editor.getValue());
 ```
 
-### 3. Validation and Compilation (Real Time)
+### 3. Language Server Protocol (LSP) Integration
 
-To display error messages and red squiggles in real time, call `check()` after every `setSource()` or `setConfig()` update. A successful check is required before `compile()` can generate and cache the binary.
+For advanced editor integrations (like CodeMirror or Monaco), you don't need to manually poll for diagnostics using `check()`. The `Playground` exposes a fully standard LSP router via `handleLspMessage()`. You can hook this up to your editor's document change listeners to get real-time diagnostics, hover tooltips, and more, directly via JSON-RPC.
+
+```javascript
+// Example of sending an LSP request to the WASM backend
+const responses = playground.handleLspMessage(JSON.stringify({
+  jsonrpc: "2.0",
+  method: "textDocument/didChange",
+  params: {
+    textDocument: { uri: "galfus://virtual/src/main.gfs", version: 2 },
+    contentChanges: [{ text: editor.getValue() }]
+  }
+}));
+
+// The backend returns an array of JSON string responses/notifications
+for (const json of responses) {
+  const msg = JSON.parse(json);
+  if (msg.method === "textDocument/publishDiagnostics") {
+    // Map the standard LSP diagnostics to your web editor!
+    console.log(msg.params.diagnostics);
+  }
+}
+```
+
+### 4. Validation and Compilation (Manual Workflow)
+
+If you are not using the LSP integration, you can manually trigger validation and compilation. To display error messages, call `check()` after every `setSource()` or `setConfig()` update. A successful check is required before `compile()` can generate and cache the binary.
 
 ```javascript
 const checkResult = JSON.parse(playground.check());
 
 if (!checkResult.is_valid) {
     console.error("Validation errors:", checkResult.diagnostics);
-    // Render the formatted diagnostics in the editor.
     return;
 }
 
