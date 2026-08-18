@@ -1,12 +1,22 @@
 mod compile;
 mod diagnostics;
 mod init;
+mod upgrade;
 mod workspace;
 
 use std::process;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+
+#[derive(Debug, Clone, ValueEnum)]
+pub enum ReleaseTag {
+    Alpha,
+    Beta,
+    Stable,
+    Next,
+    Latest,
+}
 
 #[derive(Debug, Parser)]
 #[command(name = "galfus")]
@@ -38,6 +48,10 @@ enum Command {
         #[arg(short, long, default_value = "fastest")]
         profile: String,
     },
+    Upgrade {
+        #[arg(short, long, default_value = "latest")]
+        tag: ReleaseTag,
+    },
 }
 
 fn main() -> Result<()> {
@@ -55,5 +69,6 @@ fn main() -> Result<()> {
             out,
             profile,
         } => compile::run_compile(&workspace, target, out, &profile),
+        Command::Upgrade { tag } => upgrade::run_upgrade(tag),
     }
 }
