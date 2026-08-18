@@ -1,0 +1,26 @@
+changelog:
+  exclude:
+    labels:
+      - changelog:internal
+      - chore
+    authors:
+      - dependabot
+  categories:
+    - title: "💥 Breaking Changes"
+      labels:
+        - changelog:breaking
+    - title: "🚀 Features"
+      labels:
+        - changelog:feature
+    - title: "🐛 Bug Fixes"
+      labels:
+        - changelog:fix
+    - title: "🏎️ Performance Improvements"
+      labels:
+        - changelog:performance
+    - title: "📚 Documentation"
+      labels:
+        - changelog:docs
+    - title: "🛠️ Refactors & Maintenance"
+      labels:
+        - changelog:refactor
