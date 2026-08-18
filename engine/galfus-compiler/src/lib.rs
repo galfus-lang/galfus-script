@@ -1,3 +1,7 @@
+#![allow(clippy::result_large_err)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::too_many_arguments)]
+
 pub mod bytecode_emission;
 pub mod compile;
 pub mod gfp;

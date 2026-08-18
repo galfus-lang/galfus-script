@@ -147,19 +147,17 @@ impl VirtualKernel {
 
     pub fn unblock(&mut self, id: ThreadId) -> Result<bool, galfus_contract::ExecutionFailureKind> {
         let (was_blocked, had_timer) = self.blocked.unblock(id);
-        if was_blocked {
-            if let Some(thread) = self.registry.take(id) {
-                thread
-                    .global_quota()
-                    .lock()
-                    .unwrap()
-                    .release_pending_states(1);
-                if had_timer {
-                    thread.global_quota().lock().unwrap().release_timers(1);
-                }
-                self.enqueue_runnable(id, thread)?;
-                return Ok(true);
+        if was_blocked && let Some(thread) = self.registry.take(id) {
+            thread
+                .global_quota()
+                .lock()
+                .unwrap()
+                .release_pending_states(1);
+            if had_timer {
+                thread.global_quota().lock().unwrap().release_timers(1);
             }
+            self.enqueue_runnable(id, thread)?;
+            return Ok(true);
         }
         Ok(false)
     }

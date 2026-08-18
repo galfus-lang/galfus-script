@@ -28,11 +28,11 @@ impl HostProvider for NativeIoProvider {
     ) {
         match name {
             "io_write" => {
-                if let Some(BoundaryValue::Bytes(bytes)) = args.get(0) {
-                    if let Ok(text) = std::str::from_utf8(bytes) {
-                        print!("{}", text);
-                        let _ = std::io::stdout().flush();
-                    }
+                if let Some(BoundaryValue::Bytes(bytes)) = args.first()
+                    && let Ok(text) = std::str::from_utf8(bytes)
+                {
+                    print!("{}", text);
+                    let _ = std::io::stdout().flush();
                 }
 
                 let _ = injector.inject_system_response(

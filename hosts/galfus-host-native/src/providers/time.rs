@@ -8,6 +8,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct NativeTimeProvider;
 
+impl Default for NativeTimeProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NativeTimeProvider {
     pub fn new() -> Self {
         Self

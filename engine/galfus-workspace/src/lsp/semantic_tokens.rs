@@ -47,21 +47,19 @@ pub fn semantic_tokens_full(workspace: &Workspace, path: &str) -> Option<Semanti
                     current = parents.get(&curr).copied();
                 }
 
-                if let Some(sym_id) = symbol_id {
-                    if let Some(symbol) = resolution.symbol(sym_id) {
-                        if let Some((token_type, token_modifiers)) = map_symbol_kind(symbol.kind())
-                        {
-                            let span = node.span();
-                            if let Some(start_rc) = source.row_col(span.start()) {
-                                raw_tokens.push(Token {
-                                    line: (start_rc.row - 1) as u32,
-                                    start_char: (start_rc.column - 1) as u32,
-                                    length: (span.len()) as u32,
-                                    token_type,
-                                    token_modifiers,
-                                });
-                            }
-                        }
+                if let Some(sym_id) = symbol_id
+                    && let Some(symbol) = resolution.symbol(sym_id)
+                    && let Some((token_type, token_modifiers)) = map_symbol_kind(symbol.kind())
+                {
+                    let span = node.span();
+                    if let Some(start_rc) = source.row_col(span.start()) {
+                        raw_tokens.push(Token {
+                            line: (start_rc.row - 1) as u32,
+                            start_char: (start_rc.column - 1) as u32,
+                            length: (span.len()) as u32,
+                            token_type,
+                            token_modifiers,
+                        });
                     }
                 }
             }

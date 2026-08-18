@@ -18,6 +18,12 @@ bytecode-format-version = "2.0.0"
 boundary-abi-version = "1.0.0"
 numeric-semantics-version = "1.0.0"
 
+[workspace.lints.clippy]
+result_large_err = "allow"
+type_complexity = "allow"
+too_many_arguments = "allow"
+large_enum_variant = "allow"
+
 [workspace.dependencies]
 # Serialization / binary data format
 serde = { version = "1.0", features = ["derive", "rc"] }

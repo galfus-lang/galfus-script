@@ -21,42 +21,33 @@ impl Orchestrator {
                 func_idx,
                 args,
                 arg_types,
-            } => {
-                return self.start_galfus_function_activation(
-                    thread_id, thread, future_id, module_id, func_idx, args, arg_types,
-                );
-            }
+            } => self.start_galfus_function_activation(
+                thread_id, thread, future_id, module_id, func_idx, args, arg_types,
+            ),
             Activation::Provider {
                 alias, name, args, ..
-            } => {
-                return self
-                    .start_provider_activation(thread_id, thread, future_id, alias, name, args);
-            }
+            } => self.start_provider_activation(thread_id, thread, future_id, alias, name, args),
             Activation::Adapter {
                 proxy_module,
                 symbol,
                 args,
                 ..
-            } => {
-                return self.start_adapter_activation(
-                    thread_id,
-                    thread,
-                    future_id,
-                    proxy_module,
-                    symbol,
-                    args,
-                );
-            }
-            Activation::Internal { operation, args } => {
-                return self.start_internal_activation(
-                    thread_id,
-                    thread,
-                    future_id,
-                    operation,
-                    args,
-                    aggregate_registration,
-                );
-            }
+            } => self.start_adapter_activation(
+                thread_id,
+                thread,
+                future_id,
+                proxy_module,
+                symbol,
+                args,
+            ),
+            Activation::Internal { operation, args } => self.start_internal_activation(
+                thread_id,
+                thread,
+                future_id,
+                operation,
+                args,
+                aggregate_registration,
+            ),
         }
     }
 
@@ -85,7 +76,7 @@ impl Orchestrator {
             .module;
 
         let mut vm_args = Vec::with_capacity(args.len());
-        for (boundary, expected_ty) in args.into_iter().zip(arg_types.into_iter()) {
+        for (boundary, expected_ty) in args.into_iter().zip(arg_types) {
             let vm_val = match crate::task::encode_into_thread_heap(
                 &mut worker_thread.heap,
                 boundary,

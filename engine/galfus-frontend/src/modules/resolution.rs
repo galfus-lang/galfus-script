@@ -7,7 +7,7 @@ pub fn is_resolvable_import(
     source.starts_with("./")
         || source.starts_with("../")
         || is_builtin_module(source)
-        || catalog.map_or(false, |c| c.is_provider_module(source))
+        || catalog.is_some_and(|c| c.is_provider_module(source))
 }
 
 pub fn is_relative_import(source: &str) -> bool {
@@ -25,7 +25,7 @@ pub fn resolve_relative_import(
     source: &str,
     catalog: Option<&galfus_contract::CapabilityCatalog>,
 ) -> Option<ModulePath> {
-    if is_builtin_module(source) || catalog.map_or(false, |c| c.is_provider_module(source)) {
+    if is_builtin_module(source) || catalog.is_some_and(|c| c.is_provider_module(source)) {
         return ModulePath::new(format!("{source}.gfs").as_str());
     }
 

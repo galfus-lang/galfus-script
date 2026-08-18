@@ -496,7 +496,7 @@ impl RunnableTask for RuntimeTask {
                         result: result.clone(),
                     });
                 }
-                return ThreadResult::Completed(result);
+                ThreadResult::Completed(result)
             }
             galfus_vm::VmStep::Suspend {
                 effect,

@@ -173,22 +173,23 @@ impl<'a> DeclarationTypeChecker<'a> {
             .layer
             .symbol_type(symbol)
             .or_else(|| {
-                if let Some(symbol_data) = resolution.symbol(symbol) {
-                    if symbol_data.kind() == SymbolKind::ImportNamespace {
-                        let ty = self.layer.table_mut().intern(TypeKind::Named { symbol });
-                        self.layer.bind_symbol_type(symbol, ty);
-                        return Some(ty);
-                    }
+                if let Some(symbol_data) = resolution.symbol(symbol)
+                    && symbol_data.kind() == SymbolKind::ImportNamespace
+                {
+                    let ty = self.layer.table_mut().intern(TypeKind::Named { symbol });
+                    self.layer.bind_symbol_type(symbol, ty);
+                    return Some(ty);
                 }
                 self.infer_unbound_symbol_type(symbol)
             })
             .map(|ty| self.apply_active_type_substitutions(ty));
 
-        if let Some(symbol_data) = resolution.symbol(symbol) {
-            if symbol_data.kind() == SymbolKind::Struct && self.is_opaque_struct_handle(symbol) {
-                self.report_opaque_handle_not_exportable_as_value(node);
-                return Some(self.layer.table_mut().error());
-            }
+        if let Some(symbol_data) = resolution.symbol(symbol)
+            && symbol_data.kind() == SymbolKind::Struct
+            && self.is_opaque_struct_handle(symbol)
+        {
+            self.report_opaque_handle_not_exportable_as_value(node);
+            return Some(self.layer.table_mut().error());
         }
 
         ty

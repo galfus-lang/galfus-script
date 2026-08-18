@@ -126,10 +126,10 @@ impl KernelDriver for NativeDriver {
     fn step(&self) -> ExecutorStepResult {
         // O `step` do driver tenta processar tarefas apenas da Main (já que Any está em background)
         if let Ok(task) = self.main_queue_rx.try_recv() {
-            if let KernelTask::Main(t) = task {
-                if let Some(res) = Self::run_main_task(t) {
-                    return res;
-                }
+            if let KernelTask::Main(t) = task
+                && let Some(res) = Self::run_main_task(t)
+            {
+                return res;
             }
             return ExecutorStepResult::Running;
         }

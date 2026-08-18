@@ -35,7 +35,7 @@ pub fn run_compile(
         .to_bytecode()
         .map_err(|error| anyhow::anyhow!("failed to encode bytecode: {:?}", error))?;
 
-    let resolved_target = target.unwrap_or_else(|| get_default_target());
+    let resolved_target = target.unwrap_or_else(get_default_target);
     let major = CURRENT_PRODUCER_VERSION.major;
     let minor = CURRENT_PRODUCER_VERSION.minor;
     let patch = CURRENT_PRODUCER_VERSION.patch;
@@ -46,7 +46,7 @@ pub fn run_compile(
         .context("Could not determine home directory")?
         .join(".galfus")
         .join("hosts")
-        .join(&tag)
+        .join(tag)
         .join(&version_str);
 
     fs::create_dir_all(&cache_dir).context("failed to create cache directory")?;
@@ -57,7 +57,7 @@ pub fn run_compile(
         compile_web(
             &cache_dir,
             &version_str,
-            &tag,
+            tag,
             profile,
             out,
             bytecode,
@@ -67,7 +67,7 @@ pub fn run_compile(
         compile_native(
             &cache_dir,
             &version_str,
-            &tag,
+            tag,
             profile,
             &resolved_target,
             out,

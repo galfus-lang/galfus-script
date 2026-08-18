@@ -345,10 +345,10 @@ pub(super) fn import_target_index(
 ) -> Option<usize> {
     let direct_path = galfus_core::ModulePath::new(source)
         .or_else(|| galfus_core::ModulePath::new(format!("{source}.gfs").as_str()));
-    if let Some(target) = direct_path {
-        if let Some(index) = modules.iter().position(|module| module.path() == &target) {
-            return Some(index);
-        }
+    if let Some(target) = direct_path
+        && let Some(index) = modules.iter().position(|module| module.path() == &target)
+    {
+        return Some(index);
     }
 
     let target = galfus_frontend::modules::resolution::resolve_relative_import(

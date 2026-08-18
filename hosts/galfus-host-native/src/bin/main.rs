@@ -20,27 +20,23 @@ fn main() {
         use std::io::{Read, Seek, SeekFrom};
         if let Ok(metadata) = file.metadata() {
             let file_size = metadata.len();
-            if file_size >= 16 {
-                if file.seek(SeekFrom::End(-16)).is_ok() {
-                    let mut size_buf = [0u8; 8];
-                    let mut magic_buf = [0u8; 8];
+            if file_size >= 16 && file.seek(SeekFrom::End(-16)).is_ok() {
+                let mut size_buf = [0u8; 8];
+                let mut magic_buf = [0u8; 8];
 
-                    if file.read_exact(&mut size_buf).is_ok()
-                        && file.read_exact(&mut magic_buf).is_ok()
+                if file.read_exact(&mut size_buf).is_ok()
+                    && file.read_exact(&mut magic_buf).is_ok()
+                    && &magic_buf == MAGIC_MARKER
+                {
+                    let payload_size = u64::from_le_bytes(size_buf);
+                    if file_size >= 16 + payload_size
+                        && file
+                            .seek(SeekFrom::End(-(16 + payload_size as i64)))
+                            .is_ok()
                     {
-                        if &magic_buf == MAGIC_MARKER {
-                            let payload_size = u64::from_le_bytes(size_buf);
-                            if file_size >= 16 + payload_size {
-                                if file
-                                    .seek(SeekFrom::End(-(16 + payload_size as i64)))
-                                    .is_ok()
-                                {
-                                    let mut buf = vec![0u8; payload_size as usize];
-                                    if file.read_exact(&mut buf).is_ok() {
-                                        package_bytes = Some(buf);
-                                    }
-                                }
-                            }
+                        let mut buf = vec![0u8; payload_size as usize];
+                        if file.read_exact(&mut buf).is_ok() {
+                            package_bytes = Some(buf);
                         }
                     }
                 }

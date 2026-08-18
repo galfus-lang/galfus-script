@@ -39,7 +39,7 @@ impl HostProvider for WebIoProvider {
     ) {
         match name {
             "io_write" => {
-                let bytes = if let Some(BoundaryValue::Bytes(b)) = args.get(0) {
+                let bytes = if let Some(BoundaryValue::Bytes(b)) = args.first() {
                     b.clone()
                 } else {
                     Vec::new()
@@ -52,7 +52,7 @@ impl HostProvider for WebIoProvider {
                     wasm_bindgen_futures::spawn_local(async move {
                         let promise = writer.write_with_chunk(&js_bytes);
                         let _ = JsFuture::from(promise).await;
-                        let _ = writer.release_lock();
+                        writer.release_lock();
 
                         let _ = injector.inject_system_response(
                             thread_id,
@@ -81,19 +81,19 @@ impl HostProvider for WebIoProvider {
                         let promise = reader.read();
                         let mut result_bytes = Vec::new();
 
-                        if let Ok(js_result) = JsFuture::from(promise).await {
-                            if let Ok(value) = js_sys::Reflect::get(
+                        if let Ok(js_result) = JsFuture::from(promise).await
+                            && let Ok(value) = js_sys::Reflect::get(
                                 &js_result,
                                 &wasm_bindgen::JsValue::from_str("value"),
-                            ) {
-                                if !value.is_undefined() && !value.is_null() {
-                                    let uint8_arr = js_sys::Uint8Array::new(&value);
-                                    result_bytes = uint8_arr.to_vec();
-                                }
-                            }
+                            )
+                            && !value.is_undefined()
+                            && !value.is_null()
+                        {
+                            let uint8_arr = js_sys::Uint8Array::new(&value);
+                            result_bytes = uint8_arr.to_vec();
                         }
 
-                        let _ = reader.release_lock();
+                        reader.release_lock();
 
                         let _ = injector.inject_system_response(
                             thread_id,

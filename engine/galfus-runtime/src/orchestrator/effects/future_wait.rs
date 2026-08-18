@@ -73,10 +73,8 @@ impl Orchestrator {
         if let crate::orchestrator::future_registry::WaitDisposition::Resolved { waiter, result } =
             disposition
         {
-            if aggregate_registration.is_none() {
-                if !self.block_or_fail(thread_id, thread) {
-                    return;
-                }
+            if aggregate_registration.is_none() && !self.block_or_fail(thread_id, thread) {
+                return;
             }
             self.resume_pending(
                 thread_id,
@@ -128,11 +126,7 @@ impl Orchestrator {
                 return;
             }
         }
-        if aggregate_registration.is_none() {
-            if !self.block_or_fail(thread_id, thread) {
-                return;
-            }
-        }
+        if aggregate_registration.is_none() && !self.block_or_fail(thread_id, thread) {}
     }
 
     pub(super) fn block_or_fail(

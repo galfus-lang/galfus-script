@@ -34,7 +34,7 @@ impl HostProvider for NativeEnvProvider {
     ) {
         match name {
             "env_get" | "env_has" => {
-                let key = match args.get(0) {
+                let key = match args.first() {
                     Some(BoundaryValue::Bytes(bytes)) => match std::str::from_utf8(bytes) {
                         Ok(k) => k,
                         Err(_) => {

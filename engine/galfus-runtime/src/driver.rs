@@ -43,6 +43,12 @@ pub struct NativeEventBridge {
     limit: Mutex<usize>,
 }
 
+impl Default for NativeEventBridge {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NativeEventBridge {
     pub fn new() -> Self {
         Self::with_capacity(LimitsMetadata::default().max_event_queue)

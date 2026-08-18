@@ -169,7 +169,12 @@ path = "src/main.gfs"
     let response_val: Value = serde_json::from_str(&responses[0]).unwrap();
     assert_eq!(response_val["id"], 3);
     assert!(!response_val["result"].is_null());
-    assert!(response_val["result"]["data"].as_array().unwrap().len() > 0);
+    assert!(
+        !response_val["result"]["data"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]

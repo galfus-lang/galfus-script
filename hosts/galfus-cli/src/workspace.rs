@@ -123,16 +123,18 @@ fn load_source_file(file: &Path) -> Result<Workspace> {
 
     let mut workspace = workspace_with_native_catalog();
 
-    let mut manifest = galfus_workspace::WorkspaceManifest::default();
-    manifest.module = Some(galfus_workspace::ModuleManifest {
-        name: Some("single-file".to_string()),
-        target: Some("app".to_string()),
+    let manifest = galfus_workspace::WorkspaceManifest {
+        module: Some(galfus_workspace::ModuleManifest {
+            name: Some("single-file".to_string()),
+            target: Some("app".to_string()),
+            ..Default::default()
+        }),
+        entry: Some(galfus_workspace::EntryManifest {
+            path: Some(module_path.to_string()),
+            ..Default::default()
+        }),
         ..Default::default()
-    });
-    manifest.entry = Some(galfus_workspace::EntryManifest {
-        path: Some(module_path.to_string()),
-        ..Default::default()
-    });
+    };
 
     if let LoadResult::Diagnostics(diagnostics) = workspace
         .load_manifest(manifest)

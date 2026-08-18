@@ -52,21 +52,22 @@ fn execution_manifest_matches_cli_behavior() {
                 case.name, case.exit_code,
             ));
         }
-        if let Some(expected_stdout) = case.stdout {
-            if stdout != expected_stdout {
-                failures.push(format!(
-                    "{}: expected stdout `{expected_stdout:?}`, got `{stdout:?}`",
-                    case.name,
-                ));
-            }
+        if let Some(expected_stdout) = case.stdout
+            && stdout != expected_stdout
+        {
+            failures.push(format!(
+                "{}: expected stdout `{expected_stdout:?}`, got `{stdout:?}`",
+                case.name,
+            ));
         }
-        if let Some(expected_diagnostic) = case.diagnostic {
-            if !stdout.contains(&expected_diagnostic) && !stderr.contains(&expected_diagnostic) {
-                failures.push(format!(
+        if let Some(expected_diagnostic) = case.diagnostic
+            && !stdout.contains(&expected_diagnostic)
+            && !stderr.contains(&expected_diagnostic)
+        {
+            failures.push(format!(
                     "{}: missing diagnostic `{expected_diagnostic}`\nstdout:\n{stdout}\nstderr:\n{stderr}",
                     case.name,
                 ));
-            }
         }
     }
 

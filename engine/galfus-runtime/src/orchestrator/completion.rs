@@ -221,12 +221,12 @@ impl Orchestrator {
                 return;
             }
         };
-        if let (Some(proxy_module), Ok(value)) = (adapter_proxy_module, &result) {
-            if let Err(error) = self.register_adapter_handles(&proxy_module, value) {
-                self.failure = Some(error.with_thread_id(thread_id).with_future_id(future_id));
-                self.kernel.cancel(thread_id);
-                return;
-            }
+        if let (Some(proxy_module), Ok(value)) = (adapter_proxy_module, &result)
+            && let Err(error) = self.register_adapter_handles(&proxy_module, value)
+        {
+            self.failure = Some(error.with_thread_id(thread_id).with_future_id(future_id));
+            self.kernel.cancel(thread_id);
+            return;
         }
         for waiter in waiters {
             let waiter_thread_id = waiter.continuation.thread_id;

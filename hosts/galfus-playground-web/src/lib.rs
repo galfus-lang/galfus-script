@@ -34,16 +34,18 @@ impl Playground {
             .expect("the built-in std/io provider catalog is valid"),
         );
         workspace.set_catalog(catalog);
-        let mut manifest = galfus_workspace::WorkspaceManifest::default();
-        manifest.module = Some(galfus_workspace::config::ModuleManifest {
-            name: Some("playground".to_string()),
-            target: Some("app".to_string()),
+        let manifest = galfus_workspace::WorkspaceManifest {
+            module: Some(galfus_workspace::config::ModuleManifest {
+                name: Some("playground".to_string()),
+                target: Some("app".to_string()),
+                ..Default::default()
+            }),
+            entry: Some(galfus_workspace::config::EntryManifest {
+                path: Some("src/main.gfs".to_string()),
+                ..Default::default()
+            }),
             ..Default::default()
-        });
-        manifest.entry = Some(galfus_workspace::config::EntryManifest {
-            path: Some("src/main.gfs".to_string()),
-            ..Default::default()
-        });
+        };
 
         workspace
             .load_manifest(manifest)

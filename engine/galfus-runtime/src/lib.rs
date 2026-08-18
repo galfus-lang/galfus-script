@@ -3,6 +3,11 @@
 //! See the Runtime Ownership Matrix in the Architecture Reference (`docs/Galfus_Architecture_Reference.md`)
 //! for authoritative details on the lifecycle and ownership of runtime entities.
 
+#![allow(clippy::result_large_err)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::large_enum_variant)]
+
 pub mod driver;
 pub mod event;
 pub mod execution;

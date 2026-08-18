@@ -153,10 +153,10 @@ impl<'a> DeclarationTypeChecker<'a> {
         }
 
         if let Some(import_id) = resolution.import_for_symbol(struct_symbol) {
-            if let Some(import_record) = resolution.import(import_id) {
-                if import_record.source().ends_with(".gfp") {
-                    return true;
-                }
+            if let Some(import_record) = resolution.import(import_id)
+                && import_record.source().ends_with(".gfp")
+            {
+                return true;
             }
         } else if self.source.name().ends_with(".gfp") {
             return true;

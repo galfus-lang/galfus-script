@@ -68,42 +68,33 @@ pub fn goto_definition(workspace: &Workspace, path: &str, position: Position) ->
     if matches!(
         symbol.kind(),
         SymbolKind::ImportBinding | SymbolKind::ImportNamespace
-    ) {
-        if let Some(import_id) = resolution.import_for_symbol(symbol.id()) {
-            if let Some(import_record) = resolution.import(import_id) {
-                let imported_name = import_record.imported_name();
-                let source_path = import_record.source();
+    ) && let Some(import_id) = resolution.import_for_symbol(symbol.id())
+        && let Some(import_record) = resolution.import(import_id)
+    {
+        let imported_name = import_record.imported_name();
+        let source_path = import_record.source();
 
-                // Find matching import edge
-                let edge = semantic_graph.import_edges().iter().find(|e| {
-                    e.from() == module_id
-                        && e.source() == source_path
-                        && e.imported_name() == imported_name
-                });
+        // Find matching import edge
+        let edge = semantic_graph.import_edges().iter().find(|e| {
+            e.from() == module_id && e.source() == source_path && e.imported_name() == imported_name
+        });
 
-                if let Some(e) = edge {
-                    if let Some(to_module_id) = e.to() {
-                        let to_module = semantic_graph.get(to_module_id)?;
-                        let to_resolution = to_module.graph().resolution()?;
+        if let Some(e) = edge
+            && let Some(to_module_id) = e.to()
+        {
+            let to_module = semantic_graph.get(to_module_id)?;
+            let to_resolution = to_module.graph().resolution()?;
 
-                        if let Some(export_name) = e.export_name() {
-                            if let Some(export_id) = to_resolution.export_by_name(export_name) {
-                                if let Some(export_record) = to_resolution.export_record(export_id)
-                                {
-                                    let dec_node = export_record.declaration();
-                                    return node_location(workspace, to_module, dec_node);
-                                }
-                            }
-                        } else if symbol.kind() == SymbolKind::ImportNamespace {
-                            // Point to the root of the file
-                            return node_location(
-                                workspace,
-                                to_module,
-                                to_module.graph().syntax().root()?,
-                            );
-                        }
-                    }
+            if let Some(export_name) = e.export_name() {
+                if let Some(export_id) = to_resolution.export_by_name(export_name)
+                    && let Some(export_record) = to_resolution.export_record(export_id)
+                {
+                    let dec_node = export_record.declaration();
+                    return node_location(workspace, to_module, dec_node);
                 }
+            } else if symbol.kind() == SymbolKind::ImportNamespace {
+                // Point to the root of the file
+                return node_location(workspace, to_module, to_module.graph().syntax().root()?);
             }
         }
     }
