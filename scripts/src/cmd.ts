@@ -25,6 +25,8 @@ const dev = program.command('dev').description('Development workflows');
 
 import { devVscode } from './dev/vscode';
 
+import { devCodemirror } from './dev/codemirror';
+
 setup
   .command('extension')
   .description('Install the local editor extension')
@@ -37,6 +39,11 @@ dev
   .command('vscode')
   .description('Build the local CLI and launch VS Code in extension development mode')
   .action(devVscode);
+
+dev
+  .command('codemirror')
+  .description('Build and serve the WASM LSP wrapped in a local CodeMirror instance')
+  .action(devCodemirror);
 
 playground
   .command('build')

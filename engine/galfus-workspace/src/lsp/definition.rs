@@ -147,7 +147,7 @@ pub(crate) fn node_location(
         Url::parse(&format!("galfus://virtual/{}", path)).ok()?
     } else if let Some(root) = &workspace.root_path {
         let full_path = root.join(path);
-        Url::from_file_path(full_path).ok()?
+        crate::lsp::file_path_to_uri(&full_path).ok()?
     } else {
         Url::parse(&format!("file:///{}", path)).ok()?
     };

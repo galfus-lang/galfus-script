@@ -95,6 +95,16 @@ impl WasmPlayground {
         }
     }
 
+    #[wasm_bindgen(js_name = handleLspMessage)]
+    pub fn handle_lsp_message(&mut self, message: &str) -> js_sys::Array {
+        let responses = self.playground.get_workspace().handle_lsp_message(message);
+        let array = js_sys::Array::new();
+        for response in responses {
+            array.push(&JsValue::from_str(&response));
+        }
+        array
+    }
+
     #[wasm_bindgen(js_name = start)]
     pub async fn start(&mut self, options: js_sys::Object) -> Result<JsValue, JsValue> {
         // Aborta qualquer execução anterior que ainda esteja rodando

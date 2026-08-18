@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Galfus WASM LSP CodeMirror Test</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: system-ui, sans-serif;
+        background: #1e1e1e;
+        color: #d4d4d4;
+      }
+      header {
+        padding: 10px 20px;
+        background: #252526;
+        border-bottom: 1px solid #3c3c3c;
+      }
+      main {
+        height: calc(100vh - 42px);
+      }
+      .cm-editor {
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <header>Galfus LSP Playground</header>
+    <main id="editor"></main>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

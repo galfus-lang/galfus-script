@@ -16,13 +16,39 @@ use lsp_types::{
 use rpc::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 use serde_json::Value;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn uri_to_file_path(uri: &lsp_types::Url) -> Result<std::path::PathBuf, ()> {
+    uri.to_file_path()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn uri_to_file_path(uri: &lsp_types::Url) -> Result<std::path::PathBuf, ()> {
+    Ok(std::path::PathBuf::from(uri.path()))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn file_path_to_uri(path: &std::path::Path) -> Result<lsp_types::Url, ()> {
+    lsp_types::Url::from_file_path(path)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn file_path_to_uri(path: &std::path::Path) -> Result<lsp_types::Url, ()> {
+    let s = path.to_string_lossy();
+    let s = if s.starts_with('/') {
+        s.to_string()
+    } else {
+        format!("/{}", s)
+    };
+    lsp_types::Url::parse(&format!("file://{}", s)).map_err(|_| ())
+}
+
 impl Workspace {
     fn uri_to_module_path(&self, uri: &lsp_types::Url) -> Option<String> {
         if uri.scheme() == "galfus" && uri.host_str() == Some("virtual") {
             return Some(uri.path().trim_start_matches('/').to_string());
         }
 
-        if let Ok(file_path) = uri.to_file_path() {
+        if let Ok(file_path) = uri_to_file_path(uri) {
             if let Some(root) = &self.root_path {
                 let root_path = root.canonicalize().unwrap_or_else(|_| root.clone());
                 let canonical_file = file_path
@@ -83,7 +109,7 @@ impl Workspace {
                             .and_then(|folders| folders.first().map(|f| f.uri.clone()));
 
                         if let Some(uri) = root_uri {
-                            if let Ok(file_path) = uri.to_file_path() {
+                            if let Ok(file_path) = uri_to_file_path(&uri) {
                                 self.root_path = Some(file_path.clone());
                                 let manifest_path = file_path.join("galfus.toml");
                                 if let Ok(manifest_str) = std::fs::read_to_string(manifest_path) {
