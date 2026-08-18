@@ -1,14 +1,17 @@
 #[cfg(test)]
 mod tests;
 
+pub mod definition;
 pub mod diagnostics;
 pub mod hover;
 pub mod rpc;
+pub mod semantic_tokens;
 
 use crate::workspace::Workspace;
 use galfus_core::{ModulePath, SourceFile};
 use lsp_types::{
-    DidChangeTextDocumentParams, DidOpenTextDocumentParams, HoverParams, PublishDiagnosticsParams,
+    DidChangeTextDocumentParams, DidOpenTextDocumentParams, GotoDefinitionParams, HoverParams,
+    PublishDiagnosticsParams, SemanticTokensParams,
 };
 use rpc::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 use serde_json::Value;
@@ -52,6 +55,24 @@ impl Workspace {
                     "capabilities": {
                         "hoverProvider": true,
                         "textDocumentSync": 1, // Full sync
+                        "definitionProvider": true,
+                        "semanticTokensProvider": {
+                            "legend": {
+                                "tokenTypes": [
+                                    "namespace", "type", "class", "enum", "interface",
+                                    "struct", "typeParameter", "parameter", "variable",
+                                    "property", "enumMember", "event", "function",
+                                    "method", "macro", "keyword", "modifier", "comment",
+                                    "string", "number", "regexp", "operator"
+                                ],
+                                "tokenModifiers": [
+                                    "declaration", "definition", "readonly", "static",
+                                    "deprecated", "abstract", "async", "modification",
+                                    "documentation", "defaultLibrary"
+                                ]
+                            },
+                            "full": true
+                        }
                     }
                 });
                 Some(JsonRpcResponse::success(id, result))
@@ -70,6 +91,41 @@ impl Workspace {
                             return Some(JsonRpcResponse::success(
                                 id,
                                 serde_json::to_value(hover).unwrap(),
+                            ));
+                        }
+                    }
+                }
+                Some(JsonRpcResponse::success(id, Value::Null))
+            }
+            "textDocument/definition" => {
+                if let Some(p) = params {
+                    if let Ok(def_params) = serde_json::from_value::<GotoDefinitionParams>(p) {
+                        let uri = &def_params.text_document_position_params.text_document.uri;
+                        let path_str = uri.path().trim_start_matches('/').to_string();
+                        if let Some(loc) = definition::goto_definition(
+                            self,
+                            &path_str,
+                            def_params.text_document_position_params.position,
+                        ) {
+                            return Some(JsonRpcResponse::success(
+                                id,
+                                serde_json::to_value(loc).unwrap(),
+                            ));
+                        }
+                    }
+                }
+                Some(JsonRpcResponse::success(id, Value::Null))
+            }
+            "textDocument/semanticTokens/full" => {
+                if let Some(p) = params {
+                    if let Ok(st_params) = serde_json::from_value::<SemanticTokensParams>(p) {
+                        let uri = &st_params.text_document.uri;
+                        let path_str = uri.path().trim_start_matches('/').to_string();
+                        if let Some(tokens) = semantic_tokens::semantic_tokens_full(self, &path_str)
+                        {
+                            return Some(JsonRpcResponse::success(
+                                id,
+                                serde_json::to_value(tokens).unwrap(),
                             ));
                         }
                     }

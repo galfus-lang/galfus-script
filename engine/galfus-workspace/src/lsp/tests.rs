@@ -118,9 +118,111 @@ path = "src/main.gfs"
     assert_eq!(response_val["id"], 2);
 
     // Hover response might be null if not found, but it should return Some Hover
-    // We expect it to not be null because we are over a valid node.
     assert!(
         !response_val["result"].is_null(),
         "Expected Hover response, got null"
     );
+}
+
+#[test]
+fn test_lsp_semantic_tokens() {
+    let mut workspace = Workspace::new();
+    let manifest_toml = r#"
+[module]
+name = "test"
+target = "app"
+[entry]
+path = "src/main.gfs"
+"#;
+    let manifest: crate::config::WorkspaceManifest = toml::from_str(manifest_toml).unwrap();
+    workspace.load_manifest(manifest).unwrap();
+
+    let open_req = json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didOpen",
+        "params": {
+            "textDocument": {
+                "uri": "file:///src/main.gfs",
+                "languageId": "galfus",
+                "version": 1,
+                "text": "fn main(): null { const x = 1 }"
+            }
+        }
+    })
+    .to_string();
+    let _ = workspace.handle_lsp_message(&open_req);
+
+    let tokens_req = json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "textDocument/semanticTokens/full",
+        "params": {
+            "textDocument": {
+                "uri": "file:///src/main.gfs"
+            }
+        }
+    })
+    .to_string();
+
+    let responses = workspace.handle_lsp_message(&tokens_req);
+    assert_eq!(responses.len(), 1);
+    let response_val: Value = serde_json::from_str(&responses[0]).unwrap();
+    assert_eq!(response_val["id"], 3);
+    assert!(!response_val["result"].is_null());
+    assert!(response_val["result"]["data"].as_array().unwrap().len() > 0);
+}
+
+#[test]
+fn test_lsp_goto_definition() {
+    let mut workspace = Workspace::new();
+    let manifest_toml = r#"
+[module]
+name = "test"
+target = "app"
+[entry]
+path = "src/main.gfs"
+"#;
+    let manifest: crate::config::WorkspaceManifest = toml::from_str(manifest_toml).unwrap();
+    workspace.load_manifest(manifest).unwrap();
+
+    let open_req = json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didOpen",
+        "params": {
+            "textDocument": {
+                "uri": "file:///src/main.gfs",
+                "languageId": "galfus",
+                "version": 1,
+                "text": "fn my_func(): null {} \n fn main(): null { my_func() }"
+            }
+        }
+    })
+    .to_string();
+    let _ = workspace.handle_lsp_message(&open_req);
+
+    let def_req = json!({
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "textDocument/definition",
+        "params": {
+            "textDocument": {
+                "uri": "file:///src/main.gfs"
+            },
+            "position": {
+                "line": 1,
+                "character": 22 // hovering over 'my_func' call
+            }
+        }
+    })
+    .to_string();
+
+    let responses = workspace.handle_lsp_message(&def_req);
+    assert_eq!(responses.len(), 1);
+    let response_val: Value = serde_json::from_str(&responses[0]).unwrap();
+    assert_eq!(response_val["id"], 4);
+    assert!(!response_val["result"].is_null());
+
+    // Check if location points to the declaration line 0
+    let loc = &response_val["result"];
+    assert_eq!(loc["range"]["start"]["line"], 0);
 }
