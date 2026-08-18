@@ -1,0 +1,35 @@
+import { println } from "std/io"
+
+fn configure(host: [u8], port: i32 = 8080, timeout: i32 = 3000): i32 {
+  // Just return a dummy computation to verify values were bound correctly
+  return port + timeout
+}
+
+export fn main(_args: [[u8]]): i32 {
+  // Call without any defaults missing (no wildcards)
+  const explicit = configure("localhost", 9000, 5000)
+  if explicit != 14000 { return 1 }
+
+  // Call omitting both trailing default arguments (no wildcards)
+  const omit_both = configure("localhost")
+  if omit_both != 11080 { return 2 }
+
+  // Call omitting just the last trailing default argument (no wildcards)
+  const omit_last = configure("localhost", 9000)
+  if omit_last != 12000 { return 3 }
+
+  // Call using wildcard for a middle parameter, but specifying the last
+  const wildcard_middle = configure("localhost", _, 5000)
+  if wildcard_middle != 13080 { return 4 }
+
+  // Call using wildcard for the last parameter (trailing wildcard)
+  const wildcard_last = configure("localhost", 9000, _)
+  if wildcard_last != 12000 { return 5 }
+
+  // Call using wildcard for all defaults (trailing wildcards)
+  const wildcard_all = configure("localhost", _, _)
+  if wildcard_all != 11080 { return 6 }
+
+  println("ok")
+  return 0
+}
