@@ -1,0 +1,23 @@
+import { println } from "std/io"
+import { now } from "std/time"
+import { concat } from "text"
+import { stringify } from "format"
+
+fn fib(n: i32): i32 {
+  if n <= 1 {
+    return n
+  }
+  return fib(n - 1) + fib(n - 2)
+}
+
+export fn main(_args: [[u8]]): i32 {
+  const start = now()
+  const result = fib(35)
+  const end = now()
+  
+  const elapsed = end - start
+  println(concat("RESULT=", stringify(result)))
+  println(concat("TIME_MS=", stringify(elapsed)))
+  
+  return 0
+}
