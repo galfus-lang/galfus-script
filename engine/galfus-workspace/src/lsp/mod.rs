@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 pub mod diagnostics;
 pub mod hover;
 pub mod rpc;

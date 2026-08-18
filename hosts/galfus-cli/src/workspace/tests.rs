@@ -119,6 +119,8 @@ fn run_project_spawns_a_thread_with_the_anchored_api() {
             "runner-thread-api-{}.gfs",
             NEXT_WORKSPACE_ID.fetch_add(1, Ordering::Relaxed)
         ));
+    fs::create_dir_all(source_path.parent().expect("temporary directory"))
+        .expect("temporary directory");
     fs::write(
         source_path.as_path(),
         r#"
