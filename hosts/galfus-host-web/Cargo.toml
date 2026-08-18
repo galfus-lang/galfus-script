@@ -34,3 +34,4 @@ multi_thread = []
 
 [dev-dependencies]
 galfus-workspace = { path = "../../engine/galfus-workspace" }
+toml.workspace = true

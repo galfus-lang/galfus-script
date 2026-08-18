@@ -93,11 +93,13 @@ pub fn load_workspace(root: &Path) -> Result<Workspace> {
     let root = root
         .canonicalize()
         .context("workspace root does not exist")?;
-    let config = fs::read(root.join("galfus.toml"))?;
+    let config_string = fs::read_to_string(root.join("galfus.toml"))?;
+    let manifest = toml::from_str::<galfus_workspace::WorkspaceManifest>(&config_string)
+        .context("invalid galfus.toml format")?;
 
     let mut workspace = workspace_with_native_catalog();
     if let LoadResult::Diagnostics(diagnostics) = workspace
-        .load_config(config.as_slice())
+        .load_manifest(manifest)
         .map_err(|error| anyhow::anyhow!("workspace configuration error: {error:?}"))?
     {
         bail!("workspace configuration failed: {diagnostics:?}");
@@ -120,11 +122,20 @@ fn load_source_file(file: &Path) -> Result<Workspace> {
     let source = fs::read(file.as_path())?;
 
     let mut workspace = workspace_with_native_catalog();
-    let config = format!(
-        "[module]\nname = \"single-file\"\ntarget = \"app\"\n[entry]\npath = \"{module_path}\"\n"
-    );
+
+    let mut manifest = galfus_workspace::WorkspaceManifest::default();
+    manifest.module = Some(galfus_workspace::ModuleManifest {
+        name: Some("single-file".to_string()),
+        target: Some("app".to_string()),
+        ..Default::default()
+    });
+    manifest.entry = Some(galfus_workspace::EntryManifest {
+        path: Some(module_path.to_string()),
+        ..Default::default()
+    });
+
     if let LoadResult::Diagnostics(diagnostics) = workspace
-        .load_config(config.as_bytes())
+        .load_manifest(manifest)
         .map_err(|error| anyhow::anyhow!("workspace configuration error: {error:?}"))?
     {
         bail!("workspace configuration failed: {diagnostics:?}");

@@ -5,14 +5,17 @@ use crate::state::{CompileBlocked, RunBlocked};
 fn workspace_package_loader_checks_and_compiles_its_loaded_sources() {
     let mut workspace = Workspace::new();
     workspace
-        .load_config(
-            br#"
+        .load_manifest(
+            toml::from_str(
+                r#"
             [module]
             name = "package-loader"
             target = "app"
             [entry]
             path = "main.gfs"
             "#,
+            )
+            .unwrap(),
         )
         .expect("valid configuration");
     workspace
@@ -33,8 +36,9 @@ fn workspace_package_loader_checks_and_compiles_its_loaded_sources() {
 fn check_includes_configured_entry_and_exports_as_semantic_roots() {
     let mut workspace = Workspace::new();
     workspace
-        .load_config(
-            br#"
+        .load_manifest(
+            toml::from_str(
+                r#"
             [module]
             name = "semantic-roots"
             target = "app"
@@ -44,6 +48,8 @@ fn check_includes_configured_entry_and_exports_as_semantic_roots() {
             [exports]
             library = "library.gfs"
             "#,
+            )
+            .unwrap(),
         )
         .expect("valid configuration");
     workspace
@@ -75,14 +81,17 @@ fn check_includes_configured_entry_and_exports_as_semantic_roots() {
 fn compile_emits_one_module_per_source_module_with_import_slots() {
     let mut workspace = Workspace::new();
     workspace
-        .load_config(
-            br#"
+        .load_manifest(
+            toml::from_str(
+                r#"
             [module]
             name = "module-images"
             target = "app"
             [entry]
             path = "main.gfs"
             "#,
+            )
+            .unwrap(),
         )
         .expect("valid configuration");
     workspace
@@ -154,14 +163,17 @@ fn check_accepts_imported_adapter_proxy_declarations() {
             .expect("demo catalog is valid");
     workspace.set_catalog(std::sync::Arc::new(catalog));
     workspace
-        .load_config(
-            br#"
+        .load_manifest(
+            toml::from_str(
+                r#"
             [module]
             name = "external-proxy"
             target = "app"
             [entry]
             path = "main.gfs"
             "#,
+            )
+            .unwrap(),
         )
         .expect("valid configuration");
     workspace
@@ -261,8 +273,9 @@ export fn(async) add(left: i32, right: i32): i32
 fn compile_updates_changed_modules_and_removes_deleted_modules() {
     let mut workspace = Workspace::new();
     workspace
-        .load_config(
-            br#"
+        .load_manifest(
+            toml::from_str(
+                r#"
             [module]
             name = "incremental-compile"
             target = "app"
@@ -272,6 +285,8 @@ fn compile_updates_changed_modules_and_removes_deleted_modules() {
             [exports]
             helper = "helper.gfs"
             "#,
+            )
+            .unwrap(),
         )
         .expect("valid configuration");
     workspace
@@ -370,14 +385,17 @@ fn compile_updates_changed_modules_and_removes_deleted_modules() {
 fn compile_rebuilds_only_changed_modules_and_transitive_dependents() {
     let mut workspace = Workspace::new();
     workspace
-        .load_config(
-            br#"
+        .load_manifest(
+            toml::from_str(
+                r#"
             [module]
             name = "dependent-compile"
             target = "app"
             [entry]
             path = "main.gfs"
             "#,
+            )
+            .unwrap(),
         )
         .expect("valid configuration");
     workspace
@@ -482,14 +500,17 @@ fn compile_removes_unreachable_modules() {
     let mut workspace = Workspace::new();
     assert!(matches!(
         workspace
-            .load_config(
-                br#"
+            .load_manifest(
+                toml::from_str(
+                    r#"
             [module]
             name = "test"
             target = "app"
             [entry]
             path = "main.gfs"
         "#
+                )
+                .unwrap()
             )
             .unwrap(),
         LoadResult::Success
@@ -531,14 +552,17 @@ fn run_requires_compile_and_executes_the_configured_entry() {
     ));
 
     workspace
-        .load_config(
-            br#"
+        .load_manifest(
+            toml::from_str(
+                r#"
             [module]
             name = "run-entry"
             target = "app"
             [entry]
             path = "main.gfs"
             "#,
+            )
+            .unwrap(),
         )
         .expect("valid configuration");
     workspace
@@ -573,14 +597,17 @@ fn run_rejects_a_missing_required_io_provider_before_execution() {
     let mut workspace = Workspace::new();
     workspace.set_catalog(io_catalog(galfus_contract::STD_IO_SOURCE));
     workspace
-        .load_config(
-            br#"
+        .load_manifest(
+            toml::from_str(
+                r#"
             [module]
             name = "missing-io-provider"
             target = "app"
             [entry]
             path = "main.gfs"
             "#,
+            )
+            .unwrap(),
         )
         .expect("valid configuration");
     workspace
@@ -636,7 +663,8 @@ fn compile_produces_identical_bytecode_regardless_of_module_load_order() {
 
     // Build workspace A: load in order main → math → ops
     let mut ws_a = Workspace::new();
-    ws_a.load_config(config).expect("valid configuration");
+    ws_a.load_manifest(toml::from_str(std::str::from_utf8(config).unwrap()).unwrap())
+        .expect("valid configuration");
     ws_a.load_module("main.gfs", main_src)
         .expect("valid main module");
     ws_a.load_module("math.gfs", math_src)
@@ -649,7 +677,8 @@ fn compile_produces_identical_bytecode_regardless_of_module_load_order() {
 
     // Build workspace B: load in reverse order ops → math → main
     let mut ws_b = Workspace::new();
-    ws_b.load_config(config).expect("valid configuration");
+    ws_b.load_manifest(toml::from_str(std::str::from_utf8(config).unwrap()).unwrap())
+        .expect("valid configuration");
     ws_b.load_module("ops.gfs", ops_src)
         .expect("valid ops module");
     ws_b.load_module("math.gfs", math_src)
@@ -732,7 +761,9 @@ fn package_is_reproducible_across_all_module_load_permutations() {
     for permutation in permutations {
         let mut workspace = Workspace::new();
         workspace.set_catalog(io_catalog(galfus_contract::STD_IO_SOURCE));
-        workspace.load_config(config).expect("valid configuration");
+        workspace
+            .load_manifest(toml::from_str(std::str::from_utf8(config).unwrap()).unwrap())
+            .expect("valid configuration");
         for index in permutation {
             let (path, source) = modules[index];
             workspace
@@ -776,14 +807,17 @@ pub(super) fn io_catalog(source: &str) -> std::sync::Arc<galfus_contract::Capabi
 fn workspace_importing_io() -> Workspace {
     let mut workspace = Workspace::new();
     workspace
-        .load_config(
-            br#"
+        .load_manifest(
+            toml::from_str(
+                r#"
             [module]
             name = "provider-catalog"
             target = "app"
             [entry]
             path = "main.gfs"
             "#,
+            )
+            .unwrap(),
         )
         .expect("valid configuration");
     workspace
@@ -879,14 +913,17 @@ fn compile_nullable_exports_with_nullable_boundary_type() {
     .expect("demo catalog is valid");
     workspace.set_catalog(std::sync::Arc::new(catalog));
     workspace
-        .load_config(
-            br#"
+        .load_manifest(
+            toml::from_str(
+                r#"
             [module]
             name = "nullable-test"
             target = "app"
             [entry]
             path = "main.gfs"
             "#,
+            )
+            .unwrap(),
         )
         .expect("valid configuration");
     workspace
@@ -965,14 +1002,17 @@ fn compiled_adapter_handles_are_qualified_and_do_not_collide() {
     .expect("adapter catalog is valid");
     workspace.set_catalog(std::sync::Arc::new(catalog));
     workspace
-        .load_config(
-            br#"
+        .load_manifest(
+            toml::from_str(
+                r#"
             [module]
             name = "qualified-handles"
             target = "app"
             [entry]
             path = "main.gfs"
             "#,
+            )
+            .unwrap(),
         )
         .expect("valid configuration");
     workspace

@@ -96,14 +96,12 @@ impl Workspace {
         }
     }
 
-    pub fn load_config(&mut self, config_toml: &[u8]) -> Result<LoadResult, WorkspaceError> {
-        let text = match str::from_utf8(config_toml) {
-            Ok(t) => t,
-            Err(_) => return Err(WorkspaceError::MissingConfiguration),
-        };
-
+    pub fn load_manifest(
+        &mut self,
+        manifest: crate::config::WorkspaceManifest,
+    ) -> Result<LoadResult, WorkspaceError> {
         let mut diagnostics = DiagnosticBag::new();
-        if let Some(config) = parse_workspace_config(text, &mut diagnostics) {
+        if let Some(config) = parse_workspace_config(manifest, &mut diagnostics) {
             self.config = Some(config);
             self.mark_dirty();
             Ok(LoadResult::Success)
@@ -133,7 +131,6 @@ impl Workspace {
         };
         self.frontend_snapshot = None;
 
-        // Mark compile stale when check is invalidated.
         if let CompileState::Ready {
             semantic_revision,
             package,
@@ -144,5 +141,9 @@ impl Workspace {
                 package: Arc::clone(package),
             };
         }
+    }
+
+    pub fn frontend_snapshot(&self) -> Option<&FrontendSnapshot> {
+        self.frontend_snapshot.as_ref()
     }
 }

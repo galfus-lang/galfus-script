@@ -34,16 +34,30 @@ impl Playground {
             .expect("the built-in std/io provider catalog is valid"),
         );
         workspace.set_catalog(catalog);
+        let mut manifest = galfus_workspace::WorkspaceManifest::default();
+        manifest.module = Some(galfus_workspace::config::ModuleManifest {
+            name: Some("playground".to_string()),
+            target: Some("app".to_string()),
+            ..Default::default()
+        });
+        manifest.entry = Some(galfus_workspace::config::EntryManifest {
+            path: Some("src/main.gfs".to_string()),
+            ..Default::default()
+        });
+
         workspace
-            .load_config(PLAYGROUND_CONFIG.as_bytes())
+            .load_manifest(manifest)
             .expect("the built-in playground configuration is valid");
         Self { workspace }
     }
 
-    pub fn set_config(&mut self, config: &[u8]) -> Result<()> {
+    pub fn set_config(&mut self, config_json: &[u8]) -> Result<()> {
+        let manifest: galfus_workspace::WorkspaceManifest = serde_json::from_slice(config_json)
+            .map_err(|error| anyhow::anyhow!("invalid playground json configuration: {error:?}"))?;
+
         match self
             .workspace
-            .load_config(config)
+            .load_manifest(manifest)
             .map_err(|error| anyhow::anyhow!("playground configuration error: {error:?}"))?
         {
             LoadResult::Success => Ok(()),
@@ -86,6 +100,3 @@ impl Playground {
         &mut self.workspace
     }
 }
-
-pub const PLAYGROUND_CONFIG: &str =
-    "[module]\nname = \"playground\"\ntarget = \"app\"\n[entry]\npath = \"src/main.gfs\"\n";

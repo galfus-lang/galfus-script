@@ -117,58 +117,58 @@ impl WorkspaceConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct RawWorkspaceConfig {
-    module: Option<RawModuleConfig>,
-    entry: Option<RawEntryConfig>,
-    compile: Option<RawCompileConfig>,
-    limits: Option<RawLimitsConfig>,
+#[derive(Debug, Deserialize, Default)]
+pub struct WorkspaceManifest {
+    pub module: Option<ModuleManifest>,
+    pub entry: Option<EntryManifest>,
+    pub compile: Option<CompileManifest>,
+    pub limits: Option<LimitsManifest>,
 
     #[serde(default)]
-    exports: BTreeMap<String, String>,
+    pub exports: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct RawModuleConfig {
-    name: Option<String>,
-    version: Option<String>,
-    author: Option<String>,
-    email: Option<String>,
-    description: Option<String>,
-    target: Option<String>,
+#[derive(Debug, Deserialize, Default)]
+pub struct ModuleManifest {
+    pub name: Option<String>,
+    pub version: Option<String>,
+    pub author: Option<String>,
+    pub email: Option<String>,
+    pub description: Option<String>,
+    pub target: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct RawEntryConfig {
-    path: Option<String>,
-    function: Option<String>,
-    args: Option<Vec<String>>,
+#[derive(Debug, Deserialize, Default)]
+pub struct EntryManifest {
+    pub path: Option<String>,
+    pub function: Option<String>,
+    pub args: Option<Vec<String>>,
 }
 
-#[derive(Debug, Deserialize)]
-struct RawCompileConfig {
-    target: Option<String>,
-    arch: Option<String>,
-    profile: Option<String>,
+#[derive(Debug, Deserialize, Default)]
+pub struct CompileManifest {
+    pub target: Option<String>,
+    pub arch: Option<String>,
+    pub profile: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-struct RawLimitsConfig {
-    max_heap_objects: Option<usize>,
-    max_heap_bytes: Option<usize>,
-    max_call_depth: Option<usize>,
-    max_threads: Option<usize>,
-    max_futures: Option<usize>,
-    max_pending_requests: Option<usize>,
-    max_mailbox_messages: Option<usize>,
-    max_mailbox_bytes: Option<usize>,
-    max_event_queue: Option<usize>,
-    max_kernel_tasks: Option<usize>,
-    max_runnable_threads: Option<usize>,
-    max_external_handles: Option<usize>,
-    max_timers: Option<usize>,
-    max_pending_states: Option<usize>,
+pub struct LimitsManifest {
+    pub max_heap_objects: Option<usize>,
+    pub max_heap_bytes: Option<usize>,
+    pub max_call_depth: Option<usize>,
+    pub max_threads: Option<usize>,
+    pub max_futures: Option<usize>,
+    pub max_pending_requests: Option<usize>,
+    pub max_mailbox_messages: Option<usize>,
+    pub max_mailbox_bytes: Option<usize>,
+    pub max_event_queue: Option<usize>,
+    pub max_kernel_tasks: Option<usize>,
+    pub max_runnable_threads: Option<usize>,
+    pub max_external_handles: Option<usize>,
+    pub max_timers: Option<usize>,
+    pub max_pending_states: Option<usize>,
 }
 
 macro_rules! apply_limit {
@@ -188,21 +188,9 @@ macro_rules! apply_limit {
 }
 
 pub(super) fn parse_workspace_config(
-    text: &str,
+    raw: WorkspaceManifest,
     diagnostics: &mut DiagnosticBag,
 ) -> Option<WorkspaceConfig> {
-    let raw = match toml::from_str::<RawWorkspaceConfig>(text) {
-        Ok(raw) => raw,
-        Err(error) => {
-            diagnostics.push(Diagnostic::error_with_message(
-                WorkspaceDiagnosticCode::InvalidConfig,
-                format!("invalid galfus.toml: {error}"),
-                workspace_span(),
-            ));
-            return None;
-        }
-    };
-
     let Some(module) = raw.module else {
         diagnostics.push(Diagnostic::error(
             WorkspaceDiagnosticCode::MissingModuleTable,

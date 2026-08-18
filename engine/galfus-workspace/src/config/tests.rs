@@ -13,7 +13,7 @@ fn test_default_limits_are_applied_when_not_specified() {
         path = "main.gfs"
     "#;
     let mut diagnostics = DiagnosticBag::new();
-    let config = parse_workspace_config(toml, &mut diagnostics);
+    let config = parse_workspace_config(toml::from_str(toml).unwrap(), &mut diagnostics);
     assert!(
         !diagnostics.has_errors(),
         "Diagnostics: {:?}",
@@ -49,7 +49,7 @@ fn test_overrides_are_applied() {
         max_heap_bytes = 888
     "#;
     let mut diagnostics = DiagnosticBag::new();
-    let config = parse_workspace_config(toml, &mut diagnostics);
+    let config = parse_workspace_config(toml::from_str(toml).unwrap(), &mut diagnostics);
     assert!(
         !diagnostics.has_errors(),
         "Diagnostics: {:?}",
@@ -81,7 +81,7 @@ fn test_zero_limit_is_rejected() {
         max_threads = 0
     "#;
     let mut diagnostics = DiagnosticBag::new();
-    let _ = parse_workspace_config(toml, &mut diagnostics);
+    let _ = parse_workspace_config(toml::from_str(toml).unwrap(), &mut diagnostics);
     assert!(diagnostics.has_errors());
     let errors = diagnostics.into_vec();
     assert_eq!(
@@ -104,17 +104,12 @@ fn test_negative_limit_is_rejected_as_invalid_config() {
         [limits]
         max_threads = -1
     "#;
-    let mut diagnostics = DiagnosticBag::new();
-    let _ = parse_workspace_config(toml, &mut diagnostics);
-    assert!(diagnostics.has_errors());
-    let errors = diagnostics.into_vec();
-    assert_eq!(
-        errors[0].code().as_str(),
-        WorkspaceDiagnosticCode::InvalidConfig.as_code()
-    );
+    let result = toml::from_str::<WorkspaceManifest>(toml);
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
     assert!(
-        errors[0].message().contains("invalid value: integer `-1`")
-            || errors[0].message().contains("invalid type: integer")
+        err_msg.contains("invalid value: integer `-1`")
+            || err_msg.contains("invalid type: integer")
     );
 }
 
@@ -132,17 +127,8 @@ fn test_unknown_key_is_rejected_as_invalid_config() {
         [limits]
         unknown_limit = 100
     "#;
-    let mut diagnostics = DiagnosticBag::new();
-    let _ = parse_workspace_config(toml, &mut diagnostics);
-    assert!(diagnostics.has_errors());
-    let errors = diagnostics.into_vec();
-    assert_eq!(
-        errors[0].code().as_str(),
-        WorkspaceDiagnosticCode::InvalidConfig.as_code()
-    );
-    assert!(
-        errors[0]
-            .message()
-            .contains("unknown field `unknown_limit`")
-    );
+    let result = toml::from_str::<WorkspaceManifest>(toml);
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(err_msg.contains("unknown field `unknown_limit`"));
 }

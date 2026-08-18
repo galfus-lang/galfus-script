@@ -26,7 +26,7 @@ let mut workspace = Workspace::new();
 
 // Load workspace configuration defining module target and entry points
 assert!(matches!(
-    workspace.load_config(br#"
+    workspace.load_manifest(toml::from_str(r#"
         [module]
         name = "embedded-app"
         target = "app"
@@ -34,7 +34,7 @@ assert!(matches!(
 
         [run]
         entry = "main"
-    "#)?,
+    "#).unwrap())?,
     LoadResult::Success
 ));
 

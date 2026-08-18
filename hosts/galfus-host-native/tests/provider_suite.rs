@@ -11,8 +11,9 @@ fn compile_fixture(source: &str) -> Arc<galfus_bytecode::PackageImage> {
     let mut workspace = Workspace::new();
     workspace.set_catalog(Arc::new(native_catalog()));
     workspace
-        .load_config(
-            br#"
+        .load_manifest(
+            toml::from_str(
+                r#"
             [module]
             name = "host-native-provider-suite"
             target = "app"
@@ -20,6 +21,8 @@ fn compile_fixture(source: &str) -> Arc<galfus_bytecode::PackageImage> {
             [entry]
             path = "main.gfs"
             "#,
+            )
+            .unwrap(),
         )
         .expect("fixture configuration is valid");
     workspace
