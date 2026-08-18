@@ -87,12 +87,11 @@ pub fn compile_changed_modules(
         mir_modules[module_index] = Some(mir);
 
         for (module_id, specialized) in ws_ctx.state.specialised_functions.iter() {
-            if !specialized.is_empty() {
-                if let Some(target_index) = modules.iter().position(|m| m.id() == *module_id) {
-                    if affected_modules.insert(target_index) {
-                        pending_modules.push(target_index);
-                    }
-                }
+            if !specialized.is_empty()
+                && let Some(target_index) = modules.iter().position(|m| m.id() == *module_id)
+                && affected_modules.insert(target_index)
+            {
+                pending_modules.push(target_index);
             }
         }
     }
@@ -113,7 +112,6 @@ pub fn compile_changed_modules(
             .append(&mut specialized);
     }
     let specialized_targets = ws_ctx.state.specialised_id_to_target.clone();
-    drop(ws_ctx);
 
     // Phase 2: Compile each module independently.
     let mut outputs = Vec::new();

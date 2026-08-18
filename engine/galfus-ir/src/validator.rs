@@ -449,12 +449,7 @@ fn validate_basic_block(
         }
         mir::Terminator::Return(None) => {}
         mir::Terminator::Jump { target: _, args: _ } => {}
-        mir::Terminator::Branch {
-            cond,
-            true_args: _,
-            false_args: _,
-            ..
-        } => {
+        mir::Terminator::Branch { cond, .. } => {
             validate_operand(cond, func, initialized, errors);
         }
         mir::Terminator::Panic(_) => {}

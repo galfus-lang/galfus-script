@@ -317,8 +317,10 @@ pub(super) fn execution_drops_orchestrator_and_sets_failed_state_on_error() {
 
 #[test]
 pub(super) fn max_kernel_tasks_exhaustion_cancels_thread() {
-    let mut limits = galfus_contract::LimitsMetadata::default();
-    limits.max_kernel_tasks = 0; // Trigger exhaustion immediately
+    let limits = galfus_contract::LimitsMetadata {
+        max_kernel_tasks: 0, // Trigger exhaustion immediately
+        ..Default::default()
+    };
     let quota = Arc::new(Mutex::new(galfus_vm::quota::GlobalQuota::new(
         limits.clone(),
     )));
@@ -350,8 +352,10 @@ pub(super) fn max_kernel_tasks_exhaustion_cancels_thread() {
 
 #[test]
 pub(super) fn max_runnable_threads_exhaustion_cancels_thread_on_unblock() {
-    let mut limits = galfus_contract::LimitsMetadata::default();
-    limits.max_runnable_threads = 0; // Trigger exhaustion immediately
+    let limits = galfus_contract::LimitsMetadata {
+        max_runnable_threads: 0, // Trigger exhaustion immediately
+        ..Default::default()
+    };
     let quota = Arc::new(Mutex::new(galfus_vm::quota::GlobalQuota::new(
         limits.clone(),
     )));
@@ -385,8 +389,10 @@ pub(super) fn max_runnable_threads_exhaustion_cancels_thread_on_unblock() {
 
 #[test]
 pub(super) fn max_timers_exhaustion_fails_to_block() {
-    let mut limits = galfus_contract::LimitsMetadata::default();
-    limits.max_timers = 0; // Trigger exhaustion immediately
+    let limits = galfus_contract::LimitsMetadata {
+        max_timers: 0, // Trigger exhaustion immediately
+        ..Default::default()
+    };
     let quota = Arc::new(Mutex::new(galfus_vm::quota::GlobalQuota::new(
         limits.clone(),
     )));

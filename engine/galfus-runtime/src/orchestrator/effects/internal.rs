@@ -160,12 +160,12 @@ impl Orchestrator {
                         },
                     )?;
                     let msg = mailbox.remove(index);
-                    if let Some(ref m) = msg {
-                        if let Some(target_quota) = self.kernel.get_thread_quota(thread_id) {
-                            let mut tq = target_quota.lock().unwrap();
-                            tq.release_mailbox_messages(1);
-                            tq.release_mailbox_bytes(m.data.len());
-                        }
+                    if let Some(ref m) = msg
+                        && let Some(target_quota) = self.kernel.get_thread_quota(thread_id)
+                    {
+                        let mut tq = target_quota.lock().unwrap();
+                        tq.release_mailbox_messages(1);
+                        tq.release_mailbox_bytes(m.data.len());
                     }
                     msg
                 });
@@ -273,7 +273,7 @@ impl Orchestrator {
             }
             "__internal_thread_sleep" => {
                 let ms = args
-                    .get(0)
+                    .first()
                     .and_then(|v| match v {
                         BoundaryValue::I32(m) if *m >= 0 => Some(*m as u64),
                         BoundaryValue::I64(m) if *m >= 0 => Some(*m as u64),
@@ -427,10 +427,8 @@ impl Orchestrator {
             }
         };
         if let Some(result) = immediate {
-            if aggregate_registration.is_none() {
-                if !self.block_or_fail(thread_id, thread) {
-                    return None;
-                }
+            if aggregate_registration.is_none() && !self.block_or_fail(thread_id, thread) {
+                return None;
             }
             self.complete_future(thread_id, future_id, result);
             return None;

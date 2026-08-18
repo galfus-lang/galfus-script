@@ -174,10 +174,10 @@ impl ThreadRegistry {
         &mut self,
         id: ThreadId,
     ) -> Result<(), galfus_contract::ExecutionFailureKind> {
-        if let Some(tcb) = self.tcbs.get_mut(&id) {
-            if let Some(ref mut thread) = tcb.vm_state {
-                thread.mark_spawned()?;
-            }
+        if let Some(tcb) = self.tcbs.get_mut(&id)
+            && let Some(ref mut thread) = tcb.vm_state
+        {
+            thread.mark_spawned()?;
         }
         Ok(())
     }
@@ -191,11 +191,11 @@ impl ThreadRegistry {
     }
 
     pub fn mark_running(&mut self, id: ThreadId) -> bool {
-        if let Some(tcb) = self.tcbs.get_mut(&id) {
-            if !tcb.state.is_exited() {
-                tcb.state = ThreadState::Running;
-                return true;
-            }
+        if let Some(tcb) = self.tcbs.get_mut(&id)
+            && !tcb.state.is_exited()
+        {
+            tcb.state = ThreadState::Running;
+            return true;
         }
         false
     }
@@ -231,10 +231,10 @@ impl ThreadRegistry {
                 let Some(expired_id) = self.exited_order.pop_front() else {
                     break;
                 };
-                if let Some(expired) = self.tcbs.remove(&expired_id) {
-                    if let Some(key) = expired.key {
-                        self.keys.remove(&key);
-                    }
+                if let Some(expired) = self.tcbs.remove(&expired_id)
+                    && let Some(key) = expired.key
+                {
+                    self.keys.remove(&key);
                 }
             }
             return true;

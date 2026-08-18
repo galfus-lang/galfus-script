@@ -59,10 +59,9 @@ pub fn hover(workspace: &Workspace, path: &str, position: Position) -> Option<Ho
     if matches!(
         kind,
         galfus_frontend::SyntaxNodeKind::Identifier | galfus_frontend::SyntaxNodeKind::Path
-    ) {
-        if path_stack.len() >= 2 {
-            nodes_to_check.push(path_stack[path_stack.len() - 2]);
-        }
+    ) && path_stack.len() >= 2
+    {
+        nodes_to_check.push(path_stack[path_stack.len() - 2]);
     }
 
     for &node in &nodes_to_check {
@@ -73,22 +72,21 @@ pub fn hover(workspace: &Workspace, path: &str, position: Position) -> Option<Ho
         }
     }
 
-    if node_type_id.is_none() {
-        if let Some(resolution) = semantic_module.graph().resolution() {
-            for &node in &nodes_to_check {
-                if let Some(sym) = resolution
-                    .reference_symbol(node)
-                    .or_else(|| resolution.path_reference_symbol(node))
-                    .or_else(|| resolution.type_reference_symbol(node))
-                    .or_else(|| resolution.type_path_reference_symbol(node))
-                    .or_else(|| resolution.declaration_symbol(node))
-                {
-                    if let Some(tid) = type_result.layer().symbol_type(sym) {
-                        node_type_id = Some(tid);
-                        type_node = node;
-                        break;
-                    }
-                }
+    if node_type_id.is_none()
+        && let Some(resolution) = semantic_module.graph().resolution()
+    {
+        for &node in &nodes_to_check {
+            if let Some(sym) = resolution
+                .reference_symbol(node)
+                .or_else(|| resolution.path_reference_symbol(node))
+                .or_else(|| resolution.type_reference_symbol(node))
+                .or_else(|| resolution.type_path_reference_symbol(node))
+                .or_else(|| resolution.declaration_symbol(node))
+                && let Some(tid) = type_result.layer().symbol_type(sym)
+            {
+                node_type_id = Some(tid);
+                type_node = node;
+                break;
             }
         }
     }
@@ -169,7 +167,7 @@ pub fn hover(workspace: &Workspace, path: &str, position: Position) -> Option<Ho
 
     let current_node = type_node;
     let type_name = node_type_id
-        .map(|id| format_type(workspace, &snapshot, semantic_module, id))
+        .map(|id| format_type(workspace, snapshot, semantic_module, id))
         .unwrap_or_else(|| "<unknown>".to_string());
 
     let mut hover_text = format!(
@@ -179,42 +177,36 @@ pub fn hover(workspace: &Workspace, path: &str, position: Position) -> Option<Ho
     );
 
     // Try to find module origin for imported items
-    if syntax_graph.node(current_node)?.kind() == galfus_frontend::SyntaxNodeKind::Identifier
+    if (syntax_graph.node(current_node)?.kind() == galfus_frontend::SyntaxNodeKind::Identifier
         || syntax_graph.node(current_node)?.kind()
-            == galfus_frontend::SyntaxNodeKind::NameExpression
+            == galfus_frontend::SyntaxNodeKind::NameExpression)
+        && let Some(resolution) = semantic_module.graph().resolution()
     {
-        if let Some(resolution) = semantic_module.graph().resolution() {
-            let mut symbol_id = None;
-            for &node in &nodes_to_check {
-                if let Some(sym) = resolution
-                    .reference_symbol(node)
-                    .or_else(|| resolution.path_reference_symbol(node))
-                    .or_else(|| resolution.type_reference_symbol(node))
-                    .or_else(|| resolution.type_path_reference_symbol(node))
-                    .or_else(|| resolution.declaration_symbol(node))
-                {
-                    symbol_id = Some(sym);
-                    break;
-                }
+        let mut symbol_id = None;
+        for &node in &nodes_to_check {
+            if let Some(sym) = resolution
+                .reference_symbol(node)
+                .or_else(|| resolution.path_reference_symbol(node))
+                .or_else(|| resolution.type_reference_symbol(node))
+                .or_else(|| resolution.type_path_reference_symbol(node))
+                .or_else(|| resolution.declaration_symbol(node))
+            {
+                symbol_id = Some(sym);
+                break;
             }
+        }
 
-            if let Some(symbol_id) = symbol_id {
-                if let Some(symbol) = resolution.symbol(symbol_id) {
-                    use galfus_frontend::SymbolKind;
-                    if matches!(
-                        symbol.kind(),
-                        SymbolKind::ImportBinding | SymbolKind::ImportNamespace
-                    ) {
-                        if let Some(import_id) = resolution.import_for_symbol(symbol.id()) {
-                            if let Some(import_record) = resolution.import(import_id) {
-                                hover_text.push_str(&format!(
-                                    "\n\n**Origin**: `{}`",
-                                    import_record.source()
-                                ));
-                            }
-                        }
-                    }
-                }
+        if let Some(symbol_id) = symbol_id
+            && let Some(symbol) = resolution.symbol(symbol_id)
+        {
+            use galfus_frontend::SymbolKind;
+            if matches!(
+                symbol.kind(),
+                SymbolKind::ImportBinding | SymbolKind::ImportNamespace
+            ) && let Some(import_id) = resolution.import_for_symbol(symbol.id())
+                && let Some(import_record) = resolution.import(import_id)
+            {
+                hover_text.push_str(&format!("\n\n**Origin**: `{}`", import_record.source()));
             }
         }
     }
@@ -247,29 +239,24 @@ fn find_global_export_link(
     name: &str,
 ) -> Option<String> {
     for module in snapshot.semantic_graph().modules() {
-        if let Some(res) = module.graph().resolution() {
-            if let Some(export_id) = res.export_by_name(name) {
-                if let Some(record) = res.export_record(export_id) {
-                    if let Some(loc) = crate::lsp::definition::node_location(
-                        workspace,
-                        module,
-                        record.declaration(),
-                    ) {
-                        let uri = loc.uri;
-                        let line = loc.range.start.line + 1;
-                        let col = loc.range.start.character + 1;
+        if let Some(res) = module.graph().resolution()
+            && let Some(export_id) = res.export_by_name(name)
+            && let Some(record) = res.export_record(export_id)
+            && let Some(loc) =
+                crate::lsp::definition::node_location(workspace, module, record.declaration())
+        {
+            let uri = loc.uri;
+            let line = loc.range.start.line + 1;
+            let col = loc.range.start.character + 1;
 
-                        if uri.scheme() == "galfus" {
-                            let encoded_args = encode_command_args(uri.as_str(), line, col);
-                            return Some(format!(
-                                "[{}](command:galfus.openVirtual?{})",
-                                name, encoded_args
-                            ));
-                        } else {
-                            return Some(format!("[{}]({}#{},{})", name, uri, line, col));
-                        }
-                    }
-                }
+            if uri.scheme() == "galfus" {
+                let encoded_args = encode_command_args(uri.as_str(), line, col);
+                return Some(format!(
+                    "[{}](command:galfus.openVirtual?{})",
+                    name, encoded_args
+                ));
+            } else {
+                return Some(format!("[{}]({}#{},{})", name, uri, line, col));
             }
         }
     }

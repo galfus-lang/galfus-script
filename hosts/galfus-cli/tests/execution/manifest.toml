@@ -202,3 +202,10 @@ path = "diagnostics/types/unresolved_control_target.gfs"
 command = "check"
 exit_code = 1
 diagnostic = "T0049"
+
+[[case]]
+name = "functions with default parameters and wildcards"
+path = "cases/07_functions/default_parameters.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"

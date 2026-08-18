@@ -1,3 +1,7 @@
+#![allow(clippy::result_large_err)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::too_many_arguments)]
+
 pub mod driver;
 pub mod providers;
 use galfus_bytecode::PackageImage;
@@ -19,6 +23,12 @@ pub fn native_catalog() -> CapabilityCatalog {
 
 pub struct PackageLoader {
     // Defines paths and mechanisms to load dynamic libraries for adapters
+}
+
+impl Default for PackageLoader {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PackageLoader {

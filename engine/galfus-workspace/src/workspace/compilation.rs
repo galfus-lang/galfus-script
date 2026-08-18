@@ -262,16 +262,16 @@ impl Workspace {
                 }
             },
             Some(TypeKind::Named { symbol }) => {
-                if let Some(symbol_data) = resolution.symbol(*symbol) {
-                    if symbol_data.kind() == SymbolKind::Struct {
-                        let name = string_table.resolve(symbol_data.name()).ok_or_else(|| {
-                            "struct name is missing from the string table".to_string()
-                        })?;
-                        return Ok(BoundaryType::Handle {
-                            type_id: OpaqueTypeId::new(proxy_name, name)
-                                .expect("adapter proxy types have a module path and name"),
-                        });
-                    }
+                if let Some(symbol_data) = resolution.symbol(*symbol)
+                    && symbol_data.kind() == SymbolKind::Struct
+                {
+                    let name = string_table.resolve(symbol_data.name()).ok_or_else(|| {
+                        "struct name is missing from the string table".to_string()
+                    })?;
+                    return Ok(BoundaryType::Handle {
+                        type_id: OpaqueTypeId::new(proxy_name, name)
+                            .expect("adapter proxy types have a module path and name"),
+                    });
                 }
                 Err("named type is not supported by the boundary ABI".to_string())
             }

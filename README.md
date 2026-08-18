@@ -4,6 +4,8 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
+[![Latest Release](https://img.shields.io/github/v/release/galfus-lang/galfus-script?color=success&label=Release)](https://github.com/galfus-lang/galfus-script/releases)
+[![CI Status](https://img.shields.io/github/actions/workflow/status/galfus-lang/galfus-script/rust-ci.yml?branch=main&label=CI)](https://github.com/galfus-lang/galfus-script/actions/workflows/rust-ci.yml)
 
 > A typed scripting language with an in-memory bytecode graph and a Rust-hosted VM runtime.
 

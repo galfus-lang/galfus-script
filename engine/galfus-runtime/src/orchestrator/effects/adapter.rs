@@ -79,10 +79,7 @@ impl Orchestrator {
             self.kernel.cancel(thread_id);
             return None;
         }
-        let request_lease = match self.allocate_request_lease(thread_id, future_id, &thread) {
-            Some(lease) => lease,
-            None => return None,
-        };
+        let request_lease = self.allocate_request_lease(thread_id, future_id, &thread)?;
         if let Err(error) =
             self.future_registry
                 .assign_request_id(thread_id, future_id, request_lease.id)

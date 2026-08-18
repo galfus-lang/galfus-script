@@ -773,12 +773,11 @@ impl<'a> DeclarationTypeChecker<'a> {
         for child in syntax_node.children() {
             let mut current_item = *child;
 
-            if let Some(node) = self.graph.syntax().node(current_item) {
-                if node.kind() == SyntaxNodeKind::ExportItem {
-                    if let Some(inner) = node.first_child() {
-                        current_item = inner;
-                    }
-                }
+            if let Some(node) = self.graph.syntax().node(current_item)
+                && node.kind() == SyntaxNodeKind::ExportItem
+                && let Some(inner) = node.first_child()
+            {
+                current_item = inner;
             }
 
             let Some(item_node) = self.graph.syntax().node(current_item) else {

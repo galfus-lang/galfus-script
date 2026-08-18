@@ -325,10 +325,8 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                     return_type,
                                 );
 
-                                let func_idx = *self.ctx.function_map.get(func).expect(&format!(
-                                    "missing lowered function mapping for {:?} while emitting {} ({:?})",
-                                    func, self.func.name, self.func.id
-                                ));
+                                let func_idx = *self.ctx.function_map.get(func).unwrap_or_else(|| panic!("missing lowered function mapping for {:?} while emitting {} ({:?})",
+                                    func, self.func.name, self.func.id));
                                 self.instructions.push(Instruction::CreateFuture {
                                     dest: Reg(destination.raw() as u16),
                                     func: func_idx,
@@ -355,10 +353,8 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                             self.load_operand_to(arg_op, temp_regs[i]);
                         }
 
-                        let func_idx = *self.ctx.function_map.get(func).expect(&format!(
-                            "missing lowered function mapping for {:?} while emitting {} ({:?})",
-                            func, self.func.name, self.func.id
-                        ));
+                        let func_idx = *self.ctx.function_map.get(func).unwrap_or_else(|| panic!("missing lowered function mapping for {:?} while emitting {} ({:?})",
+                            func, self.func.name, self.func.id));
                         self.instructions.push(Instruction::Call {
                             dest: Reg(destination.raw() as u16),
                             func: func_idx,

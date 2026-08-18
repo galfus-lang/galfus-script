@@ -637,7 +637,7 @@ impl VirtualMachine {
             return Ok(value.clone());
         };
 
-        if let Some(copied_ref) = copied.get(&obj_ref) {
+        if let Some(copied_ref) = copied.get(obj_ref) {
             return Ok(Value::Object(*copied_ref));
         }
 
@@ -653,7 +653,7 @@ impl VirtualMachine {
         };
 
         copied
-            .get(&obj_ref)
+            .get(obj_ref)
             .copied()
             .map(Value::Object)
             .unwrap_or(Value::Null)

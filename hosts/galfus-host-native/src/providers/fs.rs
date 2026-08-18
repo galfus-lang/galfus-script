@@ -8,6 +8,12 @@ use std::sync::Arc;
 
 pub struct NativeFsProvider;
 
+impl Default for NativeFsProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NativeFsProvider {
     pub fn new() -> Self {
         Self
@@ -18,7 +24,7 @@ impl NativeFsProvider {
     }
 
     fn extract_path(args: &[BoundaryValue]) -> Result<String, ExecutionFailure> {
-        match args.get(0) {
+        match args.first() {
             Some(BoundaryValue::Bytes(bytes)) => match std::str::from_utf8(bytes) {
                 Ok(s) => Ok(Self::normalize_path(s)),
                 Err(_) => Err(ExecutionFailure::new(

@@ -868,10 +868,10 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     let u8_ty = table.primitive(PrimitiveType::Uint8);
                     for i in 0..table.len() {
                         let ty_id = TypeId::new(i as u32);
-                        if let Some(TypeKind::Array { element }) = table.kind(ty_id) {
-                            if *element == u8_ty {
-                                return ty_id;
-                            }
+                        if let Some(TypeKind::Array { element }) = table.kind(ty_id)
+                            && *element == u8_ty
+                        {
+                            return ty_id;
                         }
                     }
                 }
@@ -899,10 +899,10 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     let u8_ty = table.primitive(PrimitiveType::Uint8);
                     for i in 0..table.len() {
                         let ty_id = TypeId::new(i as u32);
-                        if let Some(TypeKind::Array { element }) = table.kind(ty_id) {
-                            if *element == u8_ty {
-                                return ty_id;
-                            }
+                        if let Some(TypeKind::Array { element }) = table.kind(ty_id)
+                            && *element == u8_ty
+                        {
+                            return ty_id;
                         }
                     }
                 }

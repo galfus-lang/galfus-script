@@ -46,9 +46,7 @@ pub fn convert_diagnostic(diagnostic: &Diagnostic, source: &SourceFile) -> LspDi
         .row_col(start_offset)
         .unwrap_or(RowCol { row: 1, column: 1 });
 
-    let end_row_col = source
-        .row_col(end_offset)
-        .unwrap_or_else(|| start_row_col.clone());
+    let end_row_col = source.row_col(end_offset).unwrap_or(start_row_col);
 
     let severity = match diagnostic.severity() {
         galfus_core::DiagnosticSeverity::Error => Some(LspDiagnosticSeverity::ERROR),

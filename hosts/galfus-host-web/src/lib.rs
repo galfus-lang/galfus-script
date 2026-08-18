@@ -1,3 +1,7 @@
+#![allow(clippy::result_large_err)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::too_many_arguments)]
+
 pub mod driver;
 pub mod providers;
 
@@ -16,7 +20,7 @@ use std::cell::RefCell;
 use wasm_bindgen_futures::JsFuture;
 
 thread_local! {
-    static CURRENT_EXECUTION: RefCell<Option<Rc<RefCell<Execution>>>> = RefCell::new(None);
+    static CURRENT_EXECUTION: RefCell<Option<Rc<RefCell<Execution>>>> = const { RefCell::new(None) };
 }
 
 #[wasm_bindgen]
@@ -124,45 +128,48 @@ pub async fn start(options: GalfusWebOptions) -> Result<JsValue, JsValue> {
         PackageImage::from_bytecode(&bytecode).map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     let mut args: Vec<Vec<u8>> = Vec::new();
-    if let Ok(args_val) = js_sys::Reflect::get(&options, &JsValue::from_str("args")) {
-        if !args_val.is_undefined() && !args_val.is_null() {
-            let js_args = js_sys::Array::from(&args_val);
-            for i in 0..js_args.length() {
-                if let Some(s) = js_args.get(i).as_string() {
-                    args.push(s.into_bytes());
-                }
+    if let Ok(args_val) = js_sys::Reflect::get(&options, &JsValue::from_str("args"))
+        && !args_val.is_undefined()
+        && !args_val.is_null()
+    {
+        let js_args = js_sys::Array::from(&args_val);
+        for i in 0..js_args.length() {
+            if let Some(s) = js_args.get(i).as_string() {
+                args.push(s.into_bytes());
             }
         }
     }
 
     let mut env_vars = std::collections::HashMap::new();
-    if let Ok(env_val) = js_sys::Reflect::get(&options, &JsValue::from_str("envs")) {
-        if !env_val.is_undefined() && !env_val.is_null() {
-            if let Ok(keys) = js_sys::Reflect::own_keys(&env_val) {
-                for i in 0..keys.length() {
-                    let key = keys.get(i);
-                    if let Ok(value) = js_sys::Reflect::get(&env_val, &key) {
-                        if let (Some(k), Some(v)) = (key.as_string(), value.as_string()) {
-                            env_vars.insert(k, v);
-                        }
-                    }
-                }
+    if let Ok(env_val) = js_sys::Reflect::get(&options, &JsValue::from_str("envs"))
+        && !env_val.is_undefined()
+        && !env_val.is_null()
+        && let Ok(keys) = js_sys::Reflect::own_keys(&env_val)
+    {
+        for i in 0..keys.length() {
+            let key = keys.get(i);
+            if let Ok(value) = js_sys::Reflect::get(&env_val, &key)
+                && let (Some(k), Some(v)) = (key.as_string(), value.as_string())
+            {
+                env_vars.insert(k, v);
             }
         }
     }
 
     let mut stdin_stream = None;
-    if let Ok(stdin_val) = js_sys::Reflect::get(&options, &JsValue::from_str("stdin")) {
-        if !stdin_val.is_undefined() && !stdin_val.is_null() {
-            stdin_stream = Some(web_sys::ReadableStream::from(stdin_val));
-        }
+    if let Ok(stdin_val) = js_sys::Reflect::get(&options, &JsValue::from_str("stdin"))
+        && !stdin_val.is_undefined()
+        && !stdin_val.is_null()
+    {
+        stdin_stream = Some(web_sys::ReadableStream::from(stdin_val));
     }
 
     let mut stdout_stream = None;
-    if let Ok(stdout_val) = js_sys::Reflect::get(&options, &JsValue::from_str("stdout")) {
-        if !stdout_val.is_undefined() && !stdout_val.is_null() {
-            stdout_stream = Some(web_sys::WritableStream::from(stdout_val));
-        }
+    if let Ok(stdout_val) = js_sys::Reflect::get(&options, &JsValue::from_str("stdout"))
+        && !stdout_val.is_undefined()
+        && !stdout_val.is_null()
+    {
+        stdout_stream = Some(web_sys::WritableStream::from(stdout_val));
     }
 
     let providers = Providers::new()
@@ -225,10 +232,10 @@ pub async fn start(options: GalfusWebOptions) -> Result<JsValue, JsValue> {
 
                 CURRENT_EXECUTION.with(|exec| {
                     let mut exec_opt = exec.borrow_mut();
-                    if let Some(e) = exec_opt.as_ref() {
-                        if Rc::ptr_eq(e, &exec_rc) {
-                            *exec_opt = None;
-                        }
+                    if let Some(e) = exec_opt.as_ref()
+                        && Rc::ptr_eq(e, &exec_rc)
+                    {
+                        *exec_opt = None;
                     }
                 });
 

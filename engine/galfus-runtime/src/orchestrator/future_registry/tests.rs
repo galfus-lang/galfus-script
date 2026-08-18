@@ -87,14 +87,16 @@ fn created_future_is_discarded_without_starting_its_activation() {
         .discard(owner(), galfus_core::FutureId::new(7))
         .unwrap();
 
-    assert!(matches!(
-        registry.take_activation_for_start(owner(), galfus_core::FutureId::new(7)),
-        Err(_)
-    ));
-    assert!(matches!(
-        registry.add_waiter(owner(), galfus_core::FutureId::new(7), waiter()),
-        Err(_)
-    ));
+    assert!(
+        registry
+            .take_activation_for_start(owner(), galfus_core::FutureId::new(7))
+            .is_err()
+    );
+    assert!(
+        registry
+            .add_waiter(owner(), galfus_core::FutureId::new(7), waiter())
+            .is_err()
+    );
 }
 
 #[test]
