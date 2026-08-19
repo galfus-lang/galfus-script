@@ -63,7 +63,7 @@ export async function buildHostPackages(options: BuildHostOptions): Promise<void
 
   const ext = rustTarget.includes('windows') ? '.exe' : '';
   const profileDir = cargoProfile === 'dev' ? 'debug' : cargoProfile;
-  const sourceBinary = join(repositoryRoot, 'target', rustTarget, profileDir, `main${ext}`);
+  const sourceBinary = join(repositoryRoot, 'target', rustTarget, profileDir, `galfus-host-native${ext}`);
 
   const buildDir = join(repositoryRoot, 'build');
   await mkdir(buildDir, { recursive: true });
