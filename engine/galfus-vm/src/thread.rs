@@ -202,26 +202,19 @@ impl VmThreadState {
         self.initializing_module
     }
 
-    pub fn read_reg(&self, reg: Reg) -> Result<Value, VmError> {
-        self.registers
-            .get(self.current_register_base + reg.raw() as usize)
-            .cloned()
-            .ok_or(VmError::RegisterOutOfBounds { reg })
+    pub fn read_reg(&self, reg: Reg) -> Value {
+        let idx = self.current_register_base + reg.raw() as usize;
+        unsafe { self.registers.get_unchecked(idx).clone() }
     }
 
-    pub fn write_reg(&mut self, reg: Reg, val: Value) -> Result<(), VmError> {
+    pub fn write_reg(&mut self, reg: Reg, val: Value) {
         let idx = self.current_register_base + reg.raw() as usize;
-        if idx < self.registers.len() {
-            if matches!(val, Value::Object(_)) {
-                self.current_frame_has_objects = true;
-            }
-            let old_val = std::mem::replace(&mut self.registers[idx], val);
-            if let Value::Object(obj_ref) = old_val {
-                let _ = self.heap.release_anchor(obj_ref);
-            }
-            Ok(())
-        } else {
-            Err(VmError::RegisterOutOfBounds { reg })
+        if matches!(val, Value::Object(_)) {
+            self.current_frame_has_objects = true;
+        }
+        let old_val = unsafe { std::mem::replace(self.registers.get_unchecked_mut(idx), val) };
+        if let Value::Object(obj_ref) = old_val {
+            let _ = self.heap.release_anchor(obj_ref);
         }
     }
 

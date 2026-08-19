@@ -272,12 +272,7 @@ impl VirtualMachine {
             ));
         }
         if let Some(dest) = continuation.dest {
-            thread.write_reg(dest, value).map_err(|error| {
-                galfus_contract::ExecutionFailure::new(
-                    galfus_contract::ExecutionFailureKind::InvalidContinuation,
-                    error.to_string(),
-                )
-            })?;
+            thread.write_reg(dest, value);
         }
         Ok(())
     }
@@ -626,9 +621,7 @@ impl VirtualMachine {
             let pc = frame.pc;
             frame.pc += 1;
             let slice = unsafe { &*frame.cached_instructions };
-            slice
-                .get(pc)
-                .ok_or(VmError::InstructionPointerOutOfBounds { pc })?
+            unsafe { slice.get_unchecked(pc) }
         };
         let step = match instr {
             Instruction::LoadConst { .. }

@@ -4,8 +4,8 @@ use super::*;
 
 macro_rules! impl_binary_op {
     ($self:expr, $thread:expr, $dest:expr, $lhs:expr, $rhs:expr, +) => {{
-        let lhs_val = $thread.read_reg($lhs)?;
-        let rhs_val = $thread.read_reg($rhs)?;
+        let lhs_val = $thread.read_reg($lhs);
+        let rhs_val = $thread.read_reg($rhs);
         let res = match (lhs_val, rhs_val) {
             (Value::Int8(l), Value::Int8(r)) => Value::Int8(l.wrapping_add(r)),
             (Value::Int16(l), Value::Int16(r)) => Value::Int16(l.wrapping_add(r)),
@@ -28,11 +28,11 @@ macro_rules! impl_binary_op {
                 });
             }
         };
-        $thread.write_reg($dest, res)?;
+        $thread.write_reg($dest, res);
     }};
     ($self:expr, $thread:expr, $dest:expr, $lhs:expr, $rhs:expr, -) => {{
-        let lhs_val = $thread.read_reg($lhs)?;
-        let rhs_val = $thread.read_reg($rhs)?;
+        let lhs_val = $thread.read_reg($lhs);
+        let rhs_val = $thread.read_reg($rhs);
         let res = match (lhs_val, rhs_val) {
             (Value::Int8(l), Value::Int8(r)) => Value::Int8(l.wrapping_sub(r)),
             (Value::Int16(l), Value::Int16(r)) => Value::Int16(l.wrapping_sub(r)),
@@ -55,11 +55,11 @@ macro_rules! impl_binary_op {
                 });
             }
         };
-        $thread.write_reg($dest, res)?;
+        $thread.write_reg($dest, res);
     }};
     ($self:expr, $thread:expr, $dest:expr, $lhs:expr, $rhs:expr, *) => {{
-        let lhs_val = $thread.read_reg($lhs)?;
-        let rhs_val = $thread.read_reg($rhs)?;
+        let lhs_val = $thread.read_reg($lhs);
+        let rhs_val = $thread.read_reg($rhs);
         let res = match (lhs_val, rhs_val) {
             (Value::Int8(l), Value::Int8(r)) => Value::Int8(l.wrapping_mul(r)),
             (Value::Int16(l), Value::Int16(r)) => Value::Int16(l.wrapping_mul(r)),
@@ -82,14 +82,14 @@ macro_rules! impl_binary_op {
                 });
             }
         };
-        $thread.write_reg($dest, res)?;
+        $thread.write_reg($dest, res);
     }};
 }
 
 macro_rules! impl_bitwise_op {
     ($self:expr, $thread:expr, $dest:expr, $lhs:expr, $rhs:expr, $op:tt) => {{
-        let lhs_val = $thread.read_reg($lhs)?;
-        let rhs_val = $thread.read_reg($rhs)?;
+        let lhs_val = $thread.read_reg($lhs);
+        let rhs_val = $thread.read_reg($rhs);
         let res = match (lhs_val, rhs_val) {
             (Value::Bool(l), Value::Bool(r)) => Value::Bool(l $op r),
             (Value::Int8(l), Value::Int8(r)) => Value::Int8(l $op r),
@@ -105,7 +105,7 @@ macro_rules! impl_bitwise_op {
                 found: format!("{:?} and {:?}", l, r),
             }),
         };
-        $thread.write_reg($dest, res)?;
+        $thread.write_reg($dest, res);
     }};
 }
 
@@ -127,8 +127,8 @@ impl VirtualMachine {
                 impl_binary_op!(self, thread, dest, lhs, rhs, *);
             }
             Instruction::Div { dest, lhs, rhs } => {
-                let lhs_val = thread.read_reg(lhs)?;
-                let rhs_val = thread.read_reg(rhs)?;
+                let lhs_val = thread.read_reg(lhs);
+                let rhs_val = thread.read_reg(rhs);
                 let res = match (lhs_val, rhs_val) {
                     (Value::Int8(l), Value::Int8(r)) => {
                         if r == 0 {
@@ -191,11 +191,11 @@ impl VirtualMachine {
                         });
                     }
                 };
-                thread.write_reg(dest, res)?;
+                thread.write_reg(dest, res);
             }
             Instruction::Rem { dest, lhs, rhs } => {
-                let lhs_val = thread.read_reg(lhs)?;
-                let rhs_val = thread.read_reg(rhs)?;
+                let lhs_val = thread.read_reg(lhs);
+                let rhs_val = thread.read_reg(rhs);
                 let res = match (lhs_val, rhs_val) {
                     (Value::Int8(l), Value::Int8(r)) => {
                         if r == 0 {
@@ -252,16 +252,16 @@ impl VirtualMachine {
                         });
                     }
                 };
-                thread.write_reg(dest, res)?;
+                thread.write_reg(dest, res);
             }
             Instruction::Pow { dest, lhs, rhs } => {
-                let lhs_val = thread.read_reg(lhs)?;
-                let rhs_val = thread.read_reg(rhs)?;
+                let lhs_val = thread.read_reg(lhs);
+                let rhs_val = thread.read_reg(rhs);
                 let res = self.pow_values(lhs_val, rhs_val)?;
-                thread.write_reg(dest, res)?;
+                thread.write_reg(dest, res);
             }
             Instruction::Neg { dest, src } => {
-                let val = thread.read_reg(src)?;
+                let val = thread.read_reg(src);
                 let res = match val {
                     Value::Int8(x) => Value::Int8(x.wrapping_neg()),
                     Value::Int16(x) => Value::Int16(x.wrapping_neg()),
@@ -276,10 +276,10 @@ impl VirtualMachine {
                         });
                     }
                 };
-                thread.write_reg(dest, res)?;
+                thread.write_reg(dest, res);
             }
             Instruction::Not { dest, src } => {
-                let val = thread.read_reg(src)?;
+                let val = thread.read_reg(src);
                 let res = match val {
                     Value::Bool(b) => Value::Bool(!b),
                     x => {
@@ -289,10 +289,10 @@ impl VirtualMachine {
                         });
                     }
                 };
-                thread.write_reg(dest, res)?;
+                thread.write_reg(dest, res);
             }
             Instruction::BitNot { dest, src } => {
-                let val = thread.read_reg(src)?;
+                let val = thread.read_reg(src);
                 let res = match val {
                     Value::Int8(x) => Value::Int8(!x),
                     Value::Int16(x) => Value::Int16(!x),
@@ -309,11 +309,11 @@ impl VirtualMachine {
                         });
                     }
                 };
-                thread.write_reg(dest, res)?;
+                thread.write_reg(dest, res);
             }
             Instruction::Shl { dest, lhs, rhs } => {
-                let lhs_val = thread.read_reg(lhs)?;
-                let rhs_val = thread.read_reg(rhs)?;
+                let lhs_val = thread.read_reg(lhs);
+                let rhs_val = thread.read_reg(rhs);
                 let shift = self.to_shift_amount(rhs_val)?;
                 let res = match lhs_val {
                     Value::Int8(l) => Value::Int8(l.wrapping_shl(shift)),
@@ -331,11 +331,11 @@ impl VirtualMachine {
                         });
                     }
                 };
-                thread.write_reg(dest, res)?;
+                thread.write_reg(dest, res);
             }
             Instruction::Shr { dest, lhs, rhs } => {
-                let lhs_val = thread.read_reg(lhs)?;
-                let rhs_val = thread.read_reg(rhs)?;
+                let lhs_val = thread.read_reg(lhs);
+                let rhs_val = thread.read_reg(rhs);
                 let shift = self.to_shift_amount(rhs_val)?;
                 let res = match lhs_val {
                     Value::Int8(l) => Value::Int8(l.wrapping_shr(shift)),
@@ -353,7 +353,7 @@ impl VirtualMachine {
                         });
                     }
                 };
-                thread.write_reg(dest, res)?;
+                thread.write_reg(dest, res);
             }
             Instruction::And { dest, lhs, rhs } => {
                 impl_bitwise_op!(self, thread, dest, lhs, rhs, &);
@@ -365,51 +365,51 @@ impl VirtualMachine {
                 impl_bitwise_op!(self, thread, dest, lhs, rhs, ^);
             }
             Instruction::Eq { dest, lhs, rhs } => {
-                let lhs_val = thread.read_reg(lhs)?;
-                let rhs_val = thread.read_reg(rhs)?;
-                thread.write_reg(dest, Value::Bool(lhs_val == rhs_val))?;
+                let lhs_val = thread.read_reg(lhs);
+                let rhs_val = thread.read_reg(rhs);
+                thread.write_reg(dest, Value::Bool(lhs_val == rhs_val));
             }
             Instruction::Ne { dest, lhs, rhs } => {
-                let lhs_val = thread.read_reg(lhs)?;
-                let rhs_val = thread.read_reg(rhs)?;
-                thread.write_reg(dest, Value::Bool(lhs_val != rhs_val))?;
+                let lhs_val = thread.read_reg(lhs);
+                let rhs_val = thread.read_reg(rhs);
+                thread.write_reg(dest, Value::Bool(lhs_val != rhs_val));
             }
             Instruction::Lt { dest, lhs, rhs } => {
-                let lhs_val = thread.read_reg(lhs)?;
-                let rhs_val = thread.read_reg(rhs)?;
+                let lhs_val = thread.read_reg(lhs);
+                let rhs_val = thread.read_reg(rhs);
                 let cmp = self.compare_values(&lhs_val, &rhs_val)?;
-                thread.write_reg(dest, Value::Bool(cmp.is_some_and(|o| o.is_lt())))?;
+                thread.write_reg(dest, Value::Bool(cmp.is_some_and(|o| o.is_lt())));
             }
             Instruction::Le { dest, lhs, rhs } => {
-                let lhs_val = thread.read_reg(lhs)?;
-                let rhs_val = thread.read_reg(rhs)?;
+                let lhs_val = thread.read_reg(lhs);
+                let rhs_val = thread.read_reg(rhs);
                 let cmp = self.compare_values(&lhs_val, &rhs_val)?;
-                thread.write_reg(dest, Value::Bool(cmp.is_some_and(|o| o.is_le())))?;
+                thread.write_reg(dest, Value::Bool(cmp.is_some_and(|o| o.is_le())));
             }
             Instruction::Gt { dest, lhs, rhs } => {
-                let lhs_val = thread.read_reg(lhs)?;
-                let rhs_val = thread.read_reg(rhs)?;
+                let lhs_val = thread.read_reg(lhs);
+                let rhs_val = thread.read_reg(rhs);
                 let cmp = self.compare_values(&lhs_val, &rhs_val)?;
-                thread.write_reg(dest, Value::Bool(cmp.is_some_and(|o| o.is_gt())))?;
+                thread.write_reg(dest, Value::Bool(cmp.is_some_and(|o| o.is_gt())));
             }
             Instruction::Ge { dest, lhs, rhs } => {
-                let lhs_val = thread.read_reg(lhs)?;
-                let rhs_val = thread.read_reg(rhs)?;
+                let lhs_val = thread.read_reg(lhs);
+                let rhs_val = thread.read_reg(rhs);
                 let cmp = self.compare_values(&lhs_val, &rhs_val)?;
-                thread.write_reg(dest, Value::Bool(cmp.is_some_and(|o| o.is_ge())))?;
+                thread.write_reg(dest, Value::Bool(cmp.is_some_and(|o| o.is_ge())));
             }
             Instruction::Fallback {
                 dest,
                 src,
                 fallback,
             } => {
-                let src_val = thread.read_reg(src)?;
-                let fallback_val = thread.read_reg(fallback)?;
+                let src_val = thread.read_reg(src);
+                let fallback_val = thread.read_reg(fallback);
                 let val = match src_val {
                     Value::Null => fallback_val,
                     _ => src_val,
                 };
-                thread.write_reg(dest, val)?;
+                thread.write_reg(dest, val);
             }
 
             _ => unreachable!("instruction routed to the wrong runtime handler"),

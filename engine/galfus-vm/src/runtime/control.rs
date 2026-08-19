@@ -19,7 +19,7 @@ impl VirtualMachine {
                 frame.pc = new_pc;
             }
             Instruction::JumpTrue { cond, offset } => {
-                let cond_val = thread.read_reg(cond)?;
+                let cond_val = thread.read_reg(cond);
                 match cond_val {
                     Value::Bool(b) => {
                         if b {
@@ -40,7 +40,7 @@ impl VirtualMachine {
                 }
             }
             Instruction::JumpFalse { cond, offset } => {
-                let cond_val = thread.read_reg(cond)?;
+                let cond_val = thread.read_reg(cond);
                 match cond_val {
                     Value::Bool(b) => {
                         if !b {
@@ -61,7 +61,7 @@ impl VirtualMachine {
                 }
             }
             Instruction::JumpNull { val, offset } => {
-                let val_read = thread.read_reg(val)?;
+                let val_read = thread.read_reg(val);
                 if matches!(val_read, Value::Null) {
                     let frame = thread
                         .call_stack
@@ -96,7 +96,7 @@ impl VirtualMachine {
                             .ok_or(VmError::FunctionOutOfBounds { index: func_idx })?;
                         let func = match &import.kind {
                             galfus_bytecode::graph_resolver::ResolvedImportKind::Function(f) => *f,
-                            _ => return Err(VmError::FunctionOutOfBounds { index: func_idx }),
+                            _ => panic!("Corrupted bytecode: Out of bounds"),
                         };
                         (import.module_id, func)
                     };
@@ -159,21 +159,21 @@ impl VirtualMachine {
                 if let Some(value) =
                     self.execute_array_iterator_method(thread, obj, method_name.as_str())?
                 {
-                    thread.write_reg(dest, value)?;
+                    thread.write_reg(dest, value);
                     return Ok(VmStep::Continue);
                 }
 
                 if method_name == "compare" {
-                    let obj_val = thread.read_reg(obj)?;
+                    let obj_val = thread.read_reg(obj);
                     if !matches!(obj_val, Value::Object(_)) {
-                        let arg_val = thread.read_reg(Reg(args_start.raw() + 1))?;
+                        let arg_val = thread.read_reg(Reg(args_start.raw() + 1));
                         let is_equal = obj_val == arg_val;
-                        thread.write_reg(dest, Value::Bool(is_equal))?;
+                        thread.write_reg(dest, Value::Bool(is_equal));
                         return Ok(VmStep::Continue);
                     }
                 }
 
-                let receiver_layout = match thread.read_reg(obj)? {
+                let receiver_layout = match thread.read_reg(obj) {
                     Value::Object(obj_ref) => match thread.heap.get_object(obj_ref)? {
                         HeapObject::Struct {
                             module_id,
@@ -327,7 +327,7 @@ impl VirtualMachine {
                 args_start,
                 arg_count,
             } => {
-                let (target_module_id, func_idx) = match thread.read_reg(func_reg)? {
+                let (target_module_id, func_idx) = match thread.read_reg(func_reg) {
                     Value::Function {
                         module_id,
                         func_idx,
@@ -357,7 +357,7 @@ impl VirtualMachine {
                             .ok_or(VmError::FunctionOutOfBounds { index: func_idx })?;
                         let func = match &import.kind {
                             galfus_bytecode::graph_resolver::ResolvedImportKind::Function(f) => *f,
-                            _ => return Err(VmError::FunctionOutOfBounds { index: func_idx }),
+                            _ => panic!("Corrupted bytecode: Out of bounds"),
                         };
                         (import.module_id, func)
                     };
@@ -395,13 +395,13 @@ impl VirtualMachine {
             }
 
             Instruction::Ret { src } => {
-                let val = thread.read_reg(src)?;
+                let val = thread.read_reg(src);
                 thread.retain_anchor_val(&val);
                 let completed_frame = thread.pop_frame().ok_or(VmError::EmptyCallStack)?;
 
                 match completed_frame.return_dest {
                     Some(dest) => {
-                        thread.write_reg(dest, val)?;
+                        thread.write_reg(dest, val);
                     }
                     None => {
                         let return_type = self
@@ -420,7 +420,7 @@ impl VirtualMachine {
 
                 match completed_frame.return_dest {
                     Some(dest) => {
-                        thread.write_reg(dest, Value::Null)?;
+                        thread.write_reg(dest, Value::Null);
                     }
                     None => {
                         let return_type = self
@@ -461,7 +461,7 @@ impl VirtualMachine {
         obj: Reg,
         method_name: &str,
     ) -> Result<Option<Value>, VmError> {
-        let Value::Object(iterator_ref) = thread.read_reg(obj)? else {
+        let Value::Object(iterator_ref) = thread.read_reg(obj) else {
             return Ok(None);
         };
 

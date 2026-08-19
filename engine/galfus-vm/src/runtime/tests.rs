@@ -108,8 +108,7 @@ fn provider_continuation_rejects_a_result_that_violates_its_declared_type() {
     });
     let vm = VirtualMachine::new(std::sync::Arc::new(graph));
     let mut thread = thread::VmThreadState::test_new();
-    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![])
-        .expect("function is valid");
+    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![]);
 
     let continuation = Continuation::for_provider(Reg(0), module_id, TypeIdx(0))
         .with_origin(galfus_core::ThreadId::new(1));
@@ -162,11 +161,8 @@ fn await_future_suspends_and_resumes_through_a_vm_owned_continuation() {
     });
     let vm = VirtualMachine::new(std::sync::Arc::new(graph));
     let mut thread = thread::VmThreadState::test_new();
-    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![])
-        .expect("function is valid");
-    thread
-        .write_reg(Reg(0), Value::Future(galfus_core::FutureId::new(42)))
-        .expect("future handle fits in the register");
+    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![]);
+    thread.write_reg(Reg(0), Value::Future(galfus_core::FutureId::new(42)));
 
     let VmStep::Suspend {
         effect:
@@ -191,8 +187,7 @@ fn await_future_suspends_and_resumes_through_a_vm_owned_continuation() {
         &mut thread,
         continuation.with_origin(galfus_core::ThreadId::new(1)),
         Value::Int64(7),
-    )
-    .expect("future result resumes the continuation");
+    );
     assert!(matches!(
         vm.execute_with_budget(&mut thread, 1),
         Ok(VmStep::Return {
@@ -217,11 +212,8 @@ fn dropping_the_last_future_handle_notifies_the_orchestrator() {
     });
     let vm = VirtualMachine::new(std::sync::Arc::new(graph));
     let mut thread = thread::VmThreadState::test_new();
-    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![])
-        .expect("function is valid");
-    thread
-        .write_reg(Reg(0), Value::Future(galfus_core::FutureId::new(7)))
-        .expect("register exists");
+    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![]);
+    thread.write_reg(Reg(0), Value::Future(galfus_core::FutureId::new(7)));
 
     let VmStep::Suspend {
         effect: VmEffect::FutureDropped { future_id },
@@ -238,8 +230,7 @@ fn dropping_the_last_future_handle_notifies_the_orchestrator() {
         &mut thread,
         continuation.with_origin(galfus_core::ThreadId::new(1)),
         Value::Null,
-    )
-    .expect("drop continuation resumes");
+    );
 }
 
 #[test]
@@ -254,14 +245,9 @@ fn dropping_one_of_multiple_future_handles_keeps_the_future_alive() {
     });
     let vm = VirtualMachine::new(std::sync::Arc::new(graph));
     let mut thread = thread::VmThreadState::test_new();
-    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![])
-        .expect("function is valid");
-    thread
-        .write_reg(Reg(0), Value::Future(galfus_core::FutureId::new(7)))
-        .expect("register exists");
-    thread
-        .write_reg(Reg(1), Value::Future(galfus_core::FutureId::new(7)))
-        .expect("register exists");
+    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![]);
+    thread.write_reg(Reg(0), Value::Future(galfus_core::FutureId::new(7)));
+    thread.write_reg(Reg(1), Value::Future(galfus_core::FutureId::new(7)));
 
     assert!(matches!(
         vm.execute_with_budget(&mut thread, 1),

@@ -59,12 +59,12 @@ impl VirtualMachine {
                         }
                     }
                 };
-                thread.write_reg(dest, val)?;
+                thread.write_reg(dest, val);
             }
             Instruction::Move { dest, src } => {
-                let val = thread.read_reg(src)?;
+                let val = thread.read_reg(src);
                 thread.retain_anchor_val(&val);
-                thread.write_reg(dest, val)?;
+                thread.write_reg(dest, val);
             }
             Instruction::LoadGlobal {
                 dest,
@@ -73,7 +73,7 @@ impl VirtualMachine {
             } => {
                 let module = self.get_module(module_id)?;
                 if global_idx.raw() as usize >= module.global_count as usize {
-                    return Err(VmError::GlobalOutOfBounds { index: global_idx });
+                    panic!("Corrupted bytecode: Out of bounds");
                 }
                 let val = thread
                     .module_states
@@ -82,7 +82,7 @@ impl VirtualMachine {
                     .cloned()
                     .unwrap_or(Value::Null);
                 thread.retain_anchor_val(&val);
-                thread.write_reg(dest, val)?;
+                thread.write_reg(dest, val);
             }
             Instruction::StoreGlobal {
                 module_id,
@@ -91,9 +91,9 @@ impl VirtualMachine {
             } => {
                 let module = self.get_module(module_id)?;
                 if global_idx.raw() as usize >= module.global_count as usize {
-                    return Err(VmError::GlobalOutOfBounds { index: global_idx });
+                    panic!("Corrupted bytecode: Out of bounds");
                 }
-                let val = thread.read_reg(src)?;
+                let val = thread.read_reg(src);
                 thread.retain_anchor_val(&val);
                 let idx = global_idx.raw() as usize;
                 let globals = &mut thread.module_states.entry(module_id).or_default().globals;
@@ -106,7 +106,7 @@ impl VirtualMachine {
                 }
             }
             Instruction::LoadNull { dest } => {
-                thread.write_reg(dest, Value::Null)?;
+                thread.write_reg(dest, Value::Null);
             }
 
             _ => unreachable!("instruction routed to the wrong runtime handler"),
