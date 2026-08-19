@@ -6,9 +6,9 @@ impl VirtualMachine {
     pub(super) fn execute_control_instruction(
         &self,
         thread: &mut thread::VmThreadState,
-        instr: Instruction,
+        instr: &Instruction,
     ) -> Result<VmStep, VmError> {
-        match instr {
+        match *instr {
             // Category C: Control Flow & Subroutines
             Instruction::Jump { offset } => {
                 let frame = thread
@@ -126,6 +126,7 @@ impl VirtualMachine {
                 for (i, dest) in callee_regs.iter_mut().enumerate().take(arg_count as usize) {
                     let src_reg = Reg(args_start.raw() + i as u16);
                     let val = thread.read_reg(src_reg)?;
+                    thread.retain_anchor_val(&val);
                     *dest = val;
                 }
 
@@ -325,7 +326,9 @@ impl VirtualMachine {
                     } else {
                         Reg(args_start.raw() + i as u16)
                     };
-                    *dest = thread.read_reg(src_reg)?;
+                    let val = thread.read_reg(src_reg)?;
+                    thread.retain_anchor_val(&val);
+                    *dest = val;
                 }
 
                 thread.push_frame(CallFrame {
@@ -402,7 +405,9 @@ impl VirtualMachine {
                     callee_regs.iter_mut().enumerate().take(arg_count as usize)
                 {
                     let source = Reg(args_start.raw() + index as u16);
-                    *callee_reg = thread.read_reg(source)?;
+                    let val = thread.read_reg(source)?;
+                    thread.retain_anchor_val(&val);
+                    *callee_reg = val;
                 }
 
                 thread.push_frame(CallFrame {
@@ -416,6 +421,7 @@ impl VirtualMachine {
 
             Instruction::Ret { src } => {
                 let val = thread.read_reg(src)?;
+                thread.retain_anchor_val(&val);
                 let completed_frame = thread.pop_frame().ok_or(VmError::EmptyCallStack)?;
 
                 match completed_frame.return_dest {

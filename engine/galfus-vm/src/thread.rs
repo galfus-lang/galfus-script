@@ -5,176 +5,7 @@ use galfus_bytecode::instruction::Reg;
 use galfus_core::ModuleId;
 use std::collections::HashMap;
 
-pub struct PrivateHeap {
-    objects: Vec<Option<(VmObjectRef, HeapObject)>>,
-    free_slots: Vec<usize>,
-    allocations_since_release: usize,
-    next_id: u64,
-    object_to_slot: HashMap<VmObjectRef, usize>,
-    pub(crate) quota: std::sync::Arc<std::sync::Mutex<crate::quota::ThreadQuota>>,
-}
-
-impl PrivateHeap {
-    pub fn test_new() -> Self {
-        let limits = galfus_contract::LimitsMetadata::default();
-        Self::new(std::sync::Arc::new(std::sync::Mutex::new(
-            crate::quota::ThreadQuota::new(limits),
-        )))
-    }
-
-    pub fn new(quota: std::sync::Arc<std::sync::Mutex<crate::quota::ThreadQuota>>) -> Self {
-        Self {
-            objects: Vec::new(),
-            free_slots: Vec::new(),
-            allocations_since_release: 0,
-            next_id: 1,
-            object_to_slot: HashMap::new(),
-            quota,
-        }
-    }
-
-    pub fn alloc(&mut self, obj: HeapObject) -> Result<VmObjectRef, VmError> {
-        let next_id = self
-            .next_id
-            .checked_add(1)
-            .ok_or(VmError::IdCounterExhausted)?;
-        self.quota
-            .lock()
-            .unwrap()
-            .try_reserve_heap(1, obj.heap_bytes())
-            .map_err(VmError::ResourceLimitExceeded)?;
-
-        self.allocations_since_release += 1;
-
-        let id = self.next_id;
-        self.next_id = next_id;
-        let obj_ref = VmObjectRef(id);
-
-        let idx = if let Some(idx) = self.free_slots.pop() {
-            idx
-        } else {
-            let idx = self.objects.len();
-            self.objects.push(None);
-            idx
-        };
-
-        self.objects[idx] = Some((obj_ref, obj));
-        self.object_to_slot.insert(obj_ref, idx);
-
-        Ok(obj_ref)
-    }
-
-    #[cfg(test)]
-    pub fn exhaust_id_counter(&mut self) {
-        self.next_id = u64::MAX;
-    }
-
-    pub fn get_object(&self, obj_ref: VmObjectRef) -> Result<&HeapObject, VmError> {
-        let idx = *self
-            .object_to_slot
-            .get(&obj_ref)
-            .ok_or(VmError::InvalidObjectReference)?;
-        if let Some((_, ref obj)) = self.objects[idx] {
-            return Ok(obj);
-        }
-        Err(VmError::InvalidObjectReference)
-    }
-
-    pub fn get_object_mut(&mut self, obj_ref: VmObjectRef) -> Result<&mut HeapObject, VmError> {
-        let idx = *self
-            .object_to_slot
-            .get(&obj_ref)
-            .ok_or(VmError::InvalidObjectReference)?;
-        if let Some((_, ref mut obj)) = self.objects[idx] {
-            return Ok(obj);
-        }
-        Err(VmError::InvalidObjectReference)
-    }
-
-    pub fn free_object(&mut self, obj_ref: VmObjectRef) -> Result<(), VmError> {
-        let idx = self
-            .object_to_slot
-            .remove(&obj_ref)
-            .ok_or(VmError::InvalidObjectReference)?;
-
-        if let Some((_, obj)) = self.objects[idx].take() {
-            let mut q = self.quota.lock().unwrap();
-            q.release_heap_objects(1);
-            q.release_heap_bytes(obj.heap_bytes());
-        }
-
-        self.free_slots.push(idx);
-        Ok(())
-    }
-
-    pub fn allocations_since_release(&self) -> usize {
-        self.allocations_since_release
-    }
-
-    pub fn reset_allocations_since_release(&mut self) {
-        self.allocations_since_release = 0;
-    }
-
-    pub fn iter_live_objects(&self) -> impl Iterator<Item = (VmObjectRef, &HeapObject)> {
-        self.objects
-            .iter()
-            .filter_map(|slot| slot.as_ref().map(|(r, o)| (*r, o)))
-    }
-
-    pub fn iter_live_objects_mut(
-        &mut self,
-    ) -> impl Iterator<Item = (VmObjectRef, &mut HeapObject)> {
-        self.objects
-            .iter_mut()
-            .filter_map(|slot| slot.as_mut().map(|(r, o)| (*r, o)))
-    }
-
-    pub fn extract_adapter_handles(
-        &mut self,
-    ) -> Vec<(
-        galfus_core::BindingId,
-        galfus_core::OpaqueTypeId,
-        galfus_core::HandleId,
-    )> {
-        let mut extracted = Vec::new();
-        let mut to_free = Vec::new();
-
-        for (idx, slot) in self.objects.iter_mut().enumerate() {
-            if let Some((
-                obj_ref,
-                crate::runtime::HeapObject::AdapterHandle {
-                    binding_id,
-                    type_id,
-                    id,
-                },
-            )) = slot
-            {
-                extracted.push((*binding_id, type_id.clone(), *id));
-                to_free.push((*obj_ref, idx));
-            }
-        }
-
-        for (obj_ref, idx) in to_free {
-            self.objects[idx] = None;
-            self.object_to_slot.remove(&obj_ref);
-            self.free_slots.push(idx);
-        }
-
-        extracted
-    }
-}
-
-impl Drop for PrivateHeap {
-    fn drop(&mut self) {
-        let mut q = self.quota.lock().unwrap();
-        for slot in &mut self.objects {
-            if let Some((_, obj)) = slot.take() {
-                q.release_heap_objects(1);
-                q.release_heap_bytes(obj.heap_bytes());
-            }
-        }
-    }
-}
+pub use crate::heap::PrivateHeap;
 
 pub struct VmThreadState {
     pub call_stack: Vec<CallFrame>,
@@ -183,13 +14,6 @@ pub struct VmThreadState {
     pub module_states: HashMap<ModuleId, RuntimeModuleState>,
     pub entry_func: Option<crate::runtime::Value>,
     pub(crate) initializing_module: Option<ModuleId>,
-    /// Adapter handles detached by graph release. The runtime owns dispatching
-    /// their adapter release notifications on the main thread.
-    pub pending_adapter_handle_drops: Vec<(
-        galfus_core::BindingId,
-        galfus_core::OpaqueTypeId,
-        galfus_core::HandleId,
-    )>,
     pub is_spawned: bool,
     pub(crate) global_quota: std::sync::Arc<std::sync::Mutex<crate::quota::GlobalQuota>>,
     pub(crate) thread_quota: std::sync::Arc<std::sync::Mutex<crate::quota::ThreadQuota>>,
@@ -219,7 +43,6 @@ impl VmThreadState {
             module_states: HashMap::new(),
             entry_func: None,
             initializing_module: None,
-            pending_adapter_handle_drops: Vec::new(),
             is_spawned: false,
             global_quota,
             thread_quota,
@@ -244,8 +67,13 @@ impl VmThreadState {
 
     pub fn pop_frame(&mut self) -> Option<CallFrame> {
         let frame = self.call_stack.pop();
-        if frame.is_some() {
+        if let Some(frame) = &frame {
             self.thread_quota().lock().unwrap().release_call_depth(1);
+            for val in &frame.registers {
+                if let Value::Object(obj_ref) = val {
+                    let _ = self.heap.release_anchor(*obj_ref);
+                }
+            }
         }
         frame
     }
@@ -278,7 +106,7 @@ impl VmThreadState {
         galfus_core::OpaqueTypeId,
         galfus_core::HandleId,
     )> {
-        let mut extracted = std::mem::take(&mut self.pending_adapter_handle_drops);
+        let mut extracted = std::mem::take(&mut self.heap.pending_adapter_handle_drops);
         extracted.extend(self.heap.extract_adapter_handles());
         extracted
     }
@@ -307,10 +135,25 @@ impl VmThreadState {
     pub fn write_reg(&mut self, reg: Reg, val: Value) -> Result<(), VmError> {
         let frame = self.call_stack.last_mut().ok_or(VmError::EmptyCallStack)?;
         if (reg.raw() as usize) < frame.registers.len() {
-            frame.registers[reg.raw() as usize] = val;
+            let old_val = std::mem::replace(&mut frame.registers[reg.raw() as usize], val);
+            if let Value::Object(obj_ref) = old_val {
+                let _ = self.heap.release_anchor(obj_ref);
+            }
             Ok(())
         } else {
             Err(VmError::RegisterOutOfBounds { reg })
+        }
+    }
+
+    pub fn retain_anchor_val(&mut self, val: &Value) {
+        if let Value::Object(obj_ref) = val {
+            let _ = self.heap.retain_anchor(*obj_ref);
+        }
+    }
+
+    pub fn retain_edge_val(&mut self, val: &Value) {
+        if let Value::Object(obj_ref) = val {
+            let _ = self.heap.retain_edge(*obj_ref);
         }
     }
 

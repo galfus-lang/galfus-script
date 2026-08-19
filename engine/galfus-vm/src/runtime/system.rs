@@ -6,22 +6,20 @@ impl VirtualMachine {
     pub(super) fn execute_system_instruction(
         &self,
         thread: &mut thread::VmThreadState,
-        instr: Instruction,
+        instr: &Instruction,
     ) -> Result<VmStep, VmError> {
-        match instr {
+        match *instr {
             // Category E: Memory Ownership
             Instruction::Drop { reg } => {
                 let value = thread.read_reg(reg)?;
                 thread.write_reg(reg, Value::Null)?;
-                if let Value::Future(future_id) = value {
-                    let released_handles = self.release_unreachable(thread)?;
-                    thread.pending_adapter_handle_drops.extend(released_handles);
-                    if !thread.contains_future_handle(future_id) {
-                        return Ok(VmStep::Suspend {
-                            effect: VmEffect::FutureDropped { future_id },
-                            continuation: Continuation::new(None),
-                        });
-                    }
+                if let Value::Future(future_id) = value
+                    && !thread.contains_future_handle(future_id)
+                {
+                    return Ok(VmStep::Suspend {
+                        effect: VmEffect::FutureDropped { future_id },
+                        continuation: Continuation::new(None),
+                    });
                 }
             }
 
@@ -150,7 +148,9 @@ impl VirtualMachine {
             } => {
                 let mut args = Vec::with_capacity(arg_count as usize);
                 for i in 0..arg_count {
-                    args.push(thread.read_reg(Reg(args_start.raw() + i as u16))?);
+                    let val = thread.read_reg(Reg(args_start.raw() + i as u16))?;
+                    thread.retain_anchor_val(&val);
+                    args.push(val);
                 }
                 let module_id = thread
                     .call_stack
@@ -202,7 +202,9 @@ impl VirtualMachine {
                 let func_val = thread.read_reg(func_reg)?;
                 let mut args = Vec::with_capacity(arg_count as usize);
                 for i in 0..arg_count {
-                    args.push(thread.read_reg(Reg(args_start.raw() + i as u16))?);
+                    let val = thread.read_reg(Reg(args_start.raw() + i as u16))?;
+                    thread.retain_anchor_val(&val);
+                    args.push(val);
                 }
                 let module_id = thread
                     .call_stack

@@ -113,9 +113,9 @@ impl VirtualMachine {
     pub(super) fn execute_operator_instruction(
         &self,
         thread: &mut thread::VmThreadState,
-        instr: Instruction,
+        instr: &Instruction,
     ) -> Result<VmStep, VmError> {
-        match instr {
+        match *instr {
             // Category B: Unary & Binary Operations
             Instruction::Add { dest, lhs, rhs } => {
                 impl_binary_op!(self, thread, dest, lhs, rhs, +);

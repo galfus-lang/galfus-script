@@ -39,6 +39,7 @@ async function main() {
     },
     { name: 'Python 3', cmd: ['python3', 'benchmark/fib.py'] },
     { name: 'Lua 5.4', cmd: ['lua', 'benchmark/fib.lua'] },
+    { name: 'Lua JIT', cmd: ['luajit', 'benchmark/fib.lua'] },
   ];
 
   const results = [];

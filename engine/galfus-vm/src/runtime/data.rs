@@ -6,9 +6,9 @@ impl VirtualMachine {
     pub(super) fn execute_data_instruction(
         &self,
         thread: &mut thread::VmThreadState,
-        instr: Instruction,
+        instr: &Instruction,
     ) -> Result<VmStep, VmError> {
-        match instr {
+        match *instr {
             // Category A: Data Movement & Constants
             Instruction::LoadConst { dest, const_idx } => {
                 let constant = self
@@ -63,6 +63,7 @@ impl VirtualMachine {
             }
             Instruction::Move { dest, src } => {
                 let val = thread.read_reg(src)?;
+                thread.retain_anchor_val(&val);
                 thread.write_reg(dest, val)?;
             }
             Instruction::LoadGlobal {
@@ -80,6 +81,7 @@ impl VirtualMachine {
                     .and_then(|state| state.globals.get(global_idx.raw() as usize))
                     .cloned()
                     .unwrap_or(Value::Null);
+                thread.retain_anchor_val(&val);
                 thread.write_reg(dest, val)?;
             }
             Instruction::StoreGlobal {
@@ -92,12 +94,16 @@ impl VirtualMachine {
                     return Err(VmError::GlobalOutOfBounds { index: global_idx });
                 }
                 let val = thread.read_reg(src)?;
+                thread.retain_anchor_val(&val);
                 let idx = global_idx.raw() as usize;
                 let globals = &mut thread.module_states.entry(module_id).or_default().globals;
                 if idx >= globals.len() {
                     globals.resize(idx + 1, Value::Null);
                 }
-                globals[idx] = val;
+                let old_val = std::mem::replace(&mut globals[idx], val);
+                if let Value::Object(obj_ref) = old_val {
+                    let _ = thread.heap.release_anchor(obj_ref);
+                }
             }
             Instruction::LoadNull { dest } => {
                 thread.write_reg(dest, Value::Null)?;

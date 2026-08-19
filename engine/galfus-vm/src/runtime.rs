@@ -1,7 +1,7 @@
 mod casts;
 mod control;
 mod data;
-mod graph_release;
+
 mod heap;
 pub mod objects;
 mod operators;
@@ -118,11 +118,14 @@ pub enum VmStep {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct VmObjectRef(pub u64);
+pub struct VmObjectRef {
+    pub index: u32,
+    pub generation: u32,
+}
 
 impl VmObjectRef {
-    pub const fn raw(&self) -> u64 {
-        self.0
+    pub fn new(index: u32, generation: u32) -> Self {
+        Self { index, generation }
     }
 }
 
@@ -150,8 +153,6 @@ pub enum VmValue {
 
 pub type Value = VmValue;
 type ObjectRef = VmObjectRef;
-
-const RELEASE_ALLOCATION_THRESHOLD: usize = 64;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum HeapObject {
@@ -257,6 +258,10 @@ pub struct CallFrame {
 pub struct VirtualMachine {
     pub graph: Arc<BytecodeGraph>,
     pub context: VmContext,
+    pub fast_modules: Vec<(
+        galfus_core::ModuleId,
+        *const galfus_bytecode::BytecodeModule,
+    )>,
 }
 
 impl VirtualMachine {
@@ -397,9 +402,15 @@ impl VirtualMachine {
     }
 
     pub fn new(graph: Arc<BytecodeGraph>) -> Self {
+        let mut fast_modules = Vec::new();
+        for module in graph.modules() {
+            fast_modules.push((module.id, &module.module as *const _));
+        }
+        fast_modules.sort_unstable_by_key(|&(id, _)| id);
         Self {
             graph,
             context: VmContext::new(None),
+            fast_modules,
         }
     }
 
@@ -418,14 +429,14 @@ impl VirtualMachine {
         self
     }
 
-    pub fn get_module(
+    pub(crate) fn get_module(
         &self,
-        module_id: galfus_core::ModuleId,
+        id: galfus_core::ModuleId,
     ) -> Result<&galfus_bytecode::BytecodeModule, VmError> {
-        self.graph
-            .get(module_id)
-            .map(|node| &node.module)
-            .ok_or(VmError::ModuleNotFound { module_id })
+        match self.fast_modules.binary_search_by_key(&id, |&(k, _)| k) {
+            Ok(idx) => Ok(unsafe { &*self.fast_modules[idx].1 }),
+            Err(_) => Err(VmError::ModuleNotFound { module_id: id }),
+        }
     }
 
     pub fn get_function(
@@ -599,9 +610,7 @@ impl VirtualMachine {
     }
 
     pub fn step(&self, thread: &mut thread::VmThreadState) -> Result<VmStep, VmError> {
-        self.validate_graph_format()?;
-
-        if let Some((binding_id, type_id, id)) = thread.pending_adapter_handle_drops.pop() {
+        if let Some((binding_id, type_id, id)) = thread.heap.pending_adapter_handle_drops.pop() {
             return Ok(VmStep::Suspend {
                 effect: VmEffect::AdapterHandleDropped {
                     binding_id,
@@ -611,21 +620,24 @@ impl VirtualMachine {
                 continuation: Continuation::new(None),
             });
         }
-        let instr = {
+
+        let (module_id, func_idx, pc) = {
             let frame = thread
                 .call_stack
                 .last_mut()
                 .ok_or(VmError::EmptyCallStack)?;
-            let func = self.get_function(frame.module_id, frame.func_idx)?;
-            if frame.pc >= func.instructions.len() {
-                return Err(VmError::InstructionPointerOutOfBounds { pc: frame.pc });
-            }
-            let instr = func.instructions[frame.pc].clone();
+            let module_id = frame.module_id;
+            let func_idx = frame.func_idx;
+            let pc = frame.pc;
             frame.pc += 1;
-            instr
+            (module_id, func_idx, pc)
         };
 
-        let release_instruction = instr.clone();
+        let func = self.get_function(module_id, func_idx)?;
+        if pc >= func.instructions.len() {
+            return Err(VmError::InstructionPointerOutOfBounds { pc });
+        }
+        let instr = &func.instructions[pc];
         let step = match instr {
             Instruction::LoadConst { .. }
             | Instruction::Move { .. }
@@ -688,10 +700,6 @@ impl VirtualMachine {
             | Instruction::CopyArray { .. } => self.execute_system_instruction(thread, instr)?,
         };
 
-        if matches!(step, VmStep::Continue) {
-            self.release_unreachable_if_needed(thread, release_instruction)?;
-        }
-
         Ok(step)
     }
 
@@ -711,18 +719,6 @@ impl VirtualMachine {
             }
         }
     }
-
-    fn release_unreachable_if_needed(
-        &self,
-        thread: &mut thread::VmThreadState,
-        instr: Instruction,
-    ) -> Result<(), VmError> {
-        if matches!(instr, Instruction::Drop { .. })
-            || thread.heap.allocations_since_release() >= RELEASE_ALLOCATION_THRESHOLD
-        {
-            let released_handles = self.release_unreachable(thread)?;
-            thread.pending_adapter_handle_drops.extend(released_handles);
-        }
-        Ok(())
-    }
 }
+unsafe impl Send for VirtualMachine {}
+unsafe impl Sync for VirtualMachine {}

@@ -7,9 +7,9 @@ impl VirtualMachine {
     pub(super) fn execute_object_instruction(
         &self,
         thread: &mut thread::VmThreadState,
-        instr: Instruction,
+        instr: &Instruction,
     ) -> Result<VmStep, VmError> {
-        match instr {
+        match *instr {
             // Category D: Heaps, Structs & Collections
             Instruction::AllocLocal { dest, type_idx } => {
                 let ty = self
@@ -75,11 +75,16 @@ impl VirtualMachine {
             Instruction::StoreField { obj, field, val } => {
                 let obj_val = thread.read_reg(obj)?;
                 let val_to_store = thread.read_reg(val)?;
+                thread.retain_edge_val(&val_to_store);
                 if let Value::Object(obj_ref) = obj_val {
                     let heap_obj = thread.heap.get_object_mut(obj_ref)?;
                     if let HeapObject::Struct { fields, .. } = heap_obj {
                         if (field.raw() as usize) < fields.len() {
-                            fields[field.raw() as usize] = val_to_store;
+                            let old_val =
+                                std::mem::replace(&mut fields[field.raw() as usize], val_to_store);
+                            if let Value::Object(old_ref) = old_val {
+                                let _ = thread.heap.release_edge(old_ref);
+                            }
                         } else {
                             return Err(VmError::FieldOutOfBounds { index: field });
                         }
@@ -183,6 +188,7 @@ impl VirtualMachine {
                 let idx_val = thread.read_reg(idx)?;
                 let raw_index = self.to_raw_array_index(idx_val)?;
                 let val_to_store = thread.read_reg(val)?;
+                thread.retain_edge_val(&val_to_store);
 
                 if let Value::Object(obj_ref) = arr_val {
                     let (index, val_to_store) = {
@@ -228,7 +234,10 @@ impl VirtualMachine {
 
                     match heap_obj {
                         HeapObject::Array { elements, .. } | HeapObject::Tuple { elements } => {
-                            elements[index] = val_to_store;
+                            let old_val = std::mem::replace(&mut elements[index], val_to_store);
+                            if let Value::Object(old_ref) = old_val {
+                                let _ = thread.heap.release_edge(old_ref);
+                            }
                         }
                         heap_obj => {
                             return Err(VmError::TypeMismatch {

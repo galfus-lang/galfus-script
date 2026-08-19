@@ -15,3 +15,4 @@ pub use runtime::{
     CallFrame, Continuation, HeapObject, RuntimeModuleState, VirtualMachine, VmContext, VmEffect,
     VmObjectRef, VmStep, VmValue,
 };
+pub mod heap;
