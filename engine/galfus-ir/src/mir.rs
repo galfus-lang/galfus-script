@@ -217,6 +217,11 @@ pub enum Terminator {
         false_block: BlockId,
         false_args: Vec<Operand>,
     },
+    TailCall {
+        func: FunctionId,
+        args: Vec<Operand>,
+        is_external: bool,
+    },
     Panic(String),
 }
 

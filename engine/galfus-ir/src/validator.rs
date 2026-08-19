@@ -298,7 +298,9 @@ fn successor_blocks(terminator: &mir::Terminator) -> Vec<(BlockId, &Vec<Operand>
             false_args,
             ..
         } => vec![(*true_block, true_args), (*false_block, false_args)],
-        mir::Terminator::Return(_) | mir::Terminator::Panic(_) => Vec::new(),
+        mir::Terminator::Return(_)
+        | mir::Terminator::Panic(_)
+        | mir::Terminator::TailCall { .. } => Vec::new(),
     }
 }
 
@@ -453,6 +455,11 @@ fn validate_basic_block(
             validate_operand(cond, func, initialized, errors);
         }
         mir::Terminator::Panic(_) => {}
+        mir::Terminator::TailCall { args, .. } => {
+            for arg in args {
+                validate_operand(arg, func, initialized, errors);
+            }
+        }
     }
 }
 

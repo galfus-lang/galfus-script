@@ -79,7 +79,12 @@ impl KernelDriver for NativeDriver {
                     if current < self.max_workers {
                         if self
                             .spawned_workers
-                            .compare_exchange(current, current + 1, Ordering::SeqCst, Ordering::SeqCst)
+                            .compare_exchange(
+                                current,
+                                current + 1,
+                                Ordering::SeqCst,
+                                Ordering::SeqCst,
+                            )
                             .is_ok()
                         {
                             let rx = self.worker_queue_rx.clone();

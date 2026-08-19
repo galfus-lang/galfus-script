@@ -64,6 +64,10 @@ pub(super) fn collect_call_targets(
                 collect_operand_function_targets(false_args, targets);
             }
             galfus_ir::mir::Terminator::Return(None) | galfus_ir::mir::Terminator::Panic(_) => {}
+            galfus_ir::mir::Terminator::TailCall { func, args, .. } => {
+                targets.push(*func);
+                collect_operand_function_targets(args, targets);
+            }
         }
     }
 }

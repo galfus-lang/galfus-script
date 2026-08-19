@@ -39,7 +39,7 @@ impl VmThreadState {
         thread_quota: std::sync::Arc<crate::quota::ThreadQuota>,
     ) -> Self {
         Self {
-            call_stack: Vec::with_capacity(64),
+            call_stack: Vec::with_capacity(thread_quota.limits().max_call_depth),
             registers: vec![Value::Null; 4096],
             current_register_base: 0,
             current_register_top: 0,
@@ -145,7 +145,6 @@ impl VmThreadState {
     pub fn pop_frame(&mut self) -> Option<CallFrame> {
         let frame = self.call_stack.pop();
         if let Some(frame) = &frame {
-
             if self.current_frame_has_objects {
                 for i in frame.register_base..self.current_register_top {
                     let val = std::mem::replace(&mut self.registers[i], Value::Null);

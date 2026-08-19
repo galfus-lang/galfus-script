@@ -219,56 +219,232 @@ pub enum Instruction {
     },
 
     // --- AOT Specialized I32 Operations ---
-    AddI32 { dest: Reg, lhs: Reg, rhs: Reg },
-    SubI32 { dest: Reg, lhs: Reg, rhs: Reg },
-    MulI32 { dest: Reg, lhs: Reg, rhs: Reg },
-    DivI32 { dest: Reg, lhs: Reg, rhs: Reg },
-    RemI32 { dest: Reg, lhs: Reg, rhs: Reg },
-    EqI32 { dest: Reg, lhs: Reg, rhs: Reg },
-    NeI32 { dest: Reg, lhs: Reg, rhs: Reg },
-    LtI32 { dest: Reg, lhs: Reg, rhs: Reg },
-    LeI32 { dest: Reg, lhs: Reg, rhs: Reg },
-    GtI32 { dest: Reg, lhs: Reg, rhs: Reg },
-    GeI32 { dest: Reg, lhs: Reg, rhs: Reg },
+    AddI32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    SubI32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    MulI32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    DivI32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    RemI32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    EqI32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    NeI32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    LtI32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    LeI32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    GtI32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    GeI32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
 
     // --- AOT Specialized I64 Operations ---
-    AddI64 { dest: Reg, lhs: Reg, rhs: Reg },
-    SubI64 { dest: Reg, lhs: Reg, rhs: Reg },
-    MulI64 { dest: Reg, lhs: Reg, rhs: Reg },
-    DivI64 { dest: Reg, lhs: Reg, rhs: Reg },
-    RemI64 { dest: Reg, lhs: Reg, rhs: Reg },
-    EqI64 { dest: Reg, lhs: Reg, rhs: Reg },
-    NeI64 { dest: Reg, lhs: Reg, rhs: Reg },
-    LtI64 { dest: Reg, lhs: Reg, rhs: Reg },
-    LeI64 { dest: Reg, lhs: Reg, rhs: Reg },
-    GtI64 { dest: Reg, lhs: Reg, rhs: Reg },
-    GeI64 { dest: Reg, lhs: Reg, rhs: Reg },
+    AddI64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    SubI64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    MulI64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    DivI64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    RemI64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    EqI64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    NeI64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    LtI64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    LeI64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    GtI64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    GeI64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
 
     // --- AOT Specialized F32 Operations ---
-    AddF32 { dest: Reg, lhs: Reg, rhs: Reg },
-    SubF32 { dest: Reg, lhs: Reg, rhs: Reg },
-    MulF32 { dest: Reg, lhs: Reg, rhs: Reg },
-    DivF32 { dest: Reg, lhs: Reg, rhs: Reg },
-    RemF32 { dest: Reg, lhs: Reg, rhs: Reg },
-    EqF32 { dest: Reg, lhs: Reg, rhs: Reg },
-    NeF32 { dest: Reg, lhs: Reg, rhs: Reg },
-    LtF32 { dest: Reg, lhs: Reg, rhs: Reg },
-    LeF32 { dest: Reg, lhs: Reg, rhs: Reg },
-    GtF32 { dest: Reg, lhs: Reg, rhs: Reg },
-    GeF32 { dest: Reg, lhs: Reg, rhs: Reg },
+    AddF32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    SubF32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    MulF32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    DivF32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    RemF32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    EqF32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    NeF32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    LtF32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    LeF32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    GtF32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    GeF32 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
 
     // --- AOT Specialized F64 Operations ---
-    AddF64 { dest: Reg, lhs: Reg, rhs: Reg },
-    SubF64 { dest: Reg, lhs: Reg, rhs: Reg },
-    MulF64 { dest: Reg, lhs: Reg, rhs: Reg },
-    DivF64 { dest: Reg, lhs: Reg, rhs: Reg },
-    RemF64 { dest: Reg, lhs: Reg, rhs: Reg },
-    EqF64 { dest: Reg, lhs: Reg, rhs: Reg },
-    NeF64 { dest: Reg, lhs: Reg, rhs: Reg },
-    LtF64 { dest: Reg, lhs: Reg, rhs: Reg },
-    LeF64 { dest: Reg, lhs: Reg, rhs: Reg },
-    GtF64 { dest: Reg, lhs: Reg, rhs: Reg },
-    GeF64 { dest: Reg, lhs: Reg, rhs: Reg },
+    AddF64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    SubF64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    MulF64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    DivF64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    RemF64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    EqF64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    NeF64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    LtF64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    LeF64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    GtF64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    GeF64 {
+        dest: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
     Fallback {
         dest: Reg,
         src: Reg,
@@ -293,6 +469,11 @@ pub enum Instruction {
     },
     Call {
         dest: Reg,
+        func: FuncIdx,
+        args_start: Reg,
+        arg_count: u8,
+    },
+    TailCall {
         func: FuncIdx,
         args_start: Reg,
         arg_count: u8,

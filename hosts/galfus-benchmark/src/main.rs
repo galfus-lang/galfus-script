@@ -138,7 +138,10 @@ fn main() {
 
         if time_val > 0 && res_val > 0 {
             let cold_start_ms = total_time_ms.saturating_sub(time_val);
-            println!("{}ms (Total: {}ms, Cold Start: {}ms)", time_val, total_time_ms, cold_start_ms);
+            println!(
+                "{}ms (Total: {}ms, Cold Start: {}ms)",
+                time_val, total_time_ms, cold_start_ms
+            );
             results.push(BenchmarkResult {
                 language: name.to_string(),
                 time_ms: time_val,

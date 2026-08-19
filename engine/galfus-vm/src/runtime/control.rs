@@ -132,6 +132,122 @@ impl VirtualMachine {
                 )?;
                 thread.setup_args_from_caller(args_start, arg_count as usize, None)?;
             }
+            Instruction::TailCall {
+                func: func_idx,
+                args_start,
+                arg_count,
+            } => {
+                let frame = thread.call_stack.last().ok_or(VmError::EmptyCallStack)?;
+                let current_module_id = frame.module_id;
+                let current_image = self.get_module(current_module_id)?;
+
+                let (target_module_id, target_func_idx) =
+                    if (func_idx.raw() as usize) < current_image.functions.len() {
+                        (current_module_id, func_idx)
+                    } else {
+                        let import_idx = (func_idx.raw() as usize) - current_image.functions.len();
+                        let link = self
+                            .graph
+                            .resolve_imports(current_module_id)
+                            .map_err(|_| VmError::FunctionOutOfBounds { index: func_idx })?;
+                        let import = link
+                            .imports
+                            .get(import_idx)
+                            .ok_or(VmError::FunctionOutOfBounds { index: func_idx })?;
+                        let func = match &import.kind {
+                            galfus_bytecode::graph_resolver::ResolvedImportKind::Function(f) => *f,
+                            _ => panic!("Corrupted bytecode: Out of bounds"),
+                        };
+                        (import.module_id, func)
+                    };
+
+                let target_image = self.get_module(target_module_id)?;
+                let callee = target_image
+                    .functions
+                    .get(target_func_idx.raw() as usize)
+                    .ok_or(VmError::FunctionOutOfBounds {
+                        index: target_func_idx,
+                    })?;
+
+                if arg_count != callee.param_count {
+                    return Err(VmError::TypeMismatch {
+                        expected: format!("{} arguments", callee.param_count),
+                        found: format!("{} arguments", arg_count),
+                    });
+                }
+
+                let register_count = callee.param_count as usize
+                    + callee.local_count as usize
+                    + callee.temp_count as usize;
+
+                let target_func = self.get_function(target_module_id, target_func_idx)?;
+                let cached_instructions = target_func.instructions.as_slice() as *const _;
+
+                // For TailCall, we REUSE the current frame.
+                // We MUST setup args first into a temporary buffer (or correctly handle overlap if we do it in place)
+                // thread.setup_args_from_caller reads from current frame, so we read them BEFORE we overwrite the frame.
+                // Actually `setup_args_from_caller` expects the frame to ALREADY be pushed!
+                // So we can't use `setup_args_from_caller` safely if we reuse the frame without care.
+
+                let caller_base = thread.current_register_base;
+                let new_top = caller_base + register_count;
+
+                if new_top > thread.registers.len() {
+                    thread
+                        .registers
+                        .resize(new_top.max(thread.registers.len() * 2), Value::Null);
+                }
+
+                let registers_ptr = thread.registers.as_mut_ptr();
+                let count = arg_count as usize;
+                let mut temp_args = Vec::with_capacity(count);
+                if count > 0 {
+                    let src_ptr =
+                        unsafe { registers_ptr.add(caller_base + args_start.raw() as usize) };
+                    for i in 0..count {
+                        temp_args.push(*unsafe { &*src_ptr.add(i) });
+                    }
+                }
+
+                // Release objects
+                if thread.current_frame_has_objects {
+                    let old_top = thread.current_register_top;
+                    for i in caller_base..old_top {
+                        let val_ref = unsafe { &mut *registers_ptr.add(i) };
+                        let val = std::mem::replace(val_ref, Value::Null);
+                        if let Value::Object(obj_ref) = val {
+                            let _ = thread.heap.release_anchor(obj_ref);
+                        }
+                    }
+                } else {
+                    let old_top = thread.current_register_top;
+                    let max_clear = old_top.max(new_top);
+                    for i in caller_base..max_clear {
+                        unsafe { *registers_ptr.add(i) = Value::Null };
+                    }
+                }
+
+                thread.current_frame_has_objects = false;
+                if count > 0 {
+                    let dst_ptr = unsafe { registers_ptr.add(caller_base) };
+                    for (i, val) in temp_args.into_iter().enumerate() {
+                        if let Value::Object(obj_ref) = val {
+                            thread.current_frame_has_objects = true;
+                            let _ = thread.heap.retain_anchor(obj_ref);
+                        }
+                        unsafe { *dst_ptr.add(i) = val };
+                    }
+                }
+
+                thread.current_register_top = new_top;
+
+                let frame = thread.call_stack.last_mut().unwrap();
+                frame.module_id = target_module_id;
+                frame.func_idx = target_func_idx;
+                frame.pc = 0;
+                frame.cached_instructions = cached_instructions;
+                frame.has_objects = thread.current_frame_has_objects;
+            }
             Instruction::CallMethod {
                 dest,
                 obj,
