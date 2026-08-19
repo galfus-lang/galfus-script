@@ -1,0 +1,9 @@
+[package]
+name = "galfus-benchmark"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+sysinfo = "0.30"
+cli-table = "0.4"
+regex = "1.10"
