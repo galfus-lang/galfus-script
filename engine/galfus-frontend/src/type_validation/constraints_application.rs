@@ -303,7 +303,7 @@ impl<'a> DeclarationTypeChecker<'a> {
                         }
 
                         if parameter.has_default() {
-                            return FunctionParameterType::with_default(ty);
+                            return FunctionParameterType::with_default(ty, None);
                         }
 
                         FunctionParameterType::new(ty)

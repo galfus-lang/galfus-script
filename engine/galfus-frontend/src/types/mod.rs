@@ -77,6 +77,7 @@ pub struct FunctionParameterType {
     ty: TypeId,
     is_rest: bool,
     has_default: bool,
+    default_value: Option<String>,
 }
 
 impl FunctionParameterType {
@@ -85,6 +86,7 @@ impl FunctionParameterType {
             ty,
             is_rest: false,
             has_default: false,
+            default_value: None,
         }
     }
 
@@ -93,14 +95,16 @@ impl FunctionParameterType {
             ty,
             is_rest: true,
             has_default: false,
+            default_value: None,
         }
     }
 
-    pub fn with_default(ty: TypeId) -> Self {
+    pub fn with_default(ty: TypeId, default_value: Option<String>) -> Self {
         Self {
             ty,
             is_rest: false,
             has_default: true,
+            default_value,
         }
     }
 
@@ -114,6 +118,10 @@ impl FunctionParameterType {
 
     pub fn has_default(&self) -> bool {
         self.has_default
+    }
+
+    pub fn default_value(&self) -> Option<&str> {
+        self.default_value.as_deref()
     }
 }
 
@@ -400,7 +408,11 @@ impl TypeTable {
                         }
 
                         if parameter.has_default() {
-                            text = format!("{text} =");
+                            if let Some(val) = parameter.default_value() {
+                                text = format!("{text} = {val}");
+                            } else {
+                                text = format!("{text} =");
+                            }
                         }
 
                         text

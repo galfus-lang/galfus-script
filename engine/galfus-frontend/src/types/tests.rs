@@ -86,7 +86,7 @@ fn type_table_reuses_function_types() {
 
     let parameters = vec![
         FunctionParameterType::new(i32),
-        FunctionParameterType::with_default(i32),
+        FunctionParameterType::with_default(i32, None),
     ];
 
     let first = table.intern_function(parameters.clone(), null, false);

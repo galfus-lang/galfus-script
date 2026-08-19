@@ -23,6 +23,7 @@ coverage/
 logs/
 _.log
 report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+.galfus-dev-env
 
 # dotenv environment variable files
 .env

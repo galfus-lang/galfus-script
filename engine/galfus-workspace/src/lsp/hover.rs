@@ -336,7 +336,11 @@ fn format_type(
                         text = format!("...{}", text);
                     }
                     if p.has_default() {
-                        text = format!("{} =", text);
+                        if let Some(val) = p.default_value() {
+                            text = format!("{} = {}", text, val);
+                        } else {
+                            text = format!("{} =", text);
+                        }
                     }
                     text
                 })

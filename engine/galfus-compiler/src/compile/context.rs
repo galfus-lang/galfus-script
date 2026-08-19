@@ -194,7 +194,7 @@ impl<'a> MyWorkspaceContext<'a> {
                         if param.is_rest() {
                             FunctionParameterType::rest(target_ty)
                         } else if param.has_default() {
-                            FunctionParameterType::with_default(target_ty)
+                            FunctionParameterType::with_default(target_ty, None)
                         } else {
                             FunctionParameterType::new(target_ty)
                         }

@@ -577,7 +577,10 @@ fn transport_type(
                     }
 
                     if parameter.has_default() {
-                        return Some(ImportedFunctionParameterType::with_default(ty));
+                        return Some(ImportedFunctionParameterType::with_default(
+                            ty,
+                            parameter.default_value().map(|s| s.to_string()),
+                        ));
                     }
 
                     Some(ImportedFunctionParameterType::new(ty))
