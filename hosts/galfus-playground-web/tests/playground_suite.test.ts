@@ -65,8 +65,10 @@ test('runs the default playground source with arguments and stdout', async () =>
 test('uses configured entries and recompiles replaced source', async () => {
   await initialize();
   const playground = new Playground();
-  const config =
-    '[module]\nname = "custom-playground"\ntarget = "app"\n[entry]\npath = "examples/main.gfs"\n';
+  const config = JSON.stringify({
+    module: { name: 'custom-playground', target: 'app' },
+    entry: { path: 'examples/main.gfs' },
+  });
 
   expect(result(playground.setConfig(config))).toEqual({ ok: true });
   expect(result(playground.setSource('examples/main.gfs', await mainSource.text()))).toEqual({
