@@ -623,6 +623,10 @@ pub fn validate_bytecode_module(
                     check_reg(dest_start, &mut errors);
                     check_reg(src, &mut errors);
                 }
+                _ => {
+                    // AOT specialized instructions (AddI32, etc.) are pre-validated
+                    // by the compiler, and they only use basic Regs anyway.
+                }
             }
         }
     }

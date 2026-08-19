@@ -18,7 +18,7 @@ struct BenchmarkResult {
 fn main() {
     println!("Compiling Galfus Engine...");
     let status = Command::new("cargo")
-        .args(["build", "--profile", "release"])
+        .args(["build", "--workspace", "--profile", "release"])
         .status()
         .expect("Failed to compile Galfus");
     if !status.success() {

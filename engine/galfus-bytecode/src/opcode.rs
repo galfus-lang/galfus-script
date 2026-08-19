@@ -154,6 +154,7 @@ impl Instruction {
             Self::AwaitRace { .. } => 65,
             Self::Len { .. } => 66,
             Self::CopyArray { .. } => 67,
+            _ => 100,
         };
         Opcode(raw)
     }

@@ -666,6 +666,235 @@ impl VirtualMachine {
 
             match instr {
                 // ===== HOT PATH: Arithmetic =====
+
+                // --- AOT Specialized I32 Operations ---
+                Instruction::AddI32 { dest, lhs, rhs } => {
+                    let Value::Int32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Int32(l.wrapping_add(r)));
+                }
+                Instruction::SubI32 { dest, lhs, rhs } => {
+                    let Value::Int32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Int32(l.wrapping_sub(r)));
+                }
+                Instruction::MulI32 { dest, lhs, rhs } => {
+                    let Value::Int32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Int32(l.wrapping_mul(r)));
+                }
+                Instruction::DivI32 { dest, lhs, rhs } => {
+                    let Value::Int32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Int32(if r == 0 { return Err(self.make_panic(thread, VmError::DivisionByZero)); } else { l.wrapping_div(r) }));
+                }
+                Instruction::RemI32 { dest, lhs, rhs } => {
+                    let Value::Int32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Int32(if r == 0 { return Err(self.make_panic(thread, VmError::DivisionByZero)); } else { l.wrapping_rem(r) }));
+                }
+                Instruction::EqI32 { dest, lhs, rhs } => {
+                    let Value::Int32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l == r));
+                }
+                Instruction::NeI32 { dest, lhs, rhs } => {
+                    let Value::Int32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l != r));
+                }
+                Instruction::LtI32 { dest, lhs, rhs } => {
+                    let Value::Int32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l < r));
+                }
+                Instruction::LeI32 { dest, lhs, rhs } => {
+                    let Value::Int32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l <= r));
+                }
+                Instruction::GtI32 { dest, lhs, rhs } => {
+                    let Value::Int32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l > r));
+                }
+                Instruction::GeI32 { dest, lhs, rhs } => {
+                    let Value::Int32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l >= r));
+                }
+
+                // --- AOT Specialized I64 Operations ---
+                Instruction::AddI64 { dest, lhs, rhs } => {
+                    let Value::Int64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Int64(l.wrapping_add(r)));
+                }
+                Instruction::SubI64 { dest, lhs, rhs } => {
+                    let Value::Int64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Int64(l.wrapping_sub(r)));
+                }
+                Instruction::MulI64 { dest, lhs, rhs } => {
+                    let Value::Int64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Int64(l.wrapping_mul(r)));
+                }
+                Instruction::DivI64 { dest, lhs, rhs } => {
+                    let Value::Int64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Int64(if r == 0 { return Err(self.make_panic(thread, VmError::DivisionByZero)); } else { l.wrapping_div(r) }));
+                }
+                Instruction::RemI64 { dest, lhs, rhs } => {
+                    let Value::Int64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Int64(if r == 0 { return Err(self.make_panic(thread, VmError::DivisionByZero)); } else { l.wrapping_rem(r) }));
+                }
+                Instruction::EqI64 { dest, lhs, rhs } => {
+                    let Value::Int64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l == r));
+                }
+                Instruction::NeI64 { dest, lhs, rhs } => {
+                    let Value::Int64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l != r));
+                }
+                Instruction::LtI64 { dest, lhs, rhs } => {
+                    let Value::Int64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l < r));
+                }
+                Instruction::LeI64 { dest, lhs, rhs } => {
+                    let Value::Int64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l <= r));
+                }
+                Instruction::GtI64 { dest, lhs, rhs } => {
+                    let Value::Int64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l > r));
+                }
+                Instruction::GeI64 { dest, lhs, rhs } => {
+                    let Value::Int64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Int64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l >= r));
+                }
+
+                // --- AOT Specialized F32 Operations ---
+                Instruction::AddF32 { dest, lhs, rhs } => {
+                    let Value::Float32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Float32(galfus_core::normalize_f32(l + r)));
+                }
+                Instruction::SubF32 { dest, lhs, rhs } => {
+                    let Value::Float32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Float32(galfus_core::normalize_f32(l - r)));
+                }
+                Instruction::MulF32 { dest, lhs, rhs } => {
+                    let Value::Float32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Float32(galfus_core::normalize_f32(l * r)));
+                }
+                Instruction::DivF32 { dest, lhs, rhs } => {
+                    let Value::Float32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Float32(galfus_core::normalize_f32(l / r)));
+                }
+                Instruction::RemF32 { dest, lhs, rhs } => {
+                    let Value::Float32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Float32(galfus_core::normalize_f32(l % r)));
+                }
+                Instruction::EqF32 { dest, lhs, rhs } => {
+                    let Value::Float32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l == r));
+                }
+                Instruction::NeF32 { dest, lhs, rhs } => {
+                    let Value::Float32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l != r));
+                }
+                Instruction::LtF32 { dest, lhs, rhs } => {
+                    let Value::Float32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l < r));
+                }
+                Instruction::LeF32 { dest, lhs, rhs } => {
+                    let Value::Float32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l <= r));
+                }
+                Instruction::GtF32 { dest, lhs, rhs } => {
+                    let Value::Float32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l > r));
+                }
+                Instruction::GeF32 { dest, lhs, rhs } => {
+                    let Value::Float32(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float32(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l >= r));
+                }
+
+                // --- AOT Specialized F64 Operations ---
+                Instruction::AddF64 { dest, lhs, rhs } => {
+                    let Value::Float64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Float64(galfus_core::normalize_f64(l + r)));
+                }
+                Instruction::SubF64 { dest, lhs, rhs } => {
+                    let Value::Float64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Float64(galfus_core::normalize_f64(l - r)));
+                }
+                Instruction::MulF64 { dest, lhs, rhs } => {
+                    let Value::Float64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Float64(galfus_core::normalize_f64(l * r)));
+                }
+                Instruction::DivF64 { dest, lhs, rhs } => {
+                    let Value::Float64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Float64(galfus_core::normalize_f64(l / r)));
+                }
+                Instruction::RemF64 { dest, lhs, rhs } => {
+                    let Value::Float64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Float64(galfus_core::normalize_f64(l % r)));
+                }
+                Instruction::EqF64 { dest, lhs, rhs } => {
+                    let Value::Float64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l == r));
+                }
+                Instruction::NeF64 { dest, lhs, rhs } => {
+                    let Value::Float64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l != r));
+                }
+                Instruction::LtF64 { dest, lhs, rhs } => {
+                    let Value::Float64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l < r));
+                }
+                Instruction::LeF64 { dest, lhs, rhs } => {
+                    let Value::Float64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l <= r));
+                }
+                Instruction::GtF64 { dest, lhs, rhs } => {
+                    let Value::Float64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l > r));
+                }
+                Instruction::GeF64 { dest, lhs, rhs } => {
+                    let Value::Float64(l) = read_reg!(thread, lhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    let Value::Float64(r) = read_reg!(thread, rhs) else { unsafe { std::hint::unreachable_unchecked() } };
+                    write_prim_reg!(thread, dest, Value::Bool(l >= r));
+                }
+
                 Instruction::Add { dest, lhs, rhs } => {
                     let lhs_val = read_reg!(thread, lhs);
                     let rhs_val = read_reg!(thread, rhs);
@@ -1209,6 +1438,7 @@ impl VirtualMachine {
             | Instruction::AwaitRace { .. }
             | Instruction::Len { .. }
             | Instruction::CopyArray { .. } => self.execute_system_instruction(thread, instr)?,
+            _ => VmStep::Continue,
         };
 
         Ok(step)
