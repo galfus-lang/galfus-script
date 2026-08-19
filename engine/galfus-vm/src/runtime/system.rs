@@ -6,22 +6,20 @@ impl VirtualMachine {
     pub(super) fn execute_system_instruction(
         &self,
         thread: &mut thread::VmThreadState,
-        instr: Instruction,
+        instr: &Instruction,
     ) -> Result<VmStep, VmError> {
-        match instr {
+        match *instr {
             // Category E: Memory Ownership
             Instruction::Drop { reg } => {
-                let value = thread.read_reg(reg)?;
-                thread.write_reg(reg, Value::Null)?;
-                if let Value::Future(future_id) = value {
-                    let released_handles = self.release_unreachable(thread)?;
-                    thread.pending_adapter_handle_drops.extend(released_handles);
-                    if !thread.contains_future_handle(future_id) {
-                        return Ok(VmStep::Suspend {
-                            effect: VmEffect::FutureDropped { future_id },
-                            continuation: Continuation::new(None),
-                        });
-                    }
+                let value = thread.read_reg(reg);
+                thread.write_reg(reg, Value::Null);
+                if let Value::Future(future_id) = value
+                    && !thread.contains_future_handle(future_id)
+                {
+                    return Ok(VmStep::Suspend {
+                        effect: VmEffect::FutureDropped { future_id },
+                        continuation: Continuation::new(None),
+                    });
                 }
             }
 
@@ -30,7 +28,7 @@ impl VirtualMachine {
                 future_id,
                 return_type,
             } => {
-                let val = thread.read_reg(future_id)?;
+                let val = thread.read_reg(future_id);
                 let Value::Future(future_id) = val else {
                     return Err(VmError::TypeMismatch {
                         expected: "Future<T>".to_string(),
@@ -52,15 +50,15 @@ impl VirtualMachine {
                 });
             }
             Instruction::Len { dest, src } => {
-                let val = thread.read_reg(src)?;
+                let val = thread.read_reg(src);
                 if let Value::Object(obj_ref) = val {
                     let heap_obj = thread.heap.get_object(obj_ref)?;
                     match heap_obj {
                         HeapObject::Array { elements, .. } => {
-                            thread.write_reg(dest, Value::Int32(elements.len() as i32))?;
+                            thread.write_reg(dest, Value::Int32(elements.len() as i32));
                         }
                         HeapObject::Tuple { elements, .. } => {
-                            thread.write_reg(dest, Value::Int32(elements.len() as i32))?;
+                            thread.write_reg(dest, Value::Int32(elements.len() as i32));
                         }
                         _ => {
                             return Err(VmError::TypeMismatch {
@@ -81,9 +79,9 @@ impl VirtualMachine {
                 dest_start,
                 src,
             } => {
-                let dest_val = thread.read_reg(dest)?;
-                let start_val = thread.read_reg(dest_start)?;
-                let src_val = thread.read_reg(src)?;
+                let dest_val = thread.read_reg(dest);
+                let start_val = thread.read_reg(dest_start);
+                let src_val = thread.read_reg(src);
 
                 let start_idx = match start_val {
                     Value::Int8(x) if x >= 0 => x as usize,
@@ -102,9 +100,7 @@ impl VirtualMachine {
                     }
                 };
 
-                if let (Value::Object(dest_ref), Value::Object(src_ref)) =
-                    (dest_val.clone(), src_val.clone())
-                {
+                if let (Value::Object(dest_ref), Value::Object(src_ref)) = (dest_val, src_val) {
                     let src_elements = match thread.heap.get_object(src_ref)? {
                         HeapObject::Array { elements, .. } => elements.clone(),
                         HeapObject::Tuple { elements, .. } => elements.clone(),
@@ -119,10 +115,7 @@ impl VirtualMachine {
                     let dest_obj = thread.heap.get_object_mut(dest_ref)?;
                     if let HeapObject::Array { elements, .. } = dest_obj {
                         if start_idx + src_elements.len() > elements.len() {
-                            return Err(VmError::IndexOutOfBounds {
-                                index: (start_idx + src_elements.len() - 1) as i128,
-                                len: elements.len(),
-                            });
+                            panic!("Corrupted bytecode: Out of bounds");
                         }
                         for (i, elem) in src_elements.into_iter().enumerate() {
                             elements[start_idx + i] = elem;
@@ -150,7 +143,9 @@ impl VirtualMachine {
             } => {
                 let mut args = Vec::with_capacity(arg_count as usize);
                 for i in 0..arg_count {
-                    args.push(thread.read_reg(Reg(args_start.raw() + i as u16))?);
+                    let val = thread.read_reg(Reg(args_start.raw() + i as u16));
+                    thread.retain_anchor_val(&val);
+                    args.push(val);
                 }
                 let module_id = thread
                     .call_stack
@@ -175,7 +170,7 @@ impl VirtualMachine {
                             galfus_bytecode::graph_resolver::ResolvedImportKind::Function(
                                 index,
                             ) => *index,
-                            _ => return Err(VmError::FunctionOutOfBounds { index: func_idx }),
+                            _ => panic!("Corrupted bytecode: Out of bounds"),
                         };
                         (import.module_id, target_func_idx)
                     };
@@ -199,10 +194,12 @@ impl VirtualMachine {
                 ref arg_types,
                 return_type,
             } => {
-                let func_val = thread.read_reg(func_reg)?;
+                let func_val = thread.read_reg(func_reg);
                 let mut args = Vec::with_capacity(arg_count as usize);
                 for i in 0..arg_count {
-                    args.push(thread.read_reg(Reg(args_start.raw() + i as u16))?);
+                    let val = thread.read_reg(Reg(args_start.raw() + i as u16));
+                    thread.retain_anchor_val(&val);
+                    args.push(val);
                 }
                 let module_id = thread
                     .call_stack
@@ -228,7 +225,7 @@ impl VirtualMachine {
             } => {
                 let future_ids = (0..count)
                     .map(|index| {
-                        let val = thread.read_reg(Reg(futures_start.raw() + index as u16))?;
+                        let val = thread.read_reg(Reg(futures_start.raw() + index as u16));
                         match val {
                             Value::Future(id) => Ok(id),
                             value => Err(VmError::TypeMismatch {
@@ -260,7 +257,7 @@ impl VirtualMachine {
             } => {
                 let future_ids = (0..count)
                     .map(|index| {
-                        let val = thread.read_reg(Reg(futures_start.raw() + index as u16))?;
+                        let val = thread.read_reg(Reg(futures_start.raw() + index as u16));
                         match val {
                             Value::Future(id) => Ok(id),
                             value => Err(VmError::TypeMismatch {

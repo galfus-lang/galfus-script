@@ -198,9 +198,8 @@ impl Runtime {
             });
         }
 
-        let thread_quota = std::sync::Arc::new(std::sync::Mutex::new(
-            galfus_vm::quota::ThreadQuota::new(package.limits().clone()),
-        ));
+        let thread_quota =
+            std::sync::Arc::new(galfus_vm::quota::ThreadQuota::new(package.limits().clone()));
         let mut thread = galfus_vm::thread::VmThreadState::new(quota.clone(), thread_quota);
         let vm = VirtualMachine::new(graph.clone()).with_provider_handle(providers);
 

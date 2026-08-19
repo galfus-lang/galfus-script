@@ -1,8 +1,7 @@
 use galfus_bytecode::PackageImage;
-use galfus_contract::{AdapterBindings, Providers};
+use galfus_contract::AdapterBindings;
 use galfus_host_native::ExecutionHost;
 use galfus_host_native::driver::NativeDriver;
-use galfus_host_native::providers::io::NativeIoProvider;
 use std::rc::Rc;
 use std::sync::Arc;
 const MAGIC_MARKER: &[u8; 8] = b"GLFS_PKG";
@@ -68,7 +67,7 @@ fn main() {
         std::process::exit(1);
     });
 
-    let providers = Providers::new().with_host("io", Box::new(NativeIoProvider));
+    let providers = galfus_host_native::providers::default_providers(package.metadata().clone());
 
     let adapters = AdapterBindings::default();
     let driver = Rc::new(NativeDriver::new());

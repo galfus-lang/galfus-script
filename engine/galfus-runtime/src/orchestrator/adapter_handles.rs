@@ -124,7 +124,7 @@ impl Orchestrator {
         &mut self,
         thread: &mut galfus_vm::thread::VmThreadState,
     ) {
-        let handles = std::mem::take(&mut thread.pending_adapter_handle_drops);
+        let handles = std::mem::take(&mut thread.heap.pending_adapter_handle_drops);
         if let Err(error) = self.release_adapter_handles(handles) {
             self.failure = Some(ExecutionFailure::new(
                 ExecutionFailureKind::AdapterCallFailure,

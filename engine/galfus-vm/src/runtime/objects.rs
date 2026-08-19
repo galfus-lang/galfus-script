@@ -7,9 +7,9 @@ impl VirtualMachine {
     pub(super) fn execute_object_instruction(
         &self,
         thread: &mut thread::VmThreadState,
-        instr: Instruction,
+        instr: &Instruction,
     ) -> Result<VmStep, VmError> {
-        match instr {
+        match *instr {
             // Category D: Heaps, Structs & Collections
             Instruction::AllocLocal { dest, type_idx } => {
                 let ty = self
@@ -33,7 +33,7 @@ impl VirtualMachine {
                         layout_idx: *layout_idx,
                         fields,
                     })?;
-                    thread.write_reg(dest, Value::Object(obj_ref))?;
+                    thread.write_reg(dest, Value::Object(obj_ref));
                 } else {
                     return Err(VmError::TypeMismatch {
                         expected: "Struct type".to_string(),
@@ -42,7 +42,7 @@ impl VirtualMachine {
                 }
             }
             Instruction::LoadField { dest, obj, field } => {
-                let obj_val = thread.read_reg(obj)?;
+                let obj_val = thread.read_reg(obj);
                 if let Value::Object(obj_ref) = obj_val {
                     let heap_obj = thread.heap.get_object(obj_ref)?;
                     if let HeapObject::Struct { fields, .. } = heap_obj {
@@ -50,15 +50,15 @@ impl VirtualMachine {
                             .get(field.raw() as usize)
                             .cloned()
                             .ok_or(VmError::FieldOutOfBounds { index: field })?;
-                        thread.write_reg(dest, val)?;
+                        thread.write_reg(dest, val);
                     } else if let HeapObject::Tuple { elements } = heap_obj {
                         let val = elements
                             .get(field.raw() as usize)
                             .cloned()
                             .ok_or(VmError::FieldOutOfBounds { index: field })?;
-                        thread.write_reg(dest, val)?;
+                        thread.write_reg(dest, val);
                     } else if let HeapObject::Choice { payload, .. } = heap_obj {
-                        thread.write_reg(dest, payload.clone())?;
+                        thread.write_reg(dest, *payload);
                     } else {
                         return Err(VmError::TypeMismatch {
                             expected: "Struct or Choice object".to_string(),
@@ -73,15 +73,20 @@ impl VirtualMachine {
                 }
             }
             Instruction::StoreField { obj, field, val } => {
-                let obj_val = thread.read_reg(obj)?;
-                let val_to_store = thread.read_reg(val)?;
+                let obj_val = thread.read_reg(obj);
+                let val_to_store = thread.read_reg(val);
+                thread.retain_edge_val(&val_to_store);
                 if let Value::Object(obj_ref) = obj_val {
                     let heap_obj = thread.heap.get_object_mut(obj_ref)?;
                     if let HeapObject::Struct { fields, .. } = heap_obj {
                         if (field.raw() as usize) < fields.len() {
-                            fields[field.raw() as usize] = val_to_store;
+                            let old_val =
+                                std::mem::replace(&mut fields[field.raw() as usize], val_to_store);
+                            if let Value::Object(old_ref) = old_val {
+                                let _ = thread.heap.release_edge(old_ref);
+                            }
                         } else {
-                            return Err(VmError::FieldOutOfBounds { index: field });
+                            panic!("Corrupted bytecode: Out of bounds");
                         }
                     } else {
                         return Err(VmError::TypeMismatch {
@@ -115,7 +120,7 @@ impl VirtualMachine {
                         });
                     }
                 };
-                let len_val = thread.read_reg(len_reg)?;
+                let len_val = thread.read_reg(len_reg);
                 let len = match len_val {
                     Value::Int8(x) if x >= 0 => x as usize,
                     Value::Int16(x) if x >= 0 => x as usize,
@@ -143,11 +148,11 @@ impl VirtualMachine {
                     element_ty,
                     elements,
                 })?;
-                thread.write_reg(dest, Value::Object(obj_ref))?;
+                thread.write_reg(dest, Value::Object(obj_ref));
             }
             Instruction::LoadIndex { dest, arr, idx } => {
-                let arr_val = thread.read_reg(arr)?;
-                let idx_val = thread.read_reg(idx)?;
+                let arr_val = thread.read_reg(arr);
+                let idx_val = thread.read_reg(idx);
                 let raw_index = self.to_raw_array_index(idx_val)?;
 
                 if let Value::Object(obj_ref) = arr_val {
@@ -157,7 +162,7 @@ impl VirtualMachine {
                             if let Some(index) =
                                 self.resolve_raw_array_index(raw_index, elements.len())
                             {
-                                elements[index].clone()
+                                elements[index]
                             } else {
                                 Value::Null
                             }
@@ -170,7 +175,7 @@ impl VirtualMachine {
                         }
                     };
 
-                    thread.write_reg(dest, val)?;
+                    thread.write_reg(dest, val);
                 } else {
                     return Err(VmError::TypeMismatch {
                         expected: "Object reference".to_string(),
@@ -179,10 +184,11 @@ impl VirtualMachine {
                 }
             }
             Instruction::StoreIndex { arr, idx, val } => {
-                let arr_val = thread.read_reg(arr)?;
-                let idx_val = thread.read_reg(idx)?;
+                let arr_val = thread.read_reg(arr);
+                let idx_val = thread.read_reg(idx);
                 let raw_index = self.to_raw_array_index(idx_val)?;
-                let val_to_store = thread.read_reg(val)?;
+                let val_to_store = thread.read_reg(val);
+                thread.retain_edge_val(&val_to_store);
 
                 if let Value::Object(obj_ref) = arr_val {
                     let (index, val_to_store) = {
@@ -228,7 +234,10 @@ impl VirtualMachine {
 
                     match heap_obj {
                         HeapObject::Array { elements, .. } | HeapObject::Tuple { elements } => {
-                            elements[index] = val_to_store;
+                            let old_val = std::mem::replace(&mut elements[index], val_to_store);
+                            if let Value::Object(old_ref) = old_val {
+                                let _ = thread.heap.release_edge(old_ref);
+                            }
                         }
                         heap_obj => {
                             return Err(VmError::TypeMismatch {
@@ -265,10 +274,10 @@ impl VirtualMachine {
                     let mut elements = Vec::new();
                     for i in 0..count as usize {
                         let src_reg = Reg(start.raw() + i as u16);
-                        elements.push(thread.read_reg(src_reg)?);
+                        elements.push(thread.read_reg(src_reg));
                     }
                     let obj_ref = thread.heap.alloc(HeapObject::Tuple { elements })?;
-                    thread.write_reg(dest, Value::Object(obj_ref))?;
+                    thread.write_reg(dest, Value::Object(obj_ref));
                 } else {
                     return Err(VmError::TypeMismatch {
                         expected: "Tuple type".to_string(),
@@ -288,7 +297,7 @@ impl VirtualMachine {
                     .get(type_idx.raw() as usize)
                     .ok_or(VmError::TypeOutOfBounds { index: type_idx })?;
                 if let BytecodeType::Choice(layout_idx) = ty {
-                    let payload_val = thread.read_reg(payload)?;
+                    let payload_val = thread.read_reg(payload);
                     let obj_ref = thread.heap.alloc(HeapObject::Choice {
                         module_id: thread
                             .call_stack
@@ -299,7 +308,7 @@ impl VirtualMachine {
                         variant_idx,
                         payload: payload_val,
                     })?;
-                    thread.write_reg(dest, Value::Object(obj_ref))?;
+                    thread.write_reg(dest, Value::Object(obj_ref));
                 } else {
                     return Err(VmError::TypeMismatch {
                         expected: "Choice type".to_string(),
@@ -312,23 +321,23 @@ impl VirtualMachine {
                 src,
                 type_idx,
             } => {
-                let val = thread.read_reg(src)?;
+                let val = thread.read_reg(src);
                 let res = self.execute_cast(thread, &val, type_idx)?;
-                thread.write_reg(dest, res)?;
+                thread.write_reg(dest, res);
             }
             Instruction::Copy { dest, src } => {
-                let val = thread.read_reg(src)?;
+                let val = thread.read_reg(src);
                 let copied = self.deep_copy_value(thread, &val)?;
-                thread.write_reg(dest, copied)?;
+                thread.write_reg(dest, copied);
             }
             Instruction::Instanceof {
                 dest,
                 src,
                 type_idx,
             } => {
-                let val = thread.read_reg(src)?;
+                let val = thread.read_reg(src);
                 let is_instance = self.check_value_type(thread, &val, type_idx);
-                thread.write_reg(dest, Value::Bool(is_instance))?;
+                thread.write_reg(dest, Value::Bool(is_instance));
             }
 
             _ => unreachable!("instruction routed to the wrong runtime handler"),
@@ -343,7 +352,7 @@ impl VirtualMachine {
         value: &Value,
     ) -> Result<Value, VmError> {
         let Value::Object(obj_ref) = value else {
-            return Ok(value.clone());
+            return Ok(*value);
         };
 
         let strong_closure = self.discover_strong_copy_closure(thread, *obj_ref)?;
@@ -552,7 +561,7 @@ impl VirtualMachine {
                             if is_weak {
                                 Ok(self.copy_weak_value(field, copied))
                             } else {
-                                self.copy_strong_value(thread, field, copied)
+                                self.copy_strong_value(field, copied)
                             }
                         })
                         .collect::<Result<Vec<_>, _>>()?;
@@ -572,7 +581,7 @@ impl VirtualMachine {
                 HeapObject::Array { elements, .. } => {
                     let copied_elements = elements
                         .iter()
-                        .map(|element| self.copy_strong_value(thread, element, copied))
+                        .map(|element| self.copy_strong_value(element, copied))
                         .collect::<Result<Vec<_>, _>>()?;
 
                     match thread.heap.get_object_mut(copied_ref)? {
@@ -590,7 +599,7 @@ impl VirtualMachine {
                 HeapObject::Tuple { elements } => {
                     let copied_elements = elements
                         .iter()
-                        .map(|element| self.copy_strong_value(thread, element, copied))
+                        .map(|element| self.copy_strong_value(element, copied))
                         .collect::<Result<Vec<_>, _>>()?;
 
                     match thread.heap.get_object_mut(copied_ref)? {
@@ -606,7 +615,7 @@ impl VirtualMachine {
                     }
                 }
                 HeapObject::Choice { payload, .. } => {
-                    let copied_payload = self.copy_strong_value(thread, &payload, copied)?;
+                    let copied_payload = self.copy_strong_value(&payload, copied)?;
 
                     match thread.heap.get_object_mut(copied_ref)? {
                         HeapObject::Choice { payload, .. } => {
@@ -629,12 +638,11 @@ impl VirtualMachine {
 
     fn copy_strong_value(
         &self,
-        _thread: &thread::VmThreadState,
         value: &Value,
         copied: &HashMap<VmObjectRef, ObjectRef>,
     ) -> Result<Value, VmError> {
         let Value::Object(obj_ref) = value else {
-            return Ok(value.clone());
+            return Ok(*value);
         };
 
         if let Some(copied_ref) = copied.get(obj_ref) {
@@ -649,7 +657,7 @@ impl VirtualMachine {
 
     fn copy_weak_value(&self, value: &Value, copied: &HashMap<VmObjectRef, ObjectRef>) -> Value {
         let Value::Object(obj_ref) = value else {
-            return value.clone();
+            return *value;
         };
 
         copied

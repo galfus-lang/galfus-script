@@ -64,6 +64,9 @@ enum Command {
         /// Optimization profile to use during compilation
         #[arg(short, long, default_value = "fastest")]
         profile: String,
+        /// Path to a locally compiled host binary to use instead of downloading
+        #[arg(long)]
+        local_host: Option<String>,
     },
     /// Upgrade the Galfus CLI binary to a newer version
     Upgrade {
@@ -89,7 +92,8 @@ fn main() -> Result<()> {
             target,
             out,
             profile,
-        } => compile::run_compile(&workspace, target, out, &profile),
+            local_host,
+        } => compile::run_compile(&workspace, target, out, &profile, local_host),
         Command::Upgrade { tag } => upgrade::run_upgrade(tag),
         Command::Lsp => lsp::run_lsp(),
     }

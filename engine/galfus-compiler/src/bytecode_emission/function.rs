@@ -537,6 +537,42 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                         self.instructions.push(Instruction::RetNull);
                     }
                 }
+                Terminator::TailCall {
+                    func,
+                    args,
+                    is_external: _,
+                } => {
+                    let start_reg = if args.is_empty() {
+                        Reg(0) // Dummy if no args
+                    } else {
+                        let reg = self.alloc_temp();
+                        let mut temp_regs = vec![reg];
+                        for _ in 1..args.len() {
+                            temp_regs.push(self.alloc_temp());
+                        }
+                        for (i, arg_op) in args.iter().enumerate() {
+                            self.load_operand_to(arg_op, temp_regs[i]);
+                        }
+                        reg
+                    };
+
+                    let func_idx = *self.ctx.function_map.get(func).unwrap_or_else(|| {
+                        panic!(
+                            "missing lowered function mapping for {:?} while emitting {} ({:?})",
+                            func, self.func.name, self.func.id
+                        )
+                    });
+
+                    self.instructions.push(Instruction::TailCall {
+                        func: func_idx,
+                        args_start: start_reg,
+                        arg_count: args.len() as u8,
+                    });
+
+                    if !args.is_empty() {
+                        self.free_temps(args.len() as u16);
+                    }
+                }
 
                 Terminator::Panic(msg) => {
                     let const_idx = crate::bytecode_emission::constants::get_or_create_constant(

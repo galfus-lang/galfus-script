@@ -281,10 +281,7 @@ impl VirtualKernel {
         self.registry.get_mailbox(id)
     }
 
-    pub fn get_thread_quota(
-        &self,
-        id: ThreadId,
-    ) -> Option<Arc<Mutex<galfus_vm::quota::ThreadQuota>>> {
+    pub fn get_thread_quota(&self, id: ThreadId) -> Option<Arc<galfus_vm::quota::ThreadQuota>> {
         self.registry.get_thread_quota(id)
     }
 

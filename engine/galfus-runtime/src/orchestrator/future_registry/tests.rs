@@ -14,7 +14,7 @@ fn activation() -> Activation {
         module_id: ModuleId::new(1),
         func_idx: FuncIdx(0),
         args: vec![],
-        arg_types: vec![],
+        arg_types: Box::new([]),
     }
 }
 

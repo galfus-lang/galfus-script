@@ -15,7 +15,7 @@ impl Orchestrator {
         target_module_id: ModuleId,
         func_idx: FuncIdx,
         args: Vec<galfus_vm::VmValue>,
-        arg_types: Vec<TypeIdx>,
+        arg_types: Box<[TypeIdx]>,
         return_type: TypeIdx,
     ) {
         let Some(future_lease) = self.allocate_future_lease(thread_id, &thread) else {
@@ -33,7 +33,7 @@ impl Orchestrator {
             .module;
         let mut encoded_args = Vec::with_capacity(args.len());
         for (arg, ty) in args.into_iter().zip(arg_types.iter()) {
-            match crate::task::decode_from_thread_heap(&thread.heap, arg.clone(), *ty, module) {
+            match crate::task::decode_from_thread_heap(&thread.heap, arg, *ty, module) {
                 Ok(value) => encoded_args.push(value),
                 Err(_) if matches!(arg, galfus_vm::VmValue::Function { .. }) => {
                     let galfus_vm::VmValue::Function {
@@ -95,7 +95,7 @@ impl Orchestrator {
         module_id: ModuleId,
         func: galfus_vm::VmValue,
         args: Vec<galfus_vm::VmValue>,
-        arg_types: Vec<TypeIdx>,
+        arg_types: Box<[TypeIdx]>,
         return_type: TypeIdx,
     ) {
         let Some(future_lease) = self.allocate_future_lease(thread_id, &thread) else {
@@ -249,7 +249,7 @@ impl Orchestrator {
         target_module_id: ModuleId,
         func_idx: FuncIdx,
         args: Vec<BoundaryValue>,
-        arg_types: Vec<TypeIdx>,
+        arg_types: Box<[TypeIdx]>,
     ) -> crate::orchestrator::future_registry::Activation {
         let target = &self
             .vm

@@ -6,9 +6,9 @@ impl VirtualMachine {
     pub(super) fn execute_control_instruction(
         &self,
         thread: &mut thread::VmThreadState,
-        instr: Instruction,
+        instr: &Instruction,
     ) -> Result<VmStep, VmError> {
-        match instr {
+        match *instr {
             // Category C: Control Flow & Subroutines
             Instruction::Jump { offset } => {
                 let frame = thread
@@ -19,7 +19,7 @@ impl VirtualMachine {
                 frame.pc = new_pc;
             }
             Instruction::JumpTrue { cond, offset } => {
-                let cond_val = thread.read_reg(cond)?;
+                let cond_val = thread.read_reg(cond);
                 match cond_val {
                     Value::Bool(b) => {
                         if b {
@@ -40,7 +40,7 @@ impl VirtualMachine {
                 }
             }
             Instruction::JumpFalse { cond, offset } => {
-                let cond_val = thread.read_reg(cond)?;
+                let cond_val = thread.read_reg(cond);
                 match cond_val {
                     Value::Bool(b) => {
                         if !b {
@@ -61,7 +61,7 @@ impl VirtualMachine {
                 }
             }
             Instruction::JumpNull { val, offset } => {
-                let val_read = thread.read_reg(val)?;
+                let val_read = thread.read_reg(val);
                 if matches!(val_read, Value::Null) {
                     let frame = thread
                         .call_stack
@@ -96,7 +96,7 @@ impl VirtualMachine {
                             .ok_or(VmError::FunctionOutOfBounds { index: func_idx })?;
                         let func = match &import.kind {
                             galfus_bytecode::graph_resolver::ResolvedImportKind::Function(f) => *f,
-                            _ => return Err(VmError::FunctionOutOfBounds { index: func_idx }),
+                            _ => panic!("Corrupted bytecode: Out of bounds"),
                         };
                         (import.module_id, func)
                     };
@@ -116,27 +116,137 @@ impl VirtualMachine {
                     });
                 }
 
-                let mut callee_regs = vec![
-                    Value::Null;
-                    callee.param_count as usize
-                        + callee.local_count as usize
-                        + callee.temp_count as usize
-                ];
+                let register_count = callee.param_count as usize
+                    + callee.local_count as usize
+                    + callee.temp_count as usize;
 
-                for (i, dest) in callee_regs.iter_mut().enumerate().take(arg_count as usize) {
-                    let src_reg = Reg(args_start.raw() + i as u16);
-                    let val = thread.read_reg(src_reg)?;
-                    *dest = val;
+                let target_func = self.get_function(target_module_id, target_func_idx)?;
+                let cached_instructions = target_func.instructions.as_slice() as *const _;
+                thread.push_frame(
+                    target_module_id,
+                    target_func_idx,
+                    0,
+                    Some(dest),
+                    register_count,
+                    cached_instructions,
+                )?;
+                thread.setup_args_from_caller(args_start, arg_count as usize, None)?;
+            }
+            Instruction::TailCall {
+                func: func_idx,
+                args_start,
+                arg_count,
+            } => {
+                let frame = thread.call_stack.last().ok_or(VmError::EmptyCallStack)?;
+                let current_module_id = frame.module_id;
+                let current_image = self.get_module(current_module_id)?;
+
+                let (target_module_id, target_func_idx) =
+                    if (func_idx.raw() as usize) < current_image.functions.len() {
+                        (current_module_id, func_idx)
+                    } else {
+                        let import_idx = (func_idx.raw() as usize) - current_image.functions.len();
+                        let link = self
+                            .graph
+                            .resolve_imports(current_module_id)
+                            .map_err(|_| VmError::FunctionOutOfBounds { index: func_idx })?;
+                        let import = link
+                            .imports
+                            .get(import_idx)
+                            .ok_or(VmError::FunctionOutOfBounds { index: func_idx })?;
+                        let func = match &import.kind {
+                            galfus_bytecode::graph_resolver::ResolvedImportKind::Function(f) => *f,
+                            _ => panic!("Corrupted bytecode: Out of bounds"),
+                        };
+                        (import.module_id, func)
+                    };
+
+                let target_image = self.get_module(target_module_id)?;
+                let callee = target_image
+                    .functions
+                    .get(target_func_idx.raw() as usize)
+                    .ok_or(VmError::FunctionOutOfBounds {
+                        index: target_func_idx,
+                    })?;
+
+                if arg_count != callee.param_count {
+                    return Err(VmError::TypeMismatch {
+                        expected: format!("{} arguments", callee.param_count),
+                        found: format!("{} arguments", arg_count),
+                    });
                 }
 
-                // Save destination register inside call frame to write return value back
-                thread.push_frame(CallFrame {
-                    module_id: target_module_id,
-                    func_idx: target_func_idx,
-                    pc: 0,
-                    registers: callee_regs,
-                    return_dest: Some(dest),
-                })?;
+                let register_count = callee.param_count as usize
+                    + callee.local_count as usize
+                    + callee.temp_count as usize;
+
+                let target_func = self.get_function(target_module_id, target_func_idx)?;
+                let cached_instructions = target_func.instructions.as_slice() as *const _;
+
+                // For TailCall, we REUSE the current frame.
+                // We MUST setup args first into a temporary buffer (or correctly handle overlap if we do it in place)
+                // thread.setup_args_from_caller reads from current frame, so we read them BEFORE we overwrite the frame.
+                // Actually `setup_args_from_caller` expects the frame to ALREADY be pushed!
+                // So we can't use `setup_args_from_caller` safely if we reuse the frame without care.
+
+                let caller_base = thread.current_register_base;
+                let new_top = caller_base + register_count;
+
+                if new_top > thread.registers.len() {
+                    thread
+                        .registers
+                        .resize(new_top.max(thread.registers.len() * 2), Value::Null);
+                }
+
+                let registers_ptr = thread.registers.as_mut_ptr();
+                let count = arg_count as usize;
+                let mut temp_args = Vec::with_capacity(count);
+                if count > 0 {
+                    let src_ptr =
+                        unsafe { registers_ptr.add(caller_base + args_start.raw() as usize) };
+                    for i in 0..count {
+                        temp_args.push(*unsafe { &*src_ptr.add(i) });
+                    }
+                }
+
+                // Release objects
+                if thread.current_frame_has_objects {
+                    let old_top = thread.current_register_top;
+                    for i in caller_base..old_top {
+                        let val_ref = unsafe { &mut *registers_ptr.add(i) };
+                        let val = std::mem::replace(val_ref, Value::Null);
+                        if let Value::Object(obj_ref) = val {
+                            let _ = thread.heap.release_anchor(obj_ref);
+                        }
+                    }
+                } else {
+                    let old_top = thread.current_register_top;
+                    let max_clear = old_top.max(new_top);
+                    for i in caller_base..max_clear {
+                        unsafe { *registers_ptr.add(i) = Value::Null };
+                    }
+                }
+
+                thread.current_frame_has_objects = false;
+                if count > 0 {
+                    let dst_ptr = unsafe { registers_ptr.add(caller_base) };
+                    for (i, val) in temp_args.into_iter().enumerate() {
+                        if let Value::Object(obj_ref) = val {
+                            thread.current_frame_has_objects = true;
+                            let _ = thread.heap.retain_anchor(obj_ref);
+                        }
+                        unsafe { *dst_ptr.add(i) = val };
+                    }
+                }
+
+                thread.current_register_top = new_top;
+
+                let frame = thread.call_stack.last_mut().unwrap();
+                frame.module_id = target_module_id;
+                frame.func_idx = target_func_idx;
+                frame.pc = 0;
+                frame.cached_instructions = cached_instructions;
+                frame.has_objects = thread.current_frame_has_objects;
             }
             Instruction::CallMethod {
                 dest,
@@ -165,21 +275,21 @@ impl VirtualMachine {
                 if let Some(value) =
                     self.execute_array_iterator_method(thread, obj, method_name.as_str())?
                 {
-                    thread.write_reg(dest, value)?;
+                    thread.write_reg(dest, value);
                     return Ok(VmStep::Continue);
                 }
 
                 if method_name == "compare" {
-                    let obj_val = thread.read_reg(obj)?;
+                    let obj_val = thread.read_reg(obj);
                     if !matches!(obj_val, Value::Object(_)) {
-                        let arg_val = thread.read_reg(Reg(args_start.raw() + 1))?;
+                        let arg_val = thread.read_reg(Reg(args_start.raw() + 1));
                         let is_equal = obj_val == arg_val;
-                        thread.write_reg(dest, Value::Bool(is_equal))?;
+                        thread.write_reg(dest, Value::Bool(is_equal));
                         return Ok(VmStep::Continue);
                     }
                 }
 
-                let receiver_layout = match thread.read_reg(obj)? {
+                let receiver_layout = match thread.read_reg(obj) {
                     Value::Object(obj_ref) => match thread.heap.get_object(obj_ref)? {
                         HeapObject::Struct {
                             module_id,
@@ -311,30 +421,21 @@ impl VirtualMachine {
                     });
                 }
 
-                let mut callee_regs = vec![
-                    Value::Null;
-                    callee.param_count as usize
-                        + callee.local_count as usize
-                        + callee.temp_count as usize
-                ];
+                let register_count = callee.param_count as usize
+                    + callee.local_count as usize
+                    + callee.temp_count as usize;
 
-                for (i, dest) in callee_regs.iter_mut().enumerate().take(arg_count as usize) {
-                    // First arg is obj, then args_start + 1, +2, ...
-                    let src_reg = if i == 0 {
-                        obj
-                    } else {
-                        Reg(args_start.raw() + i as u16)
-                    };
-                    *dest = thread.read_reg(src_reg)?;
-                }
-
-                thread.push_frame(CallFrame {
-                    module_id: target_module_id,
-                    func_idx: target_func_idx,
-                    pc: 0,
-                    registers: callee_regs,
-                    return_dest: Some(dest),
-                })?;
+                let target_func = self.get_function(target_module_id, target_func_idx)?;
+                let cached_instructions = target_func.instructions.as_slice() as *const _;
+                thread.push_frame(
+                    target_module_id,
+                    target_func_idx,
+                    0,
+                    Some(dest),
+                    register_count,
+                    cached_instructions,
+                )?;
+                thread.setup_args_from_caller(args_start, arg_count as usize, Some(obj))?;
             }
             Instruction::CallDynamic {
                 dest,
@@ -342,7 +443,7 @@ impl VirtualMachine {
                 args_start,
                 arg_count,
             } => {
-                let (target_module_id, func_idx) = match thread.read_reg(func_reg)? {
+                let (target_module_id, func_idx) = match thread.read_reg(func_reg) {
                     Value::Function {
                         module_id,
                         func_idx,
@@ -372,7 +473,7 @@ impl VirtualMachine {
                             .ok_or(VmError::FunctionOutOfBounds { index: func_idx })?;
                         let func = match &import.kind {
                             galfus_bytecode::graph_resolver::ResolvedImportKind::Function(f) => *f,
-                            _ => return Err(VmError::FunctionOutOfBounds { index: func_idx }),
+                            _ => panic!("Corrupted bytecode: Out of bounds"),
                         };
                         (import.module_id, func)
                     };
@@ -392,35 +493,31 @@ impl VirtualMachine {
                     });
                 }
 
-                let mut callee_regs = vec![
-                    Value::Null;
-                    callee.param_count as usize
-                        + callee.local_count as usize
-                        + callee.temp_count as usize
-                ];
-                for (index, callee_reg) in
-                    callee_regs.iter_mut().enumerate().take(arg_count as usize)
-                {
-                    let source = Reg(args_start.raw() + index as u16);
-                    *callee_reg = thread.read_reg(source)?;
-                }
+                let register_count = callee.param_count as usize
+                    + callee.local_count as usize
+                    + callee.temp_count as usize;
 
-                thread.push_frame(CallFrame {
-                    module_id: target_module_id,
-                    func_idx: target_func_idx,
-                    pc: 0,
-                    registers: callee_regs,
-                    return_dest: Some(dest),
-                })?;
+                let target_func = self.get_function(target_module_id, target_func_idx)?;
+                let cached_instructions = target_func.instructions.as_slice() as *const _;
+                thread.push_frame(
+                    target_module_id,
+                    target_func_idx,
+                    0,
+                    Some(dest),
+                    register_count,
+                    cached_instructions,
+                )?;
+                thread.setup_args_from_caller(args_start, arg_count as usize, None)?;
             }
 
             Instruction::Ret { src } => {
-                let val = thread.read_reg(src)?;
+                let val = thread.read_reg(src);
+                thread.retain_anchor_val(&val);
                 let completed_frame = thread.pop_frame().ok_or(VmError::EmptyCallStack)?;
 
                 match completed_frame.return_dest {
                     Some(dest) => {
-                        thread.write_reg(dest, val)?;
+                        thread.write_reg(dest, val);
                     }
                     None => {
                         let return_type = self
@@ -439,7 +536,7 @@ impl VirtualMachine {
 
                 match completed_frame.return_dest {
                     Some(dest) => {
-                        thread.write_reg(dest, Value::Null)?;
+                        thread.write_reg(dest, Value::Null);
                     }
                     None => {
                         let return_type = self
@@ -480,7 +577,7 @@ impl VirtualMachine {
         obj: Reg,
         method_name: &str,
     ) -> Result<Option<Value>, VmError> {
-        let Value::Object(iterator_ref) = thread.read_reg(obj)? else {
+        let Value::Object(iterator_ref) = thread.read_reg(obj) else {
             return Ok(None);
         };
 
