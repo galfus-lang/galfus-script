@@ -561,7 +561,7 @@ impl VirtualMachine {
                             if is_weak {
                                 Ok(self.copy_weak_value(field, copied))
                             } else {
-                                self.copy_strong_value(thread, field, copied)
+                                self.copy_strong_value(field, copied)
                             }
                         })
                         .collect::<Result<Vec<_>, _>>()?;
@@ -581,7 +581,7 @@ impl VirtualMachine {
                 HeapObject::Array { elements, .. } => {
                     let copied_elements = elements
                         .iter()
-                        .map(|element| self.copy_strong_value(thread, element, copied))
+                        .map(|element| self.copy_strong_value(element, copied))
                         .collect::<Result<Vec<_>, _>>()?;
 
                     match thread.heap.get_object_mut(copied_ref)? {
@@ -599,7 +599,7 @@ impl VirtualMachine {
                 HeapObject::Tuple { elements } => {
                     let copied_elements = elements
                         .iter()
-                        .map(|element| self.copy_strong_value(thread, element, copied))
+                        .map(|element| self.copy_strong_value(element, copied))
                         .collect::<Result<Vec<_>, _>>()?;
 
                     match thread.heap.get_object_mut(copied_ref)? {
@@ -615,7 +615,7 @@ impl VirtualMachine {
                     }
                 }
                 HeapObject::Choice { payload, .. } => {
-                    let copied_payload = self.copy_strong_value(thread, &payload, copied)?;
+                    let copied_payload = self.copy_strong_value(&payload, copied)?;
 
                     match thread.heap.get_object_mut(copied_ref)? {
                         HeapObject::Choice { payload, .. } => {
@@ -638,7 +638,6 @@ impl VirtualMachine {
 
     fn copy_strong_value(
         &self,
-        _thread: &thread::VmThreadState,
         value: &Value,
         copied: &HashMap<VmObjectRef, ObjectRef>,
     ) -> Result<Value, VmError> {

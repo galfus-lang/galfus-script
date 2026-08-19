@@ -312,39 +312,3 @@ fn test_deterministic_order_of_released_handles() {
         })
         .unwrap();
 }
-
-#[test]
-fn test_visit_roots_includes_entry_func_and_system_response() {
-    let mut thread = thread::VmThreadState::test_new();
-    let graph = graph_with_node(galfus_bytecode::BytecodeNode {
-        id: galfus_core::ModuleId::new(0),
-        path: galfus_core::ModulePath::new("test.gfs").unwrap(),
-        semantic_revision: galfus_core::SemanticRevision::new(0),
-        module: galfus_bytecode::BytecodeModule {
-            name: "test".to_string(),
-            global_count: 0,
-            constants: galfus_bytecode::ConstantPool { constants: vec![] },
-            types: vec![],
-            functions: vec![],
-            struct_layouts: vec![],
-            choice_layouts: vec![],
-            imports: vec![],
-            exports: vec![],
-            init_func_idx: None,
-        },
-        metadata: None,
-    });
-    let _vm = VirtualMachine::new(std::sync::Arc::new(graph));
-
-    let h1 = thread
-        .heap
-        .alloc(HeapObject::Tuple { elements: vec![] })
-        .unwrap();
-    let h2 = thread
-        .heap
-        .alloc(HeapObject::Tuple { elements: vec![] })
-        .unwrap();
-
-    thread.entry_func = Some(Value::Object(h1));
-    thread.system_response = Some(Value::Object(h2));
-}

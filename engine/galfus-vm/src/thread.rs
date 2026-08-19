@@ -1,6 +1,6 @@
 use crate::error::VmError;
 use crate::runtime::Value;
-use crate::runtime::{CallFrame, HeapObject, RuntimeModuleState, VisitRoots, VmObjectRef};
+use crate::runtime::{CallFrame, HeapObject, RuntimeModuleState};
 use galfus_bytecode::instruction::Reg;
 use galfus_core::ModuleId;
 use std::collections::HashMap;
@@ -264,23 +264,6 @@ impl VmThreadState {
                     }
                     HeapObject::AdapterHandle { .. } => false,
                 })
-    }
-}
-
-impl VisitRoots for VmThreadState {
-    fn visit_roots(&self, visitor: &mut impl FnMut(VmObjectRef)) {
-        for state in self.module_states.values() {
-            state.visit_roots(visitor);
-        }
-        for val in &self.registers {
-            val.visit_roots(visitor);
-        }
-        if let Some(ref response) = self.system_response {
-            response.visit_roots(visitor);
-        }
-        if let Some(ref entry) = self.entry_func {
-            entry.visit_roots(visitor);
-        }
     }
 }
 

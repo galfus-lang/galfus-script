@@ -210,33 +210,6 @@ pub struct RuntimeModuleState {
     pub initialized: bool,
 }
 
-pub trait VisitRoots {
-    fn visit_roots(&self, visitor: &mut impl FnMut(VmObjectRef));
-}
-
-impl VisitRoots for VmValue {
-    fn visit_roots(&self, visitor: &mut impl FnMut(VmObjectRef)) {
-        if let VmValue::Object(obj_ref) = self {
-            visitor(*obj_ref);
-        }
-    }
-}
-
-impl VisitRoots for CallFrame {
-    fn visit_roots(&self, _visitor: &mut impl FnMut(VmObjectRef)) {
-        // Since registers are no longer in CallFrame, we do not visit them here.
-        // They are visited by VmThreadState.
-    }
-}
-
-impl VisitRoots for RuntimeModuleState {
-    fn visit_roots(&self, visitor: &mut impl FnMut(VmObjectRef)) {
-        for global in &self.globals {
-            global.visit_roots(visitor);
-        }
-    }
-}
-
 impl VmContext {
     pub fn new(providers: Option<Providers>) -> Self {
         Self {
