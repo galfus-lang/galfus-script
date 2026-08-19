@@ -24,6 +24,25 @@ fn main() {
         return;
     }
 
+    println!("Compiling standalone Galfus (Host)...");
+    let status = Command::new("./target/release/galfus-cli")
+        .args([
+            "compile",
+            "--local-host",
+            "./target/release/galfus-host-native",
+            "-t",
+            "native",
+            "-o",
+            "./target/release/fib_standalone",
+            "benchmark/fib.gfs",
+        ])
+        .status()
+        .expect("Failed to compile standalone host");
+    if !status.success() {
+        eprintln!("Standalone compilation failed!");
+        return;
+    }
+
     let re_result = Regex::new(r"RESULT=(\d+)").unwrap();
     let re_time = Regex::new(r"TIME_MS=(\d+)").unwrap();
 
@@ -48,9 +67,10 @@ fn main() {
         ("Lua 5.4", vec!["lua", "benchmark/fib.lua"]),
         ("Python 3", vec!["python3", "benchmark/fib.py"]),
         (
-            "Galfus Script",
+            "Galfus (Workspace)",
             vec!["./target/release/galfus-cli", "run", "benchmark/fib.gfs"],
         ),
+        ("Galfus (Host)", vec!["./target/release/fib_standalone"]),
     ];
 
     let mut results = vec![];

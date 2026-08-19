@@ -108,7 +108,7 @@ fn provider_continuation_rejects_a_result_that_violates_its_declared_type() {
     });
     let vm = VirtualMachine::new(std::sync::Arc::new(graph));
     let mut thread = thread::VmThreadState::test_new();
-    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![]);
+    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![]).unwrap();
 
     let continuation = Continuation::for_provider(Reg(0), module_id, TypeIdx(0))
         .with_origin(galfus_core::ThreadId::new(1));
@@ -161,7 +161,7 @@ fn await_future_suspends_and_resumes_through_a_vm_owned_continuation() {
     });
     let vm = VirtualMachine::new(std::sync::Arc::new(graph));
     let mut thread = thread::VmThreadState::test_new();
-    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![]);
+    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![]).unwrap();
     thread.write_reg(Reg(0), Value::Future(galfus_core::FutureId::new(42)));
 
     let VmStep::Suspend {
@@ -187,7 +187,7 @@ fn await_future_suspends_and_resumes_through_a_vm_owned_continuation() {
         &mut thread,
         continuation.with_origin(galfus_core::ThreadId::new(1)),
         Value::Int64(7),
-    );
+    ).unwrap();
     assert!(matches!(
         vm.execute_with_budget(&mut thread, 1),
         Ok(VmStep::Return {
@@ -212,7 +212,7 @@ fn dropping_the_last_future_handle_notifies_the_orchestrator() {
     });
     let vm = VirtualMachine::new(std::sync::Arc::new(graph));
     let mut thread = thread::VmThreadState::test_new();
-    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![]);
+    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![]).unwrap();
     thread.write_reg(Reg(0), Value::Future(galfus_core::FutureId::new(7)));
 
     let VmStep::Suspend {
@@ -230,7 +230,7 @@ fn dropping_the_last_future_handle_notifies_the_orchestrator() {
         &mut thread,
         continuation.with_origin(galfus_core::ThreadId::new(1)),
         Value::Null,
-    );
+    ).unwrap();
 }
 
 #[test]
@@ -245,7 +245,7 @@ fn dropping_one_of_multiple_future_handles_keeps_the_future_alive() {
     });
     let vm = VirtualMachine::new(std::sync::Arc::new(graph));
     let mut thread = thread::VmThreadState::test_new();
-    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![]);
+    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![]).unwrap();
     thread.write_reg(Reg(0), Value::Future(galfus_core::FutureId::new(7)));
     thread.write_reg(Reg(1), Value::Future(galfus_core::FutureId::new(7)));
 

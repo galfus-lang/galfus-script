@@ -129,7 +129,7 @@ impl VmObjectRef {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum VmValue {
     Null,
     Bool(bool),
@@ -578,27 +578,498 @@ impl VirtualMachine {
         thread: &mut thread::VmThreadState,
         mut budget: usize,
     ) -> Result<VmStep, VmPanic> {
+        // Check pending adapter handle drops first
+        if let Some((binding_id, type_id, id)) = thread.heap.pending_adapter_handle_drops.pop() {
+            return Ok(VmStep::Suspend {
+                effect: VmEffect::AdapterHandleDropped {
+                    binding_id,
+                    type_id,
+                    id,
+                },
+                continuation: Continuation::new(None),
+            });
+        }
+
+        let Some(frame) = thread.call_stack.last_mut() else {
+            return Err(VmPanic {
+                error: VmError::EmptyCallStack,
+                stack_trace: vec![],
+            });
+        };
+
+        // Cache hot state in locals — LLVM will promote these to CPU registers
+        let mut pc = frame.pc;
+        let mut instructions: *const [Instruction] = frame.cached_instructions;
+        let mut register_base = frame.register_base;
+
+        // Macro to sync local state back to the call frame
+        macro_rules! sync_frame {
+            ($thread:expr) => {
+                if let Some(f) = $thread.call_stack.last_mut() {
+                    f.pc = pc;
+                }
+            };
+        }
+
+        // Macro to reload local state from the current call frame
+        macro_rules! reload_frame {
+            ($thread:expr) => {
+                if let Some(f) = $thread.call_stack.last_mut() {
+                    pc = f.pc;
+                    instructions = f.cached_instructions;
+                    register_base = f.register_base;
+                }
+            };
+        }
+
+        // Inline register access using cached base
+        macro_rules! read_reg {
+            ($thread:expr, $reg:expr) => {{
+                let idx = register_base + $reg.raw() as usize;
+                unsafe { *$thread.registers.get_unchecked(idx) }
+            }};
+        }
+
+        macro_rules! write_reg {
+            ($thread:expr, $reg:expr, $val:expr) => {{
+                let idx = register_base + $reg.raw() as usize;
+                let val = $val;
+                if matches!(val, Value::Object(_)) {
+                    $thread.current_frame_has_objects = true;
+                }
+                let old_val =
+                    unsafe { std::mem::replace($thread.registers.get_unchecked_mut(idx), val) };
+                if let Value::Object(obj_ref) = old_val {
+                    let _ = $thread.heap.release_anchor(obj_ref);
+                }
+            }};
+        }
+
         while budget > 0 {
-            match self.step(thread) {
-                Ok(VmStep::Continue) => budget -= 1,
-                Ok(step) => return Ok(step),
-                Err(err) => {
-                    let mut stack_trace = Vec::new();
-                    for frame in thread.call_stack.iter().rev() {
-                        stack_trace.push(StackFrameInfo {
-                            module_id: frame.module_id,
-                            func_idx: frame.func_idx,
-                            instruction_offset: frame.pc.saturating_sub(1),
-                        });
+            let instr = unsafe {
+                let slice = &*instructions;
+                slice.get_unchecked(pc)
+            };
+            pc += 1;
+
+            match instr {
+                // ===== HOT PATH: Arithmetic =====
+                Instruction::Add { dest, lhs, rhs } => {
+                    let lhs_val = read_reg!(thread, lhs);
+                    let rhs_val = read_reg!(thread, rhs);
+                    let res = match (lhs_val, rhs_val) {
+                        (Value::Int32(l), Value::Int32(r)) => Value::Int32(l.wrapping_add(r)),
+                        (Value::Int64(l), Value::Int64(r)) => Value::Int64(l.wrapping_add(r)),
+                        (Value::Int8(l), Value::Int8(r)) => Value::Int8(l.wrapping_add(r)),
+                        (Value::Int16(l), Value::Int16(r)) => Value::Int16(l.wrapping_add(r)),
+                        (Value::Uint8(l), Value::Uint8(r)) => Value::Uint8(l.wrapping_add(r)),
+                        (Value::Uint16(l), Value::Uint16(r)) => Value::Uint16(l.wrapping_add(r)),
+                        (Value::Uint32(l), Value::Uint32(r)) => Value::Uint32(l.wrapping_add(r)),
+                        (Value::Uint64(l), Value::Uint64(r)) => Value::Uint64(l.wrapping_add(r)),
+                        (Value::Float32(l), Value::Float32(r)) => {
+                            Value::Float32(galfus_core::normalize_f32(l + r))
+                        }
+                        (Value::Float64(l), Value::Float64(r)) => {
+                            Value::Float64(galfus_core::normalize_f64(l + r))
+                        }
+                        (l, r) => {
+                            sync_frame!(thread);
+                            return Err(self.make_panic(
+                                thread,
+                                VmError::TypeMismatch {
+                                    expected: "matching numeric types".to_string(),
+                                    found: format!("{:?} and {:?}", l, r),
+                                },
+                            ));
+                        }
+                    };
+                    write_reg!(thread, dest, res);
+                    budget -= 1;
+                }
+                Instruction::Sub { dest, lhs, rhs } => {
+                    let lhs_val = read_reg!(thread, lhs);
+                    let rhs_val = read_reg!(thread, rhs);
+                    let res = match (lhs_val, rhs_val) {
+                        (Value::Int32(l), Value::Int32(r)) => Value::Int32(l.wrapping_sub(r)),
+                        (Value::Int64(l), Value::Int64(r)) => Value::Int64(l.wrapping_sub(r)),
+                        (Value::Int8(l), Value::Int8(r)) => Value::Int8(l.wrapping_sub(r)),
+                        (Value::Int16(l), Value::Int16(r)) => Value::Int16(l.wrapping_sub(r)),
+                        (Value::Uint8(l), Value::Uint8(r)) => Value::Uint8(l.wrapping_sub(r)),
+                        (Value::Uint16(l), Value::Uint16(r)) => Value::Uint16(l.wrapping_sub(r)),
+                        (Value::Uint32(l), Value::Uint32(r)) => Value::Uint32(l.wrapping_sub(r)),
+                        (Value::Uint64(l), Value::Uint64(r)) => Value::Uint64(l.wrapping_sub(r)),
+                        (Value::Float32(l), Value::Float32(r)) => {
+                            Value::Float32(galfus_core::normalize_f32(l - r))
+                        }
+                        (Value::Float64(l), Value::Float64(r)) => {
+                            Value::Float64(galfus_core::normalize_f64(l - r))
+                        }
+                        (l, r) => {
+                            sync_frame!(thread);
+                            return Err(self.make_panic(
+                                thread,
+                                VmError::TypeMismatch {
+                                    expected: "matching numeric types".to_string(),
+                                    found: format!("{:?} and {:?}", l, r),
+                                },
+                            ));
+                        }
+                    };
+                    write_reg!(thread, dest, res);
+                    budget -= 1;
+                }
+
+                // ===== HOT PATH: Comparisons =====
+                Instruction::Lt { dest, lhs, rhs } => {
+                    let lhs_val = read_reg!(thread, lhs);
+                    let rhs_val = read_reg!(thread, rhs);
+                    let result = match (&lhs_val, &rhs_val) {
+                        (Value::Int32(l), Value::Int32(r)) => l < r,
+                        (Value::Int64(l), Value::Int64(r)) => l < r,
+                        (Value::Uint32(l), Value::Uint32(r)) => l < r,
+                        (Value::Uint64(l), Value::Uint64(r)) => l < r,
+                        _ => {
+                            sync_frame!(thread);
+                            let cmp = self
+                                .compare_values(&lhs_val, &rhs_val)
+                                .map_err(|e| self.make_panic(thread, e))?;
+                            cmp.is_some_and(|o| o.is_lt())
+                        }
+                    };
+                    write_reg!(thread, dest, Value::Bool(result));
+                    budget -= 1;
+                }
+                Instruction::Le { dest, lhs, rhs } => {
+                    let lhs_val = read_reg!(thread, lhs);
+                    let rhs_val = read_reg!(thread, rhs);
+                    let result = match (&lhs_val, &rhs_val) {
+                        (Value::Int32(l), Value::Int32(r)) => l <= r,
+                        (Value::Int64(l), Value::Int64(r)) => l <= r,
+                        _ => {
+                            sync_frame!(thread);
+                            let cmp = self
+                                .compare_values(&lhs_val, &rhs_val)
+                                .map_err(|e| self.make_panic(thread, e))?;
+                            cmp.is_some_and(|o| o.is_le())
+                        }
+                    };
+                    write_reg!(thread, dest, Value::Bool(result));
+                    budget -= 1;
+                }
+                Instruction::Eq { dest, lhs, rhs } => {
+                    let lhs_val = read_reg!(thread, lhs);
+                    let rhs_val = read_reg!(thread, rhs);
+                    write_reg!(thread, dest, Value::Bool(lhs_val == rhs_val));
+                    budget -= 1;
+                }
+                Instruction::Ne { dest, lhs, rhs } => {
+                    let lhs_val = read_reg!(thread, lhs);
+                    let rhs_val = read_reg!(thread, rhs);
+                    write_reg!(thread, dest, Value::Bool(lhs_val != rhs_val));
+                    budget -= 1;
+                }
+
+                // ===== HOT PATH: Control Flow =====
+                Instruction::Jump { offset } => {
+                    pc = (pc as i32 + offset) as usize;
+                    budget -= 1;
+                }
+                Instruction::JumpTrue { cond, offset } => {
+                    let cond_val = read_reg!(thread, cond);
+                    match cond_val {
+                        Value::Bool(true) => {
+                            pc = (pc as i32 + offset) as usize;
+                        }
+                        Value::Bool(false) => {}
+                        x => {
+                            sync_frame!(thread);
+                            return Err(self.make_panic(
+                                thread,
+                                VmError::TypeMismatch {
+                                    expected: "boolean conditional".to_string(),
+                                    found: format!("{:?}", x),
+                                },
+                            ));
+                        }
                     }
-                    return Err(VmPanic {
-                        error: err,
-                        stack_trace,
-                    });
+                    budget -= 1;
+                }
+                Instruction::JumpFalse { cond, offset } => {
+                    let cond_val = read_reg!(thread, cond);
+                    match cond_val {
+                        Value::Bool(false) => {
+                            pc = (pc as i32 + offset) as usize;
+                        }
+                        Value::Bool(true) => {}
+                        x => {
+                            sync_frame!(thread);
+                            return Err(self.make_panic(
+                                thread,
+                                VmError::TypeMismatch {
+                                    expected: "boolean conditional".to_string(),
+                                    found: format!("{:?}", x),
+                                },
+                            ));
+                        }
+                    }
+                    budget -= 1;
+                }
+                Instruction::JumpNull { val, offset } => {
+                    let val_read = read_reg!(thread, val);
+                    if matches!(val_read, Value::Null) {
+                        pc = (pc as i32 + offset) as usize;
+                    }
+                    budget -= 1;
+                }
+
+                // ===== HOT PATH: Data Movement =====
+                Instruction::LoadConst {
+                    dest: _,
+                    const_idx: _,
+                } => {
+                    sync_frame!(thread);
+                    let step = self
+                        .execute_data_instruction(thread, instr)
+                        .map_err(|e| self.make_panic(thread, e))?;
+                    reload_frame!(thread);
+                    match step {
+                        VmStep::Continue => {
+                            budget -= 1;
+                        }
+                        other => return Ok(other),
+                    }
+                }
+                Instruction::Move { dest, src } => {
+                    let val = read_reg!(thread, src);
+                    thread.retain_anchor_val(&val);
+                    write_reg!(thread, dest, val);
+                    budget -= 1;
+                }
+                Instruction::LoadNull { dest } => {
+                    write_reg!(thread, dest, Value::Null);
+                    budget -= 1;
+                }
+
+                // ===== HOT PATH: Call (with fast intra-module path) =====
+                Instruction::Call {
+                    dest,
+                    func: func_idx,
+                    args_start,
+                    arg_count,
+                } => {
+                    let current_module_id = thread
+                        .call_stack
+                        .last()
+                        .ok_or_else(|| VmPanic {
+                            error: VmError::EmptyCallStack,
+                            stack_trace: vec![],
+                        })?
+                        .module_id;
+                    let current_image = self
+                        .get_module(current_module_id)
+                        .map_err(|e| self.make_panic(thread, e))?;
+
+                    // Fast path: local function call (no import resolution)
+                    if (func_idx.raw() as usize) < current_image.functions.len() {
+                        let callee = unsafe {
+                            current_image
+                                .functions
+                                .get_unchecked(func_idx.raw() as usize)
+                        };
+                        let register_count = callee.param_count as usize
+                            + callee.local_count as usize
+                            + callee.temp_count as usize;
+                        let cached_instr = callee.instructions.as_slice() as *const _;
+
+                        // Sync pc before pushing new frame
+                        if let Some(f) = thread.call_stack.last_mut() {
+                            f.pc = pc;
+                        }
+
+                        thread
+                            .push_frame(
+                                current_module_id,
+                                *func_idx,
+                                0,
+                                Some(*dest),
+                                register_count,
+                                cached_instr,
+                            )
+                            .map_err(|e| self.make_panic(thread, e))?;
+                        thread
+                            .setup_args_from_caller(*args_start, *arg_count as usize, None)
+                            .map_err(|e| self.make_panic(thread, e))?;
+
+                        // Reload cached state from the new frame
+                        reload_frame!(thread);
+                        budget -= 1;
+                    } else {
+                        // Slow path: import resolution
+                        if let Some(f) = thread.call_stack.last_mut() {
+                            f.pc = pc;
+                        }
+                        let step = self
+                            .execute_control_instruction(thread, instr)
+                            .map_err(|e| self.make_panic(thread, e))?;
+                        match step {
+                            VmStep::Continue => {
+                                reload_frame!(thread);
+                                budget -= 1;
+                            }
+                            other => return Ok(other),
+                        }
+                    }
+                }
+
+                // ===== HOT PATH: Return =====
+                Instruction::Ret { src } => {
+                    let val = read_reg!(thread, src);
+                    thread.retain_anchor_val(&val);
+                    let completed_frame = thread.pop_frame().ok_or_else(|| VmPanic {
+                        error: VmError::EmptyCallStack,
+                        stack_trace: vec![],
+                    })?;
+
+                    match completed_frame.return_dest {
+                        Some(dest) => {
+                            // Reload base from restored frame
+                            reload_frame!(thread);
+                            write_reg!(thread, dest, val);
+                            budget -= 1;
+                        }
+                        None => {
+                            let return_type = self
+                                .get_function(completed_frame.module_id, completed_frame.func_idx)
+                                .map_err(|e| self.make_panic(thread, e))?
+                                .return_ty;
+                            return Ok(VmStep::Return {
+                                value: val,
+                                module_id: completed_frame.module_id,
+                                return_type,
+                            });
+                        }
+                    }
+                }
+                Instruction::RetNull => {
+                    let completed_frame = thread.pop_frame().ok_or_else(|| VmPanic {
+                        error: VmError::EmptyCallStack,
+                        stack_trace: vec![],
+                    })?;
+
+                    match completed_frame.return_dest {
+                        Some(dest) => {
+                            reload_frame!(thread);
+                            write_reg!(thread, dest, Value::Null);
+                            budget -= 1;
+                        }
+                        None => {
+                            let return_type = self
+                                .get_function(completed_frame.module_id, completed_frame.func_idx)
+                                .map_err(|e| self.make_panic(thread, e))?
+                                .return_ty;
+                            return Ok(VmStep::Return {
+                                value: Value::Null,
+                                module_id: completed_frame.module_id,
+                                return_type,
+                            });
+                        }
+                    }
+                }
+
+                // ===== COLD PATH: Delegate to existing handlers =====
+                _ => {
+                    // Sync state to frame before delegating
+                    if let Some(f) = thread.call_stack.last_mut() {
+                        f.pc = pc;
+                    }
+
+                    let step = self.step_cold(thread, instr)?;
+
+                    match step {
+                        VmStep::Continue => {
+                            reload_frame!(thread);
+                            budget -= 1;
+                        }
+                        other => return Ok(other),
+                    }
                 }
             }
         }
+
+        // Budget exhausted: sync state back and yield
+        sync_frame!(thread);
         Ok(VmStep::Continue)
+    }
+
+    /// Cold path dispatcher for infrequently used instructions.
+    /// Called from `execute_with_budget` after syncing the local state.
+    fn step_cold(
+        &self,
+        thread: &mut thread::VmThreadState,
+        instr: &Instruction,
+    ) -> Result<VmStep, VmPanic> {
+        let result = match instr {
+            Instruction::LoadGlobal { .. } | Instruction::StoreGlobal { .. } => {
+                self.execute_data_instruction(thread, instr)
+            }
+
+            Instruction::Mul { .. }
+            | Instruction::Div { .. }
+            | Instruction::Rem { .. }
+            | Instruction::Pow { .. }
+            | Instruction::Neg { .. }
+            | Instruction::Not { .. }
+            | Instruction::BitNot { .. }
+            | Instruction::Shl { .. }
+            | Instruction::Shr { .. }
+            | Instruction::And { .. }
+            | Instruction::Or { .. }
+            | Instruction::Xor { .. }
+            | Instruction::Gt { .. }
+            | Instruction::Ge { .. }
+            | Instruction::Fallback { .. } => self.execute_operator_instruction(thread, instr),
+
+            Instruction::CallMethod { .. }
+            | Instruction::CallDynamic { .. }
+            | Instruction::Panic { .. } => self.execute_control_instruction(thread, instr),
+
+            Instruction::AllocLocal { .. }
+            | Instruction::LoadField { .. }
+            | Instruction::StoreField { .. }
+            | Instruction::NewArray { .. }
+            | Instruction::LoadIndex { .. }
+            | Instruction::StoreIndex { .. }
+            | Instruction::NewTuple { .. }
+            | Instruction::NewChoice { .. }
+            | Instruction::Cast { .. }
+            | Instruction::Copy { .. }
+            | Instruction::Instanceof { .. } => self.execute_object_instruction(thread, instr),
+
+            Instruction::Drop { .. }
+            | Instruction::AwaitFuture { .. }
+            | Instruction::CreateFuture { .. }
+            | Instruction::CreateIndirectFuture { .. }
+            | Instruction::AwaitAll { .. }
+            | Instruction::AwaitRace { .. }
+            | Instruction::Len { .. }
+            | Instruction::CopyArray { .. } => self.execute_system_instruction(thread, instr),
+
+            _ => unreachable!("unknown instruction"),
+        };
+
+        result.map_err(|e| self.make_panic(thread, e))
+    }
+
+    fn make_panic(&self, thread: &thread::VmThreadState, error: VmError) -> VmPanic {
+        let mut stack_trace = Vec::new();
+        for frame in thread.call_stack.iter().rev() {
+            stack_trace.push(StackFrameInfo {
+                module_id: frame.module_id,
+                func_idx: frame.func_idx,
+                instruction_offset: frame.pc.saturating_sub(1),
+            });
+        }
+        VmPanic { error, stack_trace }
     }
 
     pub fn step(&self, thread: &mut thread::VmThreadState) -> Result<VmStep, VmError> {

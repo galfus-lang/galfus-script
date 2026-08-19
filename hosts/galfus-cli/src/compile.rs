@@ -14,6 +14,7 @@ pub fn run_compile(
     target: Option<String>,
     out: Option<String>,
     profile: &str,
+    local_host: Option<String>,
 ) -> Result<()> {
     let workspace_path = Path::new(root);
     let mut workspace = load_workspace(workspace_path)?;
@@ -74,6 +75,7 @@ pub fn run_compile(
             out,
             bytecode,
             &project_name,
+            local_host,
         )
     }
 }
@@ -170,26 +172,32 @@ fn compile_native(
     out: Option<String>,
     bytecode: Vec<u8>,
     project_name: &str,
+    local_host: Option<String>,
 ) -> Result<()> {
-    let host_name = format!("galfus-{}-x64-{}", target, profile);
-    let mut file_name = host_name.clone();
-    if target == "windows" {
-        file_name.push_str(".exe");
-    }
+    let host_bytes = if let Some(local) = local_host {
+        fs::read(&local)
+            .with_context(|| format!("failed to read local host binary at {:?}", local))?
+    } else {
+        let host_name = format!("galfus-{}-x64-{}", target, profile);
+        let mut file_name = host_name.clone();
+        if target == "windows" {
+            file_name.push_str(".exe");
+        }
 
-    let host_path = cache_dir.join(&file_name);
+        let host_path = cache_dir.join(&file_name);
 
-    if !host_path.exists() {
-        // Base URL: {STORAGE_URL}/host-native/<tag>/<version>/<target>/x64/<file_name>
-        let url = format!(
-            "{}/host-native/{}/{}/{}/x64/{}",
-            STORAGE_URL, tag, version, target, file_name
-        );
-        download_file(&url, &host_path)?;
-    }
+        if !host_path.exists() {
+            // Base URL: {STORAGE_URL}/host-native/<tag>/<version>/<target>/x64/<file_name>
+            let url = format!(
+                "{}/host-native/{}/{}/{}/x64/{}",
+                STORAGE_URL, tag, version, target, file_name
+            );
+            download_file(&url, &host_path)?;
+        }
 
-    let host_bytes = fs::read(&host_path)
-        .with_context(|| format!("failed to read host binary at {:?}", host_path))?;
+        fs::read(&host_path)
+            .with_context(|| format!("failed to read host binary at {:?}", host_path))?
+    };
 
     let out_path = out.map(PathBuf::from).unwrap_or_else(|| {
         let mut p = PathBuf::from("dist").join(project_name);

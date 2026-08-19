@@ -146,8 +146,6 @@ impl VmThreadState {
                         let _ = self.heap.release_anchor(obj_ref);
                     }
                 }
-            } else {
-                self.registers[frame.register_base..self.current_register_top].fill(Value::Null);
             }
             self.current_register_top = frame.register_base;
             self.current_register_base =
@@ -204,7 +202,7 @@ impl VmThreadState {
 
     pub fn read_reg(&self, reg: Reg) -> Value {
         let idx = self.current_register_base + reg.raw() as usize;
-        unsafe { self.registers.get_unchecked(idx).clone() }
+        unsafe { *self.registers.get_unchecked(idx) }
     }
 
     pub fn write_reg(&mut self, reg: Reg, val: Value) {
