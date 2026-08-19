@@ -1,9 +1,9 @@
-use std::process::{Command, Stdio};
-use std::time::Duration;
-use std::thread;
-use sysinfo::{System, Pid};
-use cli_table::{format::Justify, Cell, Style, Table};
+use cli_table::{Cell, Style, Table, format::Justify};
 use regex::Regex;
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::Duration;
+use sysinfo::{Pid, System};
 
 #[derive(Debug)]
 struct BenchmarkResult {
@@ -40,11 +40,17 @@ fn main() {
         });
 
     let targets = vec![
-        ("JavaScript (Bun)", vec![bun_bin.as_str(), "benchmark/fib.js"]),
+        (
+            "JavaScript (Bun)",
+            vec![bun_bin.as_str(), "benchmark/fib.js"],
+        ),
         ("Lua JIT", vec!["luajit", "benchmark/fib.lua"]),
         ("Lua 5.4", vec!["lua", "benchmark/fib.lua"]),
         ("Python 3", vec!["python3", "benchmark/fib.py"]),
-        ("Galfus Script", vec!["./target/release/galfus-cli", "run", "benchmark/fib.gfs"]),
+        (
+            "Galfus Script",
+            vec!["./target/release/galfus-cli", "run", "benchmark/fib.gfs"],
+        ),
     ];
 
     let mut results = vec![];
@@ -58,7 +64,7 @@ fn main() {
         let mut cmd = Command::new(cmd_args[0]);
         cmd.args(&cmd_args[1..]);
         cmd.stdout(Stdio::piped());
-        
+
         let child = match cmd.spawn() {
             Ok(c) => c,
             Err(_) => {
@@ -68,7 +74,7 @@ fn main() {
         };
 
         let pid = Pid::from_u32(child.id());
-        
+
         // Spawn a thread to aggressively poll memory usage
         let (tx, rx) = std::sync::mpsc::channel();
         let handle = thread::spawn(move || {
@@ -127,19 +133,20 @@ fn main() {
             i.cell(),
             r.language.clone().cell(),
             r.time_ms.cell().justify(Justify::Right),
-            format!("{:.2}", r.peak_mem_mb).cell().justify(Justify::Right),
+            format!("{:.2}", r.peak_mem_mb)
+                .cell()
+                .justify(Justify::Right),
             r.result.cell().justify(Justify::Right),
         ]);
     }
 
-    let table = table_rows.table()
-        .title(vec![
-            "".cell().bold(true),
-            "Language".cell().bold(true),
-            "Time (ms)".cell().bold(true),
-            "Peak Mem (MB)".cell().bold(true),
-            "Result".cell().bold(true),
-        ]);
+    let table = table_rows.table().title(vec![
+        "".cell().bold(true),
+        "Language".cell().bold(true),
+        "Time (ms)".cell().bold(true),
+        "Peak Mem (MB)".cell().bold(true),
+        "Result".cell().bold(true),
+    ]);
 
     println!("\n--- Benchmark Results ---");
     if let Ok(print_table) = table.display() {
