@@ -326,3 +326,14 @@ jobs:
           STORAGE_ENDPOINT: ${{ secrets.STORAGE_ENDPOINT }}
         working-directory: scripts
         run: bun cmd github cleanup-s3 --tag ${{ steps.version.outputs.tag }}
+
+      - name: Purge CDN Cache
+        env:
+          # Assumindo a mesma secret STORAGE_KEY como você instruiu
+          ACCESS_KEY: ${{ secrets.STORAGE_KEY }}
+          # O ID numérico da sua Pull Zone na Bunny (ex: 123456)
+          PULL_ZONE_ID: ${{ secrets.PULL_ZONE_ID }}
+        run: |
+          curl -X POST "https://api.bunny.net/pullzone/${PULL_ZONE_ID}/purgeCache" \
+            -H "AccessKey: ${ACCESS_KEY}" \
+            -H "Accept: application/json"
