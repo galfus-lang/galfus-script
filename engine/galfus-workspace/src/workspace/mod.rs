@@ -2,6 +2,7 @@ pub mod compilation;
 pub mod dependency;
 pub mod execution;
 pub mod module;
+pub mod optimizer;
 
 #[cfg(test)]
 mod tests;

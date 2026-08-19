@@ -40,6 +40,7 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
     }
     let compile_report = workspace
         .compile()
+        .and_then(|_| workspace.optimize())
         .map_err(|error| anyhow::anyhow!("workspace compilation failed: {error:?}"))?;
     let args = cli_args
         .iter()

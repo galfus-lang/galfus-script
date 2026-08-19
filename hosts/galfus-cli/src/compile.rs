@@ -28,6 +28,7 @@ pub fn run_compile(
 
     let compile_report = workspace
         .compile()
+        .and_then(|_| workspace.optimize())
         .map_err(|error| anyhow::anyhow!("workspace compilation failed: {error:?}"))?;
 
     let bytecode = compile_report

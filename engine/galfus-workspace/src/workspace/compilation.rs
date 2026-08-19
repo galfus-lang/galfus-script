@@ -613,7 +613,7 @@ impl Workspace {
         requirements
     }
 
-    fn provider_requirements_for(
+    pub fn provider_requirements_for(
         &self,
         graph: &BytecodeGraph,
     ) -> Result<Vec<ProviderModuleRequirement>, String> {
@@ -713,5 +713,24 @@ impl Workspace {
             ));
         };
         Ok((alias.clone(), exports))
+    }
+
+    pub fn optimize(&mut self) -> Result<CompileReport, CompileBlocked> {
+        let (package, semantic_revision) = match &self.bytecode_state.compile_state {
+            CompileState::Ready { package, semantic_revision } => (package, *semantic_revision),
+            _ => return Err(CompileBlocked::MissingConfiguration),
+        };
+
+        let optimized_package = crate::workspace::optimizer::optimize_package(package, semantic_revision)
+            .map_err(|e| CompileBlocked::CompilerError(e))?;
+
+        let new_package = Arc::new(optimized_package);
+
+        self.bytecode_state.compile_state = CompileState::Ready {
+            semantic_revision,
+            package: Arc::clone(&new_package),
+        };
+
+        Ok(CompileReport { package: new_package })
     }
 }
