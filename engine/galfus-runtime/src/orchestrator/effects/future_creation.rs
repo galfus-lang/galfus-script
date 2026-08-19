@@ -33,7 +33,7 @@ impl Orchestrator {
             .module;
         let mut encoded_args = Vec::with_capacity(args.len());
         for (arg, ty) in args.into_iter().zip(arg_types.iter()) {
-            match crate::task::decode_from_thread_heap(&thread.heap, arg.clone(), *ty, module) {
+            match crate::task::decode_from_thread_heap(&thread.heap, arg, *ty, module) {
                 Ok(value) => encoded_args.push(value),
                 Err(_) if matches!(arg, galfus_vm::VmValue::Function { .. }) => {
                     let galfus_vm::VmValue::Function {

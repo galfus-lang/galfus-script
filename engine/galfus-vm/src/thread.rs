@@ -40,7 +40,7 @@ impl VmThreadState {
     ) -> Self {
         Self {
             call_stack: Vec::with_capacity(64),
-            registers: vec![Value::Null; 1024],
+            registers: vec![Value::Null; 4096],
             current_register_base: 0,
             current_register_top: 0,
             current_frame_has_objects: false,
@@ -70,9 +70,16 @@ impl VmThreadState {
         register_count: usize,
         cached_instructions: *const [galfus_bytecode::instruction::Instruction],
     ) -> Result<(), crate::error::VmError> {
-        self.thread_quota()
-            .try_reserve_call_depth(1)
-            .map_err(crate::error::VmError::ResourceLimitExceeded)?;
+        if self.call_stack.len() >= self.thread_quota().limits().max_call_depth {
+            return Err(crate::error::VmError::ResourceLimitExceeded(
+                galfus_contract::ExecutionFailureKind::ResourceLimitExceeded {
+                    resource: galfus_contract::ResourceLimitKind::CallDepth,
+                    current: self.call_stack.len(),
+                    requested: 1,
+                    limit: self.thread_quota().limits().max_call_depth,
+                },
+            ));
+        }
         let register_base = self.current_register_top;
         let new_top = register_base + register_count;
         if new_top > self.registers.len() {
@@ -138,7 +145,7 @@ impl VmThreadState {
     pub fn pop_frame(&mut self) -> Option<CallFrame> {
         let frame = self.call_stack.pop();
         if let Some(frame) = &frame {
-            self.thread_quota().release_call_depth(1);
+
             if self.current_frame_has_objects {
                 for i in frame.register_base..self.current_register_top {
                     let val = std::mem::replace(&mut self.registers[i], Value::Null);

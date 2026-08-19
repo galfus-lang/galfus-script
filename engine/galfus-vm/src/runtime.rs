@@ -264,7 +264,7 @@ impl VirtualMachine {
             ));
         }
         if let Some((module_id, expected_type)) = continuation.expected_result
-            && !self.value_matches_type(thread, value.clone(), module_id, expected_type)
+            && !self.value_matches_type(thread, value, module_id, expected_type)
         {
             return Err(galfus_contract::ExecutionFailure::new(
                 galfus_contract::ExecutionFailureKind::InvalidContinuation,
@@ -357,7 +357,7 @@ impl VirtualMachine {
                 };
                 match variant.payload_ty {
                     Some(type_idx) => {
-                        self.value_matches_type(thread, payload.clone(), module_id, type_idx)
+                        self.value_matches_type(thread, *payload, module_id, type_idx)
                     }
                     None => matches!(payload, Value::Null),
                 }
@@ -622,11 +622,13 @@ impl VirtualMachine {
             };
         }
 
+        let mut registers_ptr = thread.registers.as_mut_ptr();
+
         // Inline register access using cached base
         macro_rules! read_reg {
             ($thread:expr, $reg:expr) => {{
                 let idx = register_base + $reg.raw() as usize;
-                unsafe { *$thread.registers.get_unchecked(idx) }
+                unsafe { *registers_ptr.add(idx) }
             }};
         }
 
@@ -637,8 +639,18 @@ impl VirtualMachine {
                 if matches!(val, Value::Object(_)) {
                     $thread.current_frame_has_objects = true;
                 }
-                let old_val =
-                    unsafe { std::mem::replace($thread.registers.get_unchecked_mut(idx), val) };
+                let old_val = unsafe { registers_ptr.add(idx).replace(val) };
+                if let Value::Object(obj_ref) = old_val {
+                    let _ = $thread.heap.release_anchor(obj_ref);
+                }
+            }};
+        }
+
+        macro_rules! write_prim_reg {
+            ($thread:expr, $reg:expr, $val:expr) => {{
+                let idx = register_base + $reg.raw() as usize;
+                let val = $val;
+                let old_val = unsafe { registers_ptr.add(idx).replace(val) };
                 if let Value::Object(obj_ref) = old_val {
                     let _ = $thread.heap.release_anchor(obj_ref);
                 }
@@ -683,8 +695,7 @@ impl VirtualMachine {
                             ));
                         }
                     };
-                    write_reg!(thread, dest, res);
-                    budget -= 1;
+                    write_prim_reg!(thread, dest, res);
                 }
                 Instruction::Sub { dest, lhs, rhs } => {
                     let lhs_val = read_reg!(thread, lhs);
@@ -715,15 +726,14 @@ impl VirtualMachine {
                             ));
                         }
                     };
-                    write_reg!(thread, dest, res);
-                    budget -= 1;
+                    write_prim_reg!(thread, dest, res);
                 }
 
                 // ===== HOT PATH: Comparisons =====
                 Instruction::Lt { dest, lhs, rhs } => {
                     let lhs_val = read_reg!(thread, lhs);
                     let rhs_val = read_reg!(thread, rhs);
-                    let result = match (&lhs_val, &rhs_val) {
+                    let result = match (lhs_val, rhs_val) {
                         (Value::Int32(l), Value::Int32(r)) => l < r,
                         (Value::Int64(l), Value::Int64(r)) => l < r,
                         (Value::Uint32(l), Value::Uint32(r)) => l < r,
@@ -736,13 +746,12 @@ impl VirtualMachine {
                             cmp.is_some_and(|o| o.is_lt())
                         }
                     };
-                    write_reg!(thread, dest, Value::Bool(result));
-                    budget -= 1;
+                    write_prim_reg!(thread, dest, Value::Bool(result));
                 }
                 Instruction::Le { dest, lhs, rhs } => {
                     let lhs_val = read_reg!(thread, lhs);
                     let rhs_val = read_reg!(thread, rhs);
-                    let result = match (&lhs_val, &rhs_val) {
+                    let result = match (lhs_val, rhs_val) {
                         (Value::Int32(l), Value::Int32(r)) => l <= r,
                         (Value::Int64(l), Value::Int64(r)) => l <= r,
                         _ => {
@@ -753,20 +762,17 @@ impl VirtualMachine {
                             cmp.is_some_and(|o| o.is_le())
                         }
                     };
-                    write_reg!(thread, dest, Value::Bool(result));
-                    budget -= 1;
+                    write_prim_reg!(thread, dest, Value::Bool(result));
                 }
                 Instruction::Eq { dest, lhs, rhs } => {
                     let lhs_val = read_reg!(thread, lhs);
                     let rhs_val = read_reg!(thread, rhs);
-                    write_reg!(thread, dest, Value::Bool(lhs_val == rhs_val));
-                    budget -= 1;
+                    write_prim_reg!(thread, dest, Value::Bool(lhs_val == rhs_val));
                 }
                 Instruction::Ne { dest, lhs, rhs } => {
                     let lhs_val = read_reg!(thread, lhs);
                     let rhs_val = read_reg!(thread, rhs);
-                    write_reg!(thread, dest, Value::Bool(lhs_val != rhs_val));
-                    budget -= 1;
+                    write_prim_reg!(thread, dest, Value::Bool(lhs_val != rhs_val));
                 }
 
                 // ===== HOT PATH: Control Flow =====
@@ -846,8 +852,7 @@ impl VirtualMachine {
                     budget -= 1;
                 }
                 Instruction::LoadNull { dest } => {
-                    write_reg!(thread, dest, Value::Null);
-                    budget -= 1;
+                    write_prim_reg!(thread, dest, Value::Null);
                 }
 
                 // ===== HOT PATH: Call (with fast intra-module path) =====
@@ -886,22 +891,61 @@ impl VirtualMachine {
                             f.pc = pc;
                         }
 
-                        thread
-                            .push_frame(
-                                current_module_id,
-                                *func_idx,
-                                0,
-                                Some(*dest),
-                                register_count,
-                                cached_instr,
-                            )
-                            .map_err(|e| self.make_panic(thread, e))?;
-                        thread
-                            .setup_args_from_caller(*args_start, *arg_count as usize, None)
-                            .map_err(|e| self.make_panic(thread, e))?;
+                        let caller_base = register_base;
+                        let callee_base = thread.current_register_top;
+                        let new_top = callee_base + register_count;
+                        
+                        let limits = thread.thread_quota().limits();
+                        if thread.call_stack.len() >= limits.max_call_depth {
+                            return Err(self.make_panic(
+                                thread,
+                                VmError::ResourceLimitExceeded(
+                                    galfus_contract::ExecutionFailureKind::ResourceLimitExceeded {
+                                        resource: galfus_contract::ResourceLimitKind::CallDepth,
+                                        current: thread.call_stack.len(),
+                                        requested: 1,
+                                        limit: limits.max_call_depth,
+                                    },
+                                ),
+                            ));
+                        }
+                        
+                        if new_top > thread.registers.len() {
+                            thread.registers.resize(new_top.max(thread.registers.len() * 2), Value::Null);
+                            registers_ptr = thread.registers.as_mut_ptr();
+                        }
+                        
+                        thread.call_stack.push(CallFrame {
+                            module_id: current_module_id,
+                            func_idx: *func_idx,
+                            pc: 0,
+                            register_base: callee_base,
+                            return_dest: Some(*dest),
+                            cached_instructions: cached_instr,
+                            has_objects: false,
+                        });
+                        
+                        thread.current_register_base = callee_base;
+                        thread.current_register_top = new_top;
+                        thread.current_frame_has_objects = false;                        let count = *arg_count as usize;
+                        if count > 0 {
+                            let src_ptr = unsafe { registers_ptr.add(caller_base + args_start.raw() as usize) };
+                            let dst_ptr = unsafe { registers_ptr.add(callee_base) };
+                            unsafe { std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, count) };
+                            
+                            for i in 0..count {
+                                let val_ref = unsafe { &*dst_ptr.add(i) };
+                                if let Value::Object(obj_ref) = val_ref {
+                                    thread.current_frame_has_objects = true;
+                                    let _ = thread.heap.retain_anchor(*obj_ref);
+                                }
+                            }
+                        }
 
-                        // Reload cached state from the new frame
-                        reload_frame!(thread);
+                        // Sync local cache
+                        pc = 0;
+                        instructions = cached_instr;
+                        register_base = callee_base;
                         budget -= 1;
                     } else {
                         // Slow path: import resolution
@@ -914,6 +958,7 @@ impl VirtualMachine {
                         match step {
                             VmStep::Continue => {
                                 reload_frame!(thread);
+                                registers_ptr = thread.registers.as_mut_ptr();
                                 budget -= 1;
                             }
                             other => return Ok(other),
@@ -925,10 +970,20 @@ impl VirtualMachine {
                 Instruction::Ret { src } => {
                     let val = read_reg!(thread, src);
                     thread.retain_anchor_val(&val);
-                    let completed_frame = thread.pop_frame().ok_or_else(|| VmPanic {
-                        error: VmError::EmptyCallStack,
-                        stack_trace: vec![],
-                    })?;
+                    let completed_frame = thread.call_stack.pop().unwrap();
+                    
+                    if thread.current_frame_has_objects {
+                        for i in completed_frame.register_base..thread.current_register_top {
+                            let val = unsafe { registers_ptr.add(i).replace(Value::Null) };
+                            if let Value::Object(obj_ref) = val {
+                                let _ = thread.heap.release_anchor(obj_ref);
+                            }
+                        }
+                    }
+                    
+                    thread.current_register_top = completed_frame.register_base;
+                    thread.current_register_base = thread.call_stack.last().map(|f| f.register_base).unwrap_or(0);
+                    thread.current_frame_has_objects = completed_frame.has_objects;
 
                     match completed_frame.return_dest {
                         Some(dest) => {

@@ -16,7 +16,7 @@ impl VirtualMachine {
             .ok_or(VmError::TypeOutOfBounds { index: target_ty })?;
 
         if self.check_value_type(thread, val, target_ty) {
-            return Ok(val.clone());
+            return Ok(*val);
         }
 
         // Numeric casting / conversions

@@ -286,7 +286,7 @@ impl Orchestrator {
                     let Some(mut target_thread) = self.kernel.take_created_thread(target_id) else {
                         return false;
                     };
-                    let prepared = match target_thread.entry_func.clone() {
+                    let prepared = match target_thread.entry_func {
                         Some(galfus_vm::VmValue::Function {
                             module_id,
                             func_idx,

@@ -15,6 +15,10 @@ pub struct NativeDriver {
 
     worker_queue_tx: Sender<Box<dyn RunnableTask + Send>>,
 
+    worker_queue_rx: Receiver<Box<dyn RunnableTask + Send>>,
+    spawned_workers: Arc<AtomicUsize>,
+    max_workers: usize,
+
     event_bridge: Arc<NativeEventBridge>,
     active_workers: Arc<AtomicUsize>,
 
@@ -32,23 +36,13 @@ impl NativeDriver {
             .map(|n| n.get())
             .unwrap_or(4);
 
-        for _ in 0..num_workers {
-            let rx = worker_rx.clone();
-            let active = active_workers.clone();
-
-            thread::spawn(move || {
-                // Background worker loop
-                while let Ok(task) = rx.recv() {
-                    let _ = task.run(100_000);
-                    active.fetch_sub(1, Ordering::SeqCst);
-                }
-            });
-        }
-
         Self {
             main_queue_tx: main_tx,
             main_queue_rx: main_rx,
             worker_queue_tx: worker_tx,
+            worker_queue_rx: worker_rx,
+            spawned_workers: Arc::new(AtomicUsize::new(0)),
+            max_workers: num_workers,
             event_bridge: Arc::new(NativeEventBridge::new()),
             active_workers,
             exit_callback: Mutex::new(None),
@@ -80,6 +74,28 @@ impl KernelDriver for NativeDriver {
                 let _ = self.main_queue_tx.send(KernelTask::Main(t));
             }
             KernelTask::Any(t) => {
+                loop {
+                    let current = self.spawned_workers.load(Ordering::SeqCst);
+                    if current < self.max_workers {
+                        if self
+                            .spawned_workers
+                            .compare_exchange(current, current + 1, Ordering::SeqCst, Ordering::SeqCst)
+                            .is_ok()
+                        {
+                            let rx = self.worker_queue_rx.clone();
+                            let active = self.active_workers.clone();
+                            thread::spawn(move || {
+                                while let Ok(task) = rx.recv() {
+                                    let _ = task.run(100_000);
+                                    active.fetch_sub(1, Ordering::SeqCst);
+                                }
+                            });
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
                 self.active_workers.fetch_add(1, Ordering::SeqCst);
                 let _ = self.worker_queue_tx.send(t);
             }

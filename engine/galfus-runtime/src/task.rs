@@ -144,7 +144,7 @@ pub(crate) fn decode_from_thread_heap(
             let payload = variant
                 .payload_ty
                 .map(|payload_type| {
-                    decode_from_thread_heap(heap, payload.clone(), payload_type, module)
+                    decode_from_thread_heap(heap, *payload, payload_type, module)
                         .map(Box::new)
                 })
                 .transpose()?;

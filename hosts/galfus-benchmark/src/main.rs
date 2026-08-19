@@ -9,6 +9,8 @@ use sysinfo::{Pid, System};
 struct BenchmarkResult {
     language: String,
     time_ms: u64,
+    total_time_ms: u64,
+    cold_start_ms: u64,
     result: i64,
     peak_mem_mb: f64,
 }
@@ -85,6 +87,7 @@ fn main() {
         cmd.args(&cmd_args[1..]);
         cmd.stdout(Stdio::piped());
 
+        let start_time = std::time::Instant::now();
         let child = match cmd.spawn() {
             Ok(c) => c,
             Err(_) => {
@@ -117,6 +120,7 @@ fn main() {
         });
 
         let output = child.wait_with_output().expect("Failed to wait on child");
+        let total_time_ms = start_time.elapsed().as_millis() as u64;
         let _ = tx.send(()); // Stop polling thread
         let peak_bytes = handle.join().unwrap();
         let peak_mb = peak_bytes as f64 / 1024.0 / 1024.0;
@@ -133,10 +137,13 @@ fn main() {
         }
 
         if time_val > 0 && res_val > 0 {
-            println!("{}ms", time_val);
+            let cold_start_ms = total_time_ms.saturating_sub(time_val);
+            println!("{}ms (Total: {}ms, Cold Start: {}ms)", time_val, total_time_ms, cold_start_ms);
             results.push(BenchmarkResult {
                 language: name.to_string(),
                 time_ms: time_val,
+                total_time_ms,
+                cold_start_ms,
                 result: res_val,
                 peak_mem_mb: peak_mb,
             });
@@ -153,6 +160,8 @@ fn main() {
             i.cell(),
             r.language.clone().cell(),
             r.time_ms.cell().justify(Justify::Right),
+            r.cold_start_ms.cell().justify(Justify::Right),
+            r.total_time_ms.cell().justify(Justify::Right),
             format!("{:.2}", r.peak_mem_mb)
                 .cell()
                 .justify(Justify::Right),
@@ -163,7 +172,9 @@ fn main() {
     let table = table_rows.table().title(vec![
         "".cell().bold(true),
         "Language".cell().bold(true),
-        "Time (ms)".cell().bold(true),
+        "Script Time (ms)".cell().bold(true),
+        "Cold Start (ms)".cell().bold(true),
+        "Total Time (ms)".cell().bold(true),
         "Peak Mem (MB)".cell().bold(true),
         "Result".cell().bold(true),
     ]);

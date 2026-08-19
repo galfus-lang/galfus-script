@@ -58,7 +58,7 @@ impl VirtualMachine {
                             .ok_or(VmError::FieldOutOfBounds { index: field })?;
                         thread.write_reg(dest, val);
                     } else if let HeapObject::Choice { payload, .. } = heap_obj {
-                        thread.write_reg(dest, payload.clone());
+                        thread.write_reg(dest, *payload);
                     } else {
                         return Err(VmError::TypeMismatch {
                             expected: "Struct or Choice object".to_string(),
@@ -162,7 +162,7 @@ impl VirtualMachine {
                             if let Some(index) =
                                 self.resolve_raw_array_index(raw_index, elements.len())
                             {
-                                elements[index].clone()
+                                elements[index]
                             } else {
                                 Value::Null
                             }
@@ -352,7 +352,7 @@ impl VirtualMachine {
         value: &Value,
     ) -> Result<Value, VmError> {
         let Value::Object(obj_ref) = value else {
-            return Ok(value.clone());
+            return Ok(*value);
         };
 
         let strong_closure = self.discover_strong_copy_closure(thread, *obj_ref)?;
@@ -642,7 +642,7 @@ impl VirtualMachine {
         copied: &HashMap<VmObjectRef, ObjectRef>,
     ) -> Result<Value, VmError> {
         let Value::Object(obj_ref) = value else {
-            return Ok(value.clone());
+            return Ok(*value);
         };
 
         if let Some(copied_ref) = copied.get(obj_ref) {
@@ -657,7 +657,7 @@ impl VirtualMachine {
 
     fn copy_weak_value(&self, value: &Value, copied: &HashMap<VmObjectRef, ObjectRef>) -> Value {
         let Value::Object(obj_ref) = value else {
-            return value.clone();
+            return *value;
         };
 
         copied

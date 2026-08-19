@@ -101,7 +101,7 @@ impl VirtualMachine {
                 };
 
                 if let (Value::Object(dest_ref), Value::Object(src_ref)) =
-                    (dest_val.clone(), src_val.clone())
+                    (dest_val, src_val)
                 {
                     let src_elements = match thread.heap.get_object(src_ref)? {
                         HeapObject::Array { elements, .. } => elements.clone(),
