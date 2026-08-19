@@ -49,7 +49,6 @@ fn inline_in_function(
         let old_blocks = std::mem::take(&mut caller.blocks);
 
         for mut block in old_blocks {
-
             for i in 0..block.instructions.len() {
                 if let Instruction::Call {
                     func: target_id,
