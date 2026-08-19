@@ -110,10 +110,7 @@ impl ThreadRegistry {
             .and_then(|tcb| tcb.mailbox.as_ref().cloned())
     }
 
-    pub fn get_thread_quota(
-        &self,
-        id: ThreadId,
-    ) -> Option<Arc<Mutex<galfus_vm::quota::ThreadQuota>>> {
+    pub fn get_thread_quota(&self, id: ThreadId) -> Option<Arc<galfus_vm::quota::ThreadQuota>> {
         self.tcbs
             .get(&id)
             .and_then(|tcb| tcb.vm_state.as_ref().map(|vm| vm.thread_quota().clone()))
@@ -218,7 +215,7 @@ impl ThreadRegistry {
                 }
             }
             if let Some(ref vm_state) = tcb.vm_state {
-                let mut quota = vm_state.thread_quota().lock().unwrap();
+                let quota = vm_state.thread_quota();
                 quota.release_mailbox_messages(released_messages);
                 quota.release_mailbox_bytes(released_bytes);
             }

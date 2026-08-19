@@ -66,8 +66,8 @@ impl Orchestrator {
                 return;
             };
             self.aggregate_registration = Some((coordinator_id, index));
-            let thread_quota = std::sync::Arc::new(std::sync::Mutex::new(
-                galfus_vm::quota::ThreadQuota::new(self.quota.lock().unwrap().limits().clone()),
+            let thread_quota = std::sync::Arc::new(galfus_vm::quota::ThreadQuota::new(
+                self.quota.lock().unwrap().limits().clone(),
             ));
             self.handle_effect(
                 thread_id,

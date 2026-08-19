@@ -182,8 +182,8 @@ impl Orchestrator {
                 .get(payload_module_id)
                 .expect("future payload module is loaded")
                 .module;
-            let thread_quota = std::sync::Arc::new(std::sync::Mutex::new(
-                galfus_vm::quota::ThreadQuota::new(self.quota.lock().unwrap().limits().clone()),
+            let thread_quota = std::sync::Arc::new(galfus_vm::quota::ThreadQuota::new(
+                self.quota.lock().unwrap().limits().clone(),
             ));
             let mut payload_heap = galfus_vm::thread::PrivateHeap::new(thread_quota);
             if let Err(error) = crate::task::encode_into_thread_heap(

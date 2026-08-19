@@ -73,14 +73,14 @@ pub enum VmEffect {
         target_module_id: ModuleId,
         func_idx: FuncIdx,
         args: Vec<Value>,
-        arg_types: Vec<TypeIdx>,
+        arg_types: Box<[TypeIdx]>,
         return_type: TypeIdx,
     },
     CreateIndirectFuture {
         module_id: ModuleId,
         func: Value,
         args: Vec<Value>,
-        arg_types: Vec<TypeIdx>,
+        arg_types: Box<[TypeIdx]>,
         return_type: TypeIdx,
     },
     FutureDropped {
@@ -223,10 +223,9 @@ impl VisitRoots for VmValue {
 }
 
 impl VisitRoots for CallFrame {
-    fn visit_roots(&self, visitor: &mut impl FnMut(VmObjectRef)) {
-        for reg in &self.registers {
-            reg.visit_roots(visitor);
-        }
+    fn visit_roots(&self, _visitor: &mut impl FnMut(VmObjectRef)) {
+        // Since registers are no longer in CallFrame, we do not visit them here.
+        // They are visited by VmThreadState.
     }
 }
 
@@ -250,9 +249,14 @@ pub struct CallFrame {
     pub module_id: ModuleId,
     pub func_idx: FuncIdx,
     pub pc: usize,
-    pub registers: Vec<Value>,
+    pub register_base: usize,
     pub return_dest: Option<Reg>,
+    pub cached_instructions: *const [galfus_bytecode::Instruction],
+    pub has_objects: bool,
 }
+
+unsafe impl Send for CallFrame {}
+unsafe impl Sync for CallFrame {}
 
 #[derive(Clone)]
 pub struct VirtualMachine {
@@ -489,6 +493,8 @@ impl VirtualMachine {
         }
 
         thread.call_stack.clear();
+        thread.registers.clear();
+        thread.current_register_base = 0;
         let total_regs =
             func.param_count as usize + func.local_count as usize + func.temp_count as usize;
         let mut registers = vec![Value::Null; total_regs];
@@ -496,18 +502,26 @@ impl VirtualMachine {
             registers[i] = val;
         }
 
+        let cached_instructions = func.instructions.as_slice() as *const _;
         thread
-            .push_frame(CallFrame {
+            .push_frame(
                 module_id,
                 func_idx,
-                pc: 0,
-                registers,
-                return_dest: None,
-            })
+                0,
+                None,
+                registers.len(),
+                cached_instructions,
+            )
             .map_err(|error| VmPanic {
                 error,
                 stack_trace: vec![],
             })?;
+
+        let register_base = thread.call_stack.last().unwrap().register_base;
+        for (i, val) in registers.into_iter().enumerate() {
+            thread.retain_anchor_val(&val);
+            thread.registers[register_base + i] = val;
+        }
 
         Ok(())
     }
@@ -542,6 +556,8 @@ impl VirtualMachine {
         }
 
         thread.call_stack.clear();
+        thread.registers.clear();
+        thread.current_register_base = 0;
         let total_regs =
             func.param_count as usize + func.local_count as usize + func.temp_count as usize;
         let mut registers = vec![Value::Null; total_regs];
@@ -549,18 +565,26 @@ impl VirtualMachine {
             registers[i] = val;
         }
 
+        let cached_instructions = func.instructions.as_slice() as *const _;
         thread
-            .push_frame(CallFrame {
+            .push_frame(
                 module_id,
                 func_idx,
-                pc: 0,
-                registers,
-                return_dest: None,
-            })
+                0,
+                None,
+                registers.len(),
+                cached_instructions,
+            )
             .map_err(|error| VmPanic {
                 error,
                 stack_trace: vec![],
             })?;
+
+        let register_base = thread.call_stack.last().unwrap().register_base;
+        for (i, val) in registers.into_iter().enumerate() {
+            thread.retain_anchor_val(&val);
+            thread.registers[register_base + i] = val;
+        }
 
         match self.execute_loop(thread) {
             Ok(val) => Ok(val),
@@ -621,23 +645,18 @@ impl VirtualMachine {
             });
         }
 
-        let (module_id, func_idx, pc) = {
+        let instr = {
             let frame = thread
                 .call_stack
                 .last_mut()
                 .ok_or(VmError::EmptyCallStack)?;
-            let module_id = frame.module_id;
-            let func_idx = frame.func_idx;
             let pc = frame.pc;
             frame.pc += 1;
-            (module_id, func_idx, pc)
+            let slice = unsafe { &*frame.cached_instructions };
+            slice
+                .get(pc)
+                .ok_or(VmError::InstructionPointerOutOfBounds { pc })?
         };
-
-        let func = self.get_function(module_id, func_idx)?;
-        if pc >= func.instructions.len() {
-            return Err(VmError::InstructionPointerOutOfBounds { pc });
-        }
-        let instr = &func.instructions[pc];
         let step = match instr {
             Instruction::LoadConst { .. }
             | Instruction::Move { .. }

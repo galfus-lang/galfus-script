@@ -63,13 +63,14 @@ fn create_future_for_missing_module_returns_module_not_found_error() {
     let mut thread = crate::thread::VmThreadState::test_new();
 
     thread
-        .push_frame(crate::CallFrame {
-            module_id: ModuleId::new(99),
-            func_idx: FuncIdx(0),
-            pc: 0,
-            return_dest: None,
-            registers: vec![],
-        })
+        .push_frame(
+            ModuleId::new(99),
+            FuncIdx(0),
+            0,
+            None,
+            0,
+            &[] as *const [galfus_bytecode::Instruction],
+        )
         .unwrap();
 
     let step = vm.execute_system_instruction(
@@ -79,7 +80,7 @@ fn create_future_for_missing_module_returns_module_not_found_error() {
             func: FuncIdx(0),
             args_start: Reg(0),
             arg_count: 0,
-            arg_types: vec![],
+            arg_types: Box::new([]),
             return_type: galfus_bytecode::TypeIdx(0),
         },
     );
@@ -99,13 +100,14 @@ fn ret_from_missing_module_returns_module_not_found_error() {
     let mut thread = crate::thread::VmThreadState::test_new();
 
     thread
-        .push_frame(crate::CallFrame {
-            module_id: ModuleId::new(99),
-            func_idx: FuncIdx(0),
-            pc: 0,
-            return_dest: None,
-            registers: vec![],
-        })
+        .push_frame(
+            ModuleId::new(99),
+            FuncIdx(0),
+            0,
+            None,
+            0,
+            &[] as *const [galfus_bytecode::Instruction],
+        )
         .unwrap();
 
     let step = vm.execute_control_instruction(&mut thread, &Instruction::RetNull);

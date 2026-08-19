@@ -72,7 +72,7 @@ impl Orchestrator {
                             let message_bytes = data.len();
                             let mut ok = false;
                             if let Some(target_quota) = self.kernel.get_thread_quota(target_id) {
-                                let mut quota = target_quota.lock().unwrap();
+                                let quota = target_quota;
                                 if quota.try_reserve_mailbox_messages(1).is_ok() {
                                     if quota.try_reserve_mailbox_bytes(message_bytes).is_ok() {
                                         ok = true;
@@ -122,7 +122,7 @@ impl Orchestrator {
                 .and_then(|mailbox| mailbox.lock().unwrap().pop_front())
                 .map(|message| {
                     if let Some(target_quota) = self.kernel.get_thread_quota(thread_id) {
-                        let mut tq = target_quota.lock().unwrap();
+                        let tq = target_quota;
                         tq.release_mailbox_messages(1);
                         tq.release_mailbox_bytes(message.data.len());
                     }
@@ -163,7 +163,7 @@ impl Orchestrator {
                     if let Some(ref m) = msg
                         && let Some(target_quota) = self.kernel.get_thread_quota(thread_id)
                     {
-                        let mut tq = target_quota.lock().unwrap();
+                        let tq = target_quota;
                         tq.release_mailbox_messages(1);
                         tq.release_mailbox_bytes(m.data.len());
                     }
@@ -241,10 +241,8 @@ impl Orchestrator {
                     }) => {
                         let mut new_thread = galfus_vm::thread::VmThreadState::new(
                             self.quota.clone(),
-                            std::sync::Arc::new(std::sync::Mutex::new(
-                                galfus_vm::quota::ThreadQuota::new(
-                                    self.quota.lock().unwrap().limits().clone(),
-                                ),
+                            std::sync::Arc::new(galfus_vm::quota::ThreadQuota::new(
+                                self.quota.lock().unwrap().limits().clone(),
                             )),
                         );
                         new_thread.entry_func = Some(galfus_vm::VmValue::Function {

@@ -198,7 +198,7 @@ fn test_future_instructions_require_one_type_per_argument() {
         func: FuncIdx(0),
         args_start: Reg(0),
         arg_count: 2,
-        arg_types: vec![TypeIdx(0)],
+        arg_types: vec![TypeIdx(0)].into(),
         return_type: TypeIdx(0),
     }]);
 
@@ -220,7 +220,7 @@ fn test_indirect_future_validates_argument_and_payload_types() {
         func_reg: Reg(0),
         args_start: Reg(0),
         arg_count: 1,
-        arg_types: vec![TypeIdx(99)],
+        arg_types: vec![TypeIdx(99)].into(),
         return_type: TypeIdx(98),
     }]);
 

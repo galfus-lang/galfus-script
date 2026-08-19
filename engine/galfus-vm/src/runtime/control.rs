@@ -116,28 +116,21 @@ impl VirtualMachine {
                     });
                 }
 
-                let mut callee_regs = vec![
-                    Value::Null;
-                    callee.param_count as usize
-                        + callee.local_count as usize
-                        + callee.temp_count as usize
-                ];
+                let register_count = callee.param_count as usize
+                    + callee.local_count as usize
+                    + callee.temp_count as usize;
 
-                for (i, dest) in callee_regs.iter_mut().enumerate().take(arg_count as usize) {
-                    let src_reg = Reg(args_start.raw() + i as u16);
-                    let val = thread.read_reg(src_reg)?;
-                    thread.retain_anchor_val(&val);
-                    *dest = val;
-                }
-
-                // Save destination register inside call frame to write return value back
-                thread.push_frame(CallFrame {
-                    module_id: target_module_id,
-                    func_idx: target_func_idx,
-                    pc: 0,
-                    registers: callee_regs,
-                    return_dest: Some(dest),
-                })?;
+                let target_func = self.get_function(target_module_id, target_func_idx)?;
+                let cached_instructions = target_func.instructions.as_slice() as *const _;
+                thread.push_frame(
+                    target_module_id,
+                    target_func_idx,
+                    0,
+                    Some(dest),
+                    register_count,
+                    cached_instructions,
+                )?;
+                thread.setup_args_from_caller(args_start, arg_count as usize, None)?;
             }
             Instruction::CallMethod {
                 dest,
@@ -312,32 +305,21 @@ impl VirtualMachine {
                     });
                 }
 
-                let mut callee_regs = vec![
-                    Value::Null;
-                    callee.param_count as usize
-                        + callee.local_count as usize
-                        + callee.temp_count as usize
-                ];
+                let register_count = callee.param_count as usize
+                    + callee.local_count as usize
+                    + callee.temp_count as usize;
 
-                for (i, dest) in callee_regs.iter_mut().enumerate().take(arg_count as usize) {
-                    // First arg is obj, then args_start + 1, +2, ...
-                    let src_reg = if i == 0 {
-                        obj
-                    } else {
-                        Reg(args_start.raw() + i as u16)
-                    };
-                    let val = thread.read_reg(src_reg)?;
-                    thread.retain_anchor_val(&val);
-                    *dest = val;
-                }
-
-                thread.push_frame(CallFrame {
-                    module_id: target_module_id,
-                    func_idx: target_func_idx,
-                    pc: 0,
-                    registers: callee_regs,
-                    return_dest: Some(dest),
-                })?;
+                let target_func = self.get_function(target_module_id, target_func_idx)?;
+                let cached_instructions = target_func.instructions.as_slice() as *const _;
+                thread.push_frame(
+                    target_module_id,
+                    target_func_idx,
+                    0,
+                    Some(dest),
+                    register_count,
+                    cached_instructions,
+                )?;
+                thread.setup_args_from_caller(args_start, arg_count as usize, Some(obj))?;
             }
             Instruction::CallDynamic {
                 dest,
@@ -395,28 +377,21 @@ impl VirtualMachine {
                     });
                 }
 
-                let mut callee_regs = vec![
-                    Value::Null;
-                    callee.param_count as usize
-                        + callee.local_count as usize
-                        + callee.temp_count as usize
-                ];
-                for (index, callee_reg) in
-                    callee_regs.iter_mut().enumerate().take(arg_count as usize)
-                {
-                    let source = Reg(args_start.raw() + index as u16);
-                    let val = thread.read_reg(source)?;
-                    thread.retain_anchor_val(&val);
-                    *callee_reg = val;
-                }
+                let register_count = callee.param_count as usize
+                    + callee.local_count as usize
+                    + callee.temp_count as usize;
 
-                thread.push_frame(CallFrame {
-                    module_id: target_module_id,
-                    func_idx: target_func_idx,
-                    pc: 0,
-                    registers: callee_regs,
-                    return_dest: Some(dest),
-                })?;
+                let target_func = self.get_function(target_module_id, target_func_idx)?;
+                let cached_instructions = target_func.instructions.as_slice() as *const _;
+                thread.push_frame(
+                    target_module_id,
+                    target_func_idx,
+                    0,
+                    Some(dest),
+                    register_count,
+                    cached_instructions,
+                )?;
+                thread.setup_args_from_caller(args_start, arg_count as usize, None)?;
             }
 
             Instruction::Ret { src } => {

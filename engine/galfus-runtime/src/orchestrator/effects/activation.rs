@@ -59,10 +59,10 @@ impl Orchestrator {
         act_module_id: ModuleId,
         func_idx: FuncIdx,
         args: Vec<galfus_contract::BoundaryValue>,
-        arg_types: Vec<galfus_bytecode::instruction::TypeIdx>,
+        arg_types: Box<[galfus_bytecode::instruction::TypeIdx]>,
     ) -> Option<galfus_vm::thread::VmThreadState> {
-        let thread_quota = std::sync::Arc::new(std::sync::Mutex::new(
-            galfus_vm::quota::ThreadQuota::new(self.quota.lock().unwrap().limits().clone()),
+        let thread_quota = std::sync::Arc::new(galfus_vm::quota::ThreadQuota::new(
+            self.quota.lock().unwrap().limits().clone(),
         ));
         let mut worker_thread =
             galfus_vm::thread::VmThreadState::new(self.quota.clone(), thread_quota);

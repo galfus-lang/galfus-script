@@ -28,18 +28,16 @@ pub struct PrivateHeap {
         galfus_core::OpaqueTypeId,
         galfus_core::HandleId,
     )>,
-    pub(crate) quota: std::sync::Arc<std::sync::Mutex<crate::quota::ThreadQuota>>,
+    pub(crate) quota: std::sync::Arc<crate::quota::ThreadQuota>,
 }
 
 impl PrivateHeap {
     pub fn test_new() -> Self {
         let limits = galfus_contract::LimitsMetadata::default();
-        Self::new(std::sync::Arc::new(std::sync::Mutex::new(
-            crate::quota::ThreadQuota::new(limits),
-        )))
+        Self::new(std::sync::Arc::new(crate::quota::ThreadQuota::new(limits)))
     }
 
-    pub fn new(quota: std::sync::Arc<std::sync::Mutex<crate::quota::ThreadQuota>>) -> Self {
+    pub fn new(quota: std::sync::Arc<crate::quota::ThreadQuota>) -> Self {
         Self {
             objects: Vec::new(),
             free_slots: Vec::new(),
@@ -52,8 +50,6 @@ impl PrivateHeap {
 
     pub fn alloc(&mut self, obj: HeapObject) -> Result<VmObjectRef, VmError> {
         self.quota
-            .lock()
-            .unwrap()
             .try_reserve_heap(1, obj.heap_bytes())
             .map_err(VmError::ResourceLimitExceeded)?;
 
@@ -137,9 +133,7 @@ impl PrivateHeap {
         self.roots.remove(&idx);
 
         if let Some(obj) = slot.object.take() {
-            let mut q = self.quota.lock().unwrap();
-            q.release_heap_objects(1);
-            q.release_heap_bytes(obj.heap_bytes());
+            self.quota.release_heap(1, obj.heap_bytes());
 
             if let HeapObject::AdapterHandle {
                 binding_id,
@@ -241,11 +235,7 @@ impl PrivateHeap {
         self.roots.remove(&idx);
 
         if let Some(obj) = slot.object.take() {
-            {
-                let mut q = self.quota.lock().unwrap();
-                q.release_heap_objects(1);
-                q.release_heap_bytes(obj.heap_bytes());
-            }
+            self.quota.release_heap(1, obj.heap_bytes());
 
             self.free_slots.push(idx);
 
@@ -418,11 +408,7 @@ impl PrivateHeap {
 
             let obj = slot.object.take().unwrap();
 
-            {
-                let mut q = self.quota.lock().unwrap();
-                q.release_heap_objects(1);
-                q.release_heap_bytes(obj.heap_bytes());
-            }
+            self.quota.release_heap(1, obj.heap_bytes());
 
             self.free_slots.push(idx);
 
@@ -511,11 +497,9 @@ impl PrivateHeap {
 
 impl Drop for PrivateHeap {
     fn drop(&mut self) {
-        let mut q = self.quota.lock().unwrap();
         for slot in &mut self.objects {
             if let Some(obj) = slot.object.take() {
-                q.release_heap_objects(1);
-                q.release_heap_bytes(obj.heap_bytes());
+                self.quota.release_heap(1, obj.heap_bytes());
             }
         }
     }

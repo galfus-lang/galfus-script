@@ -18,7 +18,7 @@ pub enum Activation {
         module_id: ModuleId,
         func_idx: FuncIdx,
         args: Vec<BoundaryValue>,
-        arg_types: Vec<TypeIdx>,
+        arg_types: Box<[TypeIdx]>,
     },
     Internal {
         operation: String,

@@ -306,9 +306,9 @@ pub(super) fn late_provider_completions_after_thread_cancellation_are_ignored() 
 #[test]
 pub(super) fn execution_drops_orchestrator_and_sets_failed_state_on_error() {
     let mut orchestrator = Orchestrator::test_new();
-    let thread_quota = Arc::new(Mutex::new(galfus_vm::quota::ThreadQuota::new(
+    let thread_quota = Arc::new(galfus_vm::quota::ThreadQuota::new(
         orchestrator.quota.lock().unwrap().limits().clone(),
-    )));
+    ));
     let thread = galfus_vm::thread::VmThreadState::new(orchestrator.quota.clone(), thread_quota);
     let _owner = orchestrator.kernel.spawn(thread, None).unwrap();
 
@@ -326,9 +326,7 @@ pub(super) fn max_kernel_tasks_exhaustion_cancels_thread() {
     )));
     let mut orchestrator = Orchestrator::new(quota.clone());
 
-    let thread_quota = Arc::new(Mutex::new(galfus_vm::quota::ThreadQuota::new(
-        limits.clone(),
-    )));
+    let thread_quota = Arc::new(galfus_vm::quota::ThreadQuota::new(limits.clone()));
     let thread = galfus_vm::thread::VmThreadState::new(quota.clone(), thread_quota);
     let thread_id = orchestrator.kernel.spawn(thread, None).unwrap();
     let taken_thread = orchestrator.kernel.take_thread(thread_id).unwrap();
@@ -361,9 +359,7 @@ pub(super) fn max_runnable_threads_exhaustion_cancels_thread_on_unblock() {
     )));
     let mut orchestrator = Orchestrator::new(quota.clone());
 
-    let thread_quota = Arc::new(Mutex::new(galfus_vm::quota::ThreadQuota::new(
-        limits.clone(),
-    )));
+    let thread_quota = Arc::new(galfus_vm::quota::ThreadQuota::new(limits.clone()));
     let thread = galfus_vm::thread::VmThreadState::new(quota.clone(), thread_quota);
     let thread_id = orchestrator.kernel.spawn(thread, None).unwrap();
 
@@ -398,9 +394,7 @@ pub(super) fn max_timers_exhaustion_fails_to_block() {
     )));
     let mut orchestrator = Orchestrator::new(quota.clone());
 
-    let thread_quota = Arc::new(Mutex::new(galfus_vm::quota::ThreadQuota::new(
-        limits.clone(),
-    )));
+    let thread_quota = Arc::new(galfus_vm::quota::ThreadQuota::new(limits.clone()));
     let thread = galfus_vm::thread::VmThreadState::new(quota.clone(), thread_quota);
     let thread_id = orchestrator.kernel.spawn(thread, None).unwrap();
 

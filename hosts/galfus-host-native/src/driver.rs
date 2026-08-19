@@ -39,7 +39,7 @@ impl NativeDriver {
             thread::spawn(move || {
                 // Background worker loop
                 while let Ok(task) = rx.recv() {
-                    let _ = task.run(100);
+                    let _ = task.run(100_000);
                     active.fetch_sub(1, Ordering::SeqCst);
                 }
             });
@@ -56,7 +56,7 @@ impl NativeDriver {
     }
 
     fn run_main_task(task: Box<dyn RunnableTask>) -> Option<ExecutorStepResult> {
-        let result = task.run(100); // budget arbitrária
+        let result = task.run(100_000); // budget arbitrária
 
         match result {
             ThreadResult::Discarded => Some(ExecutorStepResult::Running),

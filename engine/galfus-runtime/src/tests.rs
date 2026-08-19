@@ -96,7 +96,7 @@ fn startup_graph() -> (sync::Arc<BytecodeGraph>, ModuleId) {
                         func: FuncIdx(2),
                         args_start: Reg(0),
                         arg_count: 0,
-                        arg_types: vec![],
+                        arg_types: Box::new([]),
                         return_type: TypeIdx(0),
                     },
                     Instruction::AwaitFuture {
@@ -120,7 +120,7 @@ fn startup_graph() -> (sync::Arc<BytecodeGraph>, ModuleId) {
                         func: FuncIdx(3),
                         args_start: Reg(0),
                         arg_count: 0,
-                        arg_types: vec![],
+                        arg_types: Box::new([]),
                         return_type: TypeIdx(0),
                     },
                     Instruction::AwaitFuture {

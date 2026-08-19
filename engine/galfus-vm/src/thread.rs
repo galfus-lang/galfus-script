@@ -9,6 +9,10 @@ pub use crate::heap::PrivateHeap;
 
 pub struct VmThreadState {
     pub call_stack: Vec<CallFrame>,
+    pub registers: Vec<Value>,
+    pub current_register_base: usize,
+    pub current_register_top: usize,
+    pub current_frame_has_objects: bool,
     pub system_response: Option<crate::VmValue>,
     pub heap: PrivateHeap,
     pub module_states: HashMap<ModuleId, RuntimeModuleState>,
@@ -16,7 +20,7 @@ pub struct VmThreadState {
     pub(crate) initializing_module: Option<ModuleId>,
     pub is_spawned: bool,
     pub(crate) global_quota: std::sync::Arc<std::sync::Mutex<crate::quota::GlobalQuota>>,
-    pub(crate) thread_quota: std::sync::Arc<std::sync::Mutex<crate::quota::ThreadQuota>>,
+    pub(crate) thread_quota: std::sync::Arc<crate::quota::ThreadQuota>,
 }
 
 impl VmThreadState {
@@ -26,18 +30,20 @@ impl VmThreadState {
             std::sync::Arc::new(std::sync::Mutex::new(crate::quota::GlobalQuota::new(
                 limits.clone(),
             ))),
-            std::sync::Arc::new(std::sync::Mutex::new(crate::quota::ThreadQuota::new(
-                limits,
-            ))),
+            std::sync::Arc::new(crate::quota::ThreadQuota::new(limits)),
         )
     }
 
     pub fn new(
         global_quota: std::sync::Arc<std::sync::Mutex<crate::quota::GlobalQuota>>,
-        thread_quota: std::sync::Arc<std::sync::Mutex<crate::quota::ThreadQuota>>,
+        thread_quota: std::sync::Arc<crate::quota::ThreadQuota>,
     ) -> Self {
         Self {
-            call_stack: Vec::new(),
+            call_stack: Vec::with_capacity(64),
+            registers: vec![Value::Null; 1024],
+            current_register_base: 0,
+            current_register_top: 0,
+            current_frame_has_objects: false,
             system_response: None,
             heap: PrivateHeap::new(thread_quota.clone()),
             module_states: HashMap::new(),
@@ -55,25 +61,98 @@ impl VmThreadState {
         Ok(())
     }
 
-    pub fn push_frame(&mut self, frame: CallFrame) -> Result<(), crate::error::VmError> {
+    pub fn push_frame(
+        &mut self,
+        module_id: ModuleId,
+        func_idx: galfus_bytecode::instruction::FuncIdx,
+        pc: usize,
+        return_dest: Option<Reg>,
+        register_count: usize,
+        cached_instructions: *const [galfus_bytecode::instruction::Instruction],
+    ) -> Result<(), crate::error::VmError> {
         self.thread_quota()
-            .lock()
-            .unwrap()
             .try_reserve_call_depth(1)
             .map_err(crate::error::VmError::ResourceLimitExceeded)?;
-        self.call_stack.push(frame);
+        let register_base = self.current_register_top;
+        let new_top = register_base + register_count;
+        if new_top > self.registers.len() {
+            self.registers
+                .resize(new_top.max(self.registers.len() * 2), Value::Null);
+        }
+        self.current_register_base = register_base;
+        self.current_register_top = new_top;
+
+        self.call_stack.push(CallFrame {
+            module_id,
+            func_idx,
+            register_base,
+            pc,
+            return_dest,
+            cached_instructions,
+            has_objects: self.current_frame_has_objects,
+        });
+        self.current_frame_has_objects = false;
+        Ok(())
+    }
+
+    pub fn setup_args_from_caller(
+        &mut self,
+        args_start: Reg,
+        arg_count: usize,
+        has_obj: Option<Reg>,
+    ) -> Result<(), VmError> {
+        let stack_len = self.call_stack.len();
+        if stack_len < 2 {
+            return Err(VmError::EmptyCallStack);
+        }
+        let caller_base = self.call_stack[stack_len - 2].register_base;
+        let callee_base = self.call_stack[stack_len - 1].register_base;
+
+        for i in 0..arg_count {
+            let src_reg = if let Some(obj_reg) = has_obj {
+                if i == 0 {
+                    obj_reg
+                } else {
+                    Reg(args_start.raw() + i as u16)
+                }
+            } else {
+                Reg(args_start.raw() + i as u16)
+            };
+
+            let src_idx = caller_base + src_reg.raw() as usize;
+            let val = self
+                .registers
+                .get(src_idx)
+                .cloned()
+                .ok_or(VmError::RegisterOutOfBounds { reg: src_reg })?;
+
+            if matches!(val, Value::Object(_)) {
+                self.current_frame_has_objects = true;
+            }
+            self.retain_anchor_val(&val);
+            self.registers[callee_base + i] = val;
+        }
         Ok(())
     }
 
     pub fn pop_frame(&mut self) -> Option<CallFrame> {
         let frame = self.call_stack.pop();
         if let Some(frame) = &frame {
-            self.thread_quota().lock().unwrap().release_call_depth(1);
-            for val in &frame.registers {
-                if let Value::Object(obj_ref) = val {
-                    let _ = self.heap.release_anchor(*obj_ref);
+            self.thread_quota().release_call_depth(1);
+            if self.current_frame_has_objects {
+                for i in frame.register_base..self.current_register_top {
+                    let val = std::mem::replace(&mut self.registers[i], Value::Null);
+                    if let Value::Object(obj_ref) = val {
+                        let _ = self.heap.release_anchor(obj_ref);
+                    }
                 }
+            } else {
+                self.registers[frame.register_base..self.current_register_top].fill(Value::Null);
             }
+            self.current_register_top = frame.register_base;
+            self.current_register_base =
+                self.call_stack.last().map(|f| f.register_base).unwrap_or(0);
+            self.current_frame_has_objects = frame.has_objects;
         }
         frame
     }
@@ -82,7 +161,7 @@ impl VmThreadState {
         &self.global_quota
     }
 
-    pub fn thread_quota(&self) -> &std::sync::Arc<std::sync::Mutex<crate::quota::ThreadQuota>> {
+    pub fn thread_quota(&self) -> &std::sync::Arc<crate::quota::ThreadQuota> {
         &self.thread_quota
     }
 
@@ -124,18 +203,19 @@ impl VmThreadState {
     }
 
     pub fn read_reg(&self, reg: Reg) -> Result<Value, VmError> {
-        let frame = self.call_stack.last().ok_or(VmError::EmptyCallStack)?;
-        frame
-            .registers
-            .get(reg.raw() as usize)
+        self.registers
+            .get(self.current_register_base + reg.raw() as usize)
             .cloned()
             .ok_or(VmError::RegisterOutOfBounds { reg })
     }
 
     pub fn write_reg(&mut self, reg: Reg, val: Value) -> Result<(), VmError> {
-        let frame = self.call_stack.last_mut().ok_or(VmError::EmptyCallStack)?;
-        if (reg.raw() as usize) < frame.registers.len() {
-            let old_val = std::mem::replace(&mut frame.registers[reg.raw() as usize], val);
+        let idx = self.current_register_base + reg.raw() as usize;
+        if idx < self.registers.len() {
+            if matches!(val, Value::Object(_)) {
+                self.current_frame_has_objects = true;
+            }
+            let old_val = std::mem::replace(&mut self.registers[idx], val);
             if let Value::Object(obj_ref) = old_val {
                 let _ = self.heap.release_anchor(obj_ref);
             }
@@ -158,33 +238,32 @@ impl VmThreadState {
     }
 
     pub fn contains_future_handle(&self, future_id: galfus_core::FutureId) -> bool {
-        self.call_stack.iter().any(|frame| {
-            frame
-                .registers
-                .iter()
-                .any(|value| matches!(value, Value::Future(id) if *id == future_id))
-        }) || self.module_states.values().any(|state| {
-            state
-                .globals
-                .iter()
-                .any(|value| matches!(value, Value::Future(id) if *id == future_id))
-        }) || self
-            .heap
-            .iter_live_objects()
-            .any(|(_, object)| match object {
-                HeapObject::Struct { fields, .. } | HeapObject::Tuple { elements: fields } => {
-                    fields
-                        .iter()
-                        .any(|value| matches!(value, Value::Future(id) if *id == future_id))
-                }
-                HeapObject::Array { elements, .. } => elements
+        self.registers
+            .iter()
+            .any(|value| matches!(value, Value::Future(id) if *id == future_id))
+            || self.module_states.values().any(|state| {
+                state
+                    .globals
                     .iter()
-                    .any(|value| matches!(value, Value::Future(id) if *id == future_id)),
-                HeapObject::Choice { payload, .. } => {
-                    matches!(payload, Value::Future(id) if *id == future_id)
-                }
-                HeapObject::AdapterHandle { .. } => false,
+                    .any(|value| matches!(value, Value::Future(id) if *id == future_id))
             })
+            || self
+                .heap
+                .iter_live_objects()
+                .any(|(_, object)| match object {
+                    HeapObject::Struct { fields, .. } | HeapObject::Tuple { elements: fields } => {
+                        fields
+                            .iter()
+                            .any(|value| matches!(value, Value::Future(id) if *id == future_id))
+                    }
+                    HeapObject::Array { elements, .. } => elements
+                        .iter()
+                        .any(|value| matches!(value, Value::Future(id) if *id == future_id)),
+                    HeapObject::Choice { payload, .. } => {
+                        matches!(payload, Value::Future(id) if *id == future_id)
+                    }
+                    HeapObject::AdapterHandle { .. } => false,
+                })
     }
 }
 
@@ -193,8 +272,8 @@ impl VisitRoots for VmThreadState {
         for state in self.module_states.values() {
             state.visit_roots(visitor);
         }
-        for frame in &self.call_stack {
-            frame.visit_roots(visitor);
+        for val in &self.registers {
+            val.visit_roots(visitor);
         }
         if let Some(ref response) = self.system_response {
             response.visit_roots(visitor);
@@ -211,8 +290,6 @@ impl Drop for VmThreadState {
             self.global_quota().lock().unwrap().release_threads(1);
         }
         self.thread_quota()
-            .lock()
-            .unwrap()
             .release_call_depth(self.call_stack.len());
     }
 }

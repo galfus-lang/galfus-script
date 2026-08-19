@@ -17,15 +17,19 @@ fn execution_stack_preserves_the_suspended_call_chain() {
             module_id: galfus_core::ModuleId::new(1),
             func_idx: FuncIdx(2),
             pc: 4,
-            registers: vec![],
+            register_base: 0,
             return_dest: None,
+            cached_instructions: &[] as *const [galfus_bytecode::Instruction],
+            has_objects: false,
         },
         galfus_vm::runtime::CallFrame {
             module_id: galfus_core::ModuleId::new(3),
             func_idx: FuncIdx(5),
             pc: 0,
-            registers: vec![],
+            register_base: 0,
             return_dest: None,
+            cached_instructions: &[] as *const [galfus_bytecode::Instruction],
+            has_objects: false,
         },
     ];
 

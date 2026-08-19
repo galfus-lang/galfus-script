@@ -218,25 +218,27 @@ impl GlobalQuota {
     }
 }
 
-#[derive(Debug, Clone)]
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+#[derive(Debug)]
 pub struct ThreadQuota {
     limits: LimitsMetadata,
-    heap_objects: usize,
-    heap_bytes: usize,
-    call_depth: usize,
-    mailbox_messages: usize,
-    mailbox_bytes: usize,
+    heap_objects: AtomicUsize,
+    heap_bytes: AtomicUsize,
+    call_depth: AtomicUsize,
+    mailbox_messages: AtomicUsize,
+    mailbox_bytes: AtomicUsize,
 }
 
 impl ThreadQuota {
     pub fn new(limits: LimitsMetadata) -> Self {
         Self {
             limits,
-            heap_objects: 0,
-            heap_bytes: 0,
-            call_depth: 0,
-            mailbox_messages: 0,
-            mailbox_bytes: 0,
+            heap_objects: AtomicUsize::new(0),
+            heap_bytes: AtomicUsize::new(0),
+            call_depth: AtomicUsize::new(0),
+            mailbox_messages: AtomicUsize::new(0),
+            mailbox_bytes: AtomicUsize::new(0),
         }
     }
 
@@ -245,13 +247,14 @@ impl ThreadQuota {
     }
 
     pub fn heap_objects(&self) -> usize {
-        self.heap_objects
+        self.heap_objects.load(Ordering::Relaxed)
     }
 
-    pub fn try_reserve_heap_objects(&mut self, amount: usize) -> Result<(), ExecutionFailureKind> {
-        let current = self.heap_objects;
+    pub fn try_reserve_heap_objects(&self, amount: usize) -> Result<(), ExecutionFailureKind> {
+        let current = self.heap_objects.fetch_add(amount, Ordering::Relaxed);
         let limit = self.limits.max_heap_objects;
         if current.saturating_add(amount) > limit {
+            self.heap_objects.fetch_sub(amount, Ordering::Relaxed);
             return Err(ExecutionFailureKind::ResourceLimitExceeded {
                 resource: ResourceLimitKind::HeapObjects,
                 current,
@@ -259,18 +262,18 @@ impl ThreadQuota {
                 limit,
             });
         }
-        self.heap_objects += amount;
         Ok(())
     }
 
-    pub fn release_heap_objects(&mut self, amount: usize) {
-        self.heap_objects = self.heap_objects.saturating_sub(amount);
+    pub fn release_heap_objects(&self, amount: usize) {
+        self.heap_objects.fetch_sub(amount, Ordering::Relaxed);
     }
 
-    pub fn try_reserve_heap_bytes(&mut self, amount: usize) -> Result<(), ExecutionFailureKind> {
-        let current = self.heap_bytes;
+    pub fn try_reserve_heap_bytes(&self, amount: usize) -> Result<(), ExecutionFailureKind> {
+        let current = self.heap_bytes.fetch_add(amount, Ordering::Relaxed);
         let limit = self.limits.max_heap_bytes;
         if current.saturating_add(amount) > limit {
+            self.heap_bytes.fetch_sub(amount, Ordering::Relaxed);
             return Err(ExecutionFailureKind::ResourceLimitExceeded {
                 resource: ResourceLimitKind::HeapBytes,
                 current,
@@ -278,18 +281,18 @@ impl ThreadQuota {
                 limit,
             });
         }
-        self.heap_bytes += amount;
         Ok(())
     }
 
     pub fn try_reserve_heap(
-        &mut self,
+        &self,
         objects: usize,
         bytes: usize,
     ) -> Result<(), ExecutionFailureKind> {
-        let obj_current = self.heap_objects;
+        let obj_current = self.heap_objects.fetch_add(objects, Ordering::Relaxed);
         let obj_limit = self.limits.max_heap_objects;
         if obj_current.saturating_add(objects) > obj_limit {
+            self.heap_objects.fetch_sub(objects, Ordering::Relaxed);
             return Err(ExecutionFailureKind::ResourceLimitExceeded {
                 resource: ResourceLimitKind::HeapObjects,
                 current: obj_current,
@@ -297,9 +300,12 @@ impl ThreadQuota {
                 limit: obj_limit,
             });
         }
-        let byte_current = self.heap_bytes;
+
+        let byte_current = self.heap_bytes.fetch_add(bytes, Ordering::Relaxed);
         let byte_limit = self.limits.max_heap_bytes;
         if byte_current.saturating_add(bytes) > byte_limit {
+            self.heap_bytes.fetch_sub(bytes, Ordering::Relaxed);
+            self.heap_objects.fetch_sub(objects, Ordering::Relaxed);
             return Err(ExecutionFailureKind::ResourceLimitExceeded {
                 resource: ResourceLimitKind::HeapBytes,
                 current: byte_current,
@@ -307,19 +313,24 @@ impl ThreadQuota {
                 limit: byte_limit,
             });
         }
-        self.heap_objects += objects;
-        self.heap_bytes += bytes;
+
         Ok(())
     }
 
-    pub fn release_heap_bytes(&mut self, amount: usize) {
-        self.heap_bytes = self.heap_bytes.saturating_sub(amount);
+    pub fn release_heap(&self, objects: usize, bytes: usize) {
+        self.heap_objects.fetch_sub(objects, Ordering::Relaxed);
+        self.heap_bytes.fetch_sub(bytes, Ordering::Relaxed);
     }
 
-    pub fn try_reserve_call_depth(&mut self, amount: usize) -> Result<(), ExecutionFailureKind> {
-        let current = self.call_depth;
+    pub fn release_heap_bytes(&self, amount: usize) {
+        self.heap_bytes.fetch_sub(amount, Ordering::Relaxed);
+    }
+
+    pub fn try_reserve_call_depth(&self, amount: usize) -> Result<(), ExecutionFailureKind> {
+        let current = self.call_depth.fetch_add(amount, Ordering::Relaxed);
         let limit = self.limits.max_call_depth;
         if current.saturating_add(amount) > limit {
+            self.call_depth.fetch_sub(amount, Ordering::Relaxed);
             return Err(ExecutionFailureKind::ResourceLimitExceeded {
                 resource: ResourceLimitKind::CallDepth,
                 current,
@@ -327,21 +338,18 @@ impl ThreadQuota {
                 limit,
             });
         }
-        self.call_depth += amount;
         Ok(())
     }
 
-    pub fn release_call_depth(&mut self, amount: usize) {
-        self.call_depth = self.call_depth.saturating_sub(amount);
+    pub fn release_call_depth(&self, amount: usize) {
+        self.call_depth.fetch_sub(amount, Ordering::Relaxed);
     }
 
-    pub fn try_reserve_mailbox_messages(
-        &mut self,
-        amount: usize,
-    ) -> Result<(), ExecutionFailureKind> {
-        let current = self.mailbox_messages;
+    pub fn try_reserve_mailbox_messages(&self, amount: usize) -> Result<(), ExecutionFailureKind> {
+        let current = self.mailbox_messages.fetch_add(amount, Ordering::Relaxed);
         let limit = self.limits.max_mailbox_messages;
         if current.saturating_add(amount) > limit {
+            self.mailbox_messages.fetch_sub(amount, Ordering::Relaxed);
             return Err(ExecutionFailureKind::ResourceLimitExceeded {
                 resource: ResourceLimitKind::MailboxMessages,
                 current,
@@ -349,18 +357,18 @@ impl ThreadQuota {
                 limit,
             });
         }
-        self.mailbox_messages += amount;
         Ok(())
     }
 
-    pub fn release_mailbox_messages(&mut self, amount: usize) {
-        self.mailbox_messages = self.mailbox_messages.saturating_sub(amount);
+    pub fn release_mailbox_messages(&self, amount: usize) {
+        self.mailbox_messages.fetch_sub(amount, Ordering::Relaxed);
     }
 
-    pub fn try_reserve_mailbox_bytes(&mut self, amount: usize) -> Result<(), ExecutionFailureKind> {
-        let current = self.mailbox_bytes;
+    pub fn try_reserve_mailbox_bytes(&self, amount: usize) -> Result<(), ExecutionFailureKind> {
+        let current = self.mailbox_bytes.fetch_add(amount, Ordering::Relaxed);
         let limit = self.limits.max_mailbox_bytes;
         if current.saturating_add(amount) > limit {
+            self.mailbox_bytes.fetch_sub(amount, Ordering::Relaxed);
             return Err(ExecutionFailureKind::ResourceLimitExceeded {
                 resource: ResourceLimitKind::MailboxBytes,
                 current,
@@ -368,18 +376,18 @@ impl ThreadQuota {
                 limit,
             });
         }
-        self.mailbox_bytes += amount;
         Ok(())
     }
 
     pub fn try_reserve_mailbox(
-        &mut self,
+        &self,
         messages: usize,
         bytes: usize,
     ) -> Result<(), ExecutionFailureKind> {
-        let msg_current = self.mailbox_messages;
+        let msg_current = self.mailbox_messages.fetch_add(messages, Ordering::Relaxed);
         let msg_limit = self.limits.max_mailbox_messages;
         if msg_current.saturating_add(messages) > msg_limit {
+            self.mailbox_messages.fetch_sub(messages, Ordering::Relaxed);
             return Err(ExecutionFailureKind::ResourceLimitExceeded {
                 resource: ResourceLimitKind::MailboxMessages,
                 current: msg_current,
@@ -387,9 +395,11 @@ impl ThreadQuota {
                 limit: msg_limit,
             });
         }
-        let byte_current = self.mailbox_bytes;
+        let byte_current = self.mailbox_bytes.fetch_add(bytes, Ordering::Relaxed);
         let byte_limit = self.limits.max_mailbox_bytes;
         if byte_current.saturating_add(bytes) > byte_limit {
+            self.mailbox_bytes.fetch_sub(bytes, Ordering::Relaxed);
+            self.mailbox_messages.fetch_sub(messages, Ordering::Relaxed);
             return Err(ExecutionFailureKind::ResourceLimitExceeded {
                 resource: ResourceLimitKind::MailboxBytes,
                 current: byte_current,
@@ -397,12 +407,15 @@ impl ThreadQuota {
                 limit: byte_limit,
             });
         }
-        self.mailbox_messages += messages;
-        self.mailbox_bytes += bytes;
         Ok(())
     }
 
-    pub fn release_mailbox_bytes(&mut self, amount: usize) {
-        self.mailbox_bytes = self.mailbox_bytes.saturating_sub(amount);
+    pub fn release_mailbox_bytes(&self, amount: usize) {
+        self.mailbox_bytes.fetch_sub(amount, Ordering::Relaxed);
+    }
+
+    pub fn release_mailbox(&self, messages: usize, bytes: usize) {
+        self.mailbox_messages.fetch_sub(messages, Ordering::Relaxed);
+        self.mailbox_bytes.fetch_sub(bytes, Ordering::Relaxed);
     }
 }

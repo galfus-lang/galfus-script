@@ -15,7 +15,7 @@ impl Orchestrator {
         target_module_id: ModuleId,
         func_idx: FuncIdx,
         args: Vec<galfus_vm::VmValue>,
-        arg_types: Vec<TypeIdx>,
+        arg_types: Box<[TypeIdx]>,
         return_type: TypeIdx,
     ) {
         let Some(future_lease) = self.allocate_future_lease(thread_id, &thread) else {
@@ -95,7 +95,7 @@ impl Orchestrator {
         module_id: ModuleId,
         func: galfus_vm::VmValue,
         args: Vec<galfus_vm::VmValue>,
-        arg_types: Vec<TypeIdx>,
+        arg_types: Box<[TypeIdx]>,
         return_type: TypeIdx,
     ) {
         let Some(future_lease) = self.allocate_future_lease(thread_id, &thread) else {
@@ -249,7 +249,7 @@ impl Orchestrator {
         target_module_id: ModuleId,
         func_idx: FuncIdx,
         args: Vec<BoundaryValue>,
-        arg_types: Vec<TypeIdx>,
+        arg_types: Box<[TypeIdx]>,
     ) -> crate::orchestrator::future_registry::Activation {
         let target = &self
             .vm
