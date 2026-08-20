@@ -70,12 +70,10 @@ jobs:
           bun-version-file: .bun-version
 
       - name: Install script dependencies
-        working-directory: scripts
         run: bun install --frozen-lockfile
 
       - name: Apply version from release branch
         id: version
-        working-directory: scripts
         run: bun cmd github set-version --component hosts
 
       - name: Update Cargo lockfile
@@ -103,15 +101,12 @@ jobs:
           echo "linker = \"aarch64-linux-gnu-gcc\"" >> .cargo/config.toml
 
       - name: Build Host (Debug)
-        working-directory: scripts
         run: bun cmd hosts build -t ${{ matrix.alias }} -p debug
 
       - name: Build Host (Fastest)
-        working-directory: scripts
         run: bun cmd hosts build -t ${{ matrix.alias }} -p fastest
 
       - name: Build Host (Minimal)
-        working-directory: scripts
         run: bun cmd hosts build -t ${{ matrix.alias }} -p minimal
 
       - name: Build CLI
@@ -153,12 +148,10 @@ jobs:
           bun-version-file: .bun-version
 
       - name: Install script dependencies
-        working-directory: scripts
         run: bun install --frozen-lockfile
 
       - name: Apply version from release branch
         id: version
-        working-directory: scripts
         run: bun cmd github set-version --component web
 
       - name: Update Cargo lockfile
@@ -175,11 +168,9 @@ jobs:
           key: wasm32-unknown-unknown
 
       - name: Build Playground Web
-        working-directory: scripts
         run: bun cmd playground build -t web
 
       - name: Build Host Web
-        working-directory: scripts
         run: bun cmd hosts build -t web -p release
 
       - name: Run Web Provider and Playground Suites
@@ -210,12 +201,10 @@ jobs:
           bun-version-file: .bun-version
 
       - name: Install script dependencies
-        working-directory: scripts
         run: bun install --frozen-lockfile
 
       - name: Apply version from release branch
         id: version
-        working-directory: scripts
         run: bun cmd github set-version --component hosts
 
       - name: Download Build Artifacts
@@ -318,7 +307,6 @@ jobs:
           AWS_DEFAULT_REGION: ${{ secrets.STORAGE_REGION }}
           STORAGE_ID: ${{ secrets.STORAGE_ID }}
           STORAGE_ENDPOINT: ${{ secrets.STORAGE_ENDPOINT }}
-        working-directory: scripts
         run: |
           bun cmd github update-manifest --tag ${{ steps.version.outputs.tag }} --version ${{ steps.version.outputs.version }} --component cli
 
@@ -329,7 +317,6 @@ jobs:
           AWS_DEFAULT_REGION: ${{ secrets.STORAGE_REGION }}
           STORAGE_ID: ${{ secrets.STORAGE_ID }}
           STORAGE_ENDPOINT: ${{ secrets.STORAGE_ENDPOINT }}
-        working-directory: scripts
         run: bun cmd github cleanup-s3 --tag ${{ steps.version.outputs.tag }}
 
       - name: Purge CDN Cache
