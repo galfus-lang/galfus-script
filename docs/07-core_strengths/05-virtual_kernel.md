@@ -1,10 +1,10 @@
 # Virtual Kernel
 
-If `Virtual Threads` isolate memory and the virtual machine (VM) runs the *Bytecode*, who manages the queue and tells when everything should run? This is where the great host-agnostic orchestrator comes in: the **Virtual Kernel**.
+If `Virtual Threads` isolate memory and the virtual machine (VM) runs the _Bytecode_, who manages the queue and tells when everything should run? This is where the great host-agnostic orchestrator comes in: the **Virtual Kernel**.
 
 ## OS-Agnostic Orchestrator
 
-The *Virtual Kernel* should not be confused with the Kernel of your base operating system (Linux/Windows/Mac). It is a lightweight lifecycle engine written entirely hardware-agnostic.
+The _Virtual Kernel_ should not be confused with the Kernel of your base operating system (Linux/Windows/Mac). It is a lightweight lifecycle engine written entirely hardware-agnostic.
 
 - It receives suspended tasks (`PendingContinuation`).
 - It routes byte messages between Virtual Threads.

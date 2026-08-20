@@ -368,4 +368,4 @@ Standard mathematical functions.
 - Constants: `PI` (3.14159...), `E` (2.71828...).
 - Functions: `sin(x)`, `cos(x)`, `tan(x)`, `log(x)`, `pow(base, exp)`, `sqrt(x)`, `ceil(x)`, `floor(x)`, `round(x)`.
 
-*(Note: Other utility modules like `json`, `regex`, `path`, `http`, `collections`, and `crypto` are planned but not currently implemented in the core engine's utility modules list).*
+_(Note: Other utility modules like `json`, `regex`, `path`, `http`, `collections`, and `crypto` are planned but not currently implemented in the core engine's utility modules list)._

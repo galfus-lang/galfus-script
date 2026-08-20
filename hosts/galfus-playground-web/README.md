@@ -33,14 +33,16 @@ For advanced editor integrations (like CodeMirror or Monaco), you don't need to 
 
 ```javascript
 // Example of sending an LSP request to the WASM backend
-const responses = playground.handleLspMessage(JSON.stringify({
-  jsonrpc: "2.0",
-  method: "textDocument/didChange",
-  params: {
-    textDocument: { uri: "galfus://virtual/src/main.gfs", version: 2 },
-    contentChanges: [{ text: editor.getValue() }]
-  }
-}));
+const responses = playground.handleLspMessage(
+  JSON.stringify({
+    jsonrpc: "2.0",
+    method: "textDocument/didChange",
+    params: {
+      textDocument: { uri: "galfus://virtual/src/main.gfs", version: 2 },
+      contentChanges: [{ text: editor.getValue() }],
+    },
+  }),
+);
 
 // The backend returns an array of JSON string responses/notifications
 for (const json of responses) {
@@ -60,18 +62,18 @@ If you are not using the LSP integration, you can manually trigger validation an
 const checkResult = JSON.parse(playground.check());
 
 if (!checkResult.is_valid) {
-    console.error("Validation errors:", checkResult.diagnostics);
-    return;
+  console.error("Validation errors:", checkResult.diagnostics);
+  return;
 }
 
 const compResult = JSON.parse(playground.compile());
 
 if (!compResult.ok) {
-    console.error("Build error:", compResult.error);
+  console.error("Build error:", compResult.error);
 }
 ```
 
-*Note: `setSource()` and `setConfig()` invalidate the previous check and compiled package. The required lifecycle is `setConfig`/`setSource` → `check` → `compile` → `start`. If the latest source was not successfully checked and compiled, `start()` blocks execution.*
+_Note: `setSource()` and `setConfig()` invalidate the previous check and compiled package. The required lifecycle is `setConfig`/`setSource` → `check` → `compile` → `start`. If the latest source was not successfully checked and compiled, `start()` blocks execution._
 
 ### 4. Execution (Clicking the "Run" button)
 
@@ -86,24 +88,24 @@ const writeStream = new WritableStream({
     // Writes the bytes to your Terminal (Xterm.js, etc)
     const text = new TextDecoder().decode(chunk);
     terminal.write(text);
-  }
+  },
 });
 
 const readStream = new ReadableStream({
   start(controller) {
     // Connects your terminal's keyboard to the VM
-    terminal.onData(data => {
+    terminal.onData((data) => {
       controller.enqueue(new TextEncoder().encode(data));
     });
-  }
+  },
 });
 
 // Optional parameters
 const options = {
-    args: ["--mode", "release"], // command args
-    envs: { "GREETING": "Hello" }, // Environment variables
-    stdout: writeStream,         // Output stream
-    stdin: readStream            // Input stream
+  args: ["--mode", "release"], // command args
+  envs: { GREETING: "Hello" }, // Environment variables
+  stdout: writeStream, // Output stream
+  stdin: readStream, // Input stream
 };
 
 // Wait for execution to finish.
@@ -114,10 +116,11 @@ console.log(`Script finished with code ${exitCode}`);
 
 ## Security System (Kill-Switch)
 
-The `Playground` features a smart execution state control system. 
-If you call the `await playground.start()` function while **another execution is still running in the background**, the Virtual Machine detects the new request, safely aborts (*Graceful Shutdown*) its previous execution, and initializes the new script immediately.
+The `Playground` features a smart execution state control system.
+If you call the `await playground.start()` function while **another execution is still running in the background**, the Virtual Machine detects the new request, safely aborts (_Graceful Shutdown_) its previous execution, and initializes the new script immediately.
 
 This prevents:
+
 1. Memory leaks.
 2. Accumulation of concurrent processing in the same tab.
 3. Freezes in infinite logic like `while (true) {}`. You can simply restart by pressing "Run" again.

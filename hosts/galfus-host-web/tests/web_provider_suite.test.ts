@@ -1,11 +1,15 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from "bun:test";
 
-import init, { start } from '../../../build/galfus-host-web-release/galfus_host_web.js';
+import init, {
+  start,
+} from "../../../build/galfus-host-web-release/galfus_host_web.js";
 
-const fixture = Bun.file('target/host-web-provider-suite/providers.bin');
-const hostWasm = Bun.file('build/galfus-host-web-release/galfus_host_web_bg.wasm');
+const fixture = Bun.file("target/host-web-provider-suite/providers.bin");
+const hostWasm = Bun.file(
+  "build/galfus-host-web-release/galfus_host_web_bg.wasm",
+);
 
-test('executes the provider fixture through the web host', async () => {
+test("executes the provider fixture through the web host", async () => {
   expect(await fixture.exists()).toBe(true);
   expect(await hostWasm.exists()).toBe(true);
 
@@ -16,7 +20,7 @@ test('executes the provider fixture through the web host', async () => {
   const output: string[] = [];
   const stdin = new ReadableStream<Uint8Array>({
     start(controller) {
-      controller.enqueue(encoder.encode('input'));
+      controller.enqueue(encoder.encode("input"));
       controller.close();
     },
   });
@@ -28,11 +32,11 @@ test('executes the provider fixture through the web host', async () => {
 
   const exitCode = await start({
     blob: new Uint8Array(await fixture.arrayBuffer()),
-    envs: { 'suite.value': 'web' },
+    envs: { "suite.value": "web" },
     stdin,
     stdout,
   });
 
   expect(exitCode).toBe(0);
-  expect(output.join('')).toBe('web\n');
+  expect(output.join("")).toBe("web\n");
 });

@@ -3,24 +3,24 @@ name: Dependency Policy
 on:
   pull_request:
     paths:
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - 'crates/**'
-      - 'scripts/**'
-      - 'package.json'
-      - 'bun.lock'
-      - '.github/workflows/dependency-policy.yml'
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/**"
+      - "scripts/**"
+      - "package.json"
+      - "bun.lock"
+      - ".github/workflows/dependency-policy.yml"
   push:
     branches:
       - main
     paths:
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - 'crates/**'
-      - 'scripts/**'
-      - 'package.json'
-      - 'bun.lock'
-      - '.github/workflows/dependency-policy.yml'
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/**"
+      - "scripts/**"
+      - "package.json"
+      - "bun.lock"
+      - ".github/workflows/dependency-policy.yml"
 
 permissions:
   contents: read

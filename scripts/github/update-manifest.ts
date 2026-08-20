@@ -1,4 +1,4 @@
-import { $ } from 'bun';
+import { $ } from "bun";
 
 type UpdateManifestOptions = {
   tag: string;
@@ -11,20 +11,26 @@ type Manifest = {
   latest_tag: string;
 };
 
-const ORDER_OF_PRECEDENCE = ['stable', 'beta', 'alpha', 'next'];
+const ORDER_OF_PRECEDENCE = ["stable", "beta", "alpha", "next"];
 
-export async function updateManifest(options: UpdateManifestOptions): Promise<void> {
+export async function updateManifest(
+  options: UpdateManifestOptions,
+): Promise<void> {
   const { tag, version, component } = options;
 
   if (!tag || !version || !component) {
-    throw new Error('Missing required arguments: --tag, --version, or --component');
+    throw new Error(
+      "Missing required arguments: --tag, --version, or --component",
+    );
   }
 
   const storageId = process.env.STORAGE_ID;
   const storageEndpoint = process.env.STORAGE_ENDPOINT;
 
   if (!storageId || !storageEndpoint) {
-    throw new Error('STORAGE_ID and STORAGE_ENDPOINT environment variables are required');
+    throw new Error(
+      "STORAGE_ID and STORAGE_ENDPOINT environment variables are required",
+    );
   }
 
   const s3Path = `s3://${storageId}/manifest.json`;
@@ -37,12 +43,14 @@ export async function updateManifest(options: UpdateManifestOptions): Promise<vo
   try {
     await $`aws s3 cp ${s3Path} ${localManifest} --endpoint-url ${storageEndpoint} --no-progress`.quiet();
     const content = await Bun.file(localManifest).json();
-    if (content && typeof content === 'object') {
+    if (content && typeof content === "object") {
       manifest = content as Manifest;
       if (!manifest.tags) manifest.tags = {};
     }
   } catch (err) {
-    console.log('No existing manifest found or failed to download. Creating a new one.');
+    console.log(
+      "No existing manifest found or failed to download. Creating a new one.",
+    );
   }
 
   // Inject new version
@@ -67,5 +75,5 @@ export async function updateManifest(options: UpdateManifestOptions): Promise<vo
 
   await $`aws s3 cp ${localManifest} ${s3Path} --endpoint-url ${storageEndpoint} --no-progress`;
 
-  console.log('Manifest updated successfully.');
+  console.log("Manifest updated successfully.");
 }

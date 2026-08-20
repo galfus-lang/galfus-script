@@ -3,6 +3,7 @@
 The **Adapter System** is Galfus's advanced Foreign Function Interface (FFI). It is used to bind arbitrary proxy modules (`.gfp`) to dynamic Rust code at runtime.
 
 To expose custom Rust logic through an adapter, you need three components:
+
 1. An `AdapterSchema` (Validates `.gfp` metadata during compilation).
 2. An `AdapterModuleLoader` (Translates the required `.gfp` into a runnable binding).
 3. An `AdapterModuleBinding` (The instance that actually executes the proxy calls).
@@ -60,13 +61,13 @@ impl AdapterModuleBinding for DatabaseBinding {
     ) {
         if symbol == "fetch_user" {
             println!("Fetching user from table: {}", self.table_name);
-            
+
             // Return dummy data
             let _ = injector.inject_system_response(thread_id, request_lease, Ok(BoundaryValue::I64(42)));
         } else {
             let _ = injector.inject_system_response(
-                thread_id, 
-                request_lease, 
+                thread_id,
+                request_lease,
                 Err(ExecutionFailure::AdapterError("Method not found".into()))
             );
         }
@@ -104,7 +105,7 @@ impl AdapterModuleLoader for DatabaseAdapterLoader {
         requirement: &AdapterModuleRequirement,
         _context: &AdapterLoadContext,
     ) -> Result<Box<dyn AdapterModuleBinding>, AdapterLoadError> {
-        
+
         // Extract configuration from the .gfp file
         let table = match requirement.config.get("table") {
             Some(galfus_contract::AdapterConfigValue::String(s)) => s.clone(),

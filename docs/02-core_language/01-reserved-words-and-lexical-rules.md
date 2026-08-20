@@ -74,8 +74,6 @@ throw
 commit
 ```
 
-
-
 ## 1.3 Primitive Type Names
 
 Core primitive names:

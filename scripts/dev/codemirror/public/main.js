@@ -10,50 +10,56 @@ async function main() {
   const playground = new Playground();
 
   // Initialize the LSP server
-  playground.handleLspMessage(JSON.stringify({
-    jsonrpc: "2.0",
-    id: 1,
-    method: "initialize",
-    params: {
-      processId: null,
-      rootUri: null,
-      capabilities: {}
-    }
-  }));
+  playground.handleLspMessage(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        processId: null,
+        rootUri: null,
+        capabilities: {},
+      },
+    }),
+  );
 
   let documentVersion = 1;
   const initialDoc = "fn main() {\n  let a\n}";
 
   // Simulate opening the file
-  playground.handleLspMessage(JSON.stringify({
-    jsonrpc: "2.0",
-    method: "textDocument/didOpen",
-    params: {
-      textDocument: {
-        uri: "galfus://virtual/src/main.gfs",
-        languageId: "galfus",
-        version: documentVersion,
-        text: initialDoc
-      }
-    }
-  }));
+  playground.handleLspMessage(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      method: "textDocument/didOpen",
+      params: {
+        textDocument: {
+          uri: "galfus://virtual/src/main.gfs",
+          languageId: "galfus",
+          version: documentVersion,
+          text: initialDoc,
+        },
+      },
+    }),
+  );
 
   // Create the Linter extension bridging CodeMirror and our WASM LSP
   const galfusLinter = linter(async (view) => {
     const text = view.state.doc.toString();
     documentVersion++;
-    
-    const responses = playground.handleLspMessage(JSON.stringify({
-      jsonrpc: "2.0",
-      method: "textDocument/didChange",
-      params: {
-        textDocument: {
-          uri: "galfus://virtual/src/main.gfs",
-          version: documentVersion
+
+    const responses = playground.handleLspMessage(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "textDocument/didChange",
+        params: {
+          textDocument: {
+            uri: "galfus://virtual/src/main.gfs",
+            version: documentVersion,
+          },
+          contentChanges: [{ text }],
         },
-        contentChanges: [{ text }]
-      }
-    }));
+      }),
+    );
 
     let lspDiagnostics = [];
     for (const json of responses) {
@@ -63,21 +69,32 @@ async function main() {
       }
     }
 
-    return lspDiagnostics.map(d => {
+    return lspDiagnostics.map((d) => {
       let from = 0;
       let to = 0;
       try {
-        from = view.state.doc.line(d.range.start.line + 1).from + d.range.start.character;
-        to = view.state.doc.line(d.range.end.line + 1).from + d.range.end.character;
+        from =
+          view.state.doc.line(d.range.start.line + 1).from +
+          d.range.start.character;
+        to =
+          view.state.doc.line(d.range.end.line + 1).from +
+          d.range.end.character;
       } catch (e) {
         console.error("Offset mapping failed:", e);
       }
       return {
         from,
         to,
-        severity: d.severity === 2 ? "warning" : d.severity === 3 ? "info" : d.severity === 4 ? "hint" : "error",
+        severity:
+          d.severity === 2
+            ? "warning"
+            : d.severity === 3
+              ? "info"
+              : d.severity === 4
+                ? "hint"
+                : "error",
         message: d.message,
-        source: d.source || "galfus-lsp"
+        source: d.source || "galfus-lsp",
       };
     });
   });
@@ -95,12 +112,12 @@ async function main() {
         },
         { dark: true },
       ),
-    ]
+    ],
   });
 
   new EditorView({
     state,
-    parent: document.getElementById("editor")
+    parent: document.getElementById("editor"),
   });
 }
 

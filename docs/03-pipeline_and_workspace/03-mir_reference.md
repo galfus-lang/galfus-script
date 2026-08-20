@@ -41,7 +41,7 @@ All values (including parameters, local variables, and intermediate results) are
 
 ## 3. Structural Control Flow & Scope Definitions
 
-The MIR body is structured into a flattened graph of `BasicBlock`s. 
+The MIR body is structured into a flattened graph of `BasicBlock`s.
 
 ```rust
 pub struct BasicBlock {
@@ -84,7 +84,7 @@ pub enum RValue {
     BinaryOp(MirBinaryOp, Operand, Operand),
     Cast(Operand, TypeId),
     Copy(Operand),
-    
+
     // Allocations
     NewStruct { struct_type: TypeId, fields: Vec<Operand> },
     NewArray(TypeId, Vec<Operand>),
@@ -92,7 +92,7 @@ pub enum RValue {
     NewArrayZeroed { array_type: TypeId, element_type: TypeId, size: usize },
     NewArrayZeroedDynamic { array_type: TypeId, element_type: TypeId, length: Operand },
     NewTuple(TypeId, Vec<Operand>),
-    
+
     // Access & Check
     MemberAccess(Operand, String),
     ArrayIndex(Operand, Operand),
@@ -101,7 +101,7 @@ pub enum RValue {
     Instanceof(Operand, TypeId),
     LoadGlobal(String),
     Len(Operand),
-    
+
     // Futures
     CreateFuture { func: FunctionId, args: Vec<Operand>, is_external: bool },
     CreateIndirectFuture { func: Operand, args: Vec<Operand> },
@@ -118,17 +118,17 @@ pub enum Instruction {
     Assign(LocalId, RValue),
     /// Explicitly end the lifetime of an SSA register (triggers drop in the VM)
     Drop(LocalId),
-    
+
     // Side-effects
     StoreGlobal(String, Operand),
     StoreIndex { arr: Operand, idx: Operand, val: Operand },
     StoreField { obj: Operand, field_name: String, val: Operand },
-    
+
     // Synchronous calls
     Call { func: FunctionId, args: Vec<Operand>, destination: LocalId, is_external: bool },
     IndirectCall { func: Operand, args: Vec<Operand>, destination: LocalId },
     ConstraintCall { method_name: String, obj: Operand, args: Vec<Operand>, destination: LocalId },
-    
+
     // Asynchronous waits
     Await { future: Operand, destination: LocalId },
     AwaitAll { futures: Vec<Operand>, destination: LocalId },

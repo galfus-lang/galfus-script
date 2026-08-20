@@ -217,7 +217,7 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: 'v${{ steps.version.outputs.version }}-${{ steps.version.outputs.tag }}'
+          tag_name: "v${{ steps.version.outputs.version }}-${{ steps.version.outputs.tag }}"
           name: Release "v${{ steps.version.outputs.version }}-${{ steps.version.outputs.tag }}"
           files: artifacts/*
           draft: false

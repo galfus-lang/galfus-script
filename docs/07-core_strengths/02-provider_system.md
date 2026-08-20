@@ -6,15 +6,17 @@ Everything that connects the executable code of a `.gfs` to the "Capabilities" (
 
 ## What is a Provider?
 
-A *Provider* is a concrete implementation hosted directly by the Execution Host.
+A _Provider_ is a concrete implementation hosted directly by the Execution Host.
 It is ideal for providing native language capabilities or modules that function almost like a **Standard Library**.
 
 For example, the ability to print to the screen:
+
 ```galfus
 import { println } from "std/io"
 
 println("Log!")
 ```
+
 Does not exist in the Galfus interpreter. The host registers the `std/io`
 bridge in the workspace capability catalog and supplies a compatible `io`
 provider for execution.

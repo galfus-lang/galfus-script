@@ -11,24 +11,24 @@ Use this skill whenever you need to read, write, refactor, or debug **Galfus Scr
 
 ## 1. Quick Syntax & Feature Cheat Sheet
 
-| Feature | Galfus Script Syntax | Common Mistake / Pitfall |
-| :--- | :--- | :--- |
-| **Variable Binding** | `var x = 1` (mutable), `const y = 2` (immutable) | Using `let` or omitting type for uninitialized `var x: i32` |
-| **Type Alias** | `type Account = User`, `type Number = i32` | Forgetting `type` keyword |
-| **Strings** | `"Hello"` (type is UTF-8 `[u8]`) | Assuming `String` type exists (Galfus uses `[u8]`) |
-| **Arrays** | `[1, 2, 3]`, creation: `new([i32], 10)` | Assuming `.push()`/`.pop()` exist (only `.length` is built-in) |
-| **Methods** | Anchor: `fn Struct::method(self): T`, Call: `obj::method()` | Calling method with `.` instead of `::` (`obj.method()` is wrong) |
-| **Functions** | `fn add(a: i32): i32 => a + 1` or `fn name() { return }` | Omitting return type (return type is **mandatory**) |
-| **Struct Init** | `new(User) { id: 1 }` or `new { id: 1 }` (if inferred) | Using just `User { id: 1 }` (requires `new`) |
-| **Casting** | `<i32> Priority::Low` | Using `as i32` |
-| **Narrowing** | `instanceof val { i32 n => n, null => 0 }` | Using `if (val == null)` or missing exhaustive `instanceof` arms |
-| **Async Functions** | `fn(async) fetch(id: i64): User { ... }` | Writing `async fn` (Galfus uses keyword metadata `fn(async)`) |
-| **Single Await** | `const res = await load(id)` | Writing `await()` without target |
-| **Await All** | `const (a, b) = await(all) (loadA(), loadB())` | Using `Promise.all` or non-tuple forms |
-| **Await Race** | `const winner = await(race) (loadA(), loadB())` | Using `Promise.race` |
-| **Loops** | `loop { ... }`, `for i in 0..10`, `for i in 2::4%2` | Writing `while` or `do` (they do **NOT** exist) |
-| **Errors** | `choice Result<V, E> { Ok(V), Err(E) }` | Using `try`, `catch`, or `throw` (they do **NOT** exist) |
-| **Deep Copy** | `var cloned = copy user` | Assuming assignment deep-copies (assignment passes reference) |
+| Feature              | Galfus Script Syntax                                        | Common Mistake / Pitfall                                          |
+| :------------------- | :---------------------------------------------------------- | :---------------------------------------------------------------- |
+| **Variable Binding** | `var x = 1` (mutable), `const y = 2` (immutable)            | Using `let` or omitting type for uninitialized `var x: i32`       |
+| **Type Alias**       | `type Account = User`, `type Number = i32`                  | Forgetting `type` keyword                                         |
+| **Strings**          | `"Hello"` (type is UTF-8 `[u8]`)                            | Assuming `String` type exists (Galfus uses `[u8]`)                |
+| **Arrays**           | `[1, 2, 3]`, creation: `new([i32], 10)`                     | Assuming `.push()`/`.pop()` exist (only `.length` is built-in)    |
+| **Methods**          | Anchor: `fn Struct::method(self): T`, Call: `obj::method()` | Calling method with `.` instead of `::` (`obj.method()` is wrong) |
+| **Functions**        | `fn add(a: i32): i32 => a + 1` or `fn name() { return }`    | Omitting return type (return type is **mandatory**)               |
+| **Struct Init**      | `new(User) { id: 1 }` or `new { id: 1 }` (if inferred)      | Using just `User { id: 1 }` (requires `new`)                      |
+| **Casting**          | `<i32> Priority::Low`                                       | Using `as i32`                                                    |
+| **Narrowing**        | `instanceof val { i32 n => n, null => 0 }`                  | Using `if (val == null)` or missing exhaustive `instanceof` arms  |
+| **Async Functions**  | `fn(async) fetch(id: i64): User { ... }`                    | Writing `async fn` (Galfus uses keyword metadata `fn(async)`)     |
+| **Single Await**     | `const res = await load(id)`                                | Writing `await()` without target                                  |
+| **Await All**        | `const (a, b) = await(all) (loadA(), loadB())`              | Using `Promise.all` or non-tuple forms                            |
+| **Await Race**       | `const winner = await(race) (loadA(), loadB())`             | Using `Promise.race`                                              |
+| **Loops**            | `loop { ... }`, `for i in 0..10`, `for i in 2::4%2`         | Writing `while` or `do` (they do **NOT** exist)                   |
+| **Errors**           | `choice Result<V, E> { Ok(V), Err(E) }`                     | Using `try`, `catch`, or `throw` (they do **NOT** exist)          |
+| **Deep Copy**        | `var cloned = copy user`                                    | Assuming assignment deep-copies (assignment passes reference)     |
 
 ---
 
@@ -50,7 +50,7 @@ Use this skill whenever you need to read, write, refactor, or debug **Galfus Scr
 
 ## 3. Async / Await Pattern Guide
 
-Galfus Script has explicit, top-class support for asynchronous execution via `Future<T>` and `async`/`await`. 
+Galfus Script has explicit, top-class support for asynchronous execution via `Future<T>` and `async`/`await`.
 
 > [!NOTE]
 > In `fn(async)` function declarations, declare the inner payload return type (e.g. `: [u8]` or `: User`), **not** `Future<[u8]>`. The `fn(async)` metadata automatically wraps the return value in `Future<T>`.
@@ -107,6 +107,7 @@ export fn main(_args: [[u8]]): i32 {
 ```
 
 Standard Module Architecture:
+
 1. **Internal Core Modules (Always Available, VM Native)**:
    - `std/async`: `Future<T>`
    - `std/thread`: `createThread`, `getThread`, `hasMessages`, `getMessage`
@@ -118,11 +119,12 @@ Standard Module Architecture:
 3. **Bridge Modules (Optional, Paired with Host Providers)**:
    - `std/io`: `println`, `print`, `read` (uses `fn(async) __provider_io_*`)
    - `std/fs`, `std/net`, `std/process`, `std/time`, `std/gpio`
-   - *Note*: Bridge modules use `fn(async) __provider_*` calls and exist only when registered in `galfus-workspace`.
+   - _Note_: Bridge modules use `fn(async) __provider_*` calls and exist only when registered in `galfus-workspace`.
 
 ---
 
 ## 5. Detailed Language Reference
 
 For exhaustive documentation on lexical rules, generics, constraints, enums, choices, and VM semantics, refer to:
+
 - [Language Reference](file:///.agents/skills/galfus-script/references/language_reference.md)

@@ -38,7 +38,8 @@ galfus-cli run [WORKSPACE_DIR] [ARGS]...
 - **`[WORKSPACE_DIR]`**: Path to the workspace directory. Defaults to the current directory (`.`).
 - **`[ARGS]...`**: Additional arguments passed to the script's `main` function as `[[u8]]`.
 
-*Example:*
+_Example:_
+
 ```bash
 galfus-cli run . --port 8080
 ```
@@ -62,6 +63,7 @@ galfus-cli compile [OPTIONS] <WORKSPACE_DIR>
 ```
 
 **Options:**
+
 - `-t, --target <TARGET>`: Target architecture or platform (e.g., `x86_64-linux`).
 - `-o, --out <OUT>`: Output path for the compiled artifact.
 - `-p, --profile <PROFILE>`: Optimization profile. Default is `fastest`.

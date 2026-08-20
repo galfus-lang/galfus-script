@@ -22,4 +22,4 @@ jobs:
         with:
           IS_MODIFY_TITLE: true
           APPEND_TRANSLATION: true
-          CUSTOM_BOT_NOTE: 'Automatic English translation:'
+          CUSTOM_BOT_NOTE: "Automatic English translation:"

@@ -1,65 +1,65 @@
 area:bytecode:
   - changed-files:
       - any-glob-to-any-file:
-          - 'engine/galfus-bytecode/**'
+          - "engine/galfus-bytecode/**"
 
 area:compiler:
   - changed-files:
       - any-glob-to-any-file:
-          - 'engine/galfus-compiler/**'
+          - "engine/galfus-compiler/**"
 
 area:contract:
   - changed-files:
       - any-glob-to-any-file:
-          - 'engine/galfus-contract/**'
+          - "engine/galfus-contract/**"
 
 area:core:
   - changed-files:
       - any-glob-to-any-file:
-          - 'engine/galfus-core/**'
+          - "engine/galfus-core/**"
 
 area:frontend:
   - changed-files:
       - any-glob-to-any-file:
-          - 'engine/galfus-frontend/**'
+          - "engine/galfus-frontend/**"
 
 area:ir:
   - changed-files:
       - any-glob-to-any-file:
-          - 'engine/galfus-ir/**'
+          - "engine/galfus-ir/**"
 
 area:runtime:
   - changed-files:
       - any-glob-to-any-file:
-          - 'engine/galfus-runtime/**'
+          - "engine/galfus-runtime/**"
 
 area:vm:
   - changed-files:
       - any-glob-to-any-file:
-          - 'engine/galfus-vm/**'
+          - "engine/galfus-vm/**"
 
 area:workspace:
   - changed-files:
       - any-glob-to-any-file:
-          - 'engine/galfus-workspace/**'
+          - "engine/galfus-workspace/**"
 
 area:cli:
   - changed-files:
       - any-glob-to-any-file:
-          - 'hosts/galfus-cli/**'
+          - "hosts/galfus-cli/**"
 
 area:playground:
   - changed-files:
       - any-glob-to-any-file:
-          - 'hosts/galfus-playground/**'
+          - "hosts/galfus-playground/**"
 
 area:docs:
   - changed-files:
       - any-glob-to-any-file:
-          - 'README.md'
-          - 'CONTRIBUTING.md'
-          - 'AGENTS.md'
-          - 'docs/**'
-          - 'engine/*/README.md'
-          - 'hosts/*/README.md'
-          - '.github/**/*.md'
+          - "README.md"
+          - "CONTRIBUTING.md"
+          - "AGENTS.md"
+          - "docs/**"
+          - "engine/*/README.md"
+          - "hosts/*/README.md"
+          - ".github/**/*.md"

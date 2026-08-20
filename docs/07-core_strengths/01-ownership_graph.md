@@ -15,4 +15,4 @@ Instead of relying on the unpredictable latency of a background collector (or Ma
 
 1. **Absolute Predictability**: The virtual machine will never make sudden pauses ("Stop the World") to clean up garbage. This is critical for embedded environments (Firmwares, RTOS) or physical simulators/games.
 2. **Clear Lifecycle**: If complex reference cycles exist, they must be broken semantically or by using weak references, forcing the programmer to design healthy data models at the source, eliminating invisible burdens on the host.
-3. **Constant Isolation**: Deallocation occurs in parallel with the normal execution of the *Virtual Thread*, keeping the memory footprint (RAM consumption) as small as possible by discarding garbage as soon as it becomes obsolete.
+3. **Constant Isolation**: Deallocation occurs in parallel with the normal execution of the _Virtual Thread_, keeping the memory footprint (RAM consumption) as small as possible by discarding garbage as soon as it becomes obsolete.

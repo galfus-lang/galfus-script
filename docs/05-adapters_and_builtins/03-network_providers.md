@@ -4,11 +4,11 @@ Galfus exposes network capabilities through small, host-provided bridge
 modules. Their operations may suspend the calling virtual thread, while other
 virtual threads and the host event loop continue to run.
 
-| Module | Native host | Web host | Purpose |
-| --- | --- | --- | --- |
-| `std/net` | Yes | No | Raw TCP client and UDP sockets |
-| `std/http` | Yes | Yes | One HTTP request and response |
-| `std/websocket` | Yes | Yes | WebSocket client connections |
+| Module          | Native host | Web host | Purpose                        |
+| --------------- | ----------- | -------- | ------------------------------ |
+| `std/net`       | Yes         | No       | Raw TCP client and UDP sockets |
+| `std/http`      | Yes         | Yes      | One HTTP request and response  |
+| `std/websocket` | Yes         | Yes      | WebSocket client connections   |
 
 The native host is the CLI/default native embedding. The web host is used by
 the Wasm host and the web playground. Importing one of these modules requires
