@@ -436,7 +436,7 @@ impl<'a> DeclarationTypeChecker<'a> {
             .is_some_and(|symbol| symbol.kind() == SymbolKind::Struct)
     }
 
-    fn is_null_type(&self, ty: TypeId) -> bool {
+    pub(super) fn is_null_type(&self, ty: TypeId) -> bool {
         matches!(
             self.layer.table().kind(self.resolve_alias_type(ty)),
             Some(TypeKind::Primitive(PrimitiveType::Null)) | Some(TypeKind::Error)

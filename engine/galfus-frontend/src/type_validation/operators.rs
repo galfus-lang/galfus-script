@@ -30,6 +30,9 @@ impl<'a> DeclarationTypeChecker<'a> {
                     self.check_integer_binary_operator(operator, left_type, right_type)?
                 }
                 "<<" | ">>" => self.check_shift_operator(operator, left_type, right_type)?,
+                "??" => {
+                    self.check_null_coalescing_operator(operator, left_type, right_type)?
+                }
                 _ => {
                     self.report_unsupported_operator(operator, operator_text.as_str());
                     self.layer.table_mut().error()
@@ -231,6 +234,38 @@ impl<'a> DeclarationTypeChecker<'a> {
 
         self.report_operator_type_error(operator, "integer operands", left, right);
         Some(self.layer.table_mut().error())
+    }
+
+    fn check_null_coalescing_operator(
+        &mut self,
+        _operator: NodeId,
+        left: TypeId,
+        right: TypeId,
+    ) -> Option<TypeId> {
+        let left = self.resolve_alias_type(left);
+        let right = self.resolve_alias_type(right);
+
+        let mut members = Vec::new();
+
+        if let Some(TypeKind::Union { members: left_members }) = self.layer.table().kind(left).cloned() {
+            for member in left_members {
+                if !self.is_null_type(member) {
+                    members.push(member);
+                }
+            }
+        } else if !self.is_null_type(left) {
+            members.push(left);
+        }
+
+        if let Some(TypeKind::Union { members: right_members }) = self.layer.table().kind(right).cloned() {
+            for member in right_members {
+                members.push(member);
+            }
+        } else {
+            members.push(right);
+        }
+
+        Some(self.layer.table_mut().intern_union(members))
     }
 
     fn check_numeric_unary_operator(

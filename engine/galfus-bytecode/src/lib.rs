@@ -74,6 +74,7 @@ pub enum BytecodeType {
     Constraint(String),
     Function { params: Vec<TypeIdx>, ret: TypeIdx },
     ChoiceVariant(ChoiceLayoutIdx, u16),
+    Any,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

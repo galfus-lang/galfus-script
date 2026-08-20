@@ -1,5 +1,5 @@
 import { stringify, Parsed, Stringable } from "format"
-import { concat, slice } from "text"
+import { concat, interpolate } from "text"
 import { println } from "std/io"
 import ansi from "format/ansi"
 
@@ -17,6 +17,7 @@ fn stringifyColored(value: Parsed | [u8] | Stringable): [u8] {
     u16 n => ansi::yellow()::apply(stringify(value)),
     u32 n => ansi::yellow()::apply(stringify(value)),
     u64 n => ansi::yellow()::apply(stringify(value)),
+    f16 n => ansi::yellow()::apply(stringify(value)),
     f32 n => ansi::yellow()::apply(stringify(value)),
     f64 n => ansi::yellow()::apply(stringify(value)),
     
@@ -36,42 +37,32 @@ fn buildMessage(
     msg = concat(msg, " ")
   }
   
-  var valIndex = 0
-  var msgLen = message.length
-  var i = 0
-  var lastStart = 0
+  var stringifiedValues = new([[u8]], values.length)
+  var j = 0
+  for val in values {
+    stringifiedValues[j] = stringifyColored(val)
+    j += 1
+  }
 
-  loop {
-    if i + 1 >= msgLen {
-      break
-    }
-    if message[i] == 123 && message[i + 1] == 125 {
-      if i > lastStart {
-        msg = concat(msg, slice(message, lastStart, i - lastStart))
-      }
-      if valIndex < values.length {
-        msg = concat(msg, stringifyColored(values[valIndex]))
-        valIndex += 1
-      } else {
-        msg = concat(msg, "{}")
-      }
-      i += 2
-      lastStart = i
+  var prevByte: u8 = 0
+  var consumed = 0
+  for byte in message {
+    if prevByte == 123 && byte == 125 {
+      consumed += 1
+      prevByte = 0
     } else {
-      i += 1
+      prevByte = byte
     }
   }
 
-  if lastStart < msgLen {
-    msg = concat(msg, slice(message, lastStart, msgLen - lastStart))
-  }
+  msg = concat(msg, interpolate(message, stringifiedValues))
 
-  loop {
-    if valIndex >= values.length {
-      break
+  var current = 0
+  for val in stringifiedValues {
+    if current >= consumed {
+      msg = concat(concat(msg, " "), val)
     }
-    msg = concat(concat(msg, " "), stringifyColored(values[valIndex]))
-    valIndex += 1
+    current += 1
   }
 
   return msg

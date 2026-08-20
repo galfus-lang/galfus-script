@@ -375,27 +375,13 @@ pub fn validate_bytecode_module(
                         }
                     }
                 }
-                Instruction::LoadField { dest, obj, field } => {
+                Instruction::LoadField { dest, obj, field: _ } => {
                     check_reg(dest, &mut errors);
                     check_reg(obj, &mut errors);
-                    if field.raw() as usize >= max_fields {
-                        errors.push(BytecodeValidationError::FieldOutOfBounds {
-                            func_name: func_name.clone(),
-                            instr_idx,
-                            field_idx: field,
-                        });
-                    }
                 }
-                Instruction::StoreField { obj, field, val } => {
+                Instruction::StoreField { obj, field: _, val } => {
                     check_reg(obj, &mut errors);
                     check_reg(val, &mut errors);
-                    if field.raw() as usize >= max_fields {
-                        errors.push(BytecodeValidationError::FieldOutOfBounds {
-                            func_name: func_name.clone(),
-                            instr_idx,
-                            field_idx: field,
-                        });
-                    }
                 }
                 Instruction::NewArray {
                     dest,

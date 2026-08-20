@@ -47,6 +47,10 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
         .map(|argument| argument.as_bytes().to_vec())
         .collect::<Vec<_>>();
 
+    if let Ok(_) = std::env::var("GALFUS_DEBUG_BYTECODE") {
+        println!("{:#?}", compile_report.package.graph());
+    }
+
     let providers =
         galfus_host_native::providers::default_providers(compile_report.package.metadata().clone());
     let driver = std::rc::Rc::new(galfus_host_native::driver::NativeDriver::new());

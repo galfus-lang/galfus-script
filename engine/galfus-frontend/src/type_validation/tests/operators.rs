@@ -40,6 +40,60 @@ var value = left + right
 }
 
 #[test]
+fn check_null_coalescing_removes_null_from_nullable_operand() {
+    let (source, graph, result, _string_table) = check_source(
+        r#"
+var values: [i32] = [1]
+var value = values[1] ?? 0
+"#,
+    );
+
+    let expression = find_node_by_kind_and_text(
+        &source,
+        &graph,
+        SyntaxNodeKind::BinaryExpression,
+        "values[1] ?? 0",
+    )
+    .unwrap();
+    let ty = result.layer().node_type(expression).unwrap();
+
+    assert_eq!(
+        result.layer().table().kind(ty),
+        Some(&TypeKind::Primitive(PrimitiveType::Int32))
+    );
+}
+
+#[test]
+fn check_null_coalescing_preserves_non_null_union_members() {
+    let (source, graph, result, _string_table) = check_source(
+        r#"
+var value: i32 | bool | null = null
+var fallback: i32 = 0
+var result = value ?? fallback
+"#,
+    );
+
+    let expression = find_node_by_kind_and_text(
+        &source,
+        &graph,
+        SyntaxNodeKind::BinaryExpression,
+        "value ?? fallback",
+    )
+    .unwrap();
+    let ty = result.layer().node_type(expression).unwrap();
+    let i32_type = result.layer().table().primitive(PrimitiveType::Int32);
+    let bool_type = result.layer().table().primitive(PrimitiveType::Bool);
+
+    let Some(TypeKind::Union { members }) = result.layer().table().kind(ty) else {
+        panic!("expected an i32 | bool result type");
+    };
+
+    assert_eq!(members.len(), 2);
+    assert!(members.contains(&i32_type));
+    assert!(members.contains(&bool_type));
+}
+
+#[test]
 fn check_reports_mixed_integer_float_binary_expression_type_error() {
     let source = source(
         r#"

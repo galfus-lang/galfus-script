@@ -316,11 +316,9 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 } else if let Some((variant_name, payload_types)) =
                     self.get_imported_choice_variant(pattern_node_id)
                 {
-                    let variant_ty = self
-                        .builder
-                        .type_result
-                        .layer()
-                        .node_type(pattern_node_id)
+                    let variant_ty = syntax
+                        .child(pattern_node_id, 1)
+                        .and_then(|variant| self.builder.type_result.layer().node_type(variant))
                         .unwrap();
 
                     let bool_ty = self
