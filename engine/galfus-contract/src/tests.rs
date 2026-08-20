@@ -691,6 +691,15 @@ fn test_format_ansi_source_checks() {
 }
 
 #[test]
+fn test_log_source_checks() {
+    use crate::LOG_SOURCE;
+    assert_builtin_checks("log", LOG_SOURCE);
+    assert!(LOG_SOURCE.contains("log"));
+    assert!(LOG_SOURCE.contains("info"));
+    assert!(LOG_SOURCE.contains("debug"));
+}
+
+#[test]
 fn test_std_async_source_checks() {
     assert_builtin_checks("std/async", ASYNC_SOURCE);
     assert!(ASYNC_SOURCE.contains("Future"));

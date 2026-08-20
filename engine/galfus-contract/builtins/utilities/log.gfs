@@ -1,0 +1,103 @@
+import { stringify, Parsed, Stringable } from "format"
+import { concat, slice } from "text"
+import { println } from "std/io"
+import ansi from "format/ansi"
+
+fn stringifyColored(value: Parsed | [u8] | Stringable): [u8] {
+  return instanceof value {
+    [u8] text => ansi::green()::apply(text),
+    bool flag => ansi::magenta()::apply(stringify(value)),
+    null => ansi::style()::dim()::apply("null"),
+    
+    i8 n => ansi::yellow()::apply(stringify(value)),
+    i16 n => ansi::yellow()::apply(stringify(value)),
+    i32 n => ansi::yellow()::apply(stringify(value)),
+    i64 n => ansi::yellow()::apply(stringify(value)),
+    u8 n => ansi::yellow()::apply(stringify(value)),
+    u16 n => ansi::yellow()::apply(stringify(value)),
+    u32 n => ansi::yellow()::apply(stringify(value)),
+    u64 n => ansi::yellow()::apply(stringify(value)),
+    f32 n => ansi::yellow()::apply(stringify(value)),
+    f64 n => ansi::yellow()::apply(stringify(value)),
+    
+    Stringable item => ansi::cyan()::apply(stringify(value)),
+  }
+}
+
+fn buildMessage(
+  tag: [u8], 
+  tagStyle: ansi::Style, 
+  message: [u8], 
+  values: [Parsed | [u8] | Stringable]
+): [u8] {
+  var msg = tagStyle::apply(tag)
+  
+  if tag.length > 0 {
+    msg = concat(msg, " ")
+  }
+  
+  var valIndex = 0
+  var msgLen = message.length
+  var i = 0
+  var lastStart = 0
+
+  loop {
+    if i + 1 >= msgLen {
+      break
+    }
+    if message[i] == 123 && message[i + 1] == 125 {
+      if i > lastStart {
+        msg = concat(msg, slice(message, lastStart, i - lastStart))
+      }
+      if valIndex < values.length {
+        msg = concat(msg, stringifyColored(values[valIndex]))
+        valIndex += 1
+      } else {
+        msg = concat(msg, "{}")
+      }
+      i += 2
+      lastStart = i
+    } else {
+      i += 1
+    }
+  }
+
+  if lastStart < msgLen {
+    msg = concat(msg, slice(message, lastStart, msgLen - lastStart))
+  }
+
+  loop {
+    if valIndex >= values.length {
+      break
+    }
+    msg = concat(concat(msg, " "), stringifyColored(values[valIndex]))
+    valIndex += 1
+  }
+
+  return msg
+}
+
+export fn log(message: [u8], ...values: [Parsed | [u8] | Stringable]): null {
+  println(buildMessage("", ansi::style(), message, values))
+  return null
+}
+
+export fn info(message: [u8], ...values: [Parsed | [u8] | Stringable]): null {
+  println(buildMessage("[INFO]", ansi::blue()::bold(), message, values))
+  return null
+}
+
+export fn debug(message: [u8], ...values: [Parsed | [u8] | Stringable]): null {
+  println(buildMessage("[DEBUG]", ansi::style()::dim(), message, values))
+  return null
+}
+
+export fn warn(message: [u8], ...values: [Parsed | [u8] | Stringable]): null {
+  println(buildMessage("[WARN]", ansi::yellow()::bold(), message, values))
+  return null
+}
+
+export fn error(message: [u8], ...values: [Parsed | [u8] | Stringable]): null {
+  println(buildMessage("[ERROR]", ansi::red()::bold(), message, values))
+  return null
+}
