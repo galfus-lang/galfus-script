@@ -122,39 +122,37 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: TypeId) -> TypeIdx {
             }
         }
         Some(TypeKind::Path { root, segments }) => {
-            if segments.len() == 1 {
-                if let Some(choice) = find_imported_choice_for_type(ctx, ty) {
-                    let layout_idx = get_or_create_imported_choice_layout(ctx, &choice);
-                    BytecodeType::Choice(layout_idx)
-                } else {
-                    BytecodeType::Null
-                }
-            } else if segments.len() == 2 {
-                let choice_name = &segments[0];
-                let variant_name = &segments[1];
-                let choice = ctx
-                    .type_result
-                    .imported_symbol_choices
-                    .get(root)
-                    .or_else(|| {
-                        ctx.type_result
-                            .imported_path_choices
-                            .values()
-                            .find(|c| c.name == *choice_name)
-                    });
-                if let Some(choice) = choice {
-                    let layout_idx = get_or_create_imported_choice_layout(ctx, choice);
-                    let variant_idx = choice
-                        .variants
-                        .iter()
-                        .position(|v| v.name == *variant_name)
-                        .unwrap_or(0);
-                    BytecodeType::ChoiceVariant(layout_idx, variant_idx as u16)
-                } else {
-                    BytecodeType::Null
-                }
-            } else {
-                BytecodeType::Null
+            let choice_from_symbol = ctx.type_result.imported_symbol_choices.get(root);
+            let imported_choice = choice_from_symbol.or_else(|| {
+                ctx.type_result
+                    .imported_path_choices
+                    .values()
+                    .find(|choice| {
+                        segments
+                            .iter()
+                            .position(|segment| segment == &choice.name)
+                            .is_some()
+                    })
+            });
+
+            let Some(choice) = imported_choice else {
+                return next_idx;
+            };
+
+            let layout_idx = get_or_create_imported_choice_layout(ctx, choice);
+            let variant_name = segments
+                .iter()
+                .position(|segment| segment == &choice.name)
+                .and_then(|choice_segment| segments.get(choice_segment + 1))
+                .or_else(|| choice_from_symbol.and_then(|_| segments.first()));
+            match variant_name {
+                None => BytecodeType::Choice(layout_idx),
+                Some(variant_name) => choice
+                    .variants
+                    .iter()
+                    .position(|variant| variant.name == *variant_name)
+                    .map(|variant_idx| BytecodeType::ChoiceVariant(layout_idx, variant_idx as u16))
+                    .unwrap_or(BytecodeType::Null),
             }
         }
         Some(TypeKind::Array { element }) => {
@@ -172,7 +170,7 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: TypeId) -> TypeIdx {
                     let member = crate::bytecode_emission::types::lower_type(ctx, member);
                     BytecodeType::Nullable(member)
                 }
-                _ => BytecodeType::Null,
+                _ => BytecodeType::Any,
             }
         }
         Some(TypeKind::Tuple { elements }) => {

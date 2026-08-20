@@ -126,6 +126,13 @@ omitting capabilities from the package or by rejecting the package during
 preflight; operational I/O failures are delivered later through the normal
 future/await result.
 
+The native CLI additionally provides `std/env`, `std/time`, `std/fs`,
+`std/net`, `std/http`, and `std/websocket`. The web playground provides
+`std/env`, `std/time`, `std/http`, and `std/websocket` alongside `std/io`;
+browser HTTP and WebSocket calls remain subject to normal browser security
+policy. See [Network Providers](docs/05-adapters_and_builtins/03-network_providers.md)
+for their APIs and platform support.
+
 ---
 
 ## Running and Testing Locally

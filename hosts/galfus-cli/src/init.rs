@@ -72,9 +72,9 @@ pub fn run_init() -> Result<()> {
     println!("Created galfus.toml");
 
     let source_code = if is_app {
-        "import { println } from \"std/io\"\n\nexport fn main(args: [[u8]]): i32 {\n    println(\"Hello Galfus!\")\n    return 0\n}\n"
+        "import { log } from \"log\"\n\nexport fn main(args: [[u8]]): i32 {\n  log(\"Hello Galfus!\")\n  return 0\n}\n"
     } else {
-        "export fn add(a: i32, b: i32): i32 {\n    return a + b\n}\n"
+        "export fn add(a: i32, b: i32): i32 {\n  return a + b\n}\n"
     };
 
     let main_path = path.join(&entry_path);

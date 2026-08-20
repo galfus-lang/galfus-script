@@ -372,4 +372,4 @@ export fn main(args: [[u8]]): i32 { return 0 }
 3. **Bridge Modules (Optional Host Capabilities)**:
    - `std/io`: `print(text)`, `println(text)`, `read(until)`
    - `std/fs`, `std/net`, `std/process`, `std/time`, `std/gpio`
-   - *Note*: Bridge modules use explicit `fn(async) __provider_*` declarations and require host registration in `galfus-workspace`.
+   - _Note_: Bridge modules use explicit `fn(async) __provider_*` declarations and require host registration in `galfus-workspace`.

@@ -3,8 +3,10 @@
 The `galfus-playground-web` package provides the WebAssembly (Wasm) bridge to embed the Galfus compiler and Virtual Machine (VM) directly in the browser.
 
 It is specifically designed to power interactive code editors (like Monaco Editor or CodeMirror), guaranteeing:
+
 - **Cooperative Asynchronous Execution:** the VM yields control back to the browser's Event Loop, preventing UI freezing.
 - **Native I/O Communication:** seamless integration with the Web Streams API (`ReadableStream` and `WritableStream`).
+- **Browser Networking:** `std/http` through Fetch and `std/websocket` through the browser WebSocket API.
 - **Security (Kill-Switch):** the ability to cleanly abort pending executions when restarting a script, preventing memory leaks and runaway infinite loops.
 
 ---
@@ -12,8 +14,16 @@ It is specifically designed to power interactive code editors (like Monaco Edito
 ## Architecture Flow and Lifecycle
 
 In Javascript, the main class is `Playground`. It encapsulates:
+
 - The **Workspace** (for virtual file management and static analysis).
 - The **Web Host** (for cooperative execution and native Web providers).
+
+The playground catalog and execution host install `std/io`, `std/env`,
+`std/time`, `std/http`, and `std/websocket`. Raw `std/net` is native-only,
+because browsers do not provide arbitrary TCP or UDP sockets. HTTP requests
+remain subject to Fetch/CORS and browser security policy. See [Network
+Providers](../05-adapters_and_builtins/03-network_providers.md) for the
+available APIs.
 
 ### 1. Initialization (Once per page)
 
@@ -42,19 +52,19 @@ To display error messages, diagnostics, and red squiggles in real-time, invoke `
 const checkResult = JSON.parse(playground.check());
 
 if (!checkResult.is_valid) {
-    console.error("Validation errors:", checkResult.diagnostics);
-    // Render the formatted diagnostics in the editor.
-    return;
+  console.error("Validation errors:", checkResult.diagnostics);
+  // Render the formatted diagnostics in the editor.
+  return;
 }
 
 const compResult = JSON.parse(playground.compile());
 
 if (!compResult.ok) {
-    console.error("Build error:", compResult.error);
+  console.error("Build error:", compResult.error);
 }
 ```
 
-*Note: `setSource()` and `setConfig()` invalidate the previous check and compiled package. The required lifecycle is `setConfig`/`setSource` → `check` → `compile` → `start`. If the latest source was not successfully checked and compiled, `start()` blocks execution and returns a `CompileRequired` error.*
+_Note: `setSource()` and `setConfig()` invalidate the previous check and compiled package. The required lifecycle is `setConfig`/`setSource` → `check` → `compile` → `start`. If the latest source was not successfully checked and compiled, `start()` blocks execution and returns a `CompileRequired` error._
 
 ### 4. Execution (Clicking the "Run" button)
 
@@ -69,24 +79,24 @@ const writeStream = new WritableStream({
     // Decodes the bytes and writes them to the UI Terminal
     const text = new TextDecoder().decode(chunk);
     terminal.write(text);
-  }
+  },
 });
 
 const readStream = new ReadableStream({
   start(controller) {
     // Connects the Terminal's keyboard input to the Galfus VM
-    terminal.onData(data => {
+    terminal.onData((data) => {
       controller.enqueue(new TextEncoder().encode(data));
     });
-  }
+  },
 });
 
 // Optional initialization parameters
 const options = {
-    args: ["--mode", "release"], // CLI arguments
-    envs: { "GREETING": "Hello" }, // Environment variables
-    stdout: writeStream,         // Native output stream
-    stdin: readStream            // Native input stream
+  args: ["--mode", "release"], // CLI arguments
+  envs: { GREETING: "Hello" }, // Environment variables
+  stdout: writeStream, // Native output stream
+  stdin: readStream, // Native input stream
 };
 
 // Triggers the execution.
@@ -102,9 +112,10 @@ console.log(`Script finished with code ${exitCode}`);
 
 To ensure robustness in a development environment (where infinite loops like `while (true) {}` are common), Galfus implements a **native Kill-Switch**.
 
-If you call `await playground.start()` while **another execution is still running in the background**, the Virtual Machine will detect the concurrency and force a *Graceful Shutdown* of the previous execution before starting the newly modified script.
+If you call `await playground.start()` while **another execution is still running in the background**, the Virtual Machine will detect the concurrency and force a _Graceful Shutdown_ of the previous execution before starting the newly modified script.
 
 Benefits:
+
 1. Prevents resource leaks in the browser tab.
 2. Discards "orphan" processing.
 3. Ensures that your UI's "Run/Restart" button works immediately, without blocking the thread.

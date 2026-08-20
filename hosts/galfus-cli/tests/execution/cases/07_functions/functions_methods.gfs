@@ -8,6 +8,18 @@ fn Point::move(self, dx: i32, dy: i32): Point {
   return new { x: self.x + dx, y: self.y + dy }
 }
 
+fn scale(value: i32, factor: i32 = 2, offset: i32 = 0): i32 {
+  return (value * factor) + offset
+}
+
+fn sum(start: i32, ...rest: [i32]): i32 {
+  var total = start
+  for n in rest {
+    total += n
+  }
+  return total
+}
+
 export fn main(_args: [[u8]]): i32 {
   const double = fn(value: i32): i32 => value * 2
   const increment = fn(value: i32): i32 {
@@ -18,6 +30,18 @@ export fn main(_args: [[u8]]): i32 {
 
   if add(increment(double(2)), 3) != 8 { return 1 }
   if moved.x != 4 || moved.y != 6 { return 2 }
+  
+  // Test trailing omitted args
+  if scale(10) != 20 { return 3 }
+  if scale(10, 3) != 30 { return 4 }
+  if scale(10, 3, 5) != 35 { return 5 }
+  
+  // Test placeholder '_' for omitted args
+  if scale(10, _, 5) != 25 { return 6 }
+
+  // Test spread definition (rest parameter)
+  if sum(10, 1, 2, 3) != 16 { return 7 }
+  
   println("ok")
   return 0
 }

@@ -13,20 +13,20 @@ on:
       - next/**
       - latest/**
     paths:
-      - 'engine/**'
-      - 'hosts/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '.github/workflows/rust-ci.yml'
+      - "engine/**"
+      - "hosts/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/rust-ci.yml"
   push:
     branches:
       - main
     paths:
-      - 'engine/**'
-      - 'hosts/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '.github/workflows/rust-ci.yml'
+      - "engine/**"
+      - "hosts/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/rust-ci.yml"
 
 concurrency:
   group: rust-ci-${{ github.ref }}

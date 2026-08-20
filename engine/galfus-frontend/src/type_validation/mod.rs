@@ -418,7 +418,10 @@ impl<'a> DeclarationTypeChecker<'a> {
                         }
 
                         if parameter.has_default() {
-                            return FunctionParameterType::with_default(ty);
+                            return FunctionParameterType::with_default(
+                                ty,
+                                parameter.default_value().map(|s| s.to_string()),
+                            );
                         }
 
                         FunctionParameterType::new(ty)

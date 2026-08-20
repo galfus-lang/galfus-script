@@ -200,23 +200,60 @@ fn stat(path: [u8]): FileStat
 
 ### `std/net`
 
-Raw TCP/UDP socket networking.
+Raw TCP and UDP networking. It is currently provided by the native host only.
+Socket values are opaque `u64` identifiers scoped to one execution; they are
+not OS file descriptors and must be closed explicitly.
 
 ```galfus
-external struct SocketHandle {}
+# TCP client operations
+fn tcpConnect(host: [u8], port: u16): u64 | null
+fn tcpRead(socket: u64, maxBytes: u32): [u8] | null
+fn tcpWrite(socket: u64, data: [u8]): bool
+fn tcpClose(socket: u64): bool
 
-# Connect to a target remote host/port. Returns a SocketHandle or null on failure
-fn connect(address: [u8]): SocketHandle
-
-# Send raw bytes over the connection. Returns bytes sent
-fn send(socket: SocketHandle, data: [u8]): i32
-
-# Receive raw bytes into the buffer. Returns bytes received
-fn recv(socket: SocketHandle, buffer: [u8]): i32
-
-# Terminate the socket connection
-fn close(socket: SocketHandle): null
+# UDP datagram operations
+fn udpBind(host: [u8], port: u16): u64 | null
+fn udpReceive(socket: u64, maxBytes: u32): ([u8], [u8], u16) | null
+fn udpSendTo(socket: u64, host: [u8], port: u16, data: [u8]): bool
+fn udpClose(socket: u64): bool
 ```
+
+`tcpRead` and `udpReceive` wait for data without blocking other virtual
+threads. `udpReceive` returns `(data, peerHost, peerPort)`.
+
+### `std/http`
+
+Single HTTP request/response operations. Available in the native and web hosts.
+
+```galfus
+type Header = ([u8], [u8])
+type Response = (i32, [Header], [u8])
+
+fn request(
+  method: [u8],
+  url: [u8],
+  headers: [Header] = [],
+  body: [u8] | null = null,
+): Response | null
+```
+
+The response tuple is `(status, headers, body)`. HTTP failures return `null`.
+In browsers, normal Fetch/CORS rules apply.
+
+### `std/websocket`
+
+WebSocket client operations. Available in the native and web hosts.
+
+```galfus
+fn connect(url: [u8]): u64 | null
+fn receive(socket: u64): [u8] | null
+fn send(socket: u64, data: [u8]): bool
+fn close(socket: u64): bool
+```
+
+`receive` waits for the next text or binary message and returns `null` after a
+closed or invalid socket. See [Network Providers](./03-network_providers.md)
+for platform support and examples.
 
 ### `std/time`
 
@@ -331,4 +368,4 @@ Standard mathematical functions.
 - Constants: `PI` (3.14159...), `E` (2.71828...).
 - Functions: `sin(x)`, `cos(x)`, `tan(x)`, `log(x)`, `pow(base, exp)`, `sqrt(x)`, `ceil(x)`, `floor(x)`, `round(x)`.
 
-*(Note: Other utility modules like `json`, `regex`, `path`, `http`, `collections`, and `crypto` are planned but not currently implemented in the core engine's utility modules list).*
+_(Note: Other utility modules like `json`, `regex`, `path`, `http`, `collections`, and `crypto` are planned but not currently implemented in the core engine's utility modules list)._

@@ -9,15 +9,11 @@ Welcome to the official documentation. Choose a topic below to get started.
 - [Conceptual Hello World](./00-getting_started/01-hello_world.md)
 - [CLI Reference](./00-getting_started/02-cli_reference.md)
 
-
-
 ## 01-Introduction
 
 - [Why Galfus Is Embeddable](./01-introduction/01-why_galfus_is_embeddable.md)
 
 - [Galfus Architecture Reference](./01-introduction/02-architecture_overview.md)
-
-
 
 ## 02-Core Language
 
@@ -53,8 +49,6 @@ Welcome to the official documentation. Choose a topic below to get started.
 
 - [15. Lowering and Runtime Semantics](./02-core_language/15-lowering-and-runtime-semantics.md)
 
-
-
 ## 03-Pipeline And Workspace
 
 - [Galfus Workspace Reference](./03-pipeline_and_workspace/01-workspace_reference.md)
@@ -63,15 +57,11 @@ Welcome to the official documentation. Choose a topic below to get started.
 
 - [Galfus MIR (Medium Intermediate Representation) Specification](./03-pipeline_and_workspace/03-mir_reference.md)
 
-
-
 ## 04-Runtime And Vm
 
 - [Galfus VM Bytecode and Opcode Specification](./04-runtime_and_vm/01-vm_opcodes_reference.md)
 
 - [Numerical Semantics and Determinism](./04-runtime_and_vm/02-numerical_semantics.md)
-
-
 
 ## 05-Adapters And Builtins
 
@@ -79,7 +69,7 @@ Welcome to the official documentation. Choose a topic below to get started.
 
 - [Galfus Adapters Surface Reference](./05-adapters_and_builtins/02-adapters_surface_reference.md)
 
-
+- [Network Providers](./05-adapters_and_builtins/03-network_providers.md)
 
 ## 06-Embedding Guide
 
@@ -95,8 +85,6 @@ Welcome to the official documentation. Choose a topic below to get started.
 
 - [Web Playground Integration](./06-embedding_guide/06-web_playground.md)
 
-
-
 ## 07-Core Strengths
 
 - [Ownership Graph](./07-core_strengths/01-ownership_graph.md)
@@ -108,4 +96,3 @@ Welcome to the official documentation. Choose a topic below to get started.
 - [Virtual Thread](./07-core_strengths/04-virtual_thread.md)
 
 - [Virtual Kernel](./07-core_strengths/05-virtual_kernel.md)
-

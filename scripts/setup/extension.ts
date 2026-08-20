@@ -1,7 +1,7 @@
-import { mkdir, cp, rm } from 'fs/promises';
-import { join } from 'path';
-import { homedir } from 'os';
-import { existsSync } from 'fs';
+import { mkdir, cp, rm } from "fs/promises";
+import { join } from "path";
+import { homedir } from "os";
+import { existsSync } from "fs";
 
 export type SetupExtensionOptions = {
   antigravity?: boolean;
@@ -9,7 +9,9 @@ export type SetupExtensionOptions = {
   vscode?: boolean;
 };
 
-export async function setupExtension(options: SetupExtensionOptions): Promise<void> {
+export async function setupExtension(
+  options: SetupExtensionOptions,
+): Promise<void> {
   const allTargets = options.all || (!options.vscode && !options.antigravity);
 
   const home = homedir();
@@ -17,27 +19,37 @@ export async function setupExtension(options: SetupExtensionOptions): Promise<vo
 
   if (allTargets || options.vscode) {
     targets.push(
-      { name: 'VS Code', path: join(home, '.vscode', 'extensions', 'galfus-vscode') },
       {
-        name: 'VS Code Insiders',
-        path: join(home, '.vscode-insiders', 'extensions', 'galfus-vscode'),
+        name: "VS Code",
+        path: join(home, ".vscode", "extensions", "galfus-vscode"),
+      },
+      {
+        name: "VS Code Insiders",
+        path: join(home, ".vscode-insiders", "extensions", "galfus-vscode"),
       },
     );
   }
 
   if (allTargets || options.antigravity) {
     targets.push({
-      name: 'Antigravity',
-      path: join(home, '.antigravity-ide', 'extensions', 'galfus-vscode'),
+      name: "Antigravity",
+      path: join(home, ".antigravity-ide", "extensions", "galfus-vscode"),
     });
   }
 
-  const sourceDir = join(import.meta.dir, '..', '..', '..', 'editors', 'vscode');
+  const sourceDir = join(
+    import.meta.dir,
+    "..",
+    "..",
+    "..",
+    "editors",
+    "vscode",
+  );
 
   let installedCount = 0;
 
   for (const target of targets) {
-    const parentDir = join(target.path, '..');
+    const parentDir = join(target.path, "..");
     if (existsSync(parentDir)) {
       console.log(`Installing extension to ${target.name} (${target.path})...`);
       try {
@@ -55,7 +67,7 @@ export async function setupExtension(options: SetupExtensionOptions): Promise<vo
   }
 
   if (installedCount === 0) {
-    console.warn('Could not find standard editor extension directories.');
+    console.warn("Could not find standard editor extension directories.");
     console.info(
       `Please copy the 'editors/vscode' folder manually to your editor's extension folder.`,
     );

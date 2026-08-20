@@ -56,7 +56,7 @@ impl ModuleSurface {
             });
         }
 
-        export.ty().map(|ty| ty.relocate(local_symbol))
+        export.ty().cloned()
     }
 
     pub fn imported_path_type_for_export(
@@ -143,7 +143,7 @@ impl ModuleSurface {
                 let parameters = member
                     .payload_types()
                     .iter()
-                    .map(|ty| ImportedFunctionParameterType::new(ty.relocate(local_symbol)))
+                    .map(|ty| ImportedFunctionParameterType::new(ty.clone()))
                     .collect();
 
                 Some(ImportedType::Function {
@@ -152,28 +152,80 @@ impl ModuleSurface {
                 })
             }
 
-            _ => member.ty().map(|ty| ty.relocate(local_symbol)),
+            _ => member.ty().cloned(),
         }
     }
 
-    pub fn imported_constraint_for_export(&self, name: &str) -> Option<ImportedConstraintSurface> {
+    pub fn imported_member_path_type_for_namespace(
+        &self,
+        namespace: SymbolId,
+        owner_name: &str,
+        member_name: &str,
+    ) -> Option<ImportedType> {
+        let owner = self.export(owner_name)?;
+        let member = owner
+            .members()
+            .iter()
+            .find(|member| member.name() == member_name)?;
+
+        match member.kind() {
+            SymbolKind::EnumVariant => Some(ImportedType::SurfacePath {
+                namespace,
+                name: owner_name.to_string(),
+            }),
+
+            SymbolKind::ChoiceVariant => {
+                let owner_type = ImportedType::SurfacePath {
+                    namespace,
+                    name: owner_name.to_string(),
+                };
+
+                if member.payload_types().is_empty() {
+                    return Some(owner_type);
+                }
+
+                let parameters = member
+                    .payload_types()
+                    .iter()
+                    .map(|ty| ImportedFunctionParameterType::new(ty.relocate(namespace)))
+                    .collect();
+
+                Some(ImportedType::Function {
+                    parameters,
+                    return_type: Box::new(owner_type),
+                })
+            }
+
+            _ => member.ty().map(|ty| ty.relocate(namespace)),
+        }
+    }
+
+    pub fn imported_constraint_for_export(
+        &self,
+        name: &str,
+        namespace: Option<SymbolId>,
+    ) -> Option<ImportedConstraintSurface> {
         let export = self.export(name)?;
 
         if export.kind() != SymbolKind::Constraint {
             return None;
         }
 
-        Some(export.imported_constraint_surface())
+        Some(export.imported_constraint_surface(namespace))
     }
 
-    pub fn imported_choice_for_export(&self, name: &str) -> Option<ImportedChoiceSurface> {
+    pub fn imported_choice_for_export(
+        &self,
+        name: &str,
+        namespace: Option<SymbolId>,
+    ) -> Option<ImportedChoiceSurface> {
         let export = self.export(name)?;
 
         if export.kind() != SymbolKind::Choice {
             return None;
         }
 
-        Some(export.imported_choice_surface())
+        Some(export.imported_choice_surface(namespace))
     }
 }
 
@@ -232,18 +284,20 @@ pub fn imported_surface_types_for_namespace(
     let mut imported_types = ImportedSurfaceTypes::new();
 
     for export in surface.exports() {
-        if let Some(ty) = export.ty() {
-            imported_types.insert_member_type(
-                ImportedMemberKey::new(namespace, "", export.name()),
-                ty.clone(),
-            );
+        if let Some(ty) = surface.imported_path_type_for_export(namespace, export.name()) {
+            imported_types
+                .insert_member_type(ImportedMemberKey::new(namespace, "", export.name()), ty);
         }
 
         for member in export.members() {
-            if let Some(ty) = member.ty() {
+            if let Some(ty) = surface.imported_member_path_type_for_namespace(
+                namespace,
+                export.name(),
+                member.name(),
+            ) {
                 imported_types.insert_member_type(
                     ImportedMemberKey::new(namespace, export.name(), member.name()),
-                    ty.clone(),
+                    ty,
                 );
             }
         }
@@ -262,24 +316,27 @@ pub fn imported_surface_types_for_named_export(
         return imported_types;
     };
 
-    if let Some(ty) = export.ty() {
-        imported_types.insert_symbol_type(local_symbol, ty.clone());
+    if let Some(ty) = surface.imported_type_for_export(local_symbol, name) {
+        imported_types.insert_symbol_type(local_symbol, ty);
     }
 
     if export.kind() == SymbolKind::Constraint {
-        imported_types.insert_symbol_constraint(local_symbol, export.imported_constraint_surface());
+        imported_types
+            .insert_symbol_constraint(local_symbol, export.imported_constraint_surface(None));
     }
 
     if export.kind() == SymbolKind::Choice {
-        imported_types.insert_symbol_choice(local_symbol, export.imported_choice_surface());
+        imported_types.insert_symbol_choice(local_symbol, export.imported_choice_surface(None));
     }
 
     for member in export.members() {
-        if let Some(ty) = member.ty() {
-            imported_types.insert_member_type(
-                ImportedMemberKey::new(local_symbol, "", member.name()),
-                ty.clone(),
-            );
+        if let Some(ty) = surface.imported_member_path_type_for_named_export(
+            local_symbol,
+            export.name(),
+            member.name(),
+        ) {
+            imported_types
+                .insert_member_type(ImportedMemberKey::new(local_symbol, "", member.name()), ty);
         }
     }
 
@@ -577,7 +634,10 @@ fn transport_type(
                     }
 
                     if parameter.has_default() {
-                        return Some(ImportedFunctionParameterType::with_default(ty));
+                        return Some(ImportedFunctionParameterType::with_default(
+                            ty,
+                            parameter.default_value().map(|s| s.to_string()),
+                        ));
                     }
 
                     Some(ImportedFunctionParameterType::new(ty))

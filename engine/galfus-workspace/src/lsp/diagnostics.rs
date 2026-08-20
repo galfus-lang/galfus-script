@@ -3,41 +3,6 @@ use lsp_types::{
     Diagnostic as LspDiagnostic, DiagnosticSeverity as LspDiagnosticSeverity, Position, Range,
 };
 
-pub fn format_diagnostic_rich(diagnostic: &Diagnostic, source: &SourceFile) -> String {
-    let start_offset = diagnostic.span().start();
-    let start_row_col = source
-        .row_col(start_offset)
-        .unwrap_or(RowCol { row: 1, column: 1 });
-
-    let mut message = diagnostic.message().to_string();
-    message.push_str("\n\n");
-    message.push_str(&format!(
-        "  --> {}:{}:{}\n",
-        source.name(),
-        start_row_col.row,
-        start_row_col.column
-    ));
-    message.push_str("   |\n");
-
-    let line_text = source
-        .text()
-        .lines()
-        .nth(start_row_col.row.saturating_sub(1))
-        .unwrap_or("");
-    let line_num_str = start_row_col.row.to_string();
-
-    message.push_str(&format!("{:>2} | {}\n", line_num_str, line_text));
-
-    let indent = " ".repeat(start_row_col.column.saturating_sub(1));
-    let span_len = diagnostic.span().len().max(1);
-    let pointer = "^".repeat(span_len);
-
-    let line_padding = " ".repeat(line_num_str.len().max(2));
-    message.push_str(&format!("{} | {}{}", line_padding, indent, pointer));
-
-    message
-}
-
 pub fn convert_diagnostic(diagnostic: &Diagnostic, source: &SourceFile) -> LspDiagnostic {
     let start_offset = diagnostic.span().start();
     let end_offset = diagnostic.span().end();
@@ -55,7 +20,7 @@ pub fn convert_diagnostic(diagnostic: &Diagnostic, source: &SourceFile) -> LspDi
         galfus_core::DiagnosticSeverity::Hint => Some(LspDiagnosticSeverity::HINT),
     };
 
-    let message = format_diagnostic_rich(diagnostic, source);
+    let message = diagnostic.message().to_string();
 
     LspDiagnostic {
         range: Range {

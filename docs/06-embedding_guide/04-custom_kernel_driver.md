@@ -80,13 +80,13 @@ impl KernelDriver for MyCustomDriver {
         };
 
         match result {
-            // Task yielded gracefully or hit budget, it is usually re-queued internally 
+            // Task yielded gracefully or hit budget, it is usually re-queued internally
             // by the VirtualKernel and will appear back in `dispatch`.
             ThreadResult::Discarded => ExecutorStepResult::Running,
-            
+
             // Task is blocked waiting for I/O or a timeout
             ThreadResult::Blocked { timeout } => ExecutorStepResult::Blocked { timeout },
-            
+
             // The task finished completely (Main thread returned)
             ThreadResult::Completed(res) => {
                 let code = if let Ok(galfus_contract::BoundaryValue::I32(c)) = res { c } else { 0 };

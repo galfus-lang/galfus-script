@@ -384,6 +384,9 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     0
                 };
 
+                let mut rest_args = Vec::new();
+                let mut rest_array_type = None;
+
                 if let Some(arg_list) = syntax.node(arg_list_node) {
                     for (i, &arg_id) in arg_list.children().iter().enumerate() {
                         let arg_expr = syntax
@@ -401,9 +404,15 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
 
                         let arg_ty = self.node_type(arg_expr).unwrap_or_else(|| TypeId::new(0));
 
+                        let mut is_arg_rest = false;
+
                         let casted_op = if let Some(ref params) = expected_params {
                             let parameter_index = i + parameter_offset;
                             if let Some(&(expected_ty, is_rest)) = params.get(parameter_index) {
+                                is_arg_rest = is_rest;
+                                if is_rest {
+                                    rest_array_type = Some(expected_ty);
+                                }
                                 let target_expected_ty = if is_rest {
                                     let resolved_param_ty =
                                         self.builder.resolve_alias_type(expected_ty);
@@ -423,6 +432,8 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                                 self.insert_cast_if_needed(arg_op, arg_ty, target_expected_ty)
                             } else if let Some(&(expected_ty, is_rest)) = params.last() {
                                 if is_rest {
+                                    is_arg_rest = true;
+                                    rest_array_type = Some(expected_ty);
                                     let resolved_param_ty =
                                         self.builder.resolve_alias_type(expected_ty);
                                     let target_expected_ty = match self
@@ -446,9 +457,32 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                             arg_op
                         };
 
-                        args.push(casted_op);
-                        arg_types.push(arg_ty);
+                        if is_arg_rest {
+                            rest_args.push(casted_op);
+                        } else {
+                            args.push(casted_op);
+                            arg_types.push(arg_ty);
+                        }
                     }
+                }
+
+                if rest_array_type.is_none()
+                    && let Some(params) = expected_params.as_ref()
+                    && let Some(&(expected_ty, is_rest)) = params.last()
+                    && is_rest
+                    && args.len() < params.len()
+                {
+                    rest_array_type = Some(expected_ty);
+                }
+
+                if let Some(array_ty) = rest_array_type {
+                    let arr_local = self.declare_local(None, array_ty);
+                    self.current_instructions.push((
+                        Instruction::Assign(arr_local, RValue::NewArray(array_ty, rest_args)),
+                        None,
+                    ));
+                    args.push(Operand::Local(arr_local));
+                    arg_types.push(array_ty);
                 }
 
                 if let Some(ref params) = expected_params {

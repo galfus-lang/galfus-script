@@ -186,6 +186,14 @@ impl WasmPlayground {
             .with_host(
                 "time",
                 Box::new(galfus_host_web::providers::time::WebTimeProvider::new()),
+            )
+            .with_host(
+                "http",
+                Box::new(galfus_host_web::providers::http::WebHttpProvider::new()),
+            )
+            .with_host(
+                "websocket",
+                Box::new(galfus_host_web::providers::websocket::WebWebSocketProvider::new()),
             );
 
         // Inicializar o Driver Kernel Single-Thread

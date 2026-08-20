@@ -1,13 +1,21 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from "bun:test";
 
 import init, {
   Playground,
-} from '../../../build/galfus-playground-web-release/galfus_playground_web.js';
+} from "../../../build/galfus-playground-web-release/galfus_playground_web.js";
 
-const wasm = Bun.file('build/galfus-playground-web-release/galfus_playground_web_bg.wasm');
-const mainSource = Bun.file('hosts/galfus-playground-web/tests/fixtures/main.gfs');
-const replacementSource = Bun.file('hosts/galfus-playground-web/tests/fixtures/replacement.gfs');
-const invalidTypeSource = Bun.file('hosts/galfus-playground-web/tests/fixtures/invalid_type.gfs');
+const wasm = Bun.file(
+  "build/galfus-playground-web-release/galfus_playground_web_bg.wasm",
+);
+const mainSource = Bun.file(
+  "hosts/galfus-playground-web/tests/fixtures/main.gfs",
+);
+const replacementSource = Bun.file(
+  "hosts/galfus-playground-web/tests/fixtures/replacement.gfs",
+);
+const invalidTypeSource = Bun.file(
+  "hosts/galfus-playground-web/tests/fixtures/invalid_type.gfs",
+);
 
 type Result = {
   ok: boolean;
@@ -41,7 +49,7 @@ function checkResult(value: string): CheckResult {
   return JSON.parse(value) as CheckResult;
 }
 
-test('runs the default playground source with arguments and stdout', async () => {
+test("runs the default playground source with arguments and stdout", async () => {
   await initialize();
   const playground = new Playground();
   const output: string[] = [];
@@ -52,53 +60,74 @@ test('runs the default playground source with arguments and stdout', async () =>
     },
   });
 
-  expect(result(playground.setSource('src/main.gfs', await mainSource.text()))).toEqual({
+  expect(
+    result(playground.setSource("src/main.gfs", await mainSource.text())),
+  ).toEqual({
     ok: true,
   });
-  expect(checkResult(playground.check())).toEqual({ is_valid: true, diagnostics: [] });
+  expect(checkResult(playground.check())).toEqual({
+    is_valid: true,
+    diagnostics: [],
+  });
   expect(result(playground.compile())).toEqual({ ok: true });
 
-  expect(await playground.start({ args: ['first', 'second'], stdout })).toBe(17);
-  expect(output.join('')).toBe('playground\n');
+  expect(await playground.start({ args: ["first", "second"], stdout })).toBe(
+    17,
+  );
+  expect(output.join("")).toBe("playground\n");
 });
 
-test('uses configured entries and recompiles replaced source', async () => {
+test("uses configured entries and recompiles replaced source", async () => {
   await initialize();
   const playground = new Playground();
   const config = JSON.stringify({
-    module: { name: 'custom-playground', target: 'app' },
-    entry: { path: 'examples/main.gfs' },
+    module: { name: "custom-playground", target: "app" },
+    entry: { path: "examples/main.gfs" },
   });
 
   expect(result(playground.setConfig(config))).toEqual({ ok: true });
-  expect(result(playground.setSource('examples/main.gfs', await mainSource.text()))).toEqual({
+  expect(
+    result(playground.setSource("examples/main.gfs", await mainSource.text())),
+  ).toEqual({
     ok: true,
   });
-  expect(checkResult(playground.check())).toEqual({ is_valid: true, diagnostics: [] });
+  expect(checkResult(playground.check())).toEqual({
+    is_valid: true,
+    diagnostics: [],
+  });
   expect(result(playground.compile())).toEqual({ ok: true });
-  expect(await playground.start({ args: ['first', 'second'] })).toBe(17);
+  expect(await playground.start({ args: ["first", "second"] })).toBe(17);
 
-  expect(result(playground.setSource('examples/main.gfs', await replacementSource.text()))).toEqual(
-    { ok: true },
-  );
-  expect(checkResult(playground.check())).toEqual({ is_valid: true, diagnostics: [] });
+  expect(
+    result(
+      playground.setSource("examples/main.gfs", await replacementSource.text()),
+    ),
+  ).toEqual({ ok: true });
+  expect(checkResult(playground.check())).toEqual({
+    is_valid: true,
+    diagnostics: [],
+  });
   expect(result(playground.compile())).toEqual({ ok: true });
   expect(await playground.start({})).toBe(23);
 });
 
-test('returns semantic diagnostics and prevents compilation of invalid source', async () => {
+test("returns semantic diagnostics and prevents compilation of invalid source", async () => {
   await initialize();
   const playground = new Playground();
 
-  expect(result(playground.setSource('src/main.gfs', await invalidTypeSource.text()))).toEqual({
+  expect(
+    result(
+      playground.setSource("src/main.gfs", await invalidTypeSource.text()),
+    ),
+  ).toEqual({
     ok: true,
   });
 
   const check = checkResult(playground.check());
   expect(check.is_valid).toBe(false);
-  expect(check.diagnostics?.[0]?.code).toContain('T0001');
+  expect(check.diagnostics?.[0]?.code).toContain("T0001");
 
   const compilation = result(playground.compile());
   expect(compilation.ok).toBe(false);
-  expect(compilation.error).toContain('playground compilation failed');
+  expect(compilation.error).toContain("playground compilation failed");
 });

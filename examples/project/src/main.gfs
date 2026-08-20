@@ -1,25 +1,16 @@
-import { println, read } from 'std/io'
+import { read } from 'std/io'
 import { stringify, parse, ParseResult } from 'format'
 import { cyan, green } from 'format/ansi'
-import { trim, concat } from 'text'
+import { log } from 'log'
 
 export fn main(_args: [[u8]]): i32 {
-  println(green()::apply("Please enter a number:"))
+  log(green()::apply("Please enter a number:"))
+  var r1 = parse<i32>(read())
+  var matchResult = match r1 {
+    ParseResult::Ok(v) => "Ok",
+    ParseResult::Err(e) => "Err",
+  }
+  log("Is r1 ok? {}", matchResult)
   
-  var a = match parse<i32>(trim(read())) {
-    ParseResult::Ok(v) => v,
-    ParseResult::Err(e) {
-      println('INTERNAL')
-      return 0
-    },
-  }
-
-  println(green()::apply("Enter another number:"))
-  var b = match parse<i32>(trim(read())) {
-    ParseResult::Ok(v) => v,
-    ParseResult::Err(e) => 0,
-  }
-
-  println(concat(green()::apply("Result: "), cyan()::apply(stringify(a + b))))
   return 0
 }

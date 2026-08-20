@@ -9,9 +9,11 @@ on:
       - next/editor/**
       - latest/editor/**
     paths:
-      - 'editors/**'
-      - 'scripts/**'
-      - '.github/workflows/editors-ci.yml'
+      - "editors/**"
+      - "scripts/**"
+      - "package.json"
+      - "bun.lock"
+      - ".github/workflows/editors-ci.yml"
 
   push:
     branches:
@@ -21,9 +23,11 @@ on:
       - next/editor/**
       - latest/editor/**
     paths:
-      - 'editors/**'
-      - 'scripts/**'
-      - '.github/workflows/editors-ci.yml'
+      - "editors/**"
+      - "scripts/**"
+      - "package.json"
+      - "bun.lock"
+      - ".github/workflows/editors-ci.yml"
 
   workflow_dispatch:
 
@@ -53,18 +57,16 @@ jobs:
           bun-version-file: .bun-version
 
       - name: Install script dependencies
-        working-directory: scripts
         run: bun install --frozen-lockfile
 
       - name: Apply version from release branch
         id: version
-        working-directory: scripts
         run: bun cmd github set-version --component editor
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: "24"
           package-manager-cache: false
 
       - name: Install dependencies

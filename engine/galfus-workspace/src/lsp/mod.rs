@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests;
 
+pub mod completion;
 pub mod definition;
 pub mod diagnostics;
 pub mod hover;
@@ -49,12 +50,11 @@ impl Workspace {
         }
 
         if let Ok(file_path) = uri_to_file_path(uri) {
-            if let Some(root) = &self.root_path {
-                let root_path = root.canonicalize().unwrap_or_else(|_| root.clone());
+            if let Some(root_path) = &self.root_path {
                 let canonical_file = file_path
                     .canonicalize()
                     .unwrap_or_else(|_| file_path.clone());
-                if let Ok(stripped) = canonical_file.strip_prefix(&root_path) {
+                if let Ok(stripped) = canonical_file.strip_prefix(root_path) {
                     return Some(stripped.to_string_lossy().replace('\\', "/"));
                 }
             }
@@ -111,7 +111,11 @@ impl Workspace {
                     if let Some(uri) = root_uri
                         && let Ok(file_path) = uri_to_file_path(&uri)
                     {
-                        self.root_path = Some(file_path.clone());
+                        self.root_path = Some(
+                            file_path
+                                .canonicalize()
+                                .unwrap_or_else(|_| file_path.clone()),
+                        );
                         let manifest_path = file_path.join("galfus.toml");
                         if let Ok(manifest_str) = std::fs::read_to_string(manifest_path)
                             && let Ok(manifest) = toml::from_str(&manifest_str)
@@ -126,6 +130,10 @@ impl Workspace {
                         "hoverProvider": true,
                         "textDocumentSync": 1, // Full sync
                         "definitionProvider": true,
+                        "completionProvider": {
+                            "resolveProvider": false,
+                            "triggerCharacters": ["."]
+                        },
                         "semanticTokensProvider": {
                             "legend": {
                                 "tokenTypes": [
@@ -183,6 +191,27 @@ impl Workspace {
                         return Some(JsonRpcResponse::success(
                             id,
                             serde_json::to_value(loc).unwrap(),
+                        ));
+                    }
+                }
+                Some(JsonRpcResponse::success(id, Value::Null))
+            }
+            "textDocument/completion" => {
+                if let Some(p) = params
+                    && let Ok(comp_params) =
+                        serde_json::from_value::<lsp_types::CompletionParams>(p)
+                {
+                    let uri = &comp_params.text_document_position.text_document.uri;
+                    if let Some(path_str) = self.uri_to_module_path(uri)
+                        && let Some(completions) = completion::completion(
+                            self,
+                            &path_str,
+                            comp_params.text_document_position.position,
+                        )
+                    {
+                        return Some(JsonRpcResponse::success(
+                            id,
+                            serde_json::to_value(completions).unwrap(),
                         ));
                     }
                 }

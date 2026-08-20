@@ -244,19 +244,12 @@ impl<'a> DeclarationTypeChecker<'a> {
 
         let mut expected_choice_type = expected;
         let mut generic_arguments = Vec::new();
-        if let Some(TypeKind::GenericInstance { base, arguments }) =
-            self.layer.table().kind(expected).cloned()
+
+        if let Some((base, arguments)) =
+            self.extract_generic_arguments_from_expected(expected, owner_type)
         {
-            let base = self.resolve_path_type(base);
-            let owner_base = self.resolve_path_type(owner_type);
-            if let Some(TypeKind::Named { symbol }) = self.layer.table().kind(base)
-                && let Some(TypeKind::Named { symbol: owner_sym }) =
-                    self.layer.table().kind(owner_base)
-                && *symbol == *owner_sym
-            {
-                expected_choice_type = base;
-                generic_arguments = arguments;
-            }
+            expected_choice_type = base;
+            generic_arguments = arguments;
         }
 
         if let Some(target) = self.graph.syntax().child(pattern, 0)
@@ -268,6 +261,20 @@ impl<'a> DeclarationTypeChecker<'a> {
             {
                 owner_type = resolved;
                 generic_arguments = arguments.clone();
+                expected_choice_type = expected;
+            } else if !generic_arguments.is_empty() {
+                let generic_owner_type = self
+                    .layer
+                    .table_mut()
+                    .intern_generic_instance(owner_type, generic_arguments.clone());
+                self.layer.bind_node_type(target, generic_owner_type);
+                if let Some(target_ident) = self
+                    .graph
+                    .syntax()
+                    .first_child_of_kind(target, SyntaxNodeKind::Identifier)
+                {
+                    self.layer.bind_node_type(target_ident, generic_owner_type);
+                }
             }
         }
 
@@ -300,6 +307,18 @@ impl<'a> DeclarationTypeChecker<'a> {
             }
 
             _ => {}
+        }
+
+        let mut variant_ty = self.layer.table_mut().intern_named(variant_symbol);
+        if !generic_arguments.is_empty() {
+            variant_ty = self
+                .layer
+                .table_mut()
+                .intern_generic_instance(variant_ty, generic_arguments.clone());
+        }
+
+        if let Some(variant_name_node) = self.graph.syntax().child(pattern, 1) {
+            self.layer.bind_node_type(variant_name_node, variant_ty);
         }
     }
 
@@ -391,11 +410,12 @@ impl<'a> DeclarationTypeChecker<'a> {
 
         let mut expected_choice_type = expected;
         let mut generic_arguments = Vec::new();
-        if let Some(TypeKind::GenericInstance { base, arguments }) =
-            self.layer.table().kind(expected)
+
+        if let Some((base, arguments)) =
+            self.extract_generic_arguments_from_expected(expected, owner_type)
         {
-            expected_choice_type = *base;
-            generic_arguments = arguments.clone();
+            expected_choice_type = base;
+            generic_arguments = arguments;
         }
 
         if !self.is_assignable(expected_choice_type, owner_type) {
@@ -408,31 +428,51 @@ impl<'a> DeclarationTypeChecker<'a> {
                 .generic_parameters
                 .iter()
                 .copied()
-                .zip(generic_arguments)
+                .zip(generic_arguments.clone())
                 .collect::<HashMap<_, _>>();
 
             for payload_type in &mut variant.payload_types {
                 *payload_type =
                     self.substitute_generic_expression_type(*payload_type, &substitution);
             }
+
+            if let Some(target) = self.graph.syntax().child(pattern, 0) {
+                self.infer_expression_type(target);
+                let generic_owner_type = self
+                    .layer
+                    .table_mut()
+                    .intern_generic_instance(owner_type, generic_arguments.clone());
+                self.layer.bind_node_type(target, generic_owner_type);
+                if let Some(target_ident) = self
+                    .graph
+                    .syntax()
+                    .first_child_of_kind(target, SyntaxNodeKind::Identifier)
+                {
+                    self.layer.bind_node_type(target_ident, generic_owner_type);
+                }
+            }
+        } else if let Some(target) = self.graph.syntax().child(pattern, 0) {
+            self.infer_expression_type(target);
         }
 
         self.check_imported_choice_variant_pattern_payload(pattern, &variant);
 
-        let mut segments = match self.layer.table().kind(expected) {
-            Some(TypeKind::Path { segments, .. }) => segments.clone(),
-            Some(TypeKind::GenericInstance { base, .. }) => match self.layer.table().kind(*base) {
-                Some(TypeKind::Path { segments, .. }) => segments.clone(),
-                _ => Vec::new(),
-            },
-            _ => Vec::new(),
-        };
-        if segments.is_empty() {
+        let mut segments = Vec::new();
+        if !self.imported_symbol_choices.contains_key(&owner_symbol) {
             segments.push(choice.name.clone());
         }
         segments.push(variant.name.clone());
-        let variant_ty = self.layer.table_mut().intern_path(owner_symbol, segments);
-        self.layer.bind_node_type(pattern, variant_ty);
+        let mut variant_ty = self.layer.table_mut().intern_path(owner_symbol, segments);
+        if !generic_arguments.is_empty() {
+            variant_ty = self
+                .layer
+                .table_mut()
+                .intern_generic_instance(variant_ty, generic_arguments);
+        }
+
+        if let Some(variant_name_node) = self.graph.syntax().child(pattern, 1) {
+            self.layer.bind_node_type(variant_name_node, variant_ty);
+        }
 
         true
     }

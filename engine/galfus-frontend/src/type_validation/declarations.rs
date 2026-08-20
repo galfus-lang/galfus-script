@@ -266,18 +266,26 @@ impl<'a> DeclarationTypeChecker<'a> {
             None => return None,
         };
 
-        let has_default = self
+        let default_node = self
             .graph
             .syntax()
-            .first_child_of_kind(parameter, SyntaxNodeKind::ParameterDefault)
-            .is_some();
+            .first_child_of_kind(parameter, SyntaxNodeKind::ParameterDefault);
+
+        let default_value = default_node.and_then(|node| {
+            self.graph
+                .syntax()
+                .first_child(node)
+                .map(|child| self.node_text(child))
+        });
+
+        let has_default = default_node.is_some();
 
         if parameter_node.kind() == SyntaxNodeKind::RestParameter {
             return Some(FunctionParameterType::rest(ty));
         }
 
         if has_default {
-            return Some(FunctionParameterType::with_default(ty));
+            return Some(FunctionParameterType::with_default(ty, default_value));
         }
 
         Some(FunctionParameterType::new(ty))

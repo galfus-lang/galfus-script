@@ -42,7 +42,12 @@
   "Block function expression": {
     "prefix": "gfuncblock",
     "description": "Create an anonymous function with a block body",
-    "body": ["fn (${1:parameters}): ${2:Return} {", "  ${3}", "  return ${4:value}", "}"]
+    "body": [
+      "fn (${1:parameters}): ${2:Return} {",
+      "  ${3}",
+      "  return ${4:value}",
+      "}"
+    ]
   },
   "Struct": {
     "prefix": "gstruct",

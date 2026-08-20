@@ -156,3 +156,47 @@ export fn toLower(s: [u8]): [u8] {
   }
   return result
 }
+
+export fn interpolate(template: [u8], values: [[u8]]): [u8] {
+  var result: [u8] = ""
+  var valIndex = 0
+  var lastStart = 0
+  var prevByte: u8 = 0
+  var i = 0
+
+  for byte in template {
+    if prevByte == 123 && byte == 125 {
+      if (i - 1) > lastStart {
+        result = concat(result, slice(template, lastStart, (i - 1) - lastStart))
+      }
+      
+      var valFound = false
+      var current = 0
+      for val in values {
+        if current == valIndex {
+          result = concat(result, val)
+          valFound = true
+          break
+        }
+        current += 1
+      }
+      if !valFound {
+        result = concat(result, "{}")
+      }
+
+      valIndex += 1
+      lastStart = i + 1
+      prevByte = 0
+    } else {
+      prevByte = byte
+    }
+    i += 1
+  }
+
+  if lastStart < template.length {
+    result = concat(result, slice(template, lastStart, template.length - lastStart))
+  }
+
+  return result
+}
+

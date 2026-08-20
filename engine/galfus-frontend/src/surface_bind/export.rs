@@ -57,7 +57,10 @@ impl ModuleSurfaceExport {
         self.generic_parameters.as_slice()
     }
 
-    pub(super) fn imported_constraint_surface(&self) -> ImportedConstraintSurface {
+    pub(super) fn imported_constraint_surface(
+        &self,
+        namespace: Option<galfus_core::SymbolId>,
+    ) -> ImportedConstraintSurface {
         let fields = self
             .members
             .iter()
@@ -68,7 +71,11 @@ impl ModuleSurfaceExport {
 
                 Some(ImportedConstraintMember::new(
                     member.name().to_string(),
-                    member.ty()?.clone(),
+                    if let Some(ns) = namespace {
+                        member.ty()?.relocate(ns)
+                    } else {
+                        member.ty()?.clone()
+                    },
                 ))
             })
             .collect();
@@ -83,20 +90,36 @@ impl ModuleSurfaceExport {
 
                 Some(ImportedConstraintMember::new(
                     member.name().to_string(),
-                    member.ty()?.clone(),
+                    if let Some(ns) = namespace {
+                        member.ty()?.relocate(ns)
+                    } else {
+                        member.ty()?.clone()
+                    },
                 ))
             })
             .collect();
 
         ImportedConstraintSurface::new(
             self.name.clone(),
-            self.generic_parameters.clone(),
+            self.generic_parameters
+                .iter()
+                .map(|p| {
+                    if let Some(ns) = namespace {
+                        p.relocate(ns)
+                    } else {
+                        p.clone()
+                    }
+                })
+                .collect(),
             fields,
             functions,
         )
     }
 
-    pub(super) fn imported_choice_surface(&self) -> ImportedChoiceSurface {
+    pub(super) fn imported_choice_surface(
+        &self,
+        namespace: Option<galfus_core::SymbolId>,
+    ) -> ImportedChoiceSurface {
         let variants = self
             .members
             .iter()
@@ -107,12 +130,35 @@ impl ModuleSurfaceExport {
 
                 Some(ImportedChoiceVariant::new(
                     member.name().to_string(),
-                    member.payload_types().to_vec(),
+                    member
+                        .payload_types()
+                        .iter()
+                        .map(|ty| {
+                            if let Some(ns) = namespace {
+                                ty.relocate(ns)
+                            } else {
+                                ty.clone()
+                            }
+                        })
+                        .collect(),
                 ))
             })
             .collect();
 
-        ImportedChoiceSurface::new(self.name.clone(), variants, self.generic_parameters.clone())
+        ImportedChoiceSurface::new(
+            self.name.clone(),
+            variants,
+            self.generic_parameters
+                .iter()
+                .map(|p| {
+                    if let Some(ns) = namespace {
+                        p.relocate(ns)
+                    } else {
+                        p.clone()
+                    }
+                })
+                .collect(),
+        )
     }
 }
 

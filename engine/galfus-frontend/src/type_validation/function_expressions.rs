@@ -84,7 +84,7 @@ impl<'a> DeclarationTypeChecker<'a> {
             if parameter_node.kind() == SyntaxNodeKind::RestParameter {
                 parameters.push(FunctionParameterType::rest(ty));
             } else if has_default {
-                parameters.push(FunctionParameterType::with_default(ty));
+                parameters.push(FunctionParameterType::with_default(ty, None));
             } else {
                 parameters.push(FunctionParameterType::new(ty));
             }

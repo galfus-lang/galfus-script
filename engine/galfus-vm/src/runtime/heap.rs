@@ -122,6 +122,7 @@ impl VirtualMachine {
             None => return false,
         };
         match (val, ty) {
+            (_, BytecodeType::Any) => true,
             (Value::Null, BytecodeType::Null) => true,
             (Value::Bool(_), BytecodeType::Bool) => true,
             (Value::Int8(_), BytecodeType::Int8) => true,
@@ -184,24 +185,34 @@ impl VirtualMachine {
                 BytecodeType::ChoiceVariant(expected_choice_idx, expected_variant_idx),
             ) => {
                 if let Ok(HeapObject::Choice {
+                    module_id,
                     layout_idx,
                     variant_idx,
                     ..
                 }) = thread.heap.get_object(*obj_ref)
                 {
-                    if *layout_idx == *expected_choice_idx && variant_idx == expected_variant_idx {
+                    let expected_module_id = thread.call_stack.last().unwrap().module_id;
+                    if *module_id == expected_module_id
+                        && *layout_idx == *expected_choice_idx
+                        && variant_idx == expected_variant_idx
+                    {
                         return true;
                     }
 
-                    let Ok(image) = self.current_image(thread) else {
+                    let Ok(actual_image) = self.get_module(*module_id) else {
                         return false;
                     };
-                    let Some(actual_layout) = image.choice_layouts.get(layout_idx.raw() as usize)
+                    let Ok(expected_image) = self.current_image(thread) else {
+                        return false;
+                    };
+                    let Some(actual_layout) =
+                        actual_image.choice_layouts.get(layout_idx.raw() as usize)
                     else {
                         return false;
                     };
-                    let Some(expected_layout) =
-                        image.choice_layouts.get(expected_choice_idx.raw() as usize)
+                    let Some(expected_layout) = expected_image
+                        .choice_layouts
+                        .get(expected_choice_idx.raw() as usize)
                     else {
                         return false;
                     };

@@ -1,6 +1,7 @@
 use std::sync;
 
 use crate::thread;
+use galfus_bytecode::instruction::ChoiceLayoutIdx;
 
 #[test]
 fn test_structs_load_store() {
@@ -277,6 +278,88 @@ fn test_instanceof() {
         )
         .unwrap();
     assert_eq!(res, Value::Bool(true));
+}
+
+#[test]
+fn test_instanceof_matches_imported_choice_variant_by_layout_name() {
+    let caller_module_id = galfus_core::ModuleId::new(1);
+    let provider_module_id = galfus_core::ModuleId::new(2);
+
+    let mut caller = create_test_module(vec![Instruction::RetNull], vec![]);
+    caller.choice_layouts[0] = ChoiceLayout {
+        name: "ParseResult".to_string(),
+        variants: vec![
+            ChoiceVariantLayout {
+                name: "Ok".to_string(),
+                payload_ty: Some(TypeIdx(0)),
+            },
+            ChoiceVariantLayout {
+                name: "Err".to_string(),
+                payload_ty: Some(TypeIdx(0)),
+            },
+        ],
+    };
+    caller
+        .types
+        .push(BytecodeType::ChoiceVariant(ChoiceLayoutIdx(0), 0));
+
+    let mut provider = create_test_module(vec![Instruction::RetNull], vec![]);
+    provider.choice_layouts.insert(
+        0,
+        ChoiceLayout {
+            name: "Unused".to_string(),
+            variants: vec![],
+        },
+    );
+    provider.choice_layouts[1] = ChoiceLayout {
+        name: "ParseResult".to_string(),
+        variants: vec![
+            ChoiceVariantLayout {
+                name: "Ok".to_string(),
+                payload_ty: Some(TypeIdx(0)),
+            },
+            ChoiceVariantLayout {
+                name: "Err".to_string(),
+                payload_ty: Some(TypeIdx(0)),
+            },
+        ],
+    };
+
+    let graph = graph_with_nodes(
+        galfus_core::SemanticRevision::new(0),
+        vec![
+            galfus_bytecode::BytecodeNode {
+                id: caller_module_id,
+                path: galfus_core::ModulePath::new("caller.gfs").unwrap(),
+                semantic_revision: galfus_core::SemanticRevision::new(0),
+                module: caller,
+                metadata: None,
+            },
+            galfus_bytecode::BytecodeNode {
+                id: provider_module_id,
+                path: galfus_core::ModulePath::new("provider.gfs").unwrap(),
+                semantic_revision: galfus_core::SemanticRevision::new(0),
+                module: provider,
+                metadata: None,
+            },
+        ],
+    );
+    let vm = VirtualMachine::new(sync::Arc::new(graph));
+    let mut thread = thread::VmThreadState::test_new();
+    vm.prepare_function(&mut thread, caller_module_id, FuncIdx(0), vec![])
+        .unwrap();
+
+    let choice = thread
+        .heap
+        .alloc(HeapObject::Choice {
+            module_id: provider_module_id,
+            layout_idx: ChoiceLayoutIdx(1),
+            variant_idx: 0,
+            payload: Value::Int64(22),
+        })
+        .unwrap();
+
+    assert!(vm.check_value_type(&thread, &Value::Object(choice), TypeIdx(8)));
 }
 
 #[test]

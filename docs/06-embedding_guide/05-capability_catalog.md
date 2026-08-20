@@ -7,13 +7,13 @@ and it is not the runtime provider registry.
 
 The split is deliberate:
 
-| Concern | Catalog | Execution capabilities |
-| --- | --- | --- |
-| Provider bridge source | `BridgeModule` | No |
-| Adapter schema | `AdapterSchema` | No |
-| Native provider implementation | No | `Providers` |
-| Adapter binding implementation | No | `AdapterBindings` |
-| When it is used | Check and compile | Runtime startup and execution |
+| Concern                        | Catalog           | Execution capabilities        |
+| ------------------------------ | ----------------- | ----------------------------- |
+| Provider bridge source         | `BridgeModule`    | No                            |
+| Adapter schema                 | `AdapterSchema`   | No                            |
+| Native provider implementation | No                | `Providers`                   |
+| Adapter binding implementation | No                | `AdapterBindings`             |
+| When it is used                | Check and compile | Runtime startup and execution |
 
 For example, a workspace may know the interface of `std/fs` because it is in
 the catalog, but it can only execute a package importing `std/fs` when the host
@@ -50,7 +50,9 @@ workspace.set_catalog(Arc::new(catalog));
 
 The host must set the catalog before checking or compiling modules that import
 its provider bridges. The native host uses `native_catalog()` to register the
-standard `std/io`, `std/env`, `std/time`, and `std/fs` bridges.
+standard `std/io`, `std/env`, `std/time`, `std/fs`, `std/net`, `std/http`, and
+`std/websocket` bridges. The web host catalog exposes `std/io`, `std/env`,
+`std/time`, `std/http`, and `std/websocket`.
 
 ## Provider bridge entries
 

@@ -10,6 +10,7 @@ pub struct ImportedFunctionParameterType {
     ty: ImportedType,
     is_rest: bool,
     has_default: bool,
+    pub default_value: Option<String>,
 }
 
 impl ImportedFunctionParameterType {
@@ -18,6 +19,7 @@ impl ImportedFunctionParameterType {
             ty,
             is_rest: false,
             has_default: false,
+            default_value: None,
         }
     }
 
@@ -26,14 +28,16 @@ impl ImportedFunctionParameterType {
             ty,
             is_rest: true,
             has_default: false,
+            default_value: None,
         }
     }
 
-    pub fn with_default(ty: ImportedType) -> Self {
+    pub fn with_default(ty: ImportedType, default_value: Option<String>) -> Self {
         Self {
             ty,
             is_rest: false,
             has_default: true,
+            default_value,
         }
     }
 
@@ -47,6 +51,10 @@ impl ImportedFunctionParameterType {
 
     pub fn has_default(&self) -> bool {
         self.has_default
+    }
+
+    pub fn default_value(&self) -> Option<&str> {
+        self.default_value.as_deref()
     }
 }
 
@@ -126,6 +134,7 @@ impl ImportedType {
                         ty: p.ty.relocate(namespace),
                         is_rest: p.is_rest,
                         has_default: p.has_default,
+                        default_value: p.default_value.clone(),
                     })
                     .collect(),
                 return_type: Box::new(return_type.relocate(namespace)),

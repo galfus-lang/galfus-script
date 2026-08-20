@@ -3,24 +3,24 @@ name: Dependency Policy
 on:
   pull_request:
     paths:
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - 'crates/**'
-      - 'scripts/src/**'
-      - 'scripts/package.json'
-      - 'scripts/bun.lock'
-      - '.github/workflows/dependency-policy.yml'
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/**"
+      - "scripts/**"
+      - "package.json"
+      - "bun.lock"
+      - ".github/workflows/dependency-policy.yml"
   push:
     branches:
       - main
     paths:
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - 'crates/**'
-      - 'scripts/src/**'
-      - 'scripts/package.json'
-      - 'scripts/bun.lock'
-      - '.github/workflows/dependency-policy.yml'
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/**"
+      - "scripts/**"
+      - "package.json"
+      - "bun.lock"
+      - ".github/workflows/dependency-policy.yml"
 
 permissions:
   contents: read
@@ -39,12 +39,10 @@ jobs:
           bun-version-file: .bun-version
 
       - name: Install script dependencies
-        working-directory: scripts
         run: bun install --frozen-lockfile
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Validate dependency policy
-        working-directory: scripts
         run: bun cmd check dependencies

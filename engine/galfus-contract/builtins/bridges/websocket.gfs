@@ -1,0 +1,9 @@
+fn(async) __provider_websocket_connect(url: [u8]): u64 | null
+fn(async) __provider_websocket_receive(socket: u64): [u8] | null
+fn(async) __provider_websocket_send(socket: u64, data: [u8]): bool
+fn(async) __provider_websocket_close(socket: u64): bool
+
+export fn connect(url: [u8]): u64 | null => await __provider_websocket_connect(url)
+export fn receive(socket: u64): [u8] | null => await __provider_websocket_receive(socket)
+export fn send(socket: u64, data: [u8]): bool => await __provider_websocket_send(socket, data)
+export fn close(socket: u64): bool => await __provider_websocket_close(socket)

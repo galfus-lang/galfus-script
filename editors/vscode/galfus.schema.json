@@ -77,7 +77,11 @@
           "then": { "properties": { "arch": { "enum": ["wasm32"] } } }
         },
         {
-          "if": { "properties": { "target": { "enum": ["linux", "macos", "windows"] } } },
+          "if": {
+            "properties": {
+              "target": { "enum": ["linux", "macos", "windows"] }
+            }
+          },
           "then": { "properties": { "arch": { "enum": ["x64", "arm64"] } } }
         }
       ]

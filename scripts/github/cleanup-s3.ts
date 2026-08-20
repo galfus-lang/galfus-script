@@ -1,4 +1,4 @@
-import { $ } from 'bun';
+import { $ } from "bun";
 
 export type CleanupS3Options = {
   tag: string;
@@ -7,43 +7,48 @@ export type CleanupS3Options = {
 export async function cleanupS3(options: CleanupS3Options): Promise<void> {
   const { tag } = options;
   if (!tag) {
-    throw new Error('No tag provided for cleanup');
+    throw new Error("No tag provided for cleanup");
   }
 
   const storageId = process.env.STORAGE_ID;
   const endpoint = process.env.STORAGE_ENDPOINT;
 
   if (!storageId || !endpoint) {
-    throw new Error('STORAGE_ID and STORAGE_ENDPOINT must be set');
+    throw new Error("STORAGE_ID and STORAGE_ENDPOINT must be set");
   }
 
   console.log(`Starting S3 cleanup for tag: ${tag}`);
 
   // The components we build
-  const components = ['cli', 'host-native', 'host-web', 'playground-web'];
+  const components = ["cli", "host-native", "host-web", "playground-web"];
 
   for (const component of components) {
     const basePath = `s3://${storageId}/${component}/${tag}/`;
     console.log(`\nScanning ${basePath}`);
 
     // List all versions in this component/tag
-    let output = '';
+    let output = "";
     try {
       output = await $`aws s3 ls ${basePath} --endpoint-url ${endpoint}`.text();
     } catch (e) {
-      console.log(`Failed to list or no versions found for ${component}/${tag}. Skipping.`);
+      console.log(
+        `Failed to list or no versions found for ${component}/${tag}. Skipping.`,
+      );
       continue;
     }
 
-    const lines = output.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+    const lines = output
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
     const versions: string[] = [];
 
     for (const line of lines) {
       // aws s3 ls directory output format: "                           PRE 1.0.0/"
-      if (line.includes('PRE ')) {
-        const parts = line.split('PRE ');
+      if (line.includes("PRE ")) {
+        const parts = line.split("PRE ");
         if (parts.length > 1) {
-          const dir = parts[1]!.replace('/', '').trim();
+          const dir = parts[1]!.replace("/", "").trim();
           versions.push(dir);
         }
       }
@@ -71,7 +76,9 @@ export async function cleanupS3(options: CleanupS3Options): Promise<void> {
     }
 
     // Sort major versions descending (numerically)
-    const sortedMajors = Array.from(grouped.keys()).sort((a, b) => parseInt(b, 10) - parseInt(a, 10));
+    const sortedMajors = Array.from(grouped.keys()).sort(
+      (a, b) => parseInt(b, 10) - parseInt(a, 10),
+    );
 
     const majorsToKeep = sortedMajors.slice(0, 5);
     const majorsToDelete = sortedMajors.slice(5);
@@ -91,8 +98,8 @@ export async function cleanupS3(options: CleanupS3Options): Promise<void> {
       // Sort semantic versions descending
       // We assume format X.Y.Z
       vList.sort((a, b) => {
-        const pa = a.split('.').map(Number);
-        const pb = b.split('.').map(Number);
+        const pa = a.split(".").map(Number);
+        const pb = b.split(".").map(Number);
         for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
           const numA = pa[i] || 0;
           const numB = pb[i] || 0;
@@ -118,5 +125,5 @@ export async function cleanupS3(options: CleanupS3Options): Promise<void> {
     }
   }
 
-  console.log('\nCleanup completed.');
+  console.log("\nCleanup completed.");
 }

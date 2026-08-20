@@ -121,8 +121,11 @@ impl FrontendSession {
             let Some(imported_type) = surfaces[target_index]
                 .imported_path_type_for_export(import.local_symbol, &exported_name)
             else {
-                if let Some(imported_constraint) =
-                    surfaces[target_index].imported_constraint_for_export(exported_name.as_str())
+                if let Some(imported_constraint) = surfaces[target_index]
+                    .imported_constraint_for_export(
+                        exported_name.as_str(),
+                        Some(import.local_symbol),
+                    )
                 {
                     imported_types.insert_path_constraint(path.node, imported_constraint);
                 }
@@ -132,14 +135,14 @@ impl FrontendSession {
 
             imported_types.insert_path_type(path.node, imported_type);
 
-            if let Some(imported_constraint) =
-                surfaces[target_index].imported_constraint_for_export(exported_name.as_str())
+            if let Some(imported_constraint) = surfaces[target_index]
+                .imported_constraint_for_export(exported_name.as_str(), Some(import.local_symbol))
             {
                 imported_types.insert_path_constraint(path.node, imported_constraint);
             }
 
-            if let Some(imported_choice) =
-                surfaces[target_index].imported_choice_for_export(exported_name.as_str())
+            if let Some(imported_choice) = surfaces[target_index]
+                .imported_choice_for_export(exported_name.as_str(), Some(import.local_symbol))
             {
                 imported_types.insert_path_choice(path.node, imported_choice);
             }
