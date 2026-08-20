@@ -218,4 +218,51 @@ impl<'a> DeclarationTypeChecker<'a> {
 
         ty
     }
+
+    pub(super) fn extract_generic_arguments_from_expected(
+        &self,
+        expected: TypeId,
+        owner_type: TypeId,
+    ) -> Option<(TypeId, Vec<TypeId>)> {
+        let resolved = self.resolve_alias_type(expected);
+        match self.layer.table().kind(resolved).cloned() {
+            Some(TypeKind::GenericInstance { base, arguments }) => {
+                if self.is_assignable(base, owner_type) {
+                    return Some((base, arguments));
+                }
+
+                let base_resolved = self.resolve_path_type(base);
+                let owner_resolved = self.resolve_path_type(owner_type);
+
+                let base_sym = match self.layer.table().kind(base_resolved).cloned() {
+                    Some(TypeKind::Named { symbol }) => Some(symbol),
+                    Some(TypeKind::Path { root, .. }) => Some(root),
+                    _ => None,
+                };
+
+                let owner_sym = match self.layer.table().kind(owner_resolved).cloned() {
+                    Some(TypeKind::Named { symbol }) => Some(symbol),
+                    Some(TypeKind::Path { root, .. }) => Some(root),
+                    _ => None,
+                };
+
+                if let (Some(a), Some(b)) = (base_sym, owner_sym)
+                    && a == b
+                {
+                    return Some((base, arguments));
+                }
+            }
+            Some(TypeKind::Union { members }) => {
+                for member in members {
+                    if let Some(res) =
+                        self.extract_generic_arguments_from_expected(member, owner_type)
+                    {
+                        return Some(res);
+                    }
+                }
+            }
+            _ => {}
+        }
+        None
+    }
 }

@@ -1,3 +1,4 @@
+import * as util from 'util';
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import { LanguageClient } from 'vscode-languageclient/node';
@@ -11,7 +12,7 @@ import { join } from 'path';
 
 let client: LanguageClient;
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
   let versionOutput = "";
   
   let isDevMode = false;
@@ -29,7 +30,9 @@ export function activate(context: vscode.ExtensionContext) {
   if (!isDevMode) {
     // Check if galfus is installed
     try {
-      versionOutput = cp.execSync('galfus --version', { encoding: 'utf-8' });
+      const execAsync = util.promisify(cp.exec);
+      const { stdout } = await execAsync('galfus --version', { encoding: 'utf-8' });
+      versionOutput = stdout;
     } catch (err) {
       vscode.window.showErrorMessage(
         "Galfus CLI not found in PATH. Please install Galfus Script to use language features."

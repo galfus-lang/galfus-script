@@ -56,13 +56,28 @@ pub fn hover(workspace: &Workspace, path: &str, position: Position) -> Option<Ho
     let mut type_node = current_node;
 
     let mut nodes_to_check = vec![current_node];
-    if matches!(
-        kind,
-        galfus_frontend::SyntaxNodeKind::Identifier | galfus_frontend::SyntaxNodeKind::Path
-    ) && path_stack.len() >= 2
-    {
-        nodes_to_check.push(path_stack[path_stack.len() - 2]);
+    let mut current_child = current_node;
+    for &parent in path_stack.iter().rev().skip(1) {
+        if let Some(parent_node) = syntax_graph.node(parent) {
+            use galfus_frontend::SyntaxNodeKind::*;
+            let is_bubble = match parent_node.kind() {
+                NameExpression | Path | NamedType => true,
+                VariantPattern => true,
+                PathExpression | MemberExpression => parent_node.child(1) == Some(current_child),
+                GenericExpression | GenericType => parent_node.child(0) == Some(current_child),
+                _ => false,
+            };
+            if is_bubble {
+                nodes_to_check.push(parent);
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+        current_child = parent;
     }
+    nodes_to_check.reverse();
 
     for &node in &nodes_to_check {
         if let Some(tid) = type_result.layer().node_type(node) {
@@ -166,24 +181,10 @@ pub fn hover(workspace: &Workspace, path: &str, position: Position) -> Option<Ho
     }
 
     let current_node = type_node;
-    let type_name = node_type_id
-        .map(|id| format_type(workspace, snapshot, semantic_module, id))
-        .unwrap_or_else(|| "<unknown>".to_string());
 
-    let mut hover_text = format!(
-        "**Galfus Node**: `{:?}`\n\nType: {}",
-        syntax_graph.node(current_node)?.kind(),
-        type_name
-    );
-
-    // Try to find module origin for imported items
-    if (syntax_graph.node(current_node)?.kind() == galfus_frontend::SyntaxNodeKind::Identifier
-        || syntax_graph.node(current_node)?.kind()
-            == galfus_frontend::SyntaxNodeKind::NameExpression)
-        && let Some(resolution) = semantic_module.graph().resolution()
-    {
-        let mut symbol_id = None;
-        for &node in &nodes_to_check {
+    let mut symbol_id = None;
+    if let Some(resolution) = semantic_module.graph().resolution() {
+        for &node in nodes_to_check.iter().rev() {
             if let Some(sym) = resolution
                 .reference_symbol(node)
                 .or_else(|| resolution.path_reference_symbol(node))
@@ -195,19 +196,82 @@ pub fn hover(workspace: &Workspace, path: &str, position: Position) -> Option<Ho
                 break;
             }
         }
+    }
 
-        if let Some(symbol_id) = symbol_id
-            && let Some(symbol) = resolution.symbol(symbol_id)
-        {
-            use galfus_frontend::SymbolKind;
-            if matches!(
-                symbol.kind(),
-                SymbolKind::ImportBinding | SymbolKind::ImportNamespace
-            ) && let Some(import_id) = resolution.import_for_symbol(symbol.id())
-                && let Some(import_record) = resolution.import(import_id)
-            {
-                hover_text.push_str(&format!("\n\n**Origin**: `{}`", import_record.source()));
+    let mut type_name = node_type_id
+        .map(|id| format_type(workspace, snapshot, semantic_module, id))
+        .unwrap_or_else(|| "unknown".to_string());
+
+    if type_name == "unknown"
+        && node_type_id.is_none()
+        && let Some(text) = source.slice(syntax_graph.node(current_node)?.span())
+        && matches!(
+            text,
+            "i8" | "i16"
+                | "i32"
+                | "i64"
+                | "u8"
+                | "u16"
+                | "u32"
+                | "u64"
+                | "f32"
+                | "f64"
+                | "bool"
+                | "string"
+                | "void"
+                | "any"
+        )
+    {
+        type_name = format!("Primitive type `{}`", text);
+    }
+
+    if let Some(sym_id) = symbol_id
+        && let Some(resolution) = semantic_module.graph().resolution()
+        && let Some(symbol) = resolution.symbol(sym_id)
+    {
+        use galfus_frontend::SymbolKind;
+        if matches!(
+            symbol.kind(),
+            SymbolKind::ChoiceVariant | SymbolKind::EnumVariant
+        ) {
+            let variant_name = snapshot
+                .string_table()
+                .resolve(symbol.name())
+                .unwrap_or("")
+                .to_string();
+            let mut payload_text = String::new();
+            if let Some(decl) = syntax_graph.node(symbol.declaration()) {
+                for &child in decl.children() {
+                    if let Some(c) = syntax_graph.node(child)
+                        && c.kind() == galfus_frontend::SyntaxNodeKind::ChoicePayload
+                        && let Some(text) = source.slice(c.span())
+                    {
+                        payload_text = text.to_string();
+                    }
+                }
             }
+            type_name = format!("{}::{}{}", type_name, variant_name, payload_text);
+        }
+    }
+
+    let mut hover_text = format!(
+        "**Galfus Node**: `{:?}`\n\nType: {}",
+        syntax_graph.node(current_node)?.kind(),
+        type_name
+    );
+
+    if let Some(sym_id) = symbol_id
+        && let Some(resolution) = semantic_module.graph().resolution()
+        && let Some(symbol) = resolution.symbol(sym_id)
+    {
+        use galfus_frontend::SymbolKind;
+        if matches!(
+            symbol.kind(),
+            SymbolKind::ImportBinding | SymbolKind::ImportNamespace
+        ) && let Some(import_id) = resolution.import_for_symbol(symbol.id())
+            && let Some(import_record) = resolution.import(import_id)
+        {
+            hover_text.push_str(&format!("\n\n**Origin**: `{}`", import_record.source()));
         }
     }
 
@@ -270,12 +334,12 @@ fn format_type(
     type_id: TypeId,
 ) -> String {
     let Some(type_result) = module.type_result() else {
-        return "<unknown>".to_string();
+        return "unknown".to_string();
     };
 
     let table = type_result.layer().table();
     let Some(kind) = table.kind(type_id) else {
-        return "<unknown>".to_string();
+        return "unknown".to_string();
     };
 
     let resolution = module.graph().resolution();
@@ -288,8 +352,12 @@ fn format_type(
             find_global_export_link(workspace, snapshot, &name).unwrap_or(name)
         }
         galfus_frontend::TypeKind::Path { root, segments } => {
-            let root_name = get_symbol_name(snapshot, resolution, *root)
-                .unwrap_or_else(|| "unknown".to_string());
+            let root_name = if root.raw() == 0 {
+                "unknown".to_string()
+            } else {
+                get_symbol_name(snapshot, resolution, *root)
+                    .unwrap_or_else(|| "unknown".to_string())
+            };
             let path = segments.join("::");
             if path.is_empty() {
                 find_global_export_link(workspace, snapshot, &root_name).unwrap_or(root_name)
@@ -359,7 +427,7 @@ fn format_type(
                 .collect();
             format!("{}<{}>", base_name, args.join(", "))
         }
-        galfus_frontend::TypeKind::Error => "<error>".to_string(),
+        galfus_frontend::TypeKind::Error => "error".to_string(),
     }
 }
 
