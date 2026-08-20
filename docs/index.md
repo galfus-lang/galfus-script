@@ -79,6 +79,8 @@ Welcome to the official documentation. Choose a topic below to get started.
 
 - [Galfus Adapters Surface Reference](./05-adapters_and_builtins/02-adapters_surface_reference.md)
 
+- [Network Providers](./05-adapters_and_builtins/03-network_providers.md)
+
 
 
 ## 06-Embedding Guide
@@ -108,4 +110,3 @@ Welcome to the official documentation. Choose a topic below to get started.
 - [Virtual Thread](./07-core_strengths/04-virtual_thread.md)
 
 - [Virtual Kernel](./07-core_strengths/05-virtual_kernel.md)
-

@@ -5,6 +5,7 @@ The `galfus-playground-web` package provides the WebAssembly (Wasm) bridge to em
 It is specifically designed to power interactive code editors (like Monaco Editor or CodeMirror), guaranteeing:
 - **Cooperative Asynchronous Execution:** the VM yields control back to the browser's Event Loop, preventing UI freezing.
 - **Native I/O Communication:** seamless integration with the Web Streams API (`ReadableStream` and `WritableStream`).
+- **Browser Networking:** `std/http` through Fetch and `std/websocket` through the browser WebSocket API.
 - **Security (Kill-Switch):** the ability to cleanly abort pending executions when restarting a script, preventing memory leaks and runaway infinite loops.
 
 ---
@@ -14,6 +15,13 @@ It is specifically designed to power interactive code editors (like Monaco Edito
 In Javascript, the main class is `Playground`. It encapsulates:
 - The **Workspace** (for virtual file management and static analysis).
 - The **Web Host** (for cooperative execution and native Web providers).
+
+The playground catalog and execution host install `std/io`, `std/env`,
+`std/time`, `std/http`, and `std/websocket`. Raw `std/net` is native-only,
+because browsers do not provide arbitrary TCP or UDP sockets. HTTP requests
+remain subject to Fetch/CORS and browser security policy. See [Network
+Providers](../05-adapters_and_builtins/03-network_providers.md) for the
+available APIs.
 
 ### 1. Initialization (Once per page)
 

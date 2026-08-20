@@ -27,7 +27,9 @@ This creates a default project structure (e.g., `src/main.gfs` and `galfus.toml`
 
 ### `run`
 
-Executes the Galfus project. The CLI acts as the host, providing native capabilities (such as `std/io`) to the Virtual Machine.
+Executes the Galfus project. The CLI acts as the native host, providing
+`std/io`, `std/env`, `std/time`, `std/fs`, `std/net`, `std/http`, and
+`std/websocket` capabilities to the Virtual Machine.
 
 ```bash
 galfus-cli run [WORKSPACE_DIR] [ARGS]...

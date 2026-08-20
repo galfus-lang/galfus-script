@@ -50,7 +50,9 @@ workspace.set_catalog(Arc::new(catalog));
 
 The host must set the catalog before checking or compiling modules that import
 its provider bridges. The native host uses `native_catalog()` to register the
-standard `std/io`, `std/env`, `std/time`, and `std/fs` bridges.
+standard `std/io`, `std/env`, `std/time`, `std/fs`, `std/net`, `std/http`, and
+`std/websocket` bridges. The web host catalog exposes `std/io`, `std/env`,
+`std/time`, `std/http`, and `std/websocket`.
 
 ## Provider bridge entries
 

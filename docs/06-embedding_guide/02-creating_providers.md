@@ -160,8 +160,8 @@ let providers = Providers::new()
 ```
 
 The native CLI follows this pattern through `default_providers`, registering
-the `io`, `env`, `time`, and `fs` providers before constructing an
-`ExecutionHost`.
+the `io`, `env`, `time`, `fs`, `net`, `http`, and `websocket` providers before
+constructing an `ExecutionHost`.
 
 ## Completion, asynchronous work, and cancellation
 
