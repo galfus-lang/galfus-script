@@ -47,7 +47,7 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
         .map(|argument| argument.as_bytes().to_vec())
         .collect::<Vec<_>>();
 
-    if let Ok(_) = std::env::var("GALFUS_DEBUG_BYTECODE") {
+    if std::env::var("GALFUS_DEBUG_BYTECODE").is_ok() {
         println!("{:#?}", compile_report.package.graph());
     }
 

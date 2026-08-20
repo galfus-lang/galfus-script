@@ -297,23 +297,18 @@ pub fn completion(
                             && let Some(name_id) = string_table.get(text)
                         {
                             let mut curr_scope = current_scope_id;
-                            loop {
-                                if let Some(scope) = resolution.scope(curr_scope) {
-                                    if let Some(&sym_id) = scope.symbols().get(&name_id) {
-                                        resolved_type_id = type_result.layer().symbol_type(sym_id);
-                                        if is_path_access {
-                                            target_symbol = Some(sym_id);
-                                        }
-                                        break;
+                            while let Some(scope) = resolution.scope(curr_scope) {
+                                if let Some(&sym_id) = scope.symbols().get(&name_id) {
+                                    resolved_type_id = type_result.layer().symbol_type(sym_id);
+                                    if is_path_access {
+                                        target_symbol = Some(sym_id);
                                     }
-                                    if let Some(parent) = scope.parent() {
-                                        curr_scope = parent;
-                                    } else {
-                                        break;
-                                    }
-                                } else {
                                     break;
                                 }
+                                let Some(parent) = scope.parent() else {
+                                    break;
+                                };
+                                curr_scope = parent;
                             }
                         }
                     }
@@ -442,56 +437,51 @@ pub fn completion(
         }
     }
 
-    loop {
-        if let Some(scope) = resolution.scope(current_scope_id) {
-            for (name_id, symbol_id) in scope.symbols() {
-                if let Some(symbol) = resolution.symbol(*symbol_id)
-                    && let Some(name) = string_table.resolve(*name_id)
-                {
-                    if name.is_empty() {
-                        continue;
-                    }
+    while let Some(scope) = resolution.scope(current_scope_id) {
+        for (name_id, symbol_id) in scope.symbols() {
+            if let Some(symbol) = resolution.symbol(*symbol_id)
+                && let Some(name) = string_table.resolve(*name_id)
+            {
+                if name.is_empty() {
+                    continue;
+                }
 
-                    let label = name.to_string();
-                    if seen_labels.insert(label.clone()) {
-                        let kind = match symbol.kind() {
-                            SymbolKind::Function => CompletionItemKind::FUNCTION,
-                            SymbolKind::TypeAlias => CompletionItemKind::CLASS,
-                            SymbolKind::Struct => CompletionItemKind::STRUCT,
-                            SymbolKind::Enum | SymbolKind::Choice => CompletionItemKind::ENUM,
-                            SymbolKind::Constraint => CompletionItemKind::INTERFACE,
-                            SymbolKind::Var | SymbolKind::Const => CompletionItemKind::VARIABLE,
-                            SymbolKind::Parameter
-                            | SymbolKind::RestParameter
-                            | SymbolKind::ForBinding
-                            | SymbolKind::PatternBinding
-                            | SymbolKind::TypePatternBinding => CompletionItemKind::VARIABLE,
-                            SymbolKind::GenericParameter => CompletionItemKind::TYPE_PARAMETER,
-                            SymbolKind::StructField => CompletionItemKind::FIELD,
-                            SymbolKind::EnumVariant | SymbolKind::ChoiceVariant => {
-                                CompletionItemKind::ENUM_MEMBER
-                            }
-                            _ => CompletionItemKind::TEXT,
-                        };
+                let label = name.to_string();
+                if seen_labels.insert(label.clone()) {
+                    let kind = match symbol.kind() {
+                        SymbolKind::Function => CompletionItemKind::FUNCTION,
+                        SymbolKind::TypeAlias => CompletionItemKind::CLASS,
+                        SymbolKind::Struct => CompletionItemKind::STRUCT,
+                        SymbolKind::Enum | SymbolKind::Choice => CompletionItemKind::ENUM,
+                        SymbolKind::Constraint => CompletionItemKind::INTERFACE,
+                        SymbolKind::Var | SymbolKind::Const => CompletionItemKind::VARIABLE,
+                        SymbolKind::Parameter
+                        | SymbolKind::RestParameter
+                        | SymbolKind::ForBinding
+                        | SymbolKind::PatternBinding
+                        | SymbolKind::TypePatternBinding => CompletionItemKind::VARIABLE,
+                        SymbolKind::GenericParameter => CompletionItemKind::TYPE_PARAMETER,
+                        SymbolKind::StructField => CompletionItemKind::FIELD,
+                        SymbolKind::EnumVariant | SymbolKind::ChoiceVariant => {
+                            CompletionItemKind::ENUM_MEMBER
+                        }
+                        _ => CompletionItemKind::TEXT,
+                    };
 
-                        items.push(CompletionItem {
-                            label,
-                            kind: Some(kind),
-                            sort_text: Some("2".to_string()),
-                            ..Default::default()
-                        });
-                    }
+                    items.push(CompletionItem {
+                        label,
+                        kind: Some(kind),
+                        sort_text: Some("2".to_string()),
+                        ..Default::default()
+                    });
                 }
             }
-
-            if let Some(parent) = scope.parent() {
-                current_scope_id = parent;
-            } else {
-                break;
-            }
-        } else {
-            break;
         }
+
+        let Some(parent) = scope.parent() else {
+            break;
+        };
+        current_scope_id = parent;
     }
 
     if let Some(builtin_scope_id) = resolution.builtin_scope()

@@ -466,14 +466,13 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     }
                 }
 
-                if rest_array_type.is_none() {
-                    if let Some(ref params) = expected_params {
-                        if let Some(&(expected_ty, is_rest)) = params.last() {
-                            if is_rest && args.len() < params.len() {
-                                rest_array_type = Some(expected_ty);
-                            }
-                        }
-                    }
+                if rest_array_type.is_none()
+                    && let Some(params) = expected_params.as_ref()
+                    && let Some(&(expected_ty, is_rest)) = params.last()
+                    && is_rest
+                    && args.len() < params.len()
+                {
+                    rest_array_type = Some(expected_ty);
                 }
 
                 if let Some(array_ty) = rest_array_type {
