@@ -126,6 +126,11 @@ jobs:
           fi
           cp target/${{ matrix.target }}/release/galfus-cli$EXT build/galfus-cli-${{ matrix.alias }}$EXT
 
+      - name: Mark executables with chmod +x
+        if: "!contains(matrix.target, 'windows')"
+        shell: bash
+        run: chmod +x build/*
+
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
