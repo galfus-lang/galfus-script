@@ -23,16 +23,7 @@ impl Default for Playground {
 impl Playground {
     pub fn new() -> Self {
         let mut workspace = Workspace::new();
-        let catalog = std::sync::Arc::new(
-            galfus_contract::CapabilityCatalog::new(
-                vec![galfus_contract::BridgeModule::new(
-                    "std/io",
-                    galfus_contract::builtins::STD_IO_SOURCE,
-                )],
-                Vec::new(),
-            )
-            .expect("the built-in std/io provider catalog is valid"),
-        );
+        let catalog = std::sync::Arc::new(galfus_host_web::web_catalog());
         workspace.set_catalog(catalog);
         let manifest = galfus_workspace::WorkspaceManifest {
             module: Some(galfus_workspace::config::ModuleManifest {

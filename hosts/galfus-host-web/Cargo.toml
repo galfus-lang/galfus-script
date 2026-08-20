@@ -26,6 +26,15 @@ features = [
     "ReadableStreamDefaultReader",
     "WritableStream",
     "WritableStreamDefaultWriter",
+    "Request",
+    "RequestInit",
+    "RequestMode",
+    "Headers",
+    "Response",
+    "WebSocket",
+    "BinaryType",
+    "Event",
+    "CloseEvent",
 ]
 
 [features]

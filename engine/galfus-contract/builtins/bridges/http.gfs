@@ -1,0 +1,8 @@
+type Header = ([u8], [u8])
+type Response = (i32, [Header], [u8])
+
+fn(async) __provider_http_request(method: [u8], url: [u8], headers: [Header], body: [u8] | null): Response | null
+
+export fn request(method: [u8], url: [u8], headers: [Header] = [], body: [u8] | null = null): Response | null {
+  return await __provider_http_request(method, url, headers, body)
+}

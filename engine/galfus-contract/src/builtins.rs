@@ -13,6 +13,9 @@ pub const STD_IO_SOURCE: &str = include_str!("../builtins/bridges/io.gfs");
 pub const STD_TIME_SOURCE: &str = include_str!("../builtins/bridges/time.gfs");
 pub const STD_ENV_SOURCE: &str = include_str!("../builtins/bridges/env.gfs");
 pub const STD_FS_SOURCE: &str = include_str!("../builtins/bridges/fs.gfs");
+pub const STD_NET_SOURCE: &str = include_str!("../builtins/bridges/net.gfs");
+pub const STD_HTTP_SOURCE: &str = include_str!("../builtins/bridges/http.gfs");
+pub const STD_WEBSOCKET_SOURCE: &str = include_str!("../builtins/bridges/websocket.gfs");
 
 /// Internal core modules that are built-in to the VM and auto-inferred by the language engine.
 pub static INTERNAL_CORE_MODULES: &[(&str, &str)] = &[
@@ -37,6 +40,9 @@ pub static BRIDGE_TEMPLATES: &[(&str, &str)] = &[
     ("std/time", STD_TIME_SOURCE),
     ("std/env", STD_ENV_SOURCE),
     ("std/fs", STD_FS_SOURCE),
+    ("std/net", STD_NET_SOURCE),
+    ("std/http", STD_HTTP_SOURCE),
+    ("std/websocket", STD_WEBSOCKET_SOURCE),
 ];
 
 pub fn is_bridge_template(source: &str) -> bool {
@@ -163,6 +169,128 @@ pub fn std_fs_provider_descriptor() -> ProviderDescriptor {
                     name: "fs_normalize_path".to_string(),
                     parameter_types: vec![byte_array.clone()],
                     return_type: byte_array.clone(),
+                },
+            ],
+        }],
+    }
+}
+
+pub fn std_net_provider_descriptor() -> ProviderDescriptor {
+    let bytes = BoundaryType::Array(Box::new(BoundaryType::U8));
+    let datagram = BoundaryType::Tuple(vec![bytes.clone(), bytes.clone(), BoundaryType::U16]);
+    ProviderDescriptor {
+        modules: vec![ProviderModuleDescriptor {
+            module_path: "std/net".to_string(),
+            schema_fingerprint: provider_schema_fingerprint(STD_NET_SOURCE),
+            boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
+            exports: vec![
+                ProviderFunctionSignature {
+                    name: "net_tcp_connect".to_string(),
+                    parameter_types: vec![bytes.clone(), BoundaryType::U16],
+                    return_type: BoundaryType::Nullable(Box::new(BoundaryType::U64)),
+                },
+                ProviderFunctionSignature {
+                    name: "net_tcp_read".to_string(),
+                    parameter_types: vec![BoundaryType::U64, BoundaryType::U32],
+                    return_type: BoundaryType::Nullable(Box::new(bytes.clone())),
+                },
+                ProviderFunctionSignature {
+                    name: "net_tcp_write".to_string(),
+                    parameter_types: vec![BoundaryType::U64, bytes.clone()],
+                    return_type: BoundaryType::Bool,
+                },
+                ProviderFunctionSignature {
+                    name: "net_tcp_close".to_string(),
+                    parameter_types: vec![BoundaryType::U64],
+                    return_type: BoundaryType::Bool,
+                },
+                ProviderFunctionSignature {
+                    name: "net_udp_bind".to_string(),
+                    parameter_types: vec![bytes.clone(), BoundaryType::U16],
+                    return_type: BoundaryType::Nullable(Box::new(BoundaryType::U64)),
+                },
+                ProviderFunctionSignature {
+                    name: "net_udp_receive".to_string(),
+                    parameter_types: vec![BoundaryType::U64, BoundaryType::U32],
+                    return_type: BoundaryType::Nullable(Box::new(datagram)),
+                },
+                ProviderFunctionSignature {
+                    name: "net_udp_send_to".to_string(),
+                    parameter_types: vec![
+                        BoundaryType::U64,
+                        bytes.clone(),
+                        BoundaryType::U16,
+                        bytes,
+                    ],
+                    return_type: BoundaryType::Bool,
+                },
+                ProviderFunctionSignature {
+                    name: "net_udp_close".to_string(),
+                    parameter_types: vec![BoundaryType::U64],
+                    return_type: BoundaryType::Bool,
+                },
+            ],
+        }],
+    }
+}
+
+pub fn std_http_provider_descriptor() -> ProviderDescriptor {
+    let bytes = BoundaryType::Array(Box::new(BoundaryType::U8));
+    let header = BoundaryType::Tuple(vec![bytes.clone(), bytes.clone()]);
+    let response = BoundaryType::Tuple(vec![
+        BoundaryType::I32,
+        BoundaryType::Array(Box::new(header)),
+        bytes.clone(),
+    ]);
+    ProviderDescriptor {
+        modules: vec![ProviderModuleDescriptor {
+            module_path: "std/http".to_string(),
+            schema_fingerprint: provider_schema_fingerprint(STD_HTTP_SOURCE),
+            boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
+            exports: vec![ProviderFunctionSignature {
+                name: "http_request".to_string(),
+                parameter_types: vec![
+                    bytes.clone(),
+                    bytes.clone(),
+                    BoundaryType::Array(Box::new(BoundaryType::Tuple(vec![
+                        bytes.clone(),
+                        bytes.clone(),
+                    ]))),
+                    BoundaryType::Nullable(Box::new(bytes)),
+                ],
+                return_type: BoundaryType::Nullable(Box::new(response)),
+            }],
+        }],
+    }
+}
+
+pub fn std_websocket_provider_descriptor() -> ProviderDescriptor {
+    let bytes = BoundaryType::Array(Box::new(BoundaryType::U8));
+    ProviderDescriptor {
+        modules: vec![ProviderModuleDescriptor {
+            module_path: "std/websocket".to_string(),
+            schema_fingerprint: provider_schema_fingerprint(STD_WEBSOCKET_SOURCE),
+            boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
+            exports: vec![
+                ProviderFunctionSignature {
+                    name: "websocket_connect".to_string(),
+                    parameter_types: vec![bytes.clone()],
+                    return_type: BoundaryType::Nullable(Box::new(BoundaryType::U64)),
+                },
+                ProviderFunctionSignature {
+                    name: "websocket_receive".to_string(),
+                    parameter_types: vec![BoundaryType::U64],
+                    return_type: BoundaryType::Nullable(Box::new(bytes.clone())),
+                },
+                ProviderFunctionSignature {
+                    name: "websocket_send".to_string(),
+                    parameter_types: vec![BoundaryType::U64, bytes],
+                    return_type: BoundaryType::Bool,
+                },
+                ProviderFunctionSignature {
+                    name: "websocket_close".to_string(),
+                    parameter_types: vec![BoundaryType::U64],
+                    return_type: BoundaryType::Bool,
                 },
             ],
         }],

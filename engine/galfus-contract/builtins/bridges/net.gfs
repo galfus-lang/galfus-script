@@ -1,0 +1,19 @@
+fn(async) __provider_net_tcp_connect(host: [u8], port: u16): u64 | null
+fn(async) __provider_net_tcp_read(socket: u64, max_bytes: u32): [u8] | null
+fn(async) __provider_net_tcp_write(socket: u64, data: [u8]): bool
+fn(async) __provider_net_tcp_close(socket: u64): bool
+
+fn(async) __provider_net_udp_bind(host: [u8], port: u16): u64 | null
+fn(async) __provider_net_udp_receive(socket: u64, max_bytes: u32): ([u8], [u8], u16) | null
+fn(async) __provider_net_udp_send_to(socket: u64, host: [u8], port: u16, data: [u8]): bool
+fn(async) __provider_net_udp_close(socket: u64): bool
+
+export fn tcpConnect(host: [u8], port: u16): u64 | null => await __provider_net_tcp_connect(host, port)
+export fn tcpRead(socket: u64, maxBytes: u32): [u8] | null => await __provider_net_tcp_read(socket, maxBytes)
+export fn tcpWrite(socket: u64, data: [u8]): bool => await __provider_net_tcp_write(socket, data)
+export fn tcpClose(socket: u64): bool => await __provider_net_tcp_close(socket)
+
+export fn udpBind(host: [u8], port: u16): u64 | null => await __provider_net_udp_bind(host, port)
+export fn udpReceive(socket: u64, maxBytes: u32): ([u8], [u8], u16) | null => await __provider_net_udp_receive(socket, maxBytes)
+export fn udpSendTo(socket: u64, host: [u8], port: u16, data: [u8]): bool => await __provider_net_udp_send_to(socket, host, port, data)
+export fn udpClose(socket: u64): bool => await __provider_net_udp_close(socket)

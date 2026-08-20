@@ -6,7 +6,7 @@ pub mod driver;
 pub mod providers;
 
 use galfus_bytecode::PackageImage;
-use galfus_contract::{AdapterBindings, ExecutionFailure, Providers};
+use galfus_contract::{AdapterBindings, CapabilityCatalog, ExecutionFailure, Providers};
 use galfus_runtime::driver::ExecutionDriver;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
@@ -18,6 +18,24 @@ use galfus_runtime::Execution;
 use galfus_runtime::Runtime;
 use std::cell::RefCell;
 use wasm_bindgen_futures::JsFuture;
+
+pub fn web_catalog() -> CapabilityCatalog {
+    let providers = [
+        ("std/io", galfus_contract::builtins::STD_IO_SOURCE),
+        ("std/env", galfus_contract::builtins::STD_ENV_SOURCE),
+        ("std/time", galfus_contract::builtins::STD_TIME_SOURCE),
+        ("std/http", galfus_contract::builtins::STD_HTTP_SOURCE),
+        (
+            "std/websocket",
+            galfus_contract::builtins::STD_WEBSOCKET_SOURCE,
+        ),
+    ]
+    .into_iter()
+    .map(|(name, source)| galfus_contract::BridgeModule::new(name, source))
+    .collect();
+
+    CapabilityCatalog::new(providers, Vec::new()).expect("the web provider catalog is valid")
+}
 
 thread_local! {
     static CURRENT_EXECUTION: RefCell<Option<Rc<RefCell<Execution>>>> = const { RefCell::new(None) };
@@ -187,7 +205,12 @@ pub async fn start(options: GalfusWebOptions) -> Result<JsValue, JsValue> {
                 stdout_stream,
             )),
         )
-        .with_host("time", Box::new(providers::time::WebTimeProvider::new()));
+        .with_host("time", Box::new(providers::time::WebTimeProvider::new()))
+        .with_host("http", Box::new(providers::http::WebHttpProvider::new()))
+        .with_host(
+            "websocket",
+            Box::new(providers::websocket::WebWebSocketProvider::new()),
+        );
     let adapters = AdapterBindings::default();
 
     #[cfg(feature = "multi_thread")]
