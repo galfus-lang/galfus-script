@@ -120,37 +120,6 @@ pub fn validate_bytecode_module(
     }
 
     // 3. Helper to determine max fields in any aggregate value.
-    let max_struct_fields = module
-        .struct_layouts
-        .iter()
-        .map(|l| l.fields.len())
-        .max()
-        .unwrap_or(0);
-    let max_choice_payloads = module
-        .choice_layouts
-        .iter()
-        .map(|l| {
-            l.variants
-                .iter()
-                .map(|v| if v.payload_ty.is_some() { 1 } else { 0 })
-                .max()
-                .unwrap_or(0)
-        })
-        .max()
-        .unwrap_or(0);
-    let max_tuple_fields = module
-        .types
-        .iter()
-        .filter_map(|ty| match ty {
-            BytecodeType::Tuple(elements) => Some(elements.len()),
-            _ => None,
-        })
-        .max()
-        .unwrap_or(0);
-    let max_fields = max_struct_fields
-        .max(max_choice_payloads)
-        .max(max_tuple_fields);
-
     // 4. Validate instructions of each function
     for func in &module.functions {
         let max_regs = func.param_count as u16 + func.local_count + func.temp_count;
@@ -375,7 +344,11 @@ pub fn validate_bytecode_module(
                         }
                     }
                 }
-                Instruction::LoadField { dest, obj, field: _ } => {
+                Instruction::LoadField {
+                    dest,
+                    obj,
+                    field: _,
+                } => {
                     check_reg(dest, &mut errors);
                     check_reg(obj, &mut errors);
                 }

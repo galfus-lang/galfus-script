@@ -30,9 +30,7 @@ impl<'a> DeclarationTypeChecker<'a> {
                     self.check_integer_binary_operator(operator, left_type, right_type)?
                 }
                 "<<" | ">>" => self.check_shift_operator(operator, left_type, right_type)?,
-                "??" => {
-                    self.check_null_coalescing_operator(operator, left_type, right_type)?
-                }
+                "??" => self.check_null_coalescing_operator(operator, left_type, right_type)?,
                 _ => {
                     self.report_unsupported_operator(operator, operator_text.as_str());
                     self.layer.table_mut().error()
@@ -247,7 +245,10 @@ impl<'a> DeclarationTypeChecker<'a> {
 
         let mut members = Vec::new();
 
-        if let Some(TypeKind::Union { members: left_members }) = self.layer.table().kind(left).cloned() {
+        if let Some(TypeKind::Union {
+            members: left_members,
+        }) = self.layer.table().kind(left).cloned()
+        {
             for member in left_members {
                 if !self.is_null_type(member) {
                     members.push(member);
@@ -257,7 +258,10 @@ impl<'a> DeclarationTypeChecker<'a> {
             members.push(left);
         }
 
-        if let Some(TypeKind::Union { members: right_members }) = self.layer.table().kind(right).cloned() {
+        if let Some(TypeKind::Union {
+            members: right_members,
+        }) = self.layer.table().kind(right).cloned()
+        {
             for member in right_members {
                 members.push(member);
             }
