@@ -365,27 +365,27 @@ pub fn validate_bytecode_module(
                 Instruction::LoadField { dest, obj, field } => {
                     check_reg(dest, &mut errors);
                     check_reg(obj, &mut errors);
-                    if let Some(max) = max_field_count {
-                        if field.raw() as usize >= max {
-                            errors.push(BytecodeValidationError::FieldOutOfBounds {
-                                func_name: func_name.clone(),
-                                instr_idx,
-                                field_idx: field,
-                            });
-                        }
+                    if let Some(max) = max_field_count
+                        && field.raw() as usize >= max
+                    {
+                        errors.push(BytecodeValidationError::FieldOutOfBounds {
+                            func_name: func_name.clone(),
+                            instr_idx,
+                            field_idx: field,
+                        });
                     }
                 }
                 Instruction::StoreField { obj, field, val } => {
                     check_reg(obj, &mut errors);
                     check_reg(val, &mut errors);
-                    if let Some(max) = max_field_count {
-                        if field.raw() as usize >= max {
-                            errors.push(BytecodeValidationError::FieldOutOfBounds {
-                                func_name: func_name.clone(),
-                                instr_idx,
-                                field_idx: field,
-                            });
-                        }
+                    if let Some(max) = max_field_count
+                        && field.raw() as usize >= max
+                    {
+                        errors.push(BytecodeValidationError::FieldOutOfBounds {
+                            func_name: func_name.clone(),
+                            instr_idx,
+                            field_idx: field,
+                        });
                     }
                 }
                 Instruction::NewArray {
