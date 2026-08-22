@@ -52,11 +52,10 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
                 return val;
             }
             let preds = self.preds.get(&block).cloned().unwrap_or_default();
-            let val;
-            if preds.is_empty() {
-                val = variable;
+            let val = if preds.is_empty() {
+                variable
             } else if preds.len() == 1 {
-                val = self.read_variable(preds[0], variable);
+                self.read_variable(preds[0], variable)
             } else {
                 let phi_decl = self
                     .new_locals
@@ -81,8 +80,8 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
                     ops.push((pred, variable));
                 }
                 self.phi_operands.insert(phi_id, ops);
-                val = phi_id;
-            }
+                phi_id
+            };
             self.write_variable(block, variable, val);
             val
         }
