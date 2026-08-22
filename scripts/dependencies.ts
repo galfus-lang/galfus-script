@@ -20,7 +20,7 @@ export async function checkCrateDependencies(): Promise<void> {
   const cargo = Bun.spawn(
     ["cargo", "metadata", "--format-version", "1", "--no-deps"],
     {
-      cwd: join(import.meta.dir, "..", ".."),
+      cwd: join(import.meta.dir, ".."),
       stdout: "pipe",
       stderr: "inherit",
     },

@@ -119,7 +119,25 @@ pub fn validate_bytecode_module(
         }
     }
 
-    // 3. Helper to determine max fields in any aggregate value.
+    // 3. Compute the maximum number of fields across all aggregate types in the module.
+    // LoadField / StoreField carry a FieldIdx but no type index. The FieldIdx is used to
+    // index into struct fields and tuple elements at runtime; for Choice objects the runtime
+    // ignores it and reads the payload directly. We can only detect indices that are
+    // definitively out-of-bounds for every possible aggregate (i.e. exceed the largest
+    // struct and the largest tuple in the module). When no structs or tuples exist the
+    // bound cannot be statically determined, so the check is skipped (None).
+    let max_field_count: Option<usize> = {
+        let from_structs = module.struct_layouts.iter().map(|l| l.fields.len());
+        let from_tuples = module.types.iter().filter_map(|t| {
+            if let BytecodeType::Tuple(elems) = t {
+                Some(elems.len())
+            } else {
+                None
+            }
+        });
+        from_structs.chain(from_tuples).max()
+    };
+
     // 4. Validate instructions of each function
     for func in &module.functions {
         let max_regs = func.param_count as u16 + func.local_count + func.temp_count;
@@ -344,17 +362,31 @@ pub fn validate_bytecode_module(
                         }
                     }
                 }
-                Instruction::LoadField {
-                    dest,
-                    obj,
-                    field: _,
-                } => {
+                Instruction::LoadField { dest, obj, field } => {
                     check_reg(dest, &mut errors);
                     check_reg(obj, &mut errors);
+                    if let Some(max) = max_field_count
+                        && field.raw() as usize >= max
+                    {
+                        errors.push(BytecodeValidationError::FieldOutOfBounds {
+                            func_name: func_name.clone(),
+                            instr_idx,
+                            field_idx: field,
+                        });
+                    }
                 }
-                Instruction::StoreField { obj, field: _, val } => {
+                Instruction::StoreField { obj, field, val } => {
                     check_reg(obj, &mut errors);
                     check_reg(val, &mut errors);
+                    if let Some(max) = max_field_count
+                        && field.raw() as usize >= max
+                    {
+                        errors.push(BytecodeValidationError::FieldOutOfBounds {
+                            func_name: func_name.clone(),
+                            instr_idx,
+                            field_idx: field,
+                        });
+                    }
                 }
                 Instruction::NewArray {
                     dest,

@@ -1,7 +1,7 @@
 import { join } from "path";
 import { mkdir, copyFile } from "fs/promises";
 
-const repositoryRoot = join(import.meta.dir, "..", "..", "..");
+const repositoryRoot = join(import.meta.dir, "..", "..");
 
 const ALIAS_TO_TARGET: Record<string, string> = {
   "linux-x64": "x86_64-unknown-linux-gnu",
