@@ -2,7 +2,7 @@ import { spawn } from "child_process";
 import { join } from "path";
 
 export async function devVscode() {
-  const rootDir = join(import.meta.dir, "..", "..", "..");
+  const rootDir = join(import.meta.dir, "..", "..");
 
   console.log("Building Galfus CLI locally...");
   const build = spawn("cargo", ["build", "-p", "galfus-cli"], {

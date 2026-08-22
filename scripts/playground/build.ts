@@ -1,6 +1,6 @@
 import { join, resolve } from "path";
 
-const repositoryRoot = join(import.meta.dir, "..", "..", "..");
+const repositoryRoot = join(import.meta.dir, "..", "..");
 const wasmBindgenVersion = "0.2.122";
 
 type BuildPlaygroundOptions = {

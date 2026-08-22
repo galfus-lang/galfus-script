@@ -37,14 +37,7 @@ export async function setupExtension(
     });
   }
 
-  const sourceDir = join(
-    import.meta.dir,
-    "..",
-    "..",
-    "..",
-    "editors",
-    "vscode",
-  );
+  const sourceDir = join(import.meta.dir, "..", "..", "editors", "vscode");
 
   let installedCount = 0;
 

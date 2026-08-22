@@ -1,7 +1,7 @@
 import { join } from "path";
 import { readFile, writeFile } from "fs/promises";
 
-const repositoryRoot = join(import.meta.dir, "..", "..", "..");
+const repositoryRoot = join(import.meta.dir, "..", "..");
 
 type SetVersionOptions = {
   component?: string;
