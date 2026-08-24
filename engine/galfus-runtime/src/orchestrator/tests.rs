@@ -171,8 +171,8 @@ pub(super) fn race_winner_uses_event_sequence_then_member_index() {
                 operation: PendingOperation::Future,
                 active: Arc::new(AtomicBool::new(true)),
             },
-            results: vec![None, None, None],
-            remaining_results: 3,
+            results: None,
+            remaining_results: 0,
             winner: None,
             armed: false,
         },
@@ -214,7 +214,7 @@ pub(super) fn all_results_preserve_member_order_when_completions_arrive_out_of_o
                 operation: PendingOperation::Future,
                 active: Arc::new(AtomicBool::new(true)),
             },
-            results: vec![None, None, None],
+            results: Some(vec![None, None, None]),
             remaining_results: 3,
             winner: None,
             armed: false,
@@ -227,11 +227,11 @@ pub(super) fn all_results_preserve_member_order_when_completions_arrive_out_of_o
 
     assert_eq!(
         orchestrator.aggregate_coordinators[&coordinator_id].results,
-        vec![
+        Some(vec![
             Some(Ok(BoundaryValue::I32(1))),
             Some(Ok(BoundaryValue::I32(2))),
             Some(Ok(BoundaryValue::I32(3))),
-        ]
+        ])
     );
 }
 

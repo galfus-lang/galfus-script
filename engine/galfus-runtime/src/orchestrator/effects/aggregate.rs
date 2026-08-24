@@ -41,8 +41,9 @@ impl Orchestrator {
                     operation: PendingOperation::Future,
                     active: Arc::new(AtomicBool::new(true)),
                 },
-                results: vec![None; future_ids.len()],
-                remaining_results: future_ids.len(),
+                results: matches!(mode, AggregateMode::All).then(|| vec![None; future_ids.len()]),
+                remaining_results: usize::from(matches!(mode, AggregateMode::All))
+                    * future_ids.len(),
                 winner: None,
                 armed: false,
             },
