@@ -6,6 +6,7 @@ use crate::{
     BytecodeFunction, BytecodeModule, ConstantPool, DebugLocation, ExportSlot, ImportSlot,
 };
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 fn compiled_module(id: ModuleId, revision: SemanticRevision) -> BytecodeNode {
     BytecodeNode {
@@ -76,6 +77,36 @@ fn apply_returns_a_new_validated_snapshot() {
     );
     assert_eq!(next.deps_of(main).collect::<Vec<_>>(), vec![utilities]);
     assert_eq!(next.dependents_of(utilities), vec![main]);
+}
+
+#[test]
+fn snapshots_share_unchanged_modules() {
+    let retained = ModuleId::new(1);
+    let added = ModuleId::new(2);
+    let graph = BytecodeGraph::new()
+        .apply(transaction(
+            &BytecodeGraph::new(),
+            SemanticRevision::new(1),
+            vec![compiled_module(retained, SemanticRevision::new(1))],
+            vec![],
+            vec![],
+        ))
+        .expect("initial transaction is valid");
+
+    let next = graph
+        .apply(transaction(
+            &graph,
+            SemanticRevision::new(2),
+            vec![compiled_module(added, SemanticRevision::new(2))],
+            vec![],
+            vec![],
+        ))
+        .expect("transaction is valid");
+
+    assert!(Arc::ptr_eq(
+        graph.modules.get(&retained).expect("retained module"),
+        next.modules.get(&retained).expect("retained module"),
+    ));
 }
 
 #[test]
@@ -392,7 +423,10 @@ fn validation_collects_all_errors_in_canonical_module_order() {
     let forward = BytecodeGraph {
         version: 0,
         format_version: CURRENT_BYTECODE_FORMAT_VERSION,
-        modules: BTreeMap::from([(first, first_node.clone()), (second, second_node.clone())]),
+        modules: BTreeMap::from([
+            (first, Arc::new(first_node.clone())),
+            (second, Arc::new(second_node.clone())),
+        ]),
         ids_by_path: BTreeMap::new(),
         edges: Vec::new(),
         dependencies: BTreeMap::new(),
@@ -402,7 +436,10 @@ fn validation_collects_all_errors_in_canonical_module_order() {
     let reverse = BytecodeGraph {
         version: 0,
         format_version: CURRENT_BYTECODE_FORMAT_VERSION,
-        modules: BTreeMap::from([(second, second_node), (first, first_node)]),
+        modules: BTreeMap::from([
+            (second, Arc::new(second_node)),
+            (first, Arc::new(first_node)),
+        ]),
         ids_by_path: BTreeMap::new(),
         edges: Vec::new(),
         dependencies: BTreeMap::new(),

@@ -227,7 +227,7 @@ pub struct BytecodeGraph {
     #[serde(skip)]
     version: u64,
     format_version: BytecodeFormatVersion,
-    pub(crate) modules: BTreeMap<ModuleId, BytecodeNode>,
+    pub(crate) modules: BTreeMap<ModuleId, std::sync::Arc<BytecodeNode>>,
     #[serde(skip)]
     pub(crate) ids_by_path: BTreeMap<ModulePath, ModuleId>,
     pub(crate) edges: Vec<ImportEdge>,
@@ -497,7 +497,7 @@ impl BytecodeGraph {
         for node in transaction.upserted_modules {
             let id = node.id;
             let path = node.path.clone();
-            if let Some(previous) = next.modules.insert(id, node) {
+            if let Some(previous) = next.modules.insert(id, std::sync::Arc::new(node)) {
                 next.ids_by_path.remove(&previous.path);
             }
             next.ids_by_path.insert(path, id);
@@ -576,12 +576,12 @@ impl BytecodeGraph {
     }
 
     pub fn get(&self, id: ModuleId) -> Option<&BytecodeNode> {
-        self.modules.get(&id)
+        self.modules.get(&id).map(std::sync::Arc::as_ref)
     }
 
     /// Iterate modules in canonical `ModuleId` order.
     pub fn modules(&self) -> impl Iterator<Item = &BytecodeNode> {
-        self.modules.values()
+        self.modules.values().map(std::sync::Arc::as_ref)
     }
 
     pub fn edges(&self) -> &[ImportEdge] {

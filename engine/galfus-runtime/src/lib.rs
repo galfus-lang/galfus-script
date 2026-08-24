@@ -159,7 +159,7 @@ impl Runtime {
         let entry = package
             .entry_point()
             .ok_or(RuntimeError::MissingPackageEntry)?;
-        let graph = sync::Arc::new(package.graph().clone());
+        let graph = package.graph_handle();
         let module_id = graph
             .modules()
             .find(|module| module.path() == entry.module_path())
