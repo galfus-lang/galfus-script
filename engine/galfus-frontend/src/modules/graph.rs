@@ -6,6 +6,7 @@ use crate::modules::resolution::resolve_relative_import;
 use crate::{ImportRecord, SyntaxNodeKind};
 use galfus_core::{ModuleId, ModulePath, NodeId, SemanticRevision};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SemanticRootKind {
@@ -115,7 +116,7 @@ impl SemanticImportEdge {
 #[derive(Debug, Clone, Default)]
 pub struct SemanticModuleGraph {
     roots: Vec<SemanticRoot>,
-    modules: HashMap<ModuleId, SemanticModule>,
+    modules: HashMap<ModuleId, Arc<SemanticModule>>,
     module_by_path: HashMap<ModulePath, ModuleId>,
     import_edges: Vec<SemanticImportEdge>,
     dependencies: BTreeMap<ModuleId, Box<[ModuleId]>>,
@@ -125,11 +126,11 @@ pub struct SemanticModuleGraph {
 impl SemanticModuleGraph {
     pub fn build(
         roots: &[SemanticRoot],
-        modules: &[SemanticModule],
+        modules: &[Arc<SemanticModule>],
         catalog: &galfus_contract::CapabilityCatalog,
     ) -> Self {
         let mut graph = Self::default();
-        let changed_modules = modules.iter().map(SemanticModule::id).collect();
+        let changed_modules = modules.iter().map(|module| module.id()).collect();
         graph.apply_delta(roots, modules, &changed_modules, &[], catalog);
 
         graph
@@ -138,7 +139,7 @@ impl SemanticModuleGraph {
     pub fn apply_delta(
         &mut self,
         roots: &[SemanticRoot],
-        modules: &[SemanticModule],
+        modules: &[Arc<SemanticModule>],
         changed_modules: &HashSet<ModuleId>,
         removed_modules: &[ModuleId],
         catalog: &galfus_contract::CapabilityCatalog,
@@ -215,13 +216,13 @@ impl SemanticModuleGraph {
     }
 
     pub fn get(&self, id: ModuleId) -> Option<&SemanticModule> {
-        self.modules.get(&id)
+        self.modules.get(&id).map(Arc::as_ref)
     }
 
     pub fn modules(&self) -> impl Iterator<Item = &SemanticModule> {
         let mut modules = self.modules.iter().collect::<Vec<_>>();
         modules.sort_by_key(|(id, _)| id.raw());
-        modules.into_iter().map(|(_, module)| module)
+        modules.into_iter().map(|(_, module)| module.as_ref())
     }
 
     pub fn semantic_revision(&self, id: ModuleId) -> Option<SemanticRevision> {
@@ -262,7 +263,7 @@ impl SemanticModuleGraph {
     fn add_import_edges_for(
         &mut self,
         module: &SemanticModule,
-        modules: &[SemanticModule],
+        modules: &[Arc<SemanticModule>],
         catalog: &galfus_contract::CapabilityCatalog,
     ) {
         let from = module.id();
@@ -350,7 +351,7 @@ impl SemanticModuleGraph {
         &self,
         import: &ImportRecord,
         to: Option<ModuleId>,
-        modules: &[SemanticModule],
+        modules: &[Arc<SemanticModule>],
     ) -> Option<String> {
         if import.kind() != ImportKind::Named {
             return None;
@@ -370,7 +371,7 @@ impl SemanticModuleGraph {
         module: &SemanticModule,
         import: &ImportRecord,
         to: Option<ModuleId>,
-        modules: &[SemanticModule],
+        modules: &[Arc<SemanticModule>],
     ) -> Vec<String> {
         if import.kind() != ImportKind::Namespace {
             return Vec::new();

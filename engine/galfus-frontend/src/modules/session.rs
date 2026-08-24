@@ -89,7 +89,7 @@ pub struct FrontendReport {
 
 #[derive(Default)]
 pub struct FrontendSession {
-    pub(super) modules: Vec<SemanticModule>,
+    pub(super) modules: Vec<Arc<SemanticModule>>,
     module_by_path: HashMap<ModulePath, usize>,
     reverse_imports: BTreeMap<ModuleId, Box<[ModuleId]>>,
     semantic_graph: SemanticModuleGraph,
@@ -178,7 +178,7 @@ impl FrontendSession {
         &self.semantic_graph
     }
 
-    pub fn modules(&self) -> &[SemanticModule] {
+    pub fn modules(&self) -> &[Arc<SemanticModule>] {
         &self.modules
     }
 
@@ -233,7 +233,7 @@ impl FrontendSession {
         &mut self,
         input: &FrontendSource<'_>,
         source_revision: Revision,
-    ) -> SemanticModule {
+    ) -> Arc<SemanticModule> {
         let parse_result = parse(input.source);
         let resolve_result = resolve(
             input.source,
@@ -243,7 +243,7 @@ impl FrontendSession {
         let graph = resolve_result.into_graph();
         self.next_semantic_revision += 1;
 
-        SemanticModule {
+        Arc::new(SemanticModule {
             id: input.module_id,
             source_id: input.source.id(),
             path: input.path.clone(),
@@ -253,7 +253,7 @@ impl FrontendSession {
             source: input.source.clone(),
             graph,
             type_result: None,
-        }
+        })
     }
 
     fn rebuild_module_index(&mut self) {
@@ -590,27 +590,28 @@ impl FrontendSession {
             if !changed_modules.contains(&self.modules[module_index].id()) {
                 continue;
             }
-            if self.modules[module_index].type_result.is_some() {
+            let module = Arc::make_mut(&mut self.modules[module_index]);
+            if module.type_result.is_some() {
                 self.next_semantic_revision += 1;
-                self.modules[module_index].semantic_revision =
+                module.semantic_revision =
                     galfus_core::SemanticRevision::new(self.next_semantic_revision);
             }
             let result = check_definition_types_with_surfaces(
-                self.modules[module_index].source(),
-                self.modules[module_index].graph(),
+                module.source(),
+                module.graph(),
                 previous_result,
                 imported_type,
                 &self.string_table,
                 catalog.is_provider_module(
-                    self.modules[module_index]
+                    module
                         .path()
                         .as_str()
                         .strip_suffix(".gfs")
-                        .unwrap_or(self.modules[module_index].path().as_str()),
+                        .unwrap_or(module.path().as_str()),
                 ),
             );
 
-            self.modules[module_index].type_result = Some(result);
+            module.type_result = Some(result);
         }
     }
 
