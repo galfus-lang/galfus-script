@@ -446,16 +446,12 @@ impl Workspace {
             .collect();
         while let Some(id) = queue.pop() {
             if reachable_modules.insert(id) {
-                for edge in semantic_graph.import_edges() {
-                    if edge.from() == id {
-                        let to = edge
-                            .to()
-                            .or_else(|| path_to_id.get(edge.target_path()).copied());
-                        if let Some(to) = to {
-                            queue.push(to);
-                        }
-                    }
-                }
+                queue.extend(semantic_graph.dependencies_of(id));
+                queue.extend(
+                    semantic_graph
+                        .unresolved_dependency_paths_of(id)
+                        .filter_map(|path| path_to_id.get(path).copied()),
+                );
             }
         }
 

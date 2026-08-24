@@ -5,7 +5,7 @@ use crate::modules::module::SemanticModule;
 use crate::modules::resolution::resolve_relative_import;
 use crate::{ImportRecord, SyntaxNodeKind};
 use galfus_core::{ModuleId, ModulePath, NodeId, SemanticRevision};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SemanticRootKind {
@@ -118,6 +118,8 @@ pub struct SemanticModuleGraph {
     modules: HashMap<ModuleId, SemanticModule>,
     module_by_path: HashMap<ModulePath, ModuleId>,
     import_edges: Vec<SemanticImportEdge>,
+    dependencies: BTreeMap<ModuleId, Box<[ModuleId]>>,
+    unresolved_dependency_paths: BTreeMap<ModuleId, Box<[ModulePath]>>,
 }
 
 impl SemanticModuleGraph {
@@ -180,6 +182,7 @@ impl SemanticModuleGraph {
             self.add_import_edges_for(module, modules, catalog);
             self.add_implicit_import_edges_for(module);
         }
+        self.rebuild_dependency_index();
     }
 
     pub fn roots(&self) -> &[SemanticRoot] {
@@ -188,6 +191,23 @@ impl SemanticModuleGraph {
 
     pub fn import_edges(&self) -> &[SemanticImportEdge] {
         self.import_edges.as_slice()
+    }
+
+    pub fn dependencies_of(&self, id: ModuleId) -> impl Iterator<Item = ModuleId> + '_ {
+        self.dependencies
+            .get(&id)
+            .into_iter()
+            .flat_map(|dependencies| dependencies.iter().copied())
+    }
+
+    pub fn unresolved_dependency_paths_of(
+        &self,
+        id: ModuleId,
+    ) -> impl Iterator<Item = &ModulePath> + '_ {
+        self.unresolved_dependency_paths
+            .get(&id)
+            .into_iter()
+            .flat_map(|paths| paths.iter())
     }
 
     pub fn module_by_path(&self, path: &ModulePath) -> Option<ModuleId> {
@@ -206,6 +226,37 @@ impl SemanticModuleGraph {
 
     pub fn semantic_revision(&self, id: ModuleId) -> Option<SemanticRevision> {
         self.get(id).map(SemanticModule::semantic_revision)
+    }
+
+    fn rebuild_dependency_index(&mut self) {
+        let mut dependencies = BTreeMap::<ModuleId, Vec<ModuleId>>::new();
+        let mut unresolved_paths = BTreeMap::<ModuleId, Vec<ModulePath>>::new();
+        for edge in &self.import_edges {
+            let Some(to) = edge.to else {
+                unresolved_paths
+                    .entry(edge.from)
+                    .or_default()
+                    .push(edge.target_path.clone());
+                continue;
+            };
+            dependencies.entry(edge.from).or_default().push(to);
+        }
+        self.dependencies = dependencies
+            .into_iter()
+            .map(|(id, mut dependencies)| {
+                dependencies.sort_by_key(|dependency| dependency.raw());
+                dependencies.dedup();
+                (id, dependencies.into_boxed_slice())
+            })
+            .collect();
+        self.unresolved_dependency_paths = unresolved_paths
+            .into_iter()
+            .map(|(id, mut paths)| {
+                paths.sort();
+                paths.dedup();
+                (id, paths.into_boxed_slice())
+            })
+            .collect();
     }
 
     fn add_import_edges_for(

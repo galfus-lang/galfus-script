@@ -231,6 +231,12 @@ pub struct BytecodeGraph {
     #[serde(skip)]
     pub(crate) ids_by_path: BTreeMap<ModulePath, ModuleId>,
     pub(crate) edges: Vec<ImportEdge>,
+    #[serde(skip)]
+    pub(crate) dependencies: BTreeMap<ModuleId, Box<[ModuleId]>>,
+    #[serde(skip)]
+    pub(crate) dependents: BTreeMap<ModuleId, Box<[ModuleId]>>,
+    #[serde(skip)]
+    pub(crate) export_indexes: BTreeMap<ModuleId, BTreeMap<String, usize>>,
 }
 
 impl BytecodeGraph {
@@ -244,7 +250,38 @@ impl BytecodeGraph {
             .collect();
         self.edges
             .sort_by_key(|edge| (edge.from.raw(), edge.to.raw()));
+        self.dependencies = Self::adjacency_index(&self.edges, |edge| (edge.from, edge.to));
+        self.dependents = Self::adjacency_index(&self.edges, |edge| (edge.to, edge.from));
+        self.export_indexes = self
+            .modules
+            .iter()
+            .map(|(id, node)| {
+                let exports = node
+                    .module
+                    .exports
+                    .iter()
+                    .enumerate()
+                    .map(|(index, export)| (export.symbol_name.clone(), index))
+                    .collect();
+                (*id, exports)
+            })
+            .collect();
         self.validate()
+    }
+
+    fn adjacency_index(
+        edges: &[ImportEdge],
+        endpoints: impl Fn(&ImportEdge) -> (ModuleId, ModuleId),
+    ) -> BTreeMap<ModuleId, Box<[ModuleId]>> {
+        let mut index = BTreeMap::<ModuleId, Vec<ModuleId>>::new();
+        for edge in edges {
+            let (from, to) = endpoints(edge);
+            index.entry(from).or_default().push(to);
+        }
+        index
+            .into_iter()
+            .map(|(id, modules)| (id, modules.into_boxed_slice()))
+            .collect()
     }
 
     pub fn new() -> Self {
@@ -468,7 +505,7 @@ impl BytecodeGraph {
         next.edges = transaction.edges;
         next.edges
             .sort_by_key(|edge| (edge.from.raw(), edge.to.raw()));
-        next.validate()?;
+        next.rebuild_transient_indexes()?;
         next.version += 1;
         Ok(next)
     }
@@ -552,10 +589,10 @@ impl BytecodeGraph {
     }
 
     pub fn deps_of(&self, id: ModuleId) -> impl Iterator<Item = ModuleId> + '_ {
-        self.edges
-            .iter()
-            .filter(move |edge| edge.from == id)
-            .map(|edge| edge.to)
+        self.dependencies
+            .get(&id)
+            .into_iter()
+            .flat_map(|dependencies| dependencies.iter().copied())
     }
 
     pub fn dependents_of(&self, id: ModuleId) -> Vec<ModuleId> {
@@ -571,10 +608,15 @@ impl BytecodeGraph {
         out: &mut Vec<ModuleId>,
         visited: &mut HashSet<ModuleId>,
     ) {
-        for edge in &self.edges {
-            if edge.to == id && visited.insert(edge.from) {
-                out.push(edge.from);
-                self.collect_dependents(edge.from, out, visited);
+        for dependent in self
+            .dependents
+            .get(&id)
+            .into_iter()
+            .flat_map(|dependents| dependents.iter().copied())
+        {
+            if visited.insert(dependent) {
+                out.push(dependent);
+                self.collect_dependents(dependent, out, visited);
             }
         }
     }
@@ -596,6 +638,9 @@ impl Default for BytecodeGraph {
             modules: BTreeMap::new(),
             ids_by_path: BTreeMap::new(),
             edges: Vec::new(),
+            dependencies: BTreeMap::new(),
+            dependents: BTreeMap::new(),
+            export_indexes: BTreeMap::new(),
         }
     }
 }

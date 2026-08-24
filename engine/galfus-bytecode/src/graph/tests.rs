@@ -395,6 +395,9 @@ fn validation_collects_all_errors_in_canonical_module_order() {
         modules: BTreeMap::from([(first, first_node.clone()), (second, second_node.clone())]),
         ids_by_path: BTreeMap::new(),
         edges: Vec::new(),
+        dependencies: BTreeMap::new(),
+        dependents: BTreeMap::new(),
+        export_indexes: BTreeMap::new(),
     };
     let reverse = BytecodeGraph {
         version: 0,
@@ -402,6 +405,9 @@ fn validation_collects_all_errors_in_canonical_module_order() {
         modules: BTreeMap::from([(second, second_node), (first, first_node)]),
         ids_by_path: BTreeMap::new(),
         edges: Vec::new(),
+        dependencies: BTreeMap::new(),
+        dependents: BTreeMap::new(),
+        export_indexes: BTreeMap::new(),
     };
 
     let forward_errors = forward.validate().expect_err("graph must be invalid");
