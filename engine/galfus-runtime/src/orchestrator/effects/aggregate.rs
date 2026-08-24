@@ -42,6 +42,7 @@ impl Orchestrator {
                     active: Arc::new(AtomicBool::new(true)),
                 },
                 results: vec![None; future_ids.len()],
+                remaining_results: future_ids.len(),
                 winner: None,
                 armed: false,
             },

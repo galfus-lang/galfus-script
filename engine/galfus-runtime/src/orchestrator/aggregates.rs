@@ -14,6 +14,7 @@ pub(crate) struct AggregateCoordinator {
     pub(crate) future_ids: Vec<galfus_core::FutureId>,
     pub(crate) pending: PendingContinuation,
     pub(crate) results: Vec<Option<Result<BoundaryValue, ExecutionFailure>>>,
+    pub(crate) remaining_results: usize,
     pub(crate) winner: Option<(
         EventSequence,
         usize,
@@ -36,6 +37,7 @@ impl Orchestrator {
             return;
         }
         coordinator.results[index] = Some(result.clone());
+        coordinator.remaining_results -= 1;
         if matches!(coordinator.mode, AggregateMode::Race) {
             let sequence = self
                 .active_event_sequence
@@ -62,7 +64,7 @@ impl Orchestrator {
             return;
         };
         let result = match coordinator.mode {
-            AggregateMode::All if coordinator.results.iter().all(Option::is_some) => {
+            AggregateMode::All if coordinator.remaining_results == 0 => {
                 let values = coordinator
                     .results
                     .iter()

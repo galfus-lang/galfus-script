@@ -7,34 +7,44 @@ use galfus_core::TimerId;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 pub struct RunnableQueue {
-    queue: VecDeque<(ThreadId, bool)>,
-    queued: HashSet<ThreadId>,
+    queue: VecDeque<(ThreadId, u64, bool)>,
+    queued: HashMap<ThreadId, u64>,
+    next_token: u64,
 }
 
 impl RunnableQueue {
     pub fn new() -> Self {
         Self {
             queue: VecDeque::new(),
-            queued: HashSet::new(),
+            queued: HashMap::new(),
+            next_token: 0,
         }
     }
 
     pub fn enqueue(&mut self, id: ThreadId) {
-        if self.queued.insert(id) {
-            self.queue.push_back((id, false));
+        if !self.queued.contains_key(&id) {
+            self.next_token = self.next_token.wrapping_add(1);
+            self.queued.insert(id, self.next_token);
+            self.queue.push_back((id, self.next_token, false));
         }
     }
 
     pub fn enqueue_front(&mut self, id: ThreadId) {
-        if self.queued.insert(id) {
-            self.queue.push_front((id, true));
+        if !self.queued.contains_key(&id) {
+            self.next_token = self.next_token.wrapping_add(1);
+            self.queued.insert(id, self.next_token);
+            self.queue.push_front((id, self.next_token, true));
         }
     }
 
     pub fn dequeue_detailed(&mut self) -> Option<(ThreadId, bool)> {
-        let entry = self.queue.pop_front()?;
-        self.queued.remove(&entry.0);
-        Some(entry)
+        while let Some((id, token, front)) = self.queue.pop_front() {
+            if self.queued.get(&id) == Some(&token) {
+                self.queued.remove(&id);
+                return Some((id, front));
+            }
+        }
+        None
     }
 
     pub fn dequeue(&mut self) -> Option<ThreadId> {
@@ -42,22 +52,19 @@ impl RunnableQueue {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.queue.is_empty()
+        self.queued.is_empty()
     }
 
     pub fn len(&self) -> usize {
-        self.queue.len()
+        self.queued.len()
     }
 
     pub fn contains(&self, id: ThreadId) -> bool {
-        self.queued.contains(&id)
+        self.queued.contains_key(&id)
     }
 
     pub fn remove(&mut self, id: ThreadId) -> bool {
-        let initial_len = self.queue.len();
-        self.queue.retain(|(queued, _)| *queued != id);
-        self.queued.remove(&id);
-        initial_len != self.queue.len()
+        self.queued.remove(&id).is_some()
     }
 }
 
@@ -70,7 +77,7 @@ impl Default for RunnableQueue {
 pub struct BlockedQueue {
     blocked: HashSet<ThreadId>,
     clock_ms: u64,
-    timer_id_manager: galfus_core::id_manager::IdManager<TimerId>,
+    timer_id_manager: galfus_core::id_manager::LocalIdManager<TimerId>,
     timers: BTreeSet<TimerEntry>,
     active_timers: HashMap<ThreadId, TimerEntry>,
 }
@@ -87,7 +94,7 @@ impl BlockedQueue {
         Self {
             blocked: HashSet::new(),
             clock_ms: 0,
-            timer_id_manager: galfus_core::id_manager::IdManager::new(1),
+            timer_id_manager: galfus_core::id_manager::LocalIdManager::new(1),
             timers: BTreeSet::new(),
             active_timers: HashMap::new(),
         }

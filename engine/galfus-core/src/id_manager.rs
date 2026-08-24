@@ -20,6 +20,12 @@ pub struct IdManager<T> {
     _phantom: PhantomData<T>,
 }
 
+/// An ID generator and recycler for exclusively owned state.
+pub struct LocalIdManager<T> {
+    state: IdManagerState,
+    _phantom: PhantomData<T>,
+}
+
 impl<T: RawId> IdManager<T> {
     /// Creates a new IdManager starting at the given ID.
     pub fn new(start_id: u32) -> Self {
@@ -64,7 +70,57 @@ impl<T: RawId> IdManager<T> {
     }
 }
 
+impl<T: RawId> LocalIdManager<T> {
+    /// Creates a new LocalIdManager starting at the given ID.
+    pub fn new(start_id: u32) -> Self {
+        Self {
+            state: IdManagerState {
+                next_id: Some(start_id),
+                free_list: Vec::new(),
+                active_ids: HashSet::new(),
+            },
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Attempts to allocate a new ID, returning None if exhausted.
+    pub fn try_allocate(&mut self) -> Option<T> {
+        if let Some(id) = self.state.free_list.pop() {
+            self.state.active_ids.insert(id);
+            Some(T::new(id))
+        } else if let Some(id) = self.state.next_id {
+            self.state.next_id = id.checked_add(1);
+            self.state.active_ids.insert(id);
+            Some(T::new(id))
+        } else {
+            None
+        }
+    }
+
+    /// Frees an ID so it can be re-allocated. Ignores duplicates.
+    pub fn free(&mut self, id: T) {
+        let raw = id.raw();
+        if self.state.active_ids.remove(&raw) {
+            self.state.free_list.push(raw);
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn set_next_id_for_test(&mut self, next_id: u32) {
+        self.state.next_id = Some(next_id);
+    }
+}
+
 impl<T> Default for IdManager<T>
+where
+    T: RawId,
+{
+    fn default() -> Self {
+        Self::new(0)
+    }
+}
+
+impl<T> Default for LocalIdManager<T>
 where
     T: RawId,
 {
