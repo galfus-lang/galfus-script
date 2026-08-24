@@ -239,6 +239,7 @@ pub struct VirtualMachine {
         galfus_core::ModuleId,
         *const galfus_bytecode::BytecodeModule,
     )>,
+    uint8_type_indexes: Vec<(galfus_core::ModuleId, Option<TypeIdx>)>,
 }
 
 impl VirtualMachine {
@@ -375,14 +376,26 @@ impl VirtualMachine {
 
     pub fn new(graph: Arc<BytecodeGraph>) -> Self {
         let mut fast_modules = Vec::new();
+        let mut uint8_type_indexes = Vec::new();
         for module in graph.modules() {
             fast_modules.push((module.id, &module.module as *const _));
+            uint8_type_indexes.push((
+                module.id,
+                module
+                    .module
+                    .types
+                    .iter()
+                    .position(|ty| matches!(ty, BytecodeType::Uint8))
+                    .map(|idx| TypeIdx(idx as u16)),
+            ));
         }
         fast_modules.sort_unstable_by_key(|&(id, _)| id);
+        uint8_type_indexes.sort_unstable_by_key(|&(id, _)| id);
         Self {
             graph,
             context: VmContext::new(None),
             fast_modules,
+            uint8_type_indexes,
         }
     }
 

@@ -10,6 +10,16 @@ use galfus_vm::VirtualMachine;
 
 use std::sync::Arc;
 
+fn type_mismatch<T: std::fmt::Debug>(
+    expected: &galfus_bytecode::BytecodeType,
+    found: &T,
+) -> galfus_contract::BoundaryCodecError {
+    galfus_contract::BoundaryCodecError::TypeMismatch {
+        expected: format!("{expected:?}"),
+        found: format!("{found:?}"),
+    }
+}
+
 pub(crate) fn decode_from_thread_heap(
     heap: &galfus_vm::thread::PrivateHeap,
     value: galfus_vm::VmValue,
@@ -23,11 +33,6 @@ pub(crate) fn decode_from_thread_heap(
         .types
         .get(expected.raw() as usize)
         .ok_or(BoundaryCodecError::UnsupportedType)?;
-    let found = format!("{value:?}");
-    let mismatch = || BoundaryCodecError::TypeMismatch {
-        expected: format!("{expected_type:?}"),
-        found: found.clone(),
-    };
     match (expected_type, value) {
         (BytecodeType::Null, galfus_vm::VmValue::Null) => Ok(BoundaryValue::Null),
         (BytecodeType::Bool, galfus_vm::VmValue::Bool(value)) => Ok(BoundaryValue::Bool(value)),
@@ -66,7 +71,10 @@ pub(crate) fn decode_from_thread_heap(
                     binding_id: Some(*binding_id),
                     id: *id,
                 }),
-                _ => Err(mismatch()),
+                _ => Err(type_mismatch(
+                    expected_type,
+                    &galfus_vm::VmValue::Object(reference),
+                )),
             }
         }
         (BytecodeType::Array(element_type), galfus_vm::VmValue::Object(reference)) => {
@@ -74,7 +82,10 @@ pub(crate) fn decode_from_thread_heap(
                 .get_object(reference)
                 .map_err(|_| BoundaryCodecError::UnsupportedType)?
             else {
-                return Err(mismatch());
+                return Err(type_mismatch(
+                    expected_type,
+                    &galfus_vm::VmValue::Object(reference),
+                ));
             };
             if let Some(BytecodeType::Uint8) = module.types.get(element_type.raw() as usize) {
                 let bytes: Result<Vec<u8>, _> = elements
@@ -83,7 +94,10 @@ pub(crate) fn decode_from_thread_heap(
                         if let galfus_vm::VmValue::Uint8(b) = element {
                             Ok(*b)
                         } else {
-                            Err(mismatch())
+                            Err(type_mismatch(
+                                expected_type,
+                                &galfus_vm::VmValue::Object(reference),
+                            ))
                         }
                     })
                     .collect();
@@ -108,10 +122,16 @@ pub(crate) fn decode_from_thread_heap(
                 .get_object(reference)
                 .map_err(|_| BoundaryCodecError::UnsupportedType)?
             else {
-                return Err(mismatch());
+                return Err(type_mismatch(
+                    expected_type,
+                    &galfus_vm::VmValue::Object(reference),
+                ));
             };
             if elements.len() != element_types.len() {
-                return Err(mismatch());
+                return Err(type_mismatch(
+                    expected_type,
+                    &galfus_vm::VmValue::Object(reference),
+                ));
             }
             let values = elements
                 .iter()
@@ -131,10 +151,16 @@ pub(crate) fn decode_from_thread_heap(
                 .get_object(reference)
                 .map_err(|_| BoundaryCodecError::UnsupportedType)?
             else {
-                return Err(mismatch());
+                return Err(type_mismatch(
+                    expected_type,
+                    &galfus_vm::VmValue::Object(reference),
+                ));
             };
             if actual_layout != layout_idx {
-                return Err(mismatch());
+                return Err(type_mismatch(
+                    expected_type,
+                    &galfus_vm::VmValue::Object(reference),
+                ));
             }
             let variant = module
                 .choice_layouts
@@ -152,7 +178,7 @@ pub(crate) fn decode_from_thread_heap(
                 payload,
             })
         }
-        _ => Err(mismatch()),
+        (_, found) => Err(type_mismatch(expected_type, &found)),
     }
 }
 
@@ -170,11 +196,6 @@ pub(crate) fn encode_into_thread_heap(
         .types
         .get(expected.raw() as usize)
         .ok_or(BoundaryCodecError::UnsupportedType)?;
-    let found = format!("{value:?}");
-    let mismatch = || BoundaryCodecError::TypeMismatch {
-        expected: format!("{expected_type:?}"),
-        found: found.clone(),
-    };
     match (expected_type, value) {
         (BytecodeType::Null, BoundaryValue::Null) => Ok(galfus_vm::VmValue::Null),
         (BytecodeType::Bool, BoundaryValue::Bool(value)) => Ok(galfus_vm::VmValue::Bool(value)),
@@ -233,16 +254,20 @@ pub(crate) fn encode_into_thread_heap(
                 .map_err(|_| BoundaryCodecError::HeapExhausted)?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
-        (
-            BytecodeType::Array(element_type),
-            BoundaryValue::Array {
+        (BytecodeType::Array(element_type), value @ BoundaryValue::Array { .. }) => {
+            let BoundaryValue::Array {
                 element_type: actual_element_type,
-                values,
-            },
-        ) => {
-            if actual_element_type != module.boundary_type(*element_type)? {
-                return Err(mismatch());
+                ..
+            } = &value
+            else {
+                unreachable!("array value matched above");
+            };
+            if actual_element_type != &module.boundary_type(*element_type)? {
+                return Err(type_mismatch(expected_type, &value));
             }
+            let BoundaryValue::Array { values, .. } = value else {
+                unreachable!("array value matched above");
+            };
             let elements = values
                 .into_iter()
                 .map(|element| {
@@ -262,10 +287,16 @@ pub(crate) fn encode_into_thread_heap(
         (BytecodeType::Nullable(inner), value) => {
             encode_into_thread_heap(heap, value, *inner, module_id, module)
         }
-        (BytecodeType::Tuple(element_types), BoundaryValue::Tuple(values)) => {
+        (BytecodeType::Tuple(element_types), value @ BoundaryValue::Tuple(_)) => {
+            let BoundaryValue::Tuple(values) = &value else {
+                unreachable!("tuple value matched above");
+            };
             if values.len() != element_types.len() {
-                return Err(mismatch());
+                return Err(type_mismatch(expected_type, &value));
             }
+            let BoundaryValue::Tuple(values) = value else {
+                unreachable!("tuple value matched above");
+            };
             let elements = values
                 .into_iter()
                 .zip(element_types)
@@ -276,18 +307,33 @@ pub(crate) fn encode_into_thread_heap(
                 .map_err(|_| BoundaryCodecError::HeapExhausted)?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
-        (BytecodeType::Choice(layout_idx), BoundaryValue::Choice { variant, payload }) => {
+        (BytecodeType::Choice(layout_idx), value @ BoundaryValue::Choice { .. }) => {
+            let BoundaryValue::Choice { variant, payload } = &value else {
+                unreachable!("choice value matched above");
+            };
             let layout = module
                 .choice_layouts
                 .get(layout_idx.raw() as usize)
                 .ok_or(BoundaryCodecError::UnsupportedType)?;
-            let variant_layout = layout.variants.get(variant as usize).ok_or_else(mismatch)?;
+            let variant_layout = layout
+                .variants
+                .get(*variant as usize)
+                .ok_or_else(|| type_mismatch(expected_type, &value))?;
+            if matches!(
+                (variant_layout.payload_ty, payload),
+                (None, Some(_)) | (Some(_), None)
+            ) {
+                return Err(type_mismatch(expected_type, &value));
+            }
+            let BoundaryValue::Choice { variant, payload } = value else {
+                unreachable!("choice value matched above");
+            };
             let payload = match (variant_layout.payload_ty, payload) {
                 (None, None) => galfus_vm::VmValue::Null,
                 (Some(payload_type), Some(payload)) => {
                     encode_into_thread_heap(heap, *payload, payload_type, module_id, module)?
                 }
-                _ => return Err(mismatch()),
+                _ => unreachable!("choice payload shape was validated above"),
             };
             let reference = heap
                 .alloc(galfus_vm::HeapObject::Choice {
@@ -299,7 +345,7 @@ pub(crate) fn encode_into_thread_heap(
                 .map_err(|_| BoundaryCodecError::HeapExhausted)?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
-        _ => Err(mismatch()),
+        (_, found) => Err(type_mismatch(expected_type, &found)),
     }
 }
 

@@ -119,11 +119,15 @@ impl VirtualMachine {
         &self,
         thread: &thread::VmThreadState,
     ) -> Result<TypeIdx, VmError> {
-        self.current_image(thread)?
-            .types
-            .iter()
-            .position(|ty| matches!(ty, BytecodeType::Uint8))
-            .map(|idx| TypeIdx(idx as u16))
+        let module_id = thread
+            .call_stack
+            .last()
+            .ok_or(VmError::EmptyCallStack)?
+            .module_id;
+        self.uint8_type_indexes
+            .binary_search_by_key(&module_id, |&(id, _)| id)
+            .ok()
+            .and_then(|idx| self.uint8_type_indexes[idx].1)
             .ok_or(VmError::InvalidModule)
     }
 }

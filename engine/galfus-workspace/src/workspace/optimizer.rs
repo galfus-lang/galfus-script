@@ -152,6 +152,20 @@ fn optimize_function(func: &mut BytecodeFunction) {
         func.instructions = new_instructions;
     }
 }
+
+fn is_called_method(name: &str, global_method_names: &HashSet<String>) -> bool {
+    let mut candidate = name;
+    loop {
+        if global_method_names.contains(candidate) {
+            return true;
+        }
+        let Some((_, suffix)) = candidate.split_once("::") else {
+            return false;
+        };
+        candidate = suffix;
+    }
+}
+
 pub fn prune_module(module: &mut BytecodeModule, global_method_names: &HashSet<String>) {
     let mut reachable_functions = HashSet::new();
     let mut reachable_constants = HashSet::new();
@@ -176,9 +190,7 @@ pub fn prune_module(module: &mut BytecodeModule, global_method_names: &HashSet<S
         }
     }
     for (i, func) in module.functions.iter().enumerate() {
-        let is_called_method = global_method_names
-            .iter()
-            .any(|method| func.name == *method || func.name.ends_with(&format!("::{method}")));
+        let is_called_method = is_called_method(&func.name, global_method_names);
 
         if func.adapter_proxy_metadata.is_some() || is_called_method {
             reachable_functions.insert(i);
