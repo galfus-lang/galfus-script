@@ -194,6 +194,46 @@ pub(super) fn race_winner_uses_event_sequence_then_member_index() {
 }
 
 #[test]
+pub(super) fn all_results_preserve_member_order_when_completions_arrive_out_of_order() {
+    let mut orchestrator = Orchestrator::test_new();
+    let coordinator_id = CoordinatorId::new(1);
+    let thread_id = ThreadId::new(1);
+    let module_id = ModuleId::new(1);
+    orchestrator.aggregate_coordinators.insert(
+        coordinator_id,
+        AggregateCoordinator {
+            mode: AggregateMode::All,
+            future_ids: vec![FutureId::new(1), FutureId::new(2), FutureId::new(3)],
+            pending: PendingContinuation {
+                thread_id,
+                continuation: galfus_vm::Continuation::for_provider(Reg(0), module_id, TypeIdx(0)),
+                module_id,
+                return_type: TypeIdx(0),
+                stack: vec![],
+                operation: PendingOperation::Future,
+                active: Arc::new(AtomicBool::new(true)),
+            },
+            results: vec![None, None, None],
+            winner: None,
+            armed: false,
+        },
+    );
+
+    orchestrator.complete_aggregate_member(coordinator_id, 2, Ok(BoundaryValue::I32(3)));
+    orchestrator.complete_aggregate_member(coordinator_id, 0, Ok(BoundaryValue::I32(1)));
+    orchestrator.complete_aggregate_member(coordinator_id, 1, Ok(BoundaryValue::I32(2)));
+
+    assert_eq!(
+        orchestrator.aggregate_coordinators[&coordinator_id].results,
+        vec![
+            Some(Ok(BoundaryValue::I32(1))),
+            Some(Ok(BoundaryValue::I32(2))),
+            Some(Ok(BoundaryValue::I32(3))),
+        ]
+    );
+}
+
+#[test]
 pub(super) fn cancellation_event_removes_a_queued_thread() {
     let mut orchestrator = Orchestrator::test_new();
     let thread_id = {

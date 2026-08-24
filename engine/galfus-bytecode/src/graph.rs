@@ -458,10 +458,12 @@ impl BytecodeGraph {
             }
         }
         for node in transaction.upserted_modules {
-            if let Some(previous) = next.modules.insert(node.id, node.clone()) {
+            let id = node.id;
+            let path = node.path.clone();
+            if let Some(previous) = next.modules.insert(id, node) {
                 next.ids_by_path.remove(&previous.path);
             }
-            next.ids_by_path.insert(node.path.clone(), node.id);
+            next.ids_by_path.insert(path, id);
         }
         next.edges = transaction.edges;
         next.edges
@@ -542,9 +544,7 @@ impl BytecodeGraph {
 
     /// Iterate modules in canonical `ModuleId` order.
     pub fn modules(&self) -> impl Iterator<Item = &BytecodeNode> {
-        let mut modules = self.modules.values().collect::<Vec<_>>();
-        modules.sort_by_key(|module| module.id.raw());
-        modules.into_iter()
+        self.modules.values()
     }
 
     pub fn edges(&self) -> &[ImportEdge] {
