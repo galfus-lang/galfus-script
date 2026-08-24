@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::sync;
+use std::sync::Condvar;
 use std::sync::Mutex;
 use std::thread;
 
@@ -39,6 +40,7 @@ pub struct NativeEventBridge {
     receiver: Mutex<std::sync::mpsc::Receiver<(EventSequence, RuntimeEvent)>>,
     next_sequence: Mutex<EventSequence>,
     pending: Mutex<usize>,
+    events_available: Condvar,
     capacity: usize,
     limit: Mutex<usize>,
 }
@@ -61,6 +63,7 @@ impl NativeEventBridge {
             receiver: Mutex::new(receiver),
             next_sequence: Mutex::new(EventSequence::FIRST),
             pending: Mutex::new(0),
+            events_available: Condvar::new(),
             capacity,
             limit: Mutex::new(capacity),
         }
@@ -86,6 +89,19 @@ impl NativeEventBridge {
 
     pub fn has_pending(&self) -> bool {
         *self.pending.lock().unwrap() != 0
+    }
+
+    /// Blocks until an event is available or the caller's stop condition becomes true.
+    pub fn wait_for_event_or(&self, stop: impl Fn() -> bool) {
+        let mut pending = self.pending.lock().unwrap();
+        while *pending == 0 && !stop() {
+            pending = self.events_available.wait(pending).unwrap();
+        }
+    }
+
+    /// Wakes event-loop waiters after an external worker changes state.
+    pub fn notify_waiters(&self) {
+        self.events_available.notify_all();
     }
 }
 
@@ -123,6 +139,7 @@ impl RuntimeEventSink for NativeEventBridge {
 
         *pending += 1;
         *sequence = next;
+        self.events_available.notify_one();
         Ok(())
     }
 }
