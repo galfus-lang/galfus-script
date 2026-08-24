@@ -21,7 +21,7 @@ fn thread_execution_storage_is_allocated_on_demand() {
         .expect("a frame within the quota must allocate its registers");
 
     assert_eq!(thread.call_stack.len(), 1);
-    assert!(thread.registers.len() >= 1);
+    assert!(!thread.registers.is_empty());
 }
 
 #[test]
