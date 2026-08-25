@@ -8,6 +8,7 @@ use sysinfo::{Pid, System};
 
 const SAMPLE_COUNT: usize = 7;
 const MEMORY_POLL_INTERVAL: Duration = Duration::from_millis(1);
+const JAVA_OUTPUT_DIR: &str = "./target/release/benchmark-java";
 
 #[derive(Debug)]
 struct BenchmarkResult {
@@ -62,7 +63,7 @@ fn main() {
     let re_result = Regex::new(r"RESULT=(\d+)").unwrap();
     let re_time = Regex::new(r"TIME_MS=(\d+)").unwrap();
     let bun_bin = bun_binary();
-    let targets = vec![
+    let mut targets = vec![
         (
             "JavaScript (Bun)",
             vec![bun_bin.as_str(), "benchmark/fib.js"],
@@ -76,6 +77,9 @@ fn main() {
         ),
         ("Galfus (Host)", vec!["./target/release/fib_standalone"]),
     ];
+    if prepare_java_benchmark() {
+        targets.push(("Java", vec!["java", "-cp", JAVA_OUTPUT_DIR, "Fib"]));
+    }
 
     let mut results = Vec::new();
     println!("\nRunning {SAMPLE_COUNT} cold-process samples (Fibonacci 35)...\n");
@@ -112,6 +116,29 @@ fn main() {
 
     results.sort_by_key(|result| result.script_time_ms);
     print_results(results.as_slice());
+}
+
+fn prepare_java_benchmark() -> bool {
+    if let Err(error) = std::fs::create_dir_all(JAVA_OUTPUT_DIR) {
+        eprintln!("Skipping Java: could not create output directory: {error}");
+        return false;
+    }
+
+    let status = match Command::new("javac")
+        .args(["-d", JAVA_OUTPUT_DIR, "benchmark/Fib.java"])
+        .status()
+    {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!("Skipping Java: javac is unavailable: {error}");
+            return false;
+        }
+    };
+    if !status.success() {
+        eprintln!("Skipping Java: javac failed with {status}");
+        return false;
+    }
+    true
 }
 
 fn bun_binary() -> String {
