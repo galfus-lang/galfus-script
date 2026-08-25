@@ -1,0 +1,70 @@
+import { println } from "std/io"
+import { now } from "std/time"
+import { createThread, getThread } from "std/thread"
+import { concat } from "text"
+import { stringify } from "format"
+
+fn worker(previous_key: [u8], next_key: [u8]): i32 {
+  const previous = getThread(previous_key)
+  if previous == null {
+    return 0
+  }
+  const next = getThread(next_key)
+  if next == null {
+    return 0
+  }
+  var state: i32 = 1
+  for _ in 0..20 {
+    for _ in 0..10000 {
+      state = (state * 127 + 17) % 1000003
+    }
+    if !next::send("x") {
+      return 0
+    }
+    const received = instanceof previous::tryReceiveMessage(1000) {
+      [u8] token => <i32> token.length,
+      null => 0,
+    }
+    state = (state + received) % 1000003
+  }
+  return state
+}
+
+fn first_worker(_args: [[u8]]): i32 => worker("task-4", "task-2")
+fn second_worker(_args: [[u8]]): i32 => worker("task-1", "task-3")
+fn third_worker(_args: [[u8]]): i32 => worker("task-2", "task-4")
+fn fourth_worker(_args: [[u8]]): i32 => worker("task-3", "task-1")
+
+export fn main(_args: [[u8]]): i32 {
+  const start = now()
+  const first = createThread(first_worker, "task-1")
+  const second = createThread(second_worker, "task-2")
+  const third = createThread(third_worker, "task-3")
+  const fourth = createThread(fourth_worker, "task-4")
+  first::spawn()
+  second::spawn()
+  third::spawn()
+  fourth::spawn()
+  const first_result = first::wait()
+  const second_result = second::wait()
+  const third_result = third::wait()
+  const fourth_result = fourth::wait()
+  const end = now()
+
+  const result = instanceof first_result {
+    i32 first_value => instanceof second_result {
+      i32 second_value => instanceof third_result {
+        i32 third_value => instanceof fourth_result {
+          i32 fourth_value => first_value + second_value + third_value + fourth_value,
+          null => 0,
+        },
+        null => 0,
+      },
+      null => 0,
+    },
+    null => 0,
+  }
+  println(concat("RESULT=", stringify(result)))
+  println(concat("TIME_MS=", stringify(end - start)))
+  return 0
+}

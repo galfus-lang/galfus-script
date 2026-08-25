@@ -40,6 +40,7 @@ pub struct ThreadControlBlock {
     pub id: ThreadId,
     pub state: ThreadState,
     pub mailbox: Option<Arc<Mutex<VecDeque<MailboxMessage>>>>,
+    pub quota: Arc<galfus_vm::quota::ThreadQuota>,
     pub key: Option<String>,
     pub vm_state: Option<VmThreadState>,
 }
@@ -95,6 +96,7 @@ impl ThreadRegistry {
                 id,
                 state: ThreadState::Created,
                 mailbox: Some(Arc::new(Mutex::new(VecDeque::new()))),
+                quota: thread.thread_quota().clone(),
                 key,
                 vm_state: Some(thread),
             },
@@ -114,9 +116,7 @@ impl ThreadRegistry {
     }
 
     pub fn get_thread_quota(&self, id: ThreadId) -> Option<Arc<galfus_vm::quota::ThreadQuota>> {
-        self.tcbs
-            .get(&id)
-            .and_then(|tcb| tcb.vm_state.as_ref().map(|vm| vm.thread_quota().clone()))
+        self.tcbs.get(&id).map(|tcb| tcb.quota.clone())
     }
 
     pub fn active_count(&self) -> usize {
