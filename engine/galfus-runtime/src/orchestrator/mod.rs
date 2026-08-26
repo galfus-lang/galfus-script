@@ -10,7 +10,7 @@ pub(crate) mod startup;
 
 use crate::driver::{ExecutionDriver, RuntimeEventSink};
 use crate::event::{EventSequence, RuntimeEvent};
-use crate::execution::{CancellationReport, CompletionMetrics};
+use crate::execution::{CancellationReport, CompletionMetrics, FutureMetrics};
 use crate::kernel::VirtualKernel;
 use crate::task::execution_stack;
 use galfus_contract::{AdapterBindingsCloseReport, ExecutionFailure};
@@ -63,6 +63,7 @@ pub(crate) struct Orchestrator {
     shutdown_report: Option<AdapterBindingsCloseReport>,
     cancellation_report: CancellationReport,
     completion_metrics: CompletionMetrics,
+    future_metrics: FutureMetrics,
     late_completions: VecDeque<LateCompletion>,
     root_thread_id: Option<crate::registry::ThreadId>,
     future_workers:

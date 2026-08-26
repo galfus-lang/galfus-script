@@ -21,33 +21,45 @@ impl Orchestrator {
                 func_idx,
                 args,
                 arg_types,
-            } => self.start_galfus_function_activation(
-                thread_id, thread, future_id, module_id, func_idx, args, arg_types,
-            ),
+            } => {
+                self.future_metrics.galfus_activations += 1;
+                self.start_galfus_function_activation(
+                    thread_id, thread, future_id, module_id, func_idx, args, arg_types,
+                )
+            }
             Activation::Provider {
                 alias, name, args, ..
-            } => self.start_provider_activation(thread_id, thread, future_id, alias, name, args),
+            } => {
+                self.future_metrics.provider_activations += 1;
+                self.start_provider_activation(thread_id, thread, future_id, alias, name, args)
+            }
             Activation::Adapter {
                 proxy_module,
                 symbol,
                 args,
                 ..
-            } => self.start_adapter_activation(
-                thread_id,
-                thread,
-                future_id,
-                proxy_module,
-                symbol,
-                args,
-            ),
-            Activation::Internal { operation, args } => self.start_internal_activation(
-                thread_id,
-                thread,
-                future_id,
-                operation,
-                args,
-                aggregate_registration,
-            ),
+            } => {
+                self.future_metrics.adapter_activations += 1;
+                self.start_adapter_activation(
+                    thread_id,
+                    thread,
+                    future_id,
+                    proxy_module,
+                    symbol,
+                    args,
+                )
+            }
+            Activation::Internal { operation, args } => {
+                self.future_metrics.internal_activations += 1;
+                self.start_internal_activation(
+                    thread_id,
+                    thread,
+                    future_id,
+                    operation,
+                    args,
+                    aggregate_registration,
+                )
+            }
         }
     }
 

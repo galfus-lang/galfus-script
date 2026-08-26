@@ -38,6 +38,7 @@ impl Orchestrator {
             shutdown_report: None,
             cancellation_report: CancellationReport::default(),
             completion_metrics: CompletionMetrics::default(),
+            future_metrics: FutureMetrics::default(),
             late_completions: VecDeque::new(),
             root_thread_id: None,
             future_workers: HashMap::new(),
@@ -95,6 +96,10 @@ impl Orchestrator {
 
     pub(crate) fn completion_metrics(&self) -> &CompletionMetrics {
         &self.completion_metrics
+    }
+
+    pub(crate) fn future_metrics(&self) -> &FutureMetrics {
+        &self.future_metrics
     }
 
     pub(crate) fn set_startup_plan(

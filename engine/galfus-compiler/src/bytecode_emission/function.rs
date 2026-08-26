@@ -247,6 +247,49 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     } => {
                         let builtin_name = self.ctx.function_names.get(func).map(|s| s.to_string());
                         if let Some(_name) = builtin_name {
+                            let native_math_name = _name
+                                .rsplit("::")
+                                .next()
+                                .filter(|name| name.starts_with("__internal_math_"));
+                            if native_math_name.is_some() {
+                                let start_reg = if args.is_empty() {
+                                    Reg(0)
+                                } else {
+                                    let reg = self.alloc_temp();
+                                    let mut temp_regs = vec![reg];
+                                    for _ in 1..args.len() {
+                                        temp_regs.push(self.alloc_temp());
+                                    }
+                                    for (i, arg_op) in args.iter().enumerate() {
+                                        self.load_operand_to(arg_op, temp_regs[i]);
+                                    }
+                                    reg
+                                };
+                                let operation = match native_math_name.unwrap() {
+                                    "__internal_math_is_nan" => 0,
+                                    "__internal_math_is_finite" => 1,
+                                    "__internal_math_is_infinite" => 2,
+                                    "__internal_math_sqrt" => 3,
+                                    "__internal_math_hypot" => 4,
+                                    "__internal_math_sin" => 5,
+                                    "__internal_math_cos" => 6,
+                                    "__internal_math_tan" => 7,
+                                    "__internal_math_log" => 8,
+                                    "__internal_math_log2" => 9,
+                                    "__internal_math_log10" => 10,
+                                    _ => unreachable!("recognized math intrinsic"),
+                                };
+                                self.instructions.push(Instruction::CallInternalMath {
+                                    dest: Reg(destination.raw() as u16),
+                                    operation,
+                                    args_start: start_reg,
+                                    arg_count: args.len() as u8,
+                                });
+                                if !args.is_empty() {
+                                    self.free_temps(args.len() as u16);
+                                }
+                                continue;
+                            }
                             let native_async_name = _name
                                 .rsplit("::")
                                 .next()

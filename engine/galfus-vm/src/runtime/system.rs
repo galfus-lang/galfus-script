@@ -133,6 +133,90 @@ impl VirtualMachine {
                     });
                 }
             }
+            Instruction::CallInternalMath {
+                dest,
+                name_const,
+                args_start,
+                arg_count,
+            } => {
+                let module_id = thread
+                    .call_stack
+                    .last()
+                    .ok_or(VmError::EmptyCallStack)?
+                    .module_id;
+                let current_module = self.get_module(module_id)?;
+                let Some(galfus_bytecode::Constant::String(operation)) = current_module
+                    .constants
+                    .constants
+                    .get(name_const.raw() as usize)
+                else {
+                    return Err(VmError::TypeMismatch {
+                        expected: "internal math operation".to_string(),
+                        found: "invalid constant".to_string(),
+                    });
+                };
+                let float = |index: u8| -> Result<f64, VmError> {
+                    if index >= arg_count {
+                        return Err(VmError::TypeMismatch {
+                            expected: "math argument".to_string(),
+                            found: "missing argument".to_string(),
+                        });
+                    }
+                    let value = thread.read_reg(Reg(args_start.raw() + index as u16));
+                    match value {
+                        Value::Float64(value) => Ok(value),
+                        Value::Float32(value) => Ok(value as f64),
+                        Value::Int8(value) => Ok(value as f64),
+                        Value::Int16(value) => Ok(value as f64),
+                        Value::Int32(value) => Ok(value as f64),
+                        Value::Int64(value) => Ok(value as f64),
+                        Value::Uint8(value) => Ok(value as f64),
+                        Value::Uint16(value) => Ok(value as f64),
+                        Value::Uint32(value) => Ok(value as f64),
+                        Value::Uint64(value) => Ok(value as f64),
+                        value => Err(VmError::TypeMismatch {
+                            expected: "number".to_string(),
+                            found: format!("{value:?}"),
+                        }),
+                    }
+                };
+                let value = match operation.as_str() {
+                    "__internal_math_is_nan" => Value::Bool(float(0)?.is_nan()),
+                    "__internal_math_is_finite" => Value::Bool(float(0)?.is_finite()),
+                    "__internal_math_is_infinite" => Value::Bool(float(0)?.is_infinite()),
+                    "__internal_math_sqrt" => {
+                        Value::Float64(galfus_core::normalize_f64(float(0)?.sqrt()))
+                    }
+                    "__internal_math_hypot" => {
+                        Value::Float64(galfus_core::normalize_f64(float(0)?.hypot(float(1)?)))
+                    }
+                    "__internal_math_sin" => {
+                        Value::Float64(galfus_core::normalize_f64(float(0)?.sin()))
+                    }
+                    "__internal_math_cos" => {
+                        Value::Float64(galfus_core::normalize_f64(float(0)?.cos()))
+                    }
+                    "__internal_math_tan" => {
+                        Value::Float64(galfus_core::normalize_f64(float(0)?.tan()))
+                    }
+                    "__internal_math_log" => {
+                        Value::Float64(galfus_core::normalize_f64(float(0)?.ln()))
+                    }
+                    "__internal_math_log2" => {
+                        Value::Float64(galfus_core::normalize_f64(float(0)?.log2()))
+                    }
+                    "__internal_math_log10" => {
+                        Value::Float64(galfus_core::normalize_f64(float(0)?.log10()))
+                    }
+                    _ => {
+                        return Err(VmError::TypeMismatch {
+                            expected: "internal math operation".to_string(),
+                            found: operation.to_string(),
+                        });
+                    }
+                };
+                thread.write_reg(dest, value);
+            }
             Instruction::CreateFuture {
                 dest,
                 func: func_idx,

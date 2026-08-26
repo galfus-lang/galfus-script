@@ -608,4 +608,10 @@ pub enum Instruction {
         dest_start: Reg,
         src: Reg,
     },
+    CallInternalMath {
+        dest: Reg,
+        operation: u8,
+        args_start: Reg,
+        arg_count: u8,
+    },
 }

@@ -1702,7 +1702,10 @@ impl VirtualMachine {
             | Instruction::AwaitAll { .. }
             | Instruction::AwaitRace { .. }
             | Instruction::Len { .. }
-            | Instruction::CopyArray { .. } => self.execute_system_instruction(thread, instr),
+            | Instruction::CopyArray { .. }
+            | Instruction::CallInternalMath { .. } => {
+                self.execute_system_instruction(thread, instr)
+            }
 
             _ => unreachable!("unknown instruction"),
         };
@@ -1804,7 +1807,10 @@ impl VirtualMachine {
             | Instruction::AwaitAll { .. }
             | Instruction::AwaitRace { .. }
             | Instruction::Len { .. }
-            | Instruction::CopyArray { .. } => self.execute_system_instruction(thread, instr)?,
+            | Instruction::CopyArray { .. }
+            | Instruction::CallInternalMath { .. } => {
+                self.execute_system_instruction(thread, instr)?
+            }
             _ => VmStep::Continue,
         };
 

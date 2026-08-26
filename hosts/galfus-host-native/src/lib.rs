@@ -86,6 +86,12 @@ impl ExecutionHost {
             )
         })?;
 
+        if std::env::var_os("GALFUS_RUNTIME_METRICS").is_some()
+            && let Some(report) = execution.shutdown_report()
+        {
+            eprintln!("FUTURE_METRICS={:?}", report.futures);
+        }
+
         if let galfus_contract::BoundaryValue::I32(code) = result {
             Ok(code)
         } else {

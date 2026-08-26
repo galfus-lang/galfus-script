@@ -13,6 +13,7 @@ impl Orchestrator {
         continuation: galfus_vm::Continuation,
         future_id: galfus_core::FutureId,
     ) {
+        self.future_metrics.dropped += 1;
         self.remove_mailbox_future_wait(thread_id, future_id);
         let disposition = match self.future_registry.discard(thread_id, future_id) {
             Ok(disposition) => disposition,
@@ -40,6 +41,7 @@ impl Orchestrator {
         module_id: galfus_core::ModuleId,
         return_type: galfus_bytecode::instruction::TypeIdx,
     ) {
+        self.future_metrics.awaited += 1;
         let aggregate_registration = self.aggregate_registration.take();
         let waiter = crate::orchestrator::future_registry::Waiter {
             continuation: PendingContinuation {

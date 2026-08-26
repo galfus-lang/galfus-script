@@ -728,7 +728,7 @@ impl<'a> DeclarationTypeChecker<'a> {
                         node,
                         "__internal_* functions are reserved for internal core modules".to_string(),
                     );
-                } else if !is_async {
+                } else if !is_async && !name.starts_with("__internal_math_") {
                     self.report_cannot_infer_type(
                         node,
                         format!(

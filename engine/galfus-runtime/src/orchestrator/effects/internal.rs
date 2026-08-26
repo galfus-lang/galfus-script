@@ -425,12 +425,14 @@ impl Orchestrator {
             }
         };
         if let Some(result) = immediate {
+            self.future_metrics.internal_immediate += 1;
             if aggregate_registration.is_none() && !self.block_or_fail(thread_id, thread) {
                 return None;
             }
             self.complete_future(thread_id, future_id, result);
             return None;
         }
+        self.future_metrics.internal_suspended += 1;
         Some(thread)
     }
 }

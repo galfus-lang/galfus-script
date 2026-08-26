@@ -35,7 +35,7 @@ use galfus_vm::{VirtualMachine, VmPanic, VmValue};
 pub use driver::CooperativeDriver;
 pub use execution::{
     CancellationReport, CompletionMetrics, Execution, ExecutionHandle, ExecutionState,
-    ShutdownReport,
+    FutureMetrics, ShutdownReport,
 };
 pub use execution_host::{ExecutionHost, HostBootstrapError};
 pub use preflight::{AdapterBindingPreflight, PreflightError};

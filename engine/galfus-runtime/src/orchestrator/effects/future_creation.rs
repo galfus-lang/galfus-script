@@ -18,6 +18,8 @@ impl Orchestrator {
         arg_types: Box<[TypeIdx]>,
         return_type: TypeIdx,
     ) {
+        self.future_metrics.created += 1;
+        self.future_metrics.boundary_arguments += args.len();
         let Some(future_lease) = self.allocate_future_lease(thread_id, &thread) else {
             return;
         };
@@ -98,6 +100,8 @@ impl Orchestrator {
         arg_types: Box<[TypeIdx]>,
         return_type: TypeIdx,
     ) {
+        self.future_metrics.created += 1;
+        self.future_metrics.boundary_arguments += args.len();
         let Some(future_lease) = self.allocate_future_lease(thread_id, &thread) else {
             return;
         };

@@ -104,6 +104,7 @@ impl Orchestrator {
     }
 
     pub(super) fn process_event(&mut self, event: RuntimeEvent) {
+        self.future_metrics.runtime_events += 1;
         match event {
             RuntimeEvent::ThreadSpawned { mut thread } => {
                 self.flush_thread_handle_drops(&mut thread);
@@ -252,6 +253,7 @@ impl Orchestrator {
                 thread_id,
                 mut thread,
             } => {
+                self.future_metrics.yields += 1;
                 self.flush_thread_handle_drops(&mut thread);
                 if let Err(e) = self.kernel.enqueue_runnable(thread_id, thread) {
                     self.failure = Some(

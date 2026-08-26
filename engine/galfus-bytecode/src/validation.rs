@@ -614,6 +614,24 @@ pub fn validate_bytecode_module(
                     check_reg(dest_start, &mut errors);
                     check_reg(src, &mut errors);
                 }
+                Instruction::CallInternalMath {
+                    dest,
+                    operation,
+                    args_start,
+                    arg_count,
+                } => {
+                    check_reg(dest, &mut errors);
+                    if operation > 10 {
+                        errors.push(BytecodeValidationError::InvalidConstantIndex {
+                            func_name: func_name.clone(),
+                            instr_idx,
+                            index: ConstIdx(operation as u16),
+                        });
+                    }
+                    if arg_count > 0 {
+                        check_reg(Reg(args_start.raw() + arg_count as u16 - 1), &mut errors);
+                    }
+                }
                 _ => {
                     // AOT specialized instructions (AddI32, etc.) are pre-validated
                     // by the compiler, and they only use basic Regs anyway.

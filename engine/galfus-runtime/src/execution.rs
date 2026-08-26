@@ -48,6 +48,7 @@ pub struct ShutdownReport {
     pub adapter_close: AdapterBindingsCloseReport,
     pub cancellations: CancellationReport,
     pub completions: CompletionMetrics,
+    pub futures: FutureMetrics,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -79,6 +80,22 @@ pub struct CompletionMetrics {
     pub duplicate: usize,
     pub late_after_cancel: usize,
     pub unknown_request: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FutureMetrics {
+    pub created: usize,
+    pub awaited: usize,
+    pub dropped: usize,
+    pub boundary_arguments: usize,
+    pub runtime_events: usize,
+    pub yields: usize,
+    pub galfus_activations: usize,
+    pub internal_activations: usize,
+    pub internal_immediate: usize,
+    pub internal_suspended: usize,
+    pub provider_activations: usize,
+    pub adapter_activations: usize,
 }
 impl Execution {
     pub(crate) fn new(
@@ -249,24 +266,30 @@ impl Execution {
             return;
         }
         self.state = ExecutionState::Closing;
-        let (adapter_close, orchestrator_cancellation_report, orchestrator_completion_metrics) =
-            self.orchestrator.take().map_or_else(
-                || {
-                    (
-                        AdapterBindingsCloseReport::default(),
-                        CancellationReport::default(),
-                        CompletionMetrics::default(),
-                    )
-                },
-                |mut orchestrator| {
-                    let adapter_close = orchestrator.shutdown();
-                    (
-                        adapter_close,
-                        orchestrator.cancellation_report().clone(),
-                        orchestrator.completion_metrics().clone(),
-                    )
-                },
-            );
+        let (
+            adapter_close,
+            orchestrator_cancellation_report,
+            orchestrator_completion_metrics,
+            orchestrator_future_metrics,
+        ) = self.orchestrator.take().map_or_else(
+            || {
+                (
+                    AdapterBindingsCloseReport::default(),
+                    CancellationReport::default(),
+                    CompletionMetrics::default(),
+                    FutureMetrics::default(),
+                )
+            },
+            |mut orchestrator| {
+                let adapter_close = orchestrator.shutdown();
+                (
+                    adapter_close,
+                    orchestrator.cancellation_report().clone(),
+                    orchestrator.completion_metrics().clone(),
+                    orchestrator.future_metrics().clone(),
+                )
+            },
+        );
         let result = if adapter_close.is_complete() {
             result
         } else {
@@ -288,6 +311,7 @@ impl Execution {
             adapter_close,
             cancellations: orchestrator_cancellation_report,
             completions: orchestrator_completion_metrics,
+            futures: orchestrator_future_metrics,
         });
         self.state = ExecutionState::Closed;
     }
