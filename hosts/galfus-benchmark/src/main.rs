@@ -26,6 +26,7 @@ const BENCHMARK_CASES: &[BenchmarkCase] = &[
         java_class: "Fib",
         targets: &[
             ("JavaScript (Bun)", &["benchmark/fib.js"]),
+            ("JavaScript (QuickJS)", &["qjs", "benchmark/fib.js"]),
             ("Lua JIT", &["luajit", "benchmark/fib.lua"]),
             ("Lua 5.4", &["lua", "benchmark/fib.lua"]),
             ("Python 3", &["python3", "benchmark/fib.py"]),
@@ -38,6 +39,7 @@ const BENCHMARK_CASES: &[BenchmarkCase] = &[
         java_class: "Matrix4",
         targets: &[
             ("JavaScript (Bun)", &["benchmark/matrix4.js"]),
+            ("JavaScript (QuickJS)", &["qjs", "benchmark/matrix4.js"]),
             ("Lua JIT", &["luajit", "benchmark/matrix4.lua"]),
             ("Lua 5.4", &["lua", "benchmark/matrix4.lua"]),
             ("Python 3", &["python3", "benchmark/matrix4.py"]),
