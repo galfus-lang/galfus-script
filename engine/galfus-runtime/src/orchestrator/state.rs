@@ -38,6 +38,7 @@ impl Orchestrator {
             shutdown_report: None,
             cancellation_report: CancellationReport::default(),
             completion_metrics: CompletionMetrics::default(),
+            #[cfg(feature = "metrics")]
             future_metrics: FutureMetrics::default(),
             late_completions: VecDeque::new(),
             root_thread_id: None,
@@ -45,6 +46,8 @@ impl Orchestrator {
             thread_exit_waits: HashMap::new(),
             mailbox_future_waits: HashMap::new(),
             mailbox_future_wait_targets: HashMap::new(),
+            mailbox_deadlines: BTreeSet::new(),
+            mailbox_wait_sequence: 0,
             timer_future_waits: BTreeSet::new(),
             virtual_time_ms: 0,
             future_registry: FutureRegistry::new(),
@@ -98,6 +101,7 @@ impl Orchestrator {
         &self.completion_metrics
     }
 
+    #[cfg(feature = "metrics")]
     pub(crate) fn future_metrics(&self) -> &FutureMetrics {
         &self.future_metrics
     }

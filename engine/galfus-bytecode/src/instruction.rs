@@ -579,6 +579,24 @@ pub enum Instruction {
         arg_types: Box<[TypeIdx]>,
         return_type: TypeIdx,
     },
+    /// Creates and immediately awaits a Future without materializing its handle.
+    CreateAwaitFuture {
+        dest: Reg,
+        operation: Box<str>,
+        args_start: Reg,
+        arg_count: u8,
+        arg_types: Box<[TypeIdx]>,
+        return_type: TypeIdx,
+    },
+    /// Calls an internal synchronous operation without materializing a Future.
+    CallInternalThread {
+        dest: Reg,
+        operation: Box<str>,
+        args_start: Reg,
+        arg_count: u8,
+        arg_types: Box<[TypeIdx]>,
+        return_type: TypeIdx,
+    },
     CreateIndirectFuture {
         dest: Reg,
         func_reg: Reg,

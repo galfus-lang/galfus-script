@@ -212,6 +212,11 @@ impl ExecutionDriver for NativeDriver {
         self.event_bridge.has_pending()
     }
 
+    fn available_task_capacity(&self) -> usize {
+        self.max_workers
+            .saturating_sub(self.active_workers.load(Ordering::Acquire))
+    }
+
     fn configure_limits(
         &self,
         limits: &LimitsMetadata,

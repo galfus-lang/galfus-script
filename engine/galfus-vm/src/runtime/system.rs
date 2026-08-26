@@ -135,26 +135,10 @@ impl VirtualMachine {
             }
             Instruction::CallInternalMath {
                 dest,
-                name_const,
+                operation,
                 args_start,
                 arg_count,
             } => {
-                let module_id = thread
-                    .call_stack
-                    .last()
-                    .ok_or(VmError::EmptyCallStack)?
-                    .module_id;
-                let current_module = self.get_module(module_id)?;
-                let Some(galfus_bytecode::Constant::String(operation)) = current_module
-                    .constants
-                    .constants
-                    .get(name_const.raw() as usize)
-                else {
-                    return Err(VmError::TypeMismatch {
-                        expected: "internal math operation".to_string(),
-                        found: "invalid constant".to_string(),
-                    });
-                };
                 let float = |index: u8| -> Result<f64, VmError> {
                     if index >= arg_count {
                         return Err(VmError::TypeMismatch {
@@ -180,34 +164,18 @@ impl VirtualMachine {
                         }),
                     }
                 };
-                let value = match operation.as_str() {
-                    "__internal_math_is_nan" => Value::Bool(float(0)?.is_nan()),
-                    "__internal_math_is_finite" => Value::Bool(float(0)?.is_finite()),
-                    "__internal_math_is_infinite" => Value::Bool(float(0)?.is_infinite()),
-                    "__internal_math_sqrt" => {
-                        Value::Float64(galfus_core::normalize_f64(float(0)?.sqrt()))
-                    }
-                    "__internal_math_hypot" => {
-                        Value::Float64(galfus_core::normalize_f64(float(0)?.hypot(float(1)?)))
-                    }
-                    "__internal_math_sin" => {
-                        Value::Float64(galfus_core::normalize_f64(float(0)?.sin()))
-                    }
-                    "__internal_math_cos" => {
-                        Value::Float64(galfus_core::normalize_f64(float(0)?.cos()))
-                    }
-                    "__internal_math_tan" => {
-                        Value::Float64(galfus_core::normalize_f64(float(0)?.tan()))
-                    }
-                    "__internal_math_log" => {
-                        Value::Float64(galfus_core::normalize_f64(float(0)?.ln()))
-                    }
-                    "__internal_math_log2" => {
-                        Value::Float64(galfus_core::normalize_f64(float(0)?.log2()))
-                    }
-                    "__internal_math_log10" => {
-                        Value::Float64(galfus_core::normalize_f64(float(0)?.log10()))
-                    }
+                let value = match operation {
+                    0 => Value::Bool(float(0)?.is_nan()),
+                    1 => Value::Bool(float(0)?.is_finite()),
+                    2 => Value::Bool(float(0)?.is_infinite()),
+                    3 => Value::Float64(galfus_core::normalize_f64(float(0)?.sqrt())),
+                    4 => Value::Float64(galfus_core::normalize_f64(float(0)?.hypot(float(1)?))),
+                    5 => Value::Float64(galfus_core::normalize_f64(float(0)?.sin())),
+                    6 => Value::Float64(galfus_core::normalize_f64(float(0)?.cos())),
+                    7 => Value::Float64(galfus_core::normalize_f64(float(0)?.tan())),
+                    8 => Value::Float64(galfus_core::normalize_f64(float(0)?.ln())),
+                    9 => Value::Float64(galfus_core::normalize_f64(float(0)?.log2())),
+                    10 => Value::Float64(galfus_core::normalize_f64(float(0)?.log10())),
                     _ => {
                         return Err(VmError::TypeMismatch {
                             expected: "internal math operation".to_string(),
@@ -268,6 +236,66 @@ impl VirtualMachine {
                         return_type,
                     },
                     continuation: Continuation::for_future_handle(dest),
+                });
+            }
+            Instruction::CreateAwaitFuture {
+                dest,
+                ref operation,
+                args_start,
+                arg_count,
+                ref arg_types,
+                return_type,
+            } => {
+                let mut args = Vec::with_capacity(arg_count as usize);
+                for i in 0..arg_count {
+                    let val = thread.read_reg(Reg(args_start.raw() + i as u16));
+                    thread.retain_anchor_val(&val);
+                    args.push(val);
+                }
+                let module_id = thread
+                    .call_stack
+                    .last()
+                    .ok_or(VmError::EmptyCallStack)?
+                    .module_id;
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::CreateAwaitFuture {
+                        module_id,
+                        operation: operation.clone(),
+                        args,
+                        arg_types: arg_types.clone(),
+                        return_type,
+                    },
+                    continuation: Continuation::for_provider(dest, module_id, return_type),
+                });
+            }
+            Instruction::CallInternalThread {
+                dest,
+                ref operation,
+                args_start,
+                arg_count,
+                ref arg_types,
+                return_type,
+            } => {
+                let mut args = Vec::with_capacity(arg_count as usize);
+                for i in 0..arg_count {
+                    let val = thread.read_reg(Reg(args_start.raw() + i as u16));
+                    thread.retain_anchor_val(&val);
+                    args.push(val);
+                }
+                let module_id = thread
+                    .call_stack
+                    .last()
+                    .ok_or(VmError::EmptyCallStack)?
+                    .module_id;
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::InternalThreadCall {
+                        module_id,
+                        operation: operation.clone(),
+                        args,
+                        arg_types: arg_types.clone(),
+                        return_type,
+                    },
+                    continuation: Continuation::for_provider(dest, module_id, return_type),
                 });
             }
             Instruction::CreateIndirectFuture {

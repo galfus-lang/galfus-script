@@ -38,7 +38,7 @@ fn matrix4(): i32 {
   const b33: i32 = 1
   var checksum: i32 = 0
 
-  for _ in 0..10000 {
+  for _ in 0..1000000 {
     const c00 = (a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30) % 1009
     const c01 = (a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31) % 1009
     const c02 = (a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32) % 1009

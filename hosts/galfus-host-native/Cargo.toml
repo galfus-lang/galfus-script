@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+metrics = ["galfus-runtime/metrics"]
+
 [dependencies]
 galfus-core = { path = "../../engine/galfus-core" }
 galfus-bytecode = { path = "../../engine/galfus-bytecode" }

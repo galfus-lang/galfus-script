@@ -76,6 +76,20 @@ pub enum VmEffect {
         arg_types: Box<[TypeIdx]>,
         return_type: TypeIdx,
     },
+    CreateAwaitFuture {
+        module_id: ModuleId,
+        operation: Box<str>,
+        args: Vec<Value>,
+        arg_types: Box<[TypeIdx]>,
+        return_type: TypeIdx,
+    },
+    InternalThreadCall {
+        module_id: ModuleId,
+        operation: Box<str>,
+        args: Vec<Value>,
+        arg_types: Box<[TypeIdx]>,
+        return_type: TypeIdx,
+    },
     CreateIndirectFuture {
         module_id: ModuleId,
         func: Value,
@@ -1698,6 +1712,8 @@ impl VirtualMachine {
             Instruction::Drop { .. }
             | Instruction::AwaitFuture { .. }
             | Instruction::CreateFuture { .. }
+            | Instruction::CreateAwaitFuture { .. }
+            | Instruction::CallInternalThread { .. }
             | Instruction::CreateIndirectFuture { .. }
             | Instruction::AwaitAll { .. }
             | Instruction::AwaitRace { .. }
@@ -1803,6 +1819,8 @@ impl VirtualMachine {
             Instruction::Drop { .. }
             | Instruction::AwaitFuture { .. }
             | Instruction::CreateFuture { .. }
+            | Instruction::CreateAwaitFuture { .. }
+            | Instruction::CallInternalThread { .. }
             | Instruction::CreateIndirectFuture { .. }
             | Instruction::AwaitAll { .. }
             | Instruction::AwaitRace { .. }

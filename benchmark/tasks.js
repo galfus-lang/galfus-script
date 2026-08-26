@@ -3,7 +3,10 @@ const WORKER_COUNT = 4;
 
 async function main() {
   const started = performance.now();
-  const channels = Array.from({ length: WORKER_COUNT }, () => new MessageChannel());
+  const channels = Array.from(
+    { length: WORKER_COUNT },
+    () => new MessageChannel(),
+  );
   const workers = Array.from({ length: WORKER_COUNT }, (_, index) => {
     const worker = new Worker(new URL("./tasks_worker.js", import.meta.url));
     worker.postMessage(
@@ -16,7 +19,10 @@ async function main() {
     );
     return worker;
   });
-  const result = (await Promise.all(workers.map(runWorker))).reduce((sum, value) => sum + value, 0);
+  const result = (await Promise.all(workers.map(runWorker))).reduce(
+    (sum, value) => sum + value,
+    0,
+  );
   console.log(`RESULT=${result}`);
   console.log(`TIME_MS=${Math.round(performance.now() - started)}`);
 }

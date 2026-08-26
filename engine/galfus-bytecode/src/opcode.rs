@@ -91,7 +91,7 @@ pub fn decode_opcode(
         60 => Err(BytecodeDecodeError::RemovedOpcode {
             opcode: RemovedOpcode::AdapterCall,
         }),
-        0..=34 | 46..=58 | 61..=69 => Ok(Opcode(raw_opcode)),
+        0..=34 | 46..=58 | 61..=70 => Ok(Opcode(raw_opcode)),
         opcode => Err(BytecodeDecodeError::UnknownOpcode { opcode }),
     }
 }
@@ -156,6 +156,8 @@ impl Instruction {
             Self::CopyArray { .. } => 67,
             Self::TailCall { .. } => 68,
             Self::CallInternalMath { .. } => 69,
+            Self::CreateAwaitFuture { .. } => 70,
+            Self::CallInternalThread { .. } => 71,
             _ => 100,
         };
         Opcode(raw)

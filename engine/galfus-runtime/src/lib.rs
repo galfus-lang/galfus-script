@@ -33,9 +33,11 @@ use galfus_contract::{
 use galfus_vm::{VirtualMachine, VmPanic, VmValue};
 
 pub use driver::CooperativeDriver;
+#[cfg(feature = "metrics")]
+pub use execution::FutureMetrics;
 pub use execution::{
     CancellationReport, CompletionMetrics, Execution, ExecutionHandle, ExecutionState,
-    FutureMetrics, ShutdownReport,
+    ShutdownReport,
 };
 pub use execution_host::{ExecutionHost, HostBootstrapError};
 pub use preflight::{AdapterBindingPreflight, PreflightError};

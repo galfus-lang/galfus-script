@@ -1,5 +1,5 @@
 public final class Matrix4 {
-    private static final int ITERATIONS = 10_000;
+    private static final int ITERATIONS = 1_000_000;
 
     private Matrix4() {}
 

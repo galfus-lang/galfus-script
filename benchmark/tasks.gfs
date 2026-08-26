@@ -21,7 +21,7 @@ fn worker(previous_key: [u8], next_key: [u8]): i32 {
     if !next::send("x") {
       return 0
     }
-    const received = instanceof previous::tryReceiveMessage(1000) {
+    const received = instanceof previous::receiveMessage(1000) {
       [u8] token => <i32> token.length,
       null => 0,
     }

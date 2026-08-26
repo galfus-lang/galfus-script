@@ -464,21 +464,30 @@ fn panic_stack(panic: &galfus_vm::VmPanic) -> Vec<ExecutionFrame> {
 impl RunnableTask for RuntimeTask {
     fn run(mut self: Box<Self>, budget: usize) -> ThreadResult {
         let mut thread = self.thread.take().unwrap();
-
-        let step = match self.vm.execute_with_budget(&mut thread, budget) {
-            Ok(step) => step,
-            Err(e) => {
-                let failure = with_initialization_context(
-                    &thread,
-                    ExecutionFailure::new(ExecutionFailureKind::VmPanic, e.to_string())
-                        .with_thread_id(self.thread_id)
-                        .with_stack(panic_stack(&e)),
-                );
-                let _ = self.events.submit(crate::event::RuntimeEvent::Failed {
-                    thread_id: self.thread_id,
-                    error: failure.clone(),
-                });
-                return ThreadResult::Discarded;
+        const MAX_LOCAL_CPU_QUANTA: usize = 4;
+        let mut local_quanta = 0;
+        let step = loop {
+            match self.vm.execute_with_budget(&mut thread, budget) {
+                Ok(galfus_vm::VmStep::Continue)
+                    if local_quanta + 1 < MAX_LOCAL_CPU_QUANTA
+                        && !self.events.has_pending_events() =>
+                {
+                    local_quanta += 1;
+                }
+                Ok(step) => break step,
+                Err(e) => {
+                    let failure = with_initialization_context(
+                        &thread,
+                        ExecutionFailure::new(ExecutionFailureKind::VmPanic, e.to_string())
+                            .with_thread_id(self.thread_id)
+                            .with_stack(panic_stack(&e)),
+                    );
+                    let _ = self.events.submit(crate::event::RuntimeEvent::Failed {
+                        thread_id: self.thread_id,
+                        error: failure.clone(),
+                    });
+                    return ThreadResult::Discarded;
+                }
             }
         };
 

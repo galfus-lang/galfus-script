@@ -1,6 +1,6 @@
 import time
 
-ITERATIONS = 10_000
+ITERATIONS = 1_000_000
 
 def matrix4():
     a00, a01, a02, a03 = 1, 2, 3, 4

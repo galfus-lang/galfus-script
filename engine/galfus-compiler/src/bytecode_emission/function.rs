@@ -28,6 +28,7 @@ pub struct FnEmitter<'a, 'b> {
     next_label_id: usize,
     label_pcs: collections::HashMap<usize, usize>,
     pending_jumps: Vec<(usize, usize, JumpKind)>,
+    direct_await_candidates: collections::HashMap<Reg, Box<str>>,
     pub instruction_spans: collections::HashMap<usize, galfus_core::Span>,
 }
 
@@ -49,6 +50,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
             next_label_id: 0,
             label_pcs: collections::HashMap::new(),
             pending_jumps: Vec::new(),
+            direct_await_candidates: collections::HashMap::new(),
             instruction_spans: collections::HashMap::new(),
         }
     }
@@ -251,7 +253,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                 .rsplit("::")
                                 .next()
                                 .filter(|name| name.starts_with("__internal_math_"));
-                            if native_math_name.is_some() {
+                            if let Some(native_math_name) = native_math_name {
                                 let start_reg = if args.is_empty() {
                                     Reg(0)
                                 } else {
@@ -265,7 +267,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                     }
                                     reg
                                 };
-                                let operation = match native_math_name.unwrap() {
+                                let operation = match native_math_name {
                                     "__internal_math_is_nan" => 0,
                                     "__internal_math_is_finite" => 1,
                                     "__internal_math_is_infinite" => 2,
@@ -285,6 +287,73 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                     args_start: start_reg,
                                     arg_count: args.len() as u8,
                                 });
+                                if !args.is_empty() {
+                                    self.free_temps(args.len() as u16);
+                                }
+                                continue;
+                            }
+                            let native_thread_name = _name.rsplit("::").next().filter(|name| {
+                                matches!(
+                                    *name,
+                                    "__internal_thread_get"
+                                        | "__internal_thread_is_running"
+                                        | "__internal_thread_is_exited"
+                                        | "__internal_thread_exit_reason"
+                                        | "__internal_thread_send"
+                                        | "__internal_thread_has_messages"
+                                        | "__internal_thread_get_message"
+                                        | "__internal_thread_try_receive"
+                                )
+                            });
+                            if let Some(operation) = native_thread_name {
+                                let start_reg = if args.is_empty() {
+                                    Reg(0)
+                                } else {
+                                    let reg = self.alloc_temp();
+                                    let mut temp_regs = vec![reg];
+                                    for _ in 1..args.len() {
+                                        temp_regs.push(self.alloc_temp());
+                                    }
+                                    for (i, arg_op) in args.iter().enumerate() {
+                                        self.load_operand_to(arg_op, temp_regs[i]);
+                                    }
+                                    reg
+                                };
+                                let return_type = self
+                                    .func
+                                    .locals
+                                    .iter()
+                                    .find(|local| local.id == *destination)
+                                    .expect("native call destination must be a local")
+                                    .ty;
+                                let return_type =
+                                    match self.ctx.type_result.layer().table().kind(return_type) {
+                                        Some(galfus_frontend::TypeKind::GenericInstance {
+                                            arguments,
+                                            ..
+                                        }) => arguments.first().copied().unwrap_or(return_type),
+                                        _ => return_type,
+                                    };
+                                let arg_types = args
+                                    .iter()
+                                    .map(|argument| {
+                                        let ty = self.get_operand_type(argument);
+                                        crate::bytecode_emission::types::lower_type(self.ctx, ty)
+                                    })
+                                    .collect();
+                                self.instructions.push(Instruction::CallInternalThread {
+                                    dest: Reg(destination.raw() as u16),
+                                    operation: operation.into(),
+                                    args_start: start_reg,
+                                    arg_count: args.len() as u8,
+                                    arg_types,
+                                    return_type: crate::bytecode_emission::types::lower_type(
+                                        self.ctx,
+                                        return_type,
+                                    ),
+                                });
+                                self.direct_await_candidates
+                                    .insert(Reg(destination.raw() as u16), operation.into());
                                 if !args.is_empty() {
                                     self.free_temps(args.len() as u16);
                                 }
@@ -378,7 +447,12 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                     arg_types,
                                     return_type,
                                 });
-
+                                if let Some(name) =
+                                    native_async_name.filter(|name| name.starts_with("__internal_"))
+                                {
+                                    self.direct_await_candidates
+                                        .insert(Reg(destination.raw() as u16), name.into());
+                                }
                                 if !args.is_empty() {
                                     self.free_temps(args.len() as u16);
                                 }
@@ -482,6 +556,43 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                             .ty;
                         let return_type =
                             crate::bytecode_emission::types::lower_type(self.ctx, payload_type);
+                        if let Some(Instruction::CallInternalThread { dest, .. }) =
+                            self.instructions.last_mut()
+                            && *dest == fut_reg
+                        {
+                            *dest = Reg(destination.raw() as u16);
+                            self.direct_await_candidates.remove(&fut_reg);
+                            continue;
+                        }
+                        if let Some(operation) = self.direct_await_candidates.remove(&fut_reg)
+                            && let Some(Instruction::CreateFuture {
+                                dest,
+                                func: _,
+                                args_start,
+                                arg_count,
+                                arg_types,
+                                return_type: future_return_type,
+                            }) = self.instructions.last_mut()
+                            && *dest == fut_reg
+                            && *future_return_type == return_type
+                        {
+                            let args_start = *args_start;
+                            let arg_count = *arg_count;
+                            let arg_types = std::mem::take(arg_types);
+                            *self
+                                .instructions
+                                .last_mut()
+                                .expect("future instruction exists") =
+                                Instruction::CreateAwaitFuture {
+                                    dest: Reg(destination.raw() as u16),
+                                    operation,
+                                    args_start,
+                                    arg_count,
+                                    arg_types,
+                                    return_type,
+                                };
+                            continue;
+                        }
                         self.instructions.push(Instruction::AwaitFuture {
                             dest: Reg(destination.raw() as u16),
                             future_id: fut_reg,

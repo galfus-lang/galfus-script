@@ -38,16 +38,120 @@ pub enum Activation {
     },
 }
 
+impl Activation {
+    /// Keeps only the data needed after dispatch for cancellation and completion bookkeeping.
+    fn running_descriptor(&self) -> Self {
+        match self {
+            Self::GalfusFunction {
+                module_id,
+                func_idx,
+                ..
+            } => Self::GalfusFunction {
+                module_id: *module_id,
+                func_idx: *func_idx,
+                args: Vec::new(),
+                arg_types: Box::new([]),
+            },
+            Self::Internal { operation, .. } => Self::Internal {
+                operation: operation.clone(),
+                args: Vec::new(),
+            },
+            Self::Provider { alias, name, .. } => Self::Provider {
+                alias: alias.clone(),
+                name: name.clone(),
+                args: Vec::new(),
+                request_id: None,
+            },
+            Self::Adapter {
+                proxy_module,
+                symbol,
+                ..
+            } => Self::Adapter {
+                proxy_module: proxy_module.clone(),
+                symbol: symbol.clone(),
+                args: Vec::new(),
+                request_id: None,
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum FutureState {
-    Created,
-    Running,
+    Created(Activation),
+    Running(Activation),
     Resolved(Result<BoundaryValue, ExecutionFailure>),
     Discarded,
 }
 
 pub struct Waiter {
     pub continuation: PendingContinuation,
+}
+
+enum Waiters {
+    Public {
+        first: Option<Waiter>,
+        rest: Vec<Waiter>,
+    },
+    Direct(Option<Waiter>),
+}
+
+impl Waiters {
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::Public { first, .. } => first.is_none(),
+            Self::Direct(waiter) => waiter.is_none(),
+        }
+    }
+
+    fn push(&mut self, waiter: Waiter) -> Result<(), ExecutionFailure> {
+        match self {
+            Self::Public { first, rest } => {
+                if first.is_none() {
+                    *first = Some(waiter);
+                } else {
+                    rest.push(waiter);
+                }
+                Ok(())
+            }
+            Self::Direct(slot) if slot.is_none() => {
+                *slot = Some(waiter);
+                Ok(())
+            }
+            Self::Direct(_) => Err(ExecutionFailure::new(
+                galfus_contract::ExecutionFailureKind::InvalidContinuation,
+                "direct-await future already has a waiter",
+            )),
+        }
+    }
+
+    fn take(&mut self) -> Vec<Waiter> {
+        match self {
+            Self::Public { first, rest } => {
+                let mut waiters = Vec::with_capacity(first.is_some() as usize + rest.len());
+                if let Some(waiter) = first.take() {
+                    waiters.push(waiter);
+                }
+                waiters.append(rest);
+                waiters
+            }
+            Self::Direct(waiter) => waiter.take().into_iter().collect(),
+        }
+    }
+
+    fn clear(&mut self) {
+        match self {
+            Self::Public { first, rest } => {
+                *first = None;
+                rest.clear();
+            }
+            Self::Direct(waiter) => *waiter = None,
+        }
+    }
+
+    fn is_direct(&self) -> bool {
+        matches!(self, Self::Direct(_))
+    }
 }
 
 pub enum WaitDisposition {
@@ -69,17 +173,16 @@ pub enum DiscardDisposition {
 pub struct FutureRecord {
     pub payload_type: Option<TypeIdx>,
     pub payload_module_id: Option<ModuleId>,
-    pub activation: Option<Activation>,
-    pub running_activation: Option<Activation>,
     pub state: FutureState,
-    pub waiters: Vec<Waiter>,
-    pub active: Arc<AtomicBool>,
+    waiters: Waiters,
+    active: Option<Arc<AtomicBool>>,
 }
 
 #[derive(Default)]
 pub struct FutureRegistry {
     records: HashMap<(ThreadId, galfus_core::FutureId), FutureRecord>,
     tombstones: std::collections::VecDeque<(ThreadId, galfus_core::FutureId)>,
+    tombstone_index: std::collections::HashSet<(ThreadId, galfus_core::FutureId)>,
 }
 
 impl FutureRegistry {
@@ -87,6 +190,7 @@ impl FutureRegistry {
         Self {
             records: HashMap::new(),
             tombstones: std::collections::VecDeque::new(),
+            tombstone_index: std::collections::HashSet::new(),
         }
     }
 
@@ -109,11 +213,16 @@ impl FutureRegistry {
         let record = FutureRecord {
             payload_type,
             payload_module_id,
-            activation: Some(activation),
-            running_activation: None,
-            state: FutureState::Created,
-            waiters: Vec::new(),
-            active: Arc::new(AtomicBool::new(true)),
+            active: matches!(
+                activation,
+                Activation::Provider { .. } | Activation::Adapter { .. }
+            )
+            .then(|| Arc::new(AtomicBool::new(true))),
+            state: FutureState::Created(activation),
+            waiters: Waiters::Public {
+                first: None,
+                rest: Vec::new(),
+            },
         };
         self.records.insert((owner_thread_id, future_id), record);
         Ok(())
@@ -136,6 +245,35 @@ impl FutureRegistry {
         )
     }
 
+    pub fn insert_direct_await(
+        &mut self,
+        owner_thread_id: ThreadId,
+        future_id: galfus_core::FutureId,
+        payload_type: TypeIdx,
+        payload_module_id: ModuleId,
+        activation: Activation,
+    ) -> Result<(), ExecutionFailure> {
+        if self.records.contains_key(&(owner_thread_id, future_id)) {
+            return Err(ExecutionFailure::new(
+                galfus_contract::ExecutionFailureKind::DuplicateCompletion,
+                "duplicate future id for owner thread",
+            )
+            .with_thread_id(owner_thread_id)
+            .with_future_id(future_id));
+        }
+        self.records.insert(
+            (owner_thread_id, future_id),
+            FutureRecord {
+                payload_type: Some(payload_type),
+                payload_module_id: Some(payload_module_id),
+                active: None,
+                state: FutureState::Created(activation),
+                waiters: Waiters::Direct(None),
+            },
+        );
+        Ok(())
+    }
+
     pub fn take_activation_for_start(
         &mut self,
         owner_thread_id: ThreadId,
@@ -152,14 +290,17 @@ impl FutureRegistry {
                 .with_thread_id(owner_thread_id)
                 .with_future_id(future_id)
             })?;
-        match record.state {
-            FutureState::Created => {
-                record.state = FutureState::Running;
-                let activation = record.activation.take();
-                record.running_activation = activation.clone();
-                Ok(activation)
+        match &mut record.state {
+            FutureState::Created(_) => {
+                let activation = match std::mem::replace(&mut record.state, FutureState::Discarded)
+                {
+                    FutureState::Created(activation) => activation,
+                    _ => unreachable!(),
+                };
+                record.state = FutureState::Running(activation.running_descriptor());
+                Ok(Some(activation))
             }
-            FutureState::Running | FutureState::Resolved(_) | FutureState::Discarded => Ok(None),
+            FutureState::Running(_) | FutureState::Resolved(_) | FutureState::Discarded => Ok(None),
         }
     }
 
@@ -169,8 +310,10 @@ impl FutureRegistry {
         future_id: galfus_core::FutureId,
     ) -> Option<String> {
         let record = self.records.get(&(owner_thread_id, future_id))?;
-        match record.running_activation.as_ref()? {
-            Activation::Adapter { proxy_module, .. } => Some(proxy_module.clone()),
+        match &record.state {
+            FutureState::Running(Activation::Adapter { proxy_module, .. }) => {
+                Some(proxy_module.clone())
+            }
             _ => None,
         }
     }
@@ -192,14 +335,17 @@ impl FutureRegistry {
                 .with_thread_id(owner_thread_id)
                 .with_future_id(future_id)
             })?;
-        let activation = record.running_activation.as_mut().ok_or_else(|| {
-            ExecutionFailure::new(
-                galfus_contract::ExecutionFailureKind::InvalidContinuation,
-                "future request id was assigned before activation started",
-            )
-            .with_thread_id(owner_thread_id)
-            .with_future_id(future_id)
-        })?;
+        let activation = match &mut record.state {
+            FutureState::Running(activation) => activation,
+            _ => {
+                return Err(ExecutionFailure::new(
+                    galfus_contract::ExecutionFailureKind::InvalidContinuation,
+                    "future request id was assigned before activation started",
+                )
+                .with_thread_id(owner_thread_id)
+                .with_future_id(future_id));
+            }
+        };
         match activation {
             Activation::Provider {
                 request_id: active_request_id,
@@ -246,10 +392,10 @@ impl FutureRegistry {
                 result: result.clone(),
             }),
             FutureState::Discarded => Ok(WaitDisposition::Discarded),
-            FutureState::Created | FutureState::Running => {
-                record.waiters.push(waiter);
-                Ok(WaitDisposition::Registered)
-            }
+            FutureState::Created(_) | FutureState::Running(_) => record
+                .waiters
+                .push(waiter)
+                .map(|()| WaitDisposition::Registered),
         }
     }
 
@@ -284,11 +430,16 @@ impl FutureRegistry {
         keys.into_iter()
             .filter_map(|(owner, future_id)| {
                 let mut record = self.records.remove(&(owner, future_id))?;
-                record.active.store(false, Ordering::Release);
-                record.activation = None;
+                if let Some(active) = &record.active {
+                    active.store(false, Ordering::Release);
+                }
                 record.waiters.clear();
                 self.record_tombstone(owner, future_id);
-                Some((future_id, record.running_activation.take()))
+                let activation = match record.state {
+                    FutureState::Running(activation) => Some(activation),
+                    _ => None,
+                };
+                Some((future_id, activation))
             })
             .collect()
     }
@@ -333,23 +484,22 @@ impl FutureRegistry {
                 return Ok(DiscardDisposition::Retained);
             }
             match record.state {
-                FutureState::Created => {
-                    record.activation = None;
-                    record.active.store(false, Ordering::Release);
+                FutureState::Created(_) => {
+                    if let Some(active) = &record.active {
+                        active.store(false, Ordering::Release);
+                    }
                     record.state = FutureState::Discarded;
                     (true, Ok(DiscardDisposition::Created))
                 }
-                FutureState::Running => {
-                    let activation = record.running_activation.take().ok_or_else(|| {
-                        ExecutionFailure::new(
-                            galfus_contract::ExecutionFailureKind::InvalidContinuation,
-                            "running future has no activation descriptor",
-                        )
-                        .with_thread_id(owner_thread_id)
-                        .with_future_id(future_id)
-                    })?;
-                    record.state = FutureState::Discarded;
-                    record.active.store(false, Ordering::Release);
+                FutureState::Running(_) => {
+                    let activation =
+                        match std::mem::replace(&mut record.state, FutureState::Discarded) {
+                            FutureState::Running(activation) => activation,
+                            _ => unreachable!(),
+                        };
+                    if let Some(active) = &record.active {
+                        active.store(false, Ordering::Release);
+                    }
                     (true, Ok(DiscardDisposition::Running(activation)))
                 }
                 FutureState::Resolved(_) | FutureState::Discarded => {
@@ -374,7 +524,7 @@ impl FutureRegistry {
         let record = match self.records.get_mut(&(owner_thread_id, future_id)) {
             Some(r) => r,
             None => {
-                if self.tombstones.contains(&(owner_thread_id, future_id)) {
+                if self.tombstone_index.contains(&(owner_thread_id, future_id)) {
                     return Err(ExecutionFailure::new(
                         galfus_contract::ExecutionFailureKind::DuplicateCompletion,
                         "future completed after being discarded",
@@ -402,10 +552,18 @@ impl FutureRegistry {
             .with_thread_id(owner_thread_id)
             .with_future_id(future_id));
         }
-        record.activation = None;
-        record.running_activation = None;
         record.state = FutureState::Resolved(result);
-        Ok(std::mem::take(&mut record.waiters))
+        Ok(record.waiters.take())
+    }
+
+    pub fn is_direct_await(
+        &self,
+        owner_thread_id: ThreadId,
+        future_id: galfus_core::FutureId,
+    ) -> bool {
+        self.records
+            .get(&(owner_thread_id, future_id))
+            .is_some_and(|record| record.waiters.is_direct())
     }
 
     pub fn payload_schema(
@@ -424,7 +582,7 @@ impl FutureRegistry {
     ) -> Option<Arc<AtomicBool>> {
         self.records
             .get(&(owner_thread_id, future_id))
-            .map(|record| record.active.clone())
+            .and_then(|record| record.active.clone())
     }
 
     pub(super) fn record_tombstone(
@@ -432,10 +590,14 @@ impl FutureRegistry {
         owner_thread_id: ThreadId,
         future_id: galfus_core::FutureId,
     ) {
-        if self.tombstones.len() >= 1024 {
-            self.tombstones.pop_front();
+        if self.tombstones.len() >= 1024
+            && let Some(tombstone) = self.tombstones.pop_front()
+        {
+            self.tombstone_index.remove(&tombstone);
         }
-        self.tombstones.push_back((owner_thread_id, future_id));
+        let tombstone = (owner_thread_id, future_id);
+        self.tombstones.push_back(tombstone);
+        self.tombstone_index.insert(tombstone);
     }
 
     #[cfg(test)]

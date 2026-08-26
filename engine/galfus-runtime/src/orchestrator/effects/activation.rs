@@ -22,7 +22,10 @@ impl Orchestrator {
                 args,
                 arg_types,
             } => {
-                self.future_metrics.galfus_activations += 1;
+                #[cfg(feature = "metrics")]
+                {
+                    self.future_metrics.galfus_activations += 1;
+                }
                 self.start_galfus_function_activation(
                     thread_id, thread, future_id, module_id, func_idx, args, arg_types,
                 )
@@ -30,7 +33,10 @@ impl Orchestrator {
             Activation::Provider {
                 alias, name, args, ..
             } => {
-                self.future_metrics.provider_activations += 1;
+                #[cfg(feature = "metrics")]
+                {
+                    self.future_metrics.provider_activations += 1;
+                }
                 self.start_provider_activation(thread_id, thread, future_id, alias, name, args)
             }
             Activation::Adapter {
@@ -39,7 +45,10 @@ impl Orchestrator {
                 args,
                 ..
             } => {
-                self.future_metrics.adapter_activations += 1;
+                #[cfg(feature = "metrics")]
+                {
+                    self.future_metrics.adapter_activations += 1;
+                }
                 self.start_adapter_activation(
                     thread_id,
                     thread,
@@ -50,7 +59,10 @@ impl Orchestrator {
                 )
             }
             Activation::Internal { operation, args } => {
-                self.future_metrics.internal_activations += 1;
+                #[cfg(feature = "metrics")]
+                {
+                    self.future_metrics.internal_activations += 1;
+                }
                 self.start_internal_activation(
                     thread_id,
                     thread,

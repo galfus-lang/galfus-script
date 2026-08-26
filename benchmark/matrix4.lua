@@ -1,4 +1,4 @@
-local iterations = 10000
+local iterations = 1000000
 
 local function matrix4()
   local a00, a01, a02, a03 = 1, 2, 3, 4

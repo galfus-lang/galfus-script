@@ -1,11 +1,282 @@
 use super::*;
 
 use crate::task::execution_stack;
-use galfus_bytecode::instruction::FuncIdx;
+use galfus_bytecode::instruction::{FuncIdx, TypeIdx};
 use galfus_contract::{BoundaryValue, ExecutionFailure, ExecutionFailureKind};
 use galfus_core::ModuleId;
 
 impl Orchestrator {
+    pub(super) fn try_complete_internal_await(
+        &mut self,
+        thread_id: crate::registry::ThreadId,
+        operation: &str,
+        args: &[BoundaryValue],
+    ) -> Option<Result<BoundaryValue, ExecutionFailure>> {
+        let thread_arg = |index: usize| {
+            args.get(index).and_then(|value| match value {
+                BoundaryValue::I64(id) if *id > 0 => {
+                    u32::try_from(*id).ok().map(crate::registry::ThreadId::new)
+                }
+                _ => None,
+            })
+        };
+        match operation {
+            "__internal_thread_wait" => match thread_arg(0).and_then(|id| self.kernel.state(id)) {
+                Some(state) if !state.is_exited() => None,
+                Some(state) => Some(Ok(state
+                    .exit_reason()
+                    .and_then(Result::ok)
+                    .unwrap_or(BoundaryValue::Null))),
+                None => Some(Ok(BoundaryValue::Null)),
+            },
+            "__internal_thread_receive" => {
+                let sender_id = thread_arg(0);
+                self.kernel
+                    .get_mailbox(thread_id)
+                    .and_then(|mailbox| {
+                        let mut mailbox = mailbox.lock().unwrap();
+                        let index = sender_id.map_or_else(
+                            || (!mailbox.is_empty()).then_some(0),
+                            |sender_id| {
+                                mailbox
+                                    .iter()
+                                    .position(|message| message.sender_id == sender_id)
+                            },
+                        )?;
+                        mailbox.remove(index)
+                    })
+                    .map(|message| {
+                        if let Some(quota) = self.kernel.get_thread_quota(thread_id) {
+                            quota.release_mailbox_messages(1);
+                            quota.release_mailbox_bytes(message.data.len());
+                        }
+                        Ok(BoundaryValue::Bytes(message.data))
+                    })
+            }
+            "__internal_thread_sleep" => {
+                let ms = args
+                    .first()
+                    .and_then(|value| match value {
+                        BoundaryValue::I32(ms) if *ms >= 0 => Some(*ms as u64),
+                        BoundaryValue::I64(ms) if *ms >= 0 => Some(*ms as u64),
+                        _ => None,
+                    })
+                    .unwrap_or(0);
+                (ms == 0).then_some(Ok(BoundaryValue::Null))
+            }
+            _ => None,
+        }
+    }
+
+    fn send_internal_thread_message(
+        &mut self,
+        sender_id: crate::registry::ThreadId,
+        target_id: Option<crate::registry::ThreadId>,
+        data: Option<&BoundaryValue>,
+    ) -> bool {
+        let (Some(target_id), Some(BoundaryValue::Bytes(data))) = (target_id, data) else {
+            return false;
+        };
+        let Some(mailbox) = self.kernel.get_mailbox(target_id) else {
+            return false;
+        };
+        let message_bytes = data.len();
+        let Some(quota) = self.kernel.get_thread_quota(target_id) else {
+            return false;
+        };
+        if quota.try_reserve_mailbox_messages(1).is_err() {
+            return false;
+        }
+        if quota.try_reserve_mailbox_bytes(message_bytes).is_err() {
+            quota.release_mailbox_messages(1);
+            return false;
+        }
+        mailbox
+            .lock()
+            .unwrap()
+            .push_back(crate::registry::MailboxMessage {
+                sender_id,
+                data: data.clone(),
+            });
+        if let Err(error) = self.kernel.unblock(target_id) {
+            self.failure = Some(
+                ExecutionFailure::new(error, "runnable threads limit exceeded")
+                    .with_thread_id(target_id),
+            );
+            self.kernel.cancel(target_id);
+        }
+        self.complete_mailbox_future_waits(target_id, sender_id);
+        true
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn handle_internal_thread_call(
+        &mut self,
+        thread_id: crate::registry::ThreadId,
+        mut thread: galfus_vm::thread::VmThreadState,
+        continuation: galfus_vm::Continuation,
+        module_id: ModuleId,
+        operation: Box<str>,
+        args: Vec<galfus_vm::VmValue>,
+        arg_types: &[TypeIdx],
+        return_type: TypeIdx,
+    ) {
+        let boundary_args = {
+            let module = &self
+                .vm
+                .as_ref()
+                .unwrap()
+                .graph
+                .get(module_id)
+                .unwrap()
+                .module;
+            let mut boundary_args = Vec::with_capacity(args.len());
+            for (arg, ty) in args.into_iter().zip(arg_types.iter()) {
+                match crate::task::decode_from_thread_heap(&thread.heap, arg, *ty, module) {
+                    Ok(value) => boundary_args.push(value),
+                    Err(error) => {
+                        self.failure = Some(
+                            ExecutionFailure::new(
+                                ExecutionFailureKind::BoundaryCodecFailure,
+                                format!("invalid internal argument: {error:?}"),
+                            )
+                            .with_thread_id(thread_id)
+                            .with_module_id(module_id.raw().into())
+                            .with_stack(execution_stack(&thread)),
+                        );
+                        self.kernel.cancel(thread_id);
+                        return;
+                    }
+                }
+            }
+            boundary_args
+        };
+        let thread_arg = |index: usize| {
+            boundary_args.get(index).and_then(|value| match value {
+                BoundaryValue::I64(id) if *id > 0 => {
+                    u32::try_from(*id).ok().map(crate::registry::ThreadId::new)
+                }
+                _ => None,
+            })
+        };
+        let result = match operation.as_ref() {
+            "__internal_thread_get" => Ok(BoundaryValue::I64(
+                boundary_args
+                    .first()
+                    .and_then(|value| match value {
+                        BoundaryValue::Bytes(key) => std::str::from_utf8(key).ok(),
+                        _ => None,
+                    })
+                    .and_then(|key| self.kernel.lookup_key(key))
+                    .map(|id| id.raw() as i64)
+                    .unwrap_or(-1),
+            )),
+            "__internal_thread_is_running" => Ok(BoundaryValue::Bool(
+                thread_arg(0).is_some_and(|id| self.kernel.is_running(id)),
+            )),
+            "__internal_thread_is_exited" => Ok(BoundaryValue::Bool(
+                thread_arg(0).is_some_and(|id| self.kernel.is_exited(id)),
+            )),
+            "__internal_thread_exit_reason" => Ok(thread_arg(0)
+                .and_then(|id| self.kernel.state(id))
+                .and_then(|state| state.exit_reason())
+                .and_then(|result| match result {
+                    Ok(BoundaryValue::I32(code)) => Some(BoundaryValue::I32(code)),
+                    _ => None,
+                })
+                .unwrap_or(BoundaryValue::Null)),
+            "__internal_thread_has_messages" => Ok(BoundaryValue::Bool(
+                self.kernel
+                    .get_mailbox(thread_id)
+                    .is_some_and(|mailbox| !mailbox.lock().unwrap().is_empty()),
+            )),
+            "__internal_thread_get_message" | "__internal_thread_try_receive" => {
+                let sender_id = (operation.as_ref() == "__internal_thread_try_receive")
+                    .then(|| thread_arg(0))
+                    .flatten();
+                Ok(self
+                    .kernel
+                    .get_mailbox(thread_id)
+                    .and_then(|mailbox| {
+                        let mut mailbox = mailbox.lock().unwrap();
+                        let index = sender_id.map_or_else(
+                            || (!mailbox.is_empty()).then_some(0),
+                            |sender_id| {
+                                mailbox
+                                    .iter()
+                                    .position(|message| message.sender_id == sender_id)
+                            },
+                        )?;
+                        mailbox.remove(index)
+                    })
+                    .map(|message| {
+                        if let Some(quota) = self.kernel.get_thread_quota(thread_id) {
+                            quota.release_mailbox_messages(1);
+                            quota.release_mailbox_bytes(message.data.len());
+                        }
+                        BoundaryValue::Bytes(message.data)
+                    })
+                    .unwrap_or(BoundaryValue::Null))
+            }
+            "__internal_thread_send" => Ok(BoundaryValue::Bool(self.send_internal_thread_message(
+                thread_id,
+                thread_arg(0),
+                boundary_args.get(1),
+            ))),
+            _ => Err(ExecutionFailure::new(
+                ExecutionFailureKind::InvalidBytecode,
+                format!("unknown synchronous internal operation: {operation}"),
+            )),
+        };
+        let boundary = match result {
+            Ok(value) => value,
+            Err(error) => {
+                self.failure = Some(
+                    error
+                        .with_thread_id(thread_id)
+                        .with_stack(execution_stack(&thread)),
+                );
+                self.kernel.cancel(thread_id);
+                return;
+            }
+        };
+        let module = &self
+            .vm
+            .as_ref()
+            .unwrap()
+            .graph
+            .get(module_id)
+            .unwrap()
+            .module;
+        let value = match crate::task::encode_into_thread_heap(
+            &mut thread.heap,
+            boundary,
+            return_type,
+            module_id,
+            module,
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                self.failure = Some(
+                    ExecutionFailure::new(
+                        ExecutionFailureKind::BoundaryCodecFailure,
+                        format!("invalid internal result: {error:?}"),
+                    )
+                    .with_thread_id(thread_id)
+                    .with_module_id(module_id.raw().into())
+                    .with_stack(execution_stack(&thread)),
+                );
+                self.kernel.cancel(thread_id);
+                return;
+            }
+        };
+        #[cfg(feature = "metrics")]
+        {
+            self.future_metrics.internal_immediate += 1;
+        }
+        self.resume_or_fail_front(thread_id, thread, continuation, value);
+    }
+
     pub(super) fn start_internal_activation(
         &mut self,
         thread_id: crate::registry::ThreadId,
@@ -65,52 +336,9 @@ impl Orchestrator {
                     _ => None,
                 })
                 .unwrap_or(BoundaryValue::Null))),
-            "__internal_thread_send" => {
-                let success = match (thread_arg(0), args.get(1)) {
-                    (Some(target_id), Some(BoundaryValue::Bytes(data))) => {
-                        if let Some(mailbox) = self.kernel.get_mailbox(target_id) {
-                            let message_bytes = data.len();
-                            let mut ok = false;
-                            if let Some(target_quota) = self.kernel.get_thread_quota(target_id) {
-                                let quota = target_quota;
-                                if quota.try_reserve_mailbox_messages(1).is_ok() {
-                                    if quota.try_reserve_mailbox_bytes(message_bytes).is_ok() {
-                                        ok = true;
-                                    } else {
-                                        quota.release_mailbox_messages(1);
-                                    }
-                                }
-                            }
-                            if ok {
-                                mailbox.lock().unwrap().push_back(
-                                    crate::registry::MailboxMessage {
-                                        sender_id: thread_id,
-                                        data: data.clone(),
-                                    },
-                                );
-                                if let Err(e) = self.kernel.unblock(target_id) {
-                                    self.failure = Some(
-                                        galfus_contract::ExecutionFailure::new(
-                                            e,
-                                            "runnable threads limit exceeded",
-                                        )
-                                        .with_thread_id(target_id),
-                                    );
-                                    self.kernel.cancel(target_id);
-                                }
-                                self.complete_mailbox_future_waits(target_id);
-                                true
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
-                    }
-                    _ => false,
-                };
-                Some(Ok(BoundaryValue::Bool(success)))
-            }
+            "__internal_thread_send" => Some(Ok(BoundaryValue::Bool(
+                self.send_internal_thread_message(thread_id, thread_arg(0), args.get(1)),
+            ))),
             "__internal_thread_has_messages" => Some(Ok(BoundaryValue::Bool(
                 self.kernel
                     .get_mailbox(thread_id)
@@ -425,14 +653,20 @@ impl Orchestrator {
             }
         };
         if let Some(result) = immediate {
-            self.future_metrics.internal_immediate += 1;
+            #[cfg(feature = "metrics")]
+            {
+                self.future_metrics.internal_immediate += 1;
+            }
             if aggregate_registration.is_none() && !self.block_or_fail(thread_id, thread) {
                 return None;
             }
             self.complete_future(thread_id, future_id, result);
             return None;
         }
-        self.future_metrics.internal_suspended += 1;
+        #[cfg(feature = "metrics")]
+        {
+            self.future_metrics.internal_suspended += 1;
+        }
         Some(thread)
     }
 }

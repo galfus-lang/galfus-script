@@ -538,9 +538,60 @@ pub fn validate_bytecode_module(
                     arg_count,
                     ref arg_types,
                     return_type,
+                    ..
                 } => {
                     check_reg(dest, &mut errors);
                     check_func(func_idx, &mut errors);
+                    if arg_types.len() != arg_count as usize {
+                        errors.push(BytecodeValidationError::FutureArgumentTypeCountMismatch {
+                            func_name: func_name.clone(),
+                            instr_idx,
+                            expected_count: arg_count as usize,
+                            found_count: arg_types.len(),
+                        });
+                    }
+                    for &ty in arg_types {
+                        check_type(ty, &mut errors);
+                    }
+                    check_type(return_type, &mut errors);
+                    if arg_count > 0 {
+                        check_reg(Reg(args_start.raw() + arg_count as u16 - 1), &mut errors);
+                    }
+                }
+                Instruction::CreateAwaitFuture {
+                    dest,
+                    args_start,
+                    arg_count,
+                    ref arg_types,
+                    return_type,
+                    ..
+                } => {
+                    check_reg(dest, &mut errors);
+                    if arg_types.len() != arg_count as usize {
+                        errors.push(BytecodeValidationError::FutureArgumentTypeCountMismatch {
+                            func_name: func_name.clone(),
+                            instr_idx,
+                            expected_count: arg_count as usize,
+                            found_count: arg_types.len(),
+                        });
+                    }
+                    for &ty in arg_types {
+                        check_type(ty, &mut errors);
+                    }
+                    check_type(return_type, &mut errors);
+                    if arg_count > 0 {
+                        check_reg(Reg(args_start.raw() + arg_count as u16 - 1), &mut errors);
+                    }
+                }
+                Instruction::CallInternalThread {
+                    dest,
+                    args_start,
+                    arg_count,
+                    ref arg_types,
+                    return_type,
+                    ..
+                } => {
+                    check_reg(dest, &mut errors);
                     if arg_types.len() != arg_count as usize {
                         errors.push(BytecodeValidationError::FutureArgumentTypeCountMismatch {
                             func_name: func_name.clone(),

@@ -56,6 +56,10 @@ impl Orchestrator {
         result: Result<BoundaryValue, ExecutionFailure>,
         key: PendingKey,
     ) {
+        #[cfg(feature = "metrics")]
+        {
+            self.future_metrics.resumed_continuations += 1;
+        }
         if let PendingOperation::AggregateMember {
             coordinator_id,
             index,
@@ -64,13 +68,20 @@ impl Orchestrator {
             self.complete_aggregate_member(coordinator_id, index, result);
             return;
         }
-        if let Err(e) = self.kernel.unblock(thread_id) {
-            self.failure = Some(
-                ExecutionFailure::new(e, "runnable threads limit exceeded")
-                    .with_thread_id(thread_id),
-            );
-            self.cancel_and_teardown_thread(thread_id);
-            return;
+        let _was_unblocked = match self.kernel.unblock(thread_id) {
+            Ok(was_unblocked) => was_unblocked,
+            Err(e) => {
+                self.failure = Some(
+                    ExecutionFailure::new(e, "runnable threads limit exceeded")
+                        .with_thread_id(thread_id),
+                );
+                self.cancel_and_teardown_thread(thread_id);
+                return;
+            }
+        };
+        #[cfg(feature = "metrics")]
+        if _was_unblocked {
+            self.future_metrics.unblocked_threads += 1;
         }
         let Some(mut thread) = self.kernel.take_thread(thread_id) else {
             return;
@@ -170,10 +181,14 @@ impl Orchestrator {
             ));
         }
 
-        if let (Some((payload_module_id, payload_type)), Ok(value)) = (
-            self.future_registry.payload_schema(thread_id, future_id),
-            &result,
-        ) {
+        let is_direct_await = self.future_registry.is_direct_await(thread_id, future_id);
+
+        if !is_direct_await
+            && let (Some((payload_module_id, payload_type)), Ok(value)) = (
+                self.future_registry.payload_schema(thread_id, future_id),
+                &result,
+            )
+        {
             let module = &self
                 .vm
                 .as_ref()
@@ -236,6 +251,10 @@ impl Orchestrator {
                 result.clone(),
                 PendingKey::Future(future_id),
             );
+        }
+        if is_direct_await {
+            let _ = self.future_registry.discard(thread_id, future_id);
+            self.free_future_id(future_id);
         }
         self.completion_metrics.accepted += 1;
     }
