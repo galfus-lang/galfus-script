@@ -346,7 +346,7 @@ impl Workspace {
         FrontendRoots::new(roots)
     }
 
-    /// Compile the workspace into a [`BytecodeGraph`].
+    /// Compile the workspace into an optimized, validated [`PackageImage`].
     ///
     /// Gate rules:
     /// - Returns `Err(CompileBlocked::Dirty)` if `check()` has not been called
@@ -580,6 +580,9 @@ impl Workspace {
             )
             .map_err(|error| CompileBlocked::CompilerError(error.to_string()))?,
         );
+
+        let package = crate::workspace::optimizer::optimize_package(package, semantic_revision)
+            .map_err(CompileBlocked::CompilerError)?;
         self.bytecode_state.compile_state = CompileState::Ready {
             semantic_revision,
             package: Arc::clone(&package),
@@ -709,30 +712,5 @@ impl Workspace {
             ));
         };
         Ok((alias.clone(), exports))
-    }
-
-    pub fn optimize(&mut self) -> Result<CompileReport, CompileBlocked> {
-        let (package, semantic_revision) = match &self.bytecode_state.compile_state {
-            CompileState::Ready {
-                package,
-                semantic_revision,
-            } => (package, *semantic_revision),
-            _ => return Err(CompileBlocked::MissingConfiguration),
-        };
-
-        let optimized_package =
-            crate::workspace::optimizer::optimize_package(package, semantic_revision)
-                .map_err(CompileBlocked::CompilerError)?;
-
-        let new_package = Arc::new(optimized_package);
-
-        self.bytecode_state.compile_state = CompileState::Ready {
-            semantic_revision,
-            package: Arc::clone(&new_package),
-        };
-
-        Ok(CompileReport {
-            package: new_package,
-        })
     }
 }

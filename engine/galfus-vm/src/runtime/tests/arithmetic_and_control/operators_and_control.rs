@@ -42,6 +42,50 @@ fn test_basic_arithmetic() {
 }
 
 #[test]
+fn typed_immediates_preserve_integer_unsigned_and_float_semantics() {
+    let cases = [
+        (Constant::Int32(9), ImmediateValue::I32(4), ImmediateBinaryOp::Subtract, Value::Int32(5)),
+        (Constant::Int64(9), ImmediateValue::I64(4), ImmediateBinaryOp::Multiply, Value::Int64(36)),
+        (Constant::Uint32(9), ImmediateValue::U32(4), ImmediateBinaryOp::Greater, Value::Bool(true)),
+        (Constant::Uint64(9), ImmediateValue::U64(4), ImmediateBinaryOp::Remainder, Value::Uint64(1)),
+        (Constant::Float32(1.5), ImmediateValue::F32(2.0f32.to_bits()), ImmediateBinaryOp::Add, Value::Float32(3.5)),
+        (Constant::Float64(1.5), ImmediateValue::F64(2.0f64.to_bits()), ImmediateBinaryOp::Multiply, Value::Float64(3.0)),
+    ];
+
+    for (constant, rhs, operation, expected) in cases {
+        let image = create_test_module(
+            vec![
+                Instruction::LoadConst { dest: Reg(1), const_idx: ConstIdx(0) },
+                Instruction::BinaryImmediate { dest: Reg(2), lhs: Reg(1), operation, rhs },
+                Instruction::Ret { src: Reg(2) },
+            ],
+            vec![constant],
+        );
+        let graph = graph_with_node(galfus_bytecode::BytecodeNode {
+            id: galfus_core::ModuleId::new(0), path: galfus_core::ModulePath::new("immediate.gfs").unwrap(),
+            semantic_revision: galfus_core::SemanticRevision::new(0), module: image, metadata: None,
+        });
+        let vm = VirtualMachine::new(sync::Arc::new(graph));
+        let actual = vm.run_function(&mut thread::VmThreadState::test_new(), galfus_core::ModuleId::new(0), FuncIdx(0), vec![]).unwrap();
+        assert_eq!(actual, expected);
+    }
+}
+
+#[test]
+fn immediate_integer_division_by_zero_panics() {
+    let image = create_test_module(
+        vec![
+            Instruction::LoadConst { dest: Reg(1), const_idx: ConstIdx(0) },
+            Instruction::BinaryImmediate { dest: Reg(2), lhs: Reg(1), operation: ImmediateBinaryOp::Divide, rhs: ImmediateValue::I32(0) },
+            Instruction::Ret { src: Reg(2) },
+        ], vec![Constant::Int32(1)],
+    );
+    let graph = graph_with_node(galfus_bytecode::BytecodeNode { id: galfus_core::ModuleId::new(0), path: galfus_core::ModulePath::new("immediate.gfs").unwrap(), semantic_revision: galfus_core::SemanticRevision::new(0), module: image, metadata: None });
+    let vm = VirtualMachine::new(sync::Arc::new(graph));
+    assert!(vm.run_function(&mut thread::VmThreadState::test_new(), galfus_core::ModuleId::new(0), FuncIdx(0), vec![]).is_err());
+}
+
+#[test]
 fn test_sub_mul_div_rem_pow() {
     let instrs = vec![
         Instruction::LoadConst {

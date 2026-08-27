@@ -1,6 +1,7 @@
 use galfus_ir::mir::{Instruction, MirModule, Operand, Terminator};
 
-pub fn optimize_tail_calls(module: &mut MirModule) {
+pub fn optimize_tail_calls(module: &mut MirModule) -> usize {
+    let mut optimized_calls = 0;
     for func in &mut module.functions {
         for block in &mut func.blocks {
             let mut is_tco = false;
@@ -24,7 +25,7 @@ pub fn optimize_tail_calls(module: &mut MirModule) {
                                 _ => false,
                             };
 
-                            if can_tco {
+                            if can_tco && !*is_external && *call_func == func.id {
                                 is_tco = true;
                                 tail_call_data = Some((*call_func, args.clone(), *is_external));
                                 call_instr_index = Some(i);
@@ -46,7 +47,9 @@ pub fn optimize_tail_calls(module: &mut MirModule) {
                     args,
                     is_external,
                 };
+                optimized_calls += 1;
             }
         }
     }
+    optimized_calls
 }

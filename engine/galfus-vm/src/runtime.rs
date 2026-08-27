@@ -13,7 +13,8 @@ use crate::thread;
 
 use crate::error::{StackFrameInfo, VmError, VmPanic};
 use galfus_bytecode::instruction::{
-    ChoiceLayoutIdx, FuncIdx, Instruction, Reg, StructLayoutIdx, TypeIdx,
+    ChoiceLayoutIdx, FuncIdx, ImmediateBinaryOp, ImmediateValue, Instruction, Reg, StructLayoutIdx,
+    TypeIdx,
 };
 use galfus_bytecode::{BytecodeGraph, BytecodeType, Constant, OwnershipKind};
 use galfus_contract::Providers;
@@ -704,6 +705,16 @@ impl VirtualMachine {
 
             match instr {
                 // ===== HOT PATH: Arithmetic =====
+                Instruction::BinaryImmediate {
+                    dest,
+                    lhs,
+                    operation,
+                    rhs,
+                } => {
+                    let value = immediate_binary_value(read_reg!(thread, lhs), *rhs, *operation)
+                        .map_err(|error| self.make_panic(thread, error))?;
+                    write_prim_reg!(thread, dest, value);
+                }
 
                 // --- AOT Specialized I32 Operations ---
                 Instruction::AddI32 { dest, lhs, rhs } => {
@@ -1652,6 +1663,7 @@ impl VirtualMachine {
                     match step {
                         VmStep::Continue => {
                             reload_frame!(thread);
+                            registers_ptr = thread.registers.as_mut_ptr();
                             budget -= 1;
                         }
                         other => return Ok(other),
@@ -1790,7 +1802,10 @@ impl VirtualMachine {
             | Instruction::Le { .. }
             | Instruction::Gt { .. }
             | Instruction::Ge { .. }
-            | Instruction::Fallback { .. } => self.execute_operator_instruction(thread, instr)?,
+            | Instruction::Fallback { .. }
+            | Instruction::BinaryImmediate { .. } => {
+                self.execute_operator_instruction(thread, instr)?
+            }
 
             Instruction::Jump { .. }
             | Instruction::JumpTrue { .. }
@@ -1851,6 +1866,92 @@ impl VirtualMachine {
             }
         }
     }
+}
+
+fn immediate_binary_value(
+    lhs: Value,
+    rhs: ImmediateValue,
+    operation: ImmediateBinaryOp,
+) -> Result<Value, VmError> {
+    macro_rules! integer {
+        ($left:expr, $right:expr, $variant:ident) => {
+            match operation {
+                ImmediateBinaryOp::Add => Value::$variant($left.wrapping_add($right)),
+                ImmediateBinaryOp::Subtract => Value::$variant($left.wrapping_sub($right)),
+                ImmediateBinaryOp::Multiply => Value::$variant($left.wrapping_mul($right)),
+                ImmediateBinaryOp::Divide => {
+                    if $right == 0 {
+                        return Err(VmError::DivisionByZero);
+                    }
+                    Value::$variant($left / $right)
+                }
+                ImmediateBinaryOp::Remainder => {
+                    if $right == 0 {
+                        return Err(VmError::DivisionByZero);
+                    }
+                    Value::$variant($left % $right)
+                }
+                ImmediateBinaryOp::Equal => Value::Bool($left == $right),
+                ImmediateBinaryOp::NotEqual => Value::Bool($left != $right),
+                ImmediateBinaryOp::Less => Value::Bool($left < $right),
+                ImmediateBinaryOp::LessEqual => Value::Bool($left <= $right),
+                ImmediateBinaryOp::Greater => Value::Bool($left > $right),
+                ImmediateBinaryOp::GreaterEqual => Value::Bool($left >= $right),
+                ImmediateBinaryOp::ShiftLeft => Value::$variant($left.wrapping_shl($right as u32)),
+                ImmediateBinaryOp::ShiftRight => Value::$variant($left.wrapping_shr($right as u32)),
+                ImmediateBinaryOp::BitwiseAnd => Value::$variant($left & $right),
+                ImmediateBinaryOp::BitwiseOr => Value::$variant($left | $right),
+                ImmediateBinaryOp::BitwiseXor => Value::$variant($left ^ $right),
+            }
+        };
+    }
+    macro_rules! float {
+        ($left:expr, $right:expr, $variant:ident, $normalize:path) => {
+            match operation {
+                ImmediateBinaryOp::Add => Value::$variant($normalize($left + $right)),
+                ImmediateBinaryOp::Subtract => Value::$variant($normalize($left - $right)),
+                ImmediateBinaryOp::Multiply => Value::$variant($normalize($left * $right)),
+                ImmediateBinaryOp::Divide => Value::$variant($normalize($left / $right)),
+                ImmediateBinaryOp::Remainder => Value::$variant($normalize($left % $right)),
+                ImmediateBinaryOp::Equal => Value::Bool($left == $right),
+                ImmediateBinaryOp::NotEqual => Value::Bool($left != $right),
+                ImmediateBinaryOp::Less => Value::Bool($left < $right),
+                ImmediateBinaryOp::LessEqual => Value::Bool($left <= $right),
+                ImmediateBinaryOp::Greater => Value::Bool($left > $right),
+                ImmediateBinaryOp::GreaterEqual => Value::Bool($left >= $right),
+                _ => {
+                    return Err(VmError::TypeMismatch {
+                        expected: "numeric operation".to_string(),
+                        found: "float bitwise operation".to_string(),
+                    })
+                }
+            }
+        };
+    }
+    Ok(match (lhs, rhs) {
+        (Value::Int32(left), ImmediateValue::I32(right)) => integer!(left, right, Int32),
+        (Value::Int64(left), ImmediateValue::I64(right)) => integer!(left, right, Int64),
+        (Value::Uint32(left), ImmediateValue::U32(right)) => integer!(left, right, Uint32),
+        (Value::Uint64(left), ImmediateValue::U64(right)) => integer!(left, right, Uint64),
+        (Value::Float32(left), ImmediateValue::F32(right)) => float!(
+            left,
+            f32::from_bits(right),
+            Float32,
+            galfus_core::normalize_f32
+        ),
+        (Value::Float64(left), ImmediateValue::F64(right)) => float!(
+            left,
+            f64::from_bits(right),
+            Float64,
+            galfus_core::normalize_f64
+        ),
+        (left, right) => {
+            return Err(VmError::TypeMismatch {
+                expected: "matching immediate type".to_string(),
+                found: format!("{left:?} and {right:?}"),
+            });
+        }
+    })
 }
 unsafe impl Send for VirtualMachine {}
 unsafe impl Sync for VirtualMachine {}

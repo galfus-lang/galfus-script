@@ -257,6 +257,10 @@ pub fn validate_bytecode_module(
                     check_reg(src, &mut errors);
                     check_reg(fallback, &mut errors);
                 }
+                Instruction::BinaryImmediate { dest, lhs, .. } => {
+                    check_reg(dest, &mut errors);
+                    check_reg(lhs, &mut errors);
+                }
 
                 // Category C
                 Instruction::Jump { offset } => {

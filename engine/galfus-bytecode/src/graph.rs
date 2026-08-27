@@ -73,6 +73,37 @@ impl ExecutionMetadata {
             .and_then(|spans| spans.get(&instruction_offset))
             .copied()
     }
+
+    /// Removes spans for pruned functions and remaps retained function indexes.
+    pub fn remap_functions(&mut self, function_remap: &[Option<instruction::FuncIdx>]) {
+        let spans = std::mem::take(&mut self.spans);
+        for (function, locations) in spans {
+            let Some(Some(remapped)) = function_remap.get(function.raw() as usize) else {
+                continue;
+            };
+            self.spans.insert(*remapped, locations);
+        }
+    }
+
+    pub fn remap_instruction_offsets(
+        &mut self,
+        function: instruction::FuncIdx,
+        offset_remap: &[Option<usize>],
+    ) {
+        let Some(spans) = self.spans.remove(&function) else {
+            return;
+        };
+        let remapped = spans
+            .into_iter()
+            .filter_map(|(offset, location)| {
+                offset_remap
+                    .get(offset)
+                    .and_then(|offset| *offset)
+                    .map(|offset| (offset, location))
+            })
+            .collect();
+        self.spans.insert(function, remapped);
+    }
 }
 
 /// The compiled artifact for one source module.

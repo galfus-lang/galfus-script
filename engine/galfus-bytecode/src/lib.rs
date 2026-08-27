@@ -8,6 +8,7 @@ pub mod instruction;
 pub mod loader;
 pub mod opcode;
 pub mod package;
+pub mod statistics;
 pub mod validation;
 pub mod version;
 
@@ -21,6 +22,7 @@ pub use instruction::*;
 pub use loader::*;
 pub use opcode::*;
 pub use package::*;
+pub use statistics::*;
 pub use validation::*;
 pub use version::*;
 

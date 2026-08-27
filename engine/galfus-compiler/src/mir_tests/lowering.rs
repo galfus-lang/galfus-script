@@ -482,3 +482,97 @@ fn test_indirect_async_call_emits_typed_future_instruction() {
         galfus_bytecode::BytecodeType::Int32
     ));
 }
+
+#[test]
+fn test_typed_literals_do_not_emit_redundant_casts() {
+    let source_id = SourceId::new(0);
+    let code = r#"
+        fn main(): i64 {
+            var integer: i64 = 42
+            var decimal: f64 = 1.5
+            return integer
+        }
+    "#;
+    let source = SourceFile::new(
+        source_id,
+        "typed_literals.gfs".to_string(),
+        code.to_string(),
+    );
+    let parse_result = parse(&source);
+    let mut string_table = galfus_frontend::StringTable::new();
+    let graph = resolve(&source, parse_result.into_graph(), &mut string_table).into_graph();
+    let type_result = check_definition_types(
+        &source,
+        &graph,
+        check_declaration_types(&source, &graph, &string_table, false),
+        &string_table,
+        false,
+    );
+    assert!(
+        !type_result.has_errors(),
+        "Typecheck error: {:?}",
+        type_result.diagnostics()
+    );
+
+    let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
+    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let main = module
+        .functions
+        .iter()
+        .find(|function| function.name == "main")
+        .expect("main function should be emitted");
+
+    assert!(
+        !main
+            .instructions
+            .iter()
+            .any(|instruction| matches!(instruction, galfus_bytecode::Instruction::Cast { .. }))
+    );
+}
+
+#[test]
+fn test_conditional_without_branch_arguments_uses_direct_targets() {
+    let source_id = SourceId::new(0);
+    let code = r#"
+        fn choose(condition: bool): i32 {
+            if condition {
+                return 1
+            } else {
+                return 2
+            }
+        }
+    "#;
+    let source = SourceFile::new(source_id, "conditional.gfs".to_string(), code.to_string());
+    let parse_result = parse(&source);
+    let mut string_table = galfus_frontend::StringTable::new();
+    let graph = resolve(&source, parse_result.into_graph(), &mut string_table).into_graph();
+    let type_result = check_definition_types(
+        &source,
+        &graph,
+        check_declaration_types(&source, &graph, &string_table, false),
+        &string_table,
+        false,
+    );
+    assert!(
+        !type_result.has_errors(),
+        "Typecheck error: {:?}",
+        type_result.diagnostics()
+    );
+
+    let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
+    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let choose = module
+        .functions
+        .iter()
+        .find(|function| function.name == "choose")
+        .expect("choose function should be emitted");
+
+    assert!(matches!(
+        choose.instructions.as_slice(),
+        [
+            galfus_bytecode::Instruction::JumpTrue { offset: 1, .. },
+            galfus_bytecode::Instruction::Jump { offset: 3 },
+            ..
+        ]
+    ));
+}

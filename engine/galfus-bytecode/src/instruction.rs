@@ -90,6 +90,36 @@ impl ChoiceLayoutIdx {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ImmediateBinaryOp {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Remainder,
+    Equal,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    ShiftLeft,
+    ShiftRight,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ImmediateValue {
+    I32(i32),
+    I64(i64),
+    U32(u32),
+    U64(u64),
+    F32(u32),
+    F64(u64),
+}
+
 // =========================================================================
 // Opcode Instruction Set
 // =========================================================================
@@ -444,6 +474,13 @@ pub enum Instruction {
         dest: Reg,
         lhs: Reg,
         rhs: Reg,
+    },
+    /// Typed binary operation with an exact-width immediate right operand.
+    BinaryImmediate {
+        dest: Reg,
+        lhs: Reg,
+        operation: ImmediateBinaryOp,
+        rhs: ImmediateValue,
     },
     Fallback {
         dest: Reg,

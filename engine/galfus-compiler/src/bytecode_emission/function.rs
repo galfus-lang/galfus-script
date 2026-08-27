@@ -182,7 +182,8 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
             block_labels.insert(bb.id, self.new_label());
         }
 
-        for bb in &self.func.blocks {
+        for (block_index, bb) in self.func.blocks.iter().enumerate() {
+            let next_block = self.func.blocks.get(block_index + 1).map(|block| block.id);
             let label = block_labels[&bb.id];
             self.emit_label(label);
 
@@ -458,6 +459,25 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                 }
                                 continue;
                             }
+                        }
+
+                        if !*is_external
+                            && args.len() == 1
+                            && let mir::Operand::Local(argument) = &args[0]
+                        {
+                            let func_idx = *self.ctx.function_map.get(func).unwrap_or_else(|| {
+                                panic!(
+                                    "missing lowered function mapping for {:?} while emitting {} ({:?})",
+                                    func, self.func.name, self.func.id
+                                )
+                            });
+                            self.instructions.push(Instruction::Call {
+                                dest: Reg(destination.raw() as u16),
+                                func: func_idx,
+                                args_start: Reg(argument.raw() as u16),
+                                arg_count: 1,
+                            });
+                            continue;
                         }
 
                         let start_reg = self.alloc_temp();
@@ -749,17 +769,35 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                 } => {
                     let cond_reg = self.operand_reg(cond);
 
-                    let true_trampoline = self.new_label();
-                    self.emit_jump(true_trampoline, JumpKind::IfTrue(cond_reg));
+                    if true_args.is_empty() {
+                        self.emit_jump(block_labels[true_block], JumpKind::IfTrue(cond_reg));
 
-                    let false_target_params = self.target_params(*false_block);
-                    self.emit_parallel_copies(&false_target_params, false_args);
-                    self.emit_jump(block_labels[false_block], JumpKind::Unconditional);
+                        let false_target_params = self.target_params(*false_block);
+                        self.emit_parallel_copies(&false_target_params, false_args);
+                        if next_block != Some(*false_block) {
+                            self.emit_jump(block_labels[false_block], JumpKind::Unconditional);
+                        }
+                    } else if false_args.is_empty() {
+                        self.emit_jump(block_labels[false_block], JumpKind::IfFalse(cond_reg));
 
-                    self.emit_label(true_trampoline);
-                    let true_target_params = self.target_params(*true_block);
-                    self.emit_parallel_copies(&true_target_params, true_args);
-                    self.emit_jump(block_labels[true_block], JumpKind::Unconditional);
+                        let true_target_params = self.target_params(*true_block);
+                        self.emit_parallel_copies(&true_target_params, true_args);
+                        if next_block != Some(*true_block) {
+                            self.emit_jump(block_labels[true_block], JumpKind::Unconditional);
+                        }
+                    } else {
+                        let true_trampoline = self.new_label();
+                        self.emit_jump(true_trampoline, JumpKind::IfTrue(cond_reg));
+
+                        let false_target_params = self.target_params(*false_block);
+                        self.emit_parallel_copies(&false_target_params, false_args);
+                        self.emit_jump(block_labels[false_block], JumpKind::Unconditional);
+
+                        self.emit_label(true_trampoline);
+                        let true_target_params = self.target_params(*true_block);
+                        self.emit_parallel_copies(&true_target_params, true_args);
+                        self.emit_jump(block_labels[true_block], JumpKind::Unconditional);
+                    }
 
                     self.free_temp_if_operand(cond);
                 }

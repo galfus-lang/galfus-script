@@ -33,7 +33,7 @@ const BENCHMARK_CASES: &[BenchmarkCase] = &[
         ],
     },
     BenchmarkCase {
-        name: "Matrix 4x4",
+        name: "Matrix 4x4 (i64)",
         galfus_source: "benchmark/matrix4.gfs",
         standalone_output: "./target/release/matrix4_standalone",
         java_class: "Matrix4",

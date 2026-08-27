@@ -479,3 +479,22 @@ fn execution_metadata_resolves_the_span_for_an_instruction() {
     );
     assert_eq!(metadata.location_for(function, 5), None);
 }
+
+#[test]
+fn execution_metadata_remaps_retained_function_spans() {
+    let removed = instruction::FuncIdx(0);
+    let retained = instruction::FuncIdx(1);
+    let remapped = instruction::FuncIdx(0);
+    let span = galfus_core::Span::new(galfus_core::SourceId::new(9), 18, 27);
+    let mut metadata = ExecutionMetadata::default();
+    metadata.set_function_spans(removed, HashMap::from([(1, span)]));
+    metadata.set_function_spans(retained, HashMap::from([(4, span)]));
+
+    metadata.remap_functions(&[None, Some(remapped)]);
+
+    assert_eq!(metadata.location_for(removed, 1), None);
+    assert_eq!(
+        metadata.location_for(remapped, 4),
+        Some(DebugLocation::new(18, 27))
+    );
+}
