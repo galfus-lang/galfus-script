@@ -5,6 +5,7 @@ pub mod completion;
 pub mod definition;
 pub mod diagnostics;
 pub mod hover;
+pub mod inlay_hints;
 pub mod rpc;
 pub mod semantic_tokens;
 
@@ -12,7 +13,7 @@ use crate::workspace::Workspace;
 use galfus_core::{ModulePath, SourceFile};
 use lsp_types::{
     DidChangeTextDocumentParams, DidOpenTextDocumentParams, GotoDefinitionParams, HoverParams,
-    PublishDiagnosticsParams, SemanticTokensParams,
+    InlayHintParams, PublishDiagnosticsParams, SemanticTokensParams,
 };
 use rpc::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 use serde_json::Value;
@@ -128,6 +129,7 @@ impl Workspace {
                 let result = serde_json::json!({
                     "capabilities": {
                         "hoverProvider": true,
+                        "inlayHintProvider": true,
                         "textDocumentSync": 1, // Full sync
                         "definitionProvider": true,
                         "completionProvider": {
@@ -171,6 +173,23 @@ impl Workspace {
                         return Some(JsonRpcResponse::success(
                             id,
                             serde_json::to_value(hover).unwrap(),
+                        ));
+                    }
+                }
+                Some(JsonRpcResponse::success(id, Value::Null))
+            }
+            "textDocument/inlayHint" => {
+                if let Some(p) = params
+                    && let Ok(inlay_hint_params) = serde_json::from_value::<InlayHintParams>(p)
+                {
+                    let uri = &inlay_hint_params.text_document.uri;
+                    if let Some(path_str) = self.uri_to_module_path(uri)
+                        && let Some(hints) =
+                            inlay_hints::inlay_hints(self, &path_str, inlay_hint_params.range)
+                    {
+                        return Some(JsonRpcResponse::success(
+                            id,
+                            serde_json::to_value(hints).unwrap(),
                         ));
                     }
                 }

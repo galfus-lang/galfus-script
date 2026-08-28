@@ -199,7 +199,7 @@ pub fn hover(workspace: &Workspace, path: &str, position: Position) -> Option<Ho
     }
 
     let mut type_name = node_type_id
-        .map(|id| format_type(workspace, snapshot, semantic_module, id))
+        .map(|id| format_type(workspace, snapshot, semantic_module, id, true))
         .unwrap_or_else(|| "unknown".to_string());
 
     if type_name == "unknown"
@@ -327,11 +327,12 @@ fn find_global_export_link(
     None
 }
 
-fn format_type(
+pub(crate) fn format_type(
     workspace: &crate::workspace::Workspace,
     snapshot: &FrontendSnapshot,
     module: &SemanticModule,
     type_id: TypeId,
+    with_links: bool,
 ) -> String {
     let Some(type_result) = module.type_result() else {
         return "unknown".to_string();
@@ -349,7 +350,11 @@ fn format_type(
         galfus_frontend::TypeKind::Named { symbol } => {
             let name = get_symbol_name(snapshot, resolution, *symbol)
                 .unwrap_or_else(|| "unknown".to_string());
-            find_global_export_link(workspace, snapshot, &name).unwrap_or(name)
+            if with_links {
+                find_global_export_link(workspace, snapshot, &name).unwrap_or(name)
+            } else {
+                name
+            }
         }
         galfus_frontend::TypeKind::Path { root, segments } => {
             let root_name = if root.raw() == 0 {
@@ -360,37 +365,52 @@ fn format_type(
             };
             let path = segments.join("::");
             if path.is_empty() {
-                find_global_export_link(workspace, snapshot, &root_name).unwrap_or(root_name)
+                if with_links {
+                    find_global_export_link(workspace, snapshot, &root_name).unwrap_or(root_name)
+                } else {
+                    root_name
+                }
             } else if root_name == "null" || root_name == "unknown" {
-                find_global_export_link(workspace, snapshot, &path).unwrap_or(path)
+                if with_links {
+                    find_global_export_link(workspace, snapshot, &path).unwrap_or(path)
+                } else {
+                    path
+                }
             } else {
                 let full = format!("{}::{}", root_name, path);
-                find_global_export_link(workspace, snapshot, &full).unwrap_or(full)
+                if with_links {
+                    find_global_export_link(workspace, snapshot, &full).unwrap_or(full)
+                } else {
+                    full
+                }
             }
         }
         galfus_frontend::TypeKind::GenericParameter { symbol } => {
             get_symbol_name(snapshot, resolution, *symbol).unwrap_or_else(|| "unknown".to_string())
         }
         galfus_frontend::TypeKind::Array { element } => {
-            format!("[{}]", format_type(workspace, snapshot, module, *element))
+            format!(
+                "[{}]",
+                format_type(workspace, snapshot, module, *element, with_links)
+            )
         }
         galfus_frontend::TypeKind::Range { element } => {
             format!(
                 "range<{}>",
-                format_type(workspace, snapshot, module, *element)
+                format_type(workspace, snapshot, module, *element, with_links)
             )
         }
         galfus_frontend::TypeKind::Tuple { elements } => {
             let elems: Vec<String> = elements
                 .iter()
-                .map(|e| format_type(workspace, snapshot, module, *e))
+                .map(|e| format_type(workspace, snapshot, module, *e, with_links))
                 .collect();
             format!("({})", elems.join(", "))
         }
         galfus_frontend::TypeKind::Union { members } => {
             let members: Vec<String> = members
                 .iter()
-                .map(|m| format_type(workspace, snapshot, module, *m))
+                .map(|m| format_type(workspace, snapshot, module, *m, with_links))
                 .collect();
             members.join(" | ")
         }
@@ -399,7 +419,7 @@ fn format_type(
                 .parameters()
                 .iter()
                 .map(|p| {
-                    let mut text = format_type(workspace, snapshot, module, p.ty());
+                    let mut text = format_type(workspace, snapshot, module, p.ty(), with_links);
                     if p.is_rest() {
                         text = format!("...{}", text);
                     }
@@ -416,14 +436,14 @@ fn format_type(
             format!(
                 "fn({}): {}",
                 params.join(", "),
-                format_type(workspace, snapshot, module, f.return_type())
+                format_type(workspace, snapshot, module, f.return_type(), with_links)
             )
         }
         galfus_frontend::TypeKind::GenericInstance { base, arguments } => {
-            let base_name = format_type(workspace, snapshot, module, *base);
+            let base_name = format_type(workspace, snapshot, module, *base, with_links);
             let args: Vec<String> = arguments
                 .iter()
-                .map(|a| format_type(workspace, snapshot, module, *a))
+                .map(|a| format_type(workspace, snapshot, module, *a, with_links))
                 .collect();
             format!("{}<{}>", base_name, args.join(", "))
         }

@@ -1,6 +1,6 @@
 {
   "name": "galfus-language",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Syntax highlighting and basic editor support for Galfus Script.",
   "displayName": "Galfus Script",
   "publisher": "galfus",
@@ -28,6 +28,11 @@
     "syntax-highlighting"
   ],
   "contributes": {
+    "configurationDefaults": {
+      "[galfus]": {
+        "editor.inlayHints.enabled": "on"
+      }
+    },
     "languages": [
       {
         "id": "galfus",
