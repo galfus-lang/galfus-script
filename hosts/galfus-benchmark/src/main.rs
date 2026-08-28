@@ -1,5 +1,6 @@
 use cli_table::{Cell, Style, Table, format::Justify};
 use regex::Regex;
+use serde::Serialize;
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::thread;
@@ -57,7 +58,7 @@ const BENCHMARK_CASES: &[BenchmarkCase] = &[
     },
 ];
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 struct BenchmarkResult {
     benchmark: String,
     language: String,
@@ -69,7 +70,7 @@ struct BenchmarkResult {
     peak_virtual_mb: f64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize)]
 struct BenchmarkSample {
     script_time_ms: u64,
     total_time_ms: u64,
@@ -78,19 +79,64 @@ struct BenchmarkSample {
     peak_virtual_bytes: u64,
 }
 
+#[derive(Debug, Serialize)]
+struct RawBenchmarkRun {
+    benchmark: String,
+    language: String,
+    command: Vec<String>,
+    samples: Vec<BenchmarkSample>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CommandVersion {
+    command: String,
+    version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct BenchmarkEnvironment {
+    sample_count: usize,
+    reuse_release_binaries: bool,
+    commands: Vec<CommandVersion>,
+}
+
+#[derive(Debug, Serialize)]
+struct RawBenchmarkReport<'a> {
+    environment: BenchmarkEnvironment,
+    runs: &'a [RawBenchmarkRun],
+}
+
+#[derive(Debug, Serialize)]
+struct BenchmarkSummaryReport<'a> {
+    environment: BenchmarkEnvironment,
+    summaries: &'a [BenchmarkResult],
+}
+
+fn reuse_release_binaries() -> bool {
+    std::env::args()
+        .skip(1)
+        .any(|argument| argument == "--reuse-release")
+}
+
 fn main() {
-    println!("Compiling Galfus Engine...");
-    let status = Command::new("cargo")
-        .args(["build", "--workspace", "--profile", "release"])
-        .status()
-        .expect("Failed to compile Galfus");
-    if !status.success() {
-        eprintln!("Compilation failed!");
-        return;
+    let reuse_release = reuse_release_binaries();
+    if reuse_release {
+        println!("Reusing existing release binaries.");
+    } else {
+        println!("Compiling Galfus Engine...");
+        let status = Command::new("cargo")
+            .args(["build", "--workspace", "--profile", "release"])
+            .status()
+            .expect("Failed to compile Galfus");
+        if !status.success() {
+            eprintln!("Compilation failed!");
+            return;
+        }
     }
 
     for benchmark in BENCHMARK_CASES {
-        if !compile_standalone(benchmark) {
+        if !compile_standalone(benchmark, reuse_release) {
             return;
         }
     }
@@ -98,9 +144,11 @@ fn main() {
     let re_result = Regex::new(r"RESULT=([^\r\n]+)").unwrap();
     let re_time = Regex::new(r"TIME_MS=(\d+)").unwrap();
     let bun_bin = bun_binary();
+    let qjs_bin = qjs_binary();
     let java_available = prepare_java_benchmarks();
 
     let mut results = Vec::new();
+    let mut raw_runs = Vec::new();
     println!("\nRunning {SAMPLE_COUNT} cold-process samples per benchmark...\n");
 
     for benchmark in BENCHMARK_CASES {
@@ -114,6 +162,9 @@ fn main() {
                     .collect::<Vec<_>>();
                 if *name == "JavaScript (Bun)" {
                     command.insert(0, bun_bin.clone());
+                }
+                if *name == "JavaScript (QuickJS)" {
+                    command[0] = qjs_bin.clone();
                 }
                 (*name, command)
             })
@@ -147,6 +198,7 @@ fn main() {
             std::io::stdout().flush().unwrap();
 
             let mut samples = Vec::with_capacity(SAMPLE_COUNT);
+            let mut failure = None;
             for _ in 0..SAMPLE_COUNT {
                 match run_sample(&command, &re_result, &re_time) {
                     Ok(sample) => {
@@ -155,10 +207,24 @@ fn main() {
                     }
                     Err(error) => {
                         println!(" Failed: {error}");
+                        failure = Some(error);
                         break;
                     }
                 }
                 std::io::stdout().flush().unwrap();
+            }
+
+            raw_runs.push(RawBenchmarkRun {
+                benchmark: benchmark.name.to_string(),
+                language: name.to_string(),
+                command: command.clone(),
+                samples: samples.clone(),
+                error: failure,
+            });
+            if let Err(error) =
+                write_reports(reuse_release, raw_runs.as_slice(), results.as_slice())
+            {
+                eprintln!("Could not persist benchmark reports: {error}");
             }
 
             let Some(result) = summarize(benchmark.name, name, samples) else {
@@ -170,6 +236,11 @@ fn main() {
                 result.script_time_ms, result.total_time_ms
             );
             results.push(result);
+            if let Err(error) =
+                write_reports(reuse_release, raw_runs.as_slice(), results.as_slice())
+            {
+                eprintln!("Could not persist benchmark reports: {error}");
+            }
         }
     }
 
@@ -179,9 +250,15 @@ fn main() {
             .then(left.script_time_ms.cmp(&right.script_time_ms))
     });
     print_results(results.as_slice());
+    if let Err(error) = write_reports(reuse_release, raw_runs.as_slice(), results.as_slice()) {
+        eprintln!("Could not persist benchmark reports: {error}");
+    }
 }
 
-fn compile_standalone(benchmark: &BenchmarkCase) -> bool {
+fn compile_standalone(benchmark: &BenchmarkCase, reuse_release: bool) -> bool {
+    if reuse_release && std::path::Path::new(benchmark.standalone_output).exists() {
+        return true;
+    }
     println!("Compiling standalone Galfus ({})...", benchmark.name);
     let status = Command::new("./target/release/galfus-cli")
         .args([
@@ -194,6 +271,7 @@ fn compile_standalone(benchmark: &BenchmarkCase) -> bool {
             benchmark.standalone_output,
             benchmark.galfus_source,
         ])
+        .env("GALFUS_CACHE_DIR", ".tmp/galfus-cache")
         .status()
         .expect("Failed to compile standalone host");
     if !status.success() {
@@ -244,13 +322,89 @@ fn bun_binary() -> String {
         })
 }
 
+fn qjs_binary() -> String {
+    std::env::var("QJS_BIN").unwrap_or_else(|_| {
+        std::env::var("HOME")
+            .ok()
+            .map(|home| format!("{home}/Scripts/qjs"))
+            .filter(|path| std::path::Path::new(path).exists())
+            .unwrap_or_else(|| "qjs".to_string())
+    })
+}
+
+fn write_reports(
+    reuse_release: bool,
+    raw_runs: &[RawBenchmarkRun],
+    summaries: &[BenchmarkResult],
+) -> Result<(), String> {
+    let output_dir = std::path::Path::new(".tmp/benchmark");
+    std::fs::create_dir_all(output_dir).map_err(|error| error.to_string())?;
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_secs();
+    let environment = BenchmarkEnvironment {
+        sample_count: SAMPLE_COUNT,
+        reuse_release_binaries: reuse_release,
+        commands: [
+            "rustc".to_string(),
+            "cargo".to_string(),
+            qjs_binary(),
+            bun_binary(),
+            "java".to_string(),
+            "python3".to_string(),
+            "lua".to_string(),
+            "luajit".to_string(),
+        ]
+        .iter()
+        .map(|command| command_version(command))
+        .collect(),
+    };
+    write_json(
+        output_dir.join(format!("{timestamp}-raw.json")),
+        &RawBenchmarkReport {
+            environment: environment.clone(),
+            runs: raw_runs,
+        },
+    )?;
+    write_json(
+        output_dir.join(format!("{timestamp}-summary.json")),
+        &BenchmarkSummaryReport {
+            environment,
+            summaries,
+        },
+    )
+}
+
+fn command_version(command: &str) -> CommandVersion {
+    let version = Command::new(command)
+        .arg("--version")
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|version| version.lines().next().unwrap_or_default().to_string());
+    CommandVersion {
+        command: command.to_string(),
+        version,
+    }
+}
+
+fn write_json(path: std::path::PathBuf, value: &impl Serialize) -> Result<(), String> {
+    let contents = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
+    std::fs::write(path, contents).map_err(|error| error.to_string())
+}
+
 fn run_sample(
     command: &[String],
     re_result: &Regex,
     re_time: &Regex,
 ) -> Result<BenchmarkSample, String> {
     let mut process = Command::new(&command[0]);
-    process.args(&command[1..]).stdout(Stdio::piped());
+    process
+        .args(&command[1..])
+        .env("GALFUS_CACHE_DIR", ".tmp/galfus-cache")
+        .stdout(Stdio::piped());
 
     let started = Instant::now();
     let child = process.spawn().map_err(|error| error.to_string())?;

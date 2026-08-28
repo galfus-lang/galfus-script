@@ -531,6 +531,135 @@ fn test_typed_literals_do_not_emit_redundant_casts() {
 }
 
 #[test]
+fn typed_numeric_operations_emit_exact_width_immediates() {
+    let source_id = SourceId::new(0);
+    let code = r#"
+        fn i32(value: i32): i32 => value + <i32> 1
+        fn u32(value: u32): u32 => value + <u32> 1
+        fn i64(value: i64): i64 => value + <i64> 1
+        fn u64(value: u64): u64 => value + <u64> 1
+        fn f32(value: f32): f32 => value + <f32> 1.0
+        fn f64(value: f64): f64 => value + <f64> 1.0
+    "#;
+    let source = SourceFile::new(
+        source_id,
+        "typed_immediates.gfs".to_string(),
+        code.to_string(),
+    );
+    let parse_result = parse(&source);
+    let mut string_table = galfus_frontend::StringTable::new();
+    let graph = resolve(&source, parse_result.into_graph(), &mut string_table).into_graph();
+    let type_result = check_definition_types(
+        &source,
+        &graph,
+        check_declaration_types(&source, &graph, &string_table, false),
+        &string_table,
+        false,
+    );
+    assert!(
+        !type_result.has_errors(),
+        "Typecheck error: {:?}",
+        type_result.diagnostics()
+    );
+
+    let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
+    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let immediates = module
+        .functions
+        .iter()
+        .map(|function| {
+            function
+                .instructions
+                .iter()
+                .find_map(|instruction| match instruction {
+                    galfus_bytecode::Instruction::BinaryImmediate { rhs, .. } => Some(*rhs),
+                    _ => None,
+                })
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{} must use BinaryImmediate: {:#?}",
+                        function.name, function.instructions
+                    )
+                })
+        })
+        .collect::<Vec<_>>();
+
+    assert!(matches!(
+        immediates[0],
+        galfus_bytecode::ImmediateValue::I32(1)
+    ));
+    assert!(matches!(
+        immediates[1],
+        galfus_bytecode::ImmediateValue::U32(1)
+    ));
+    assert!(matches!(
+        immediates[2],
+        galfus_bytecode::ImmediateValue::I64(1)
+    ));
+    assert!(matches!(
+        immediates[3],
+        galfus_bytecode::ImmediateValue::U64(1)
+    ));
+    assert!(
+        matches!(immediates[4], galfus_bytecode::ImmediateValue::F32(bits) if bits == 1.0f32.to_bits())
+    );
+    assert!(
+        matches!(immediates[5], galfus_bytecode::ImmediateValue::F64(bits) if bits == 1.0f64.to_bits())
+    );
+}
+
+#[test]
+fn direct_single_argument_calls_use_the_local_source_register() {
+    let source_id = SourceId::new(0);
+    let code = r#"
+        fn increment(value: i64): i64 => value + <i64> 1
+
+        fn caller(value: i64): i64 {
+            var shifted: i64 = value + <i64> 1
+            return increment(shifted)
+        }
+    "#;
+    let source = SourceFile::new(source_id, "direct_call.gfs".to_string(), code.to_string());
+    let parse_result = parse(&source);
+    let mut string_table = galfus_frontend::StringTable::new();
+    let graph = resolve(&source, parse_result.into_graph(), &mut string_table).into_graph();
+    let type_result = check_definition_types(
+        &source,
+        &graph,
+        check_declaration_types(&source, &graph, &string_table, false),
+        &string_table,
+        false,
+    );
+    assert!(
+        !type_result.has_errors(),
+        "Typecheck error: {:?}",
+        type_result.diagnostics()
+    );
+
+    let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
+    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let caller = module
+        .functions
+        .iter()
+        .find(|function| function.name == "caller")
+        .expect("caller function should be emitted");
+    let args_start = caller
+        .instructions
+        .iter()
+        .find_map(|instruction| match instruction {
+            galfus_bytecode::Instruction::Call {
+                args_start,
+                arg_count: 1,
+                ..
+            } => Some(*args_start),
+            _ => None,
+        })
+        .expect("caller must emit a direct one-argument call");
+
+    assert_ne!(args_start, galfus_bytecode::Reg(0));
+}
+
+#[test]
 fn test_conditional_without_branch_arguments_uses_direct_targets() {
     let source_id = SourceId::new(0);
     let code = r#"
@@ -567,12 +696,16 @@ fn test_conditional_without_branch_arguments_uses_direct_targets() {
         .find(|function| function.name == "choose")
         .expect("choose function should be emitted");
 
-    assert!(matches!(
-        choose.instructions.as_slice(),
-        [
-            galfus_bytecode::Instruction::JumpTrue { offset: 1, .. },
-            galfus_bytecode::Instruction::Jump { offset: 3 },
-            ..
-        ]
-    ));
+    assert!(
+        matches!(
+            choose.instructions.as_slice(),
+            [
+                galfus_bytecode::Instruction::JumpFalse { offset: 3, .. },
+                galfus_bytecode::Instruction::LoadConst { .. },
+                ..
+            ],
+        ),
+        "{:#?}",
+        choose.instructions
+    );
 }

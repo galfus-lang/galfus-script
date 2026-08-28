@@ -1,103 +1,218 @@
-use galfus_bytecode::{Instruction, Reg, BytecodeFunction};
+use std::collections::{BTreeMap, BTreeSet};
 
+use galfus_bytecode::{BytecodeFunction, Reg};
 
-pub fn allocate_registers(func: &mut BytecodeFunction, intervals: &[Option<(usize, usize)>], register_count: usize) {
-    let param_count = func.param_count as usize;
-    let mut remap = vec![None; register_count];
-    
-    // Pin parameters
-    for i in 0..param_count {
-        remap[i] = Some(Reg(i as u16));
-    }
-    
-    let mut pinned = vec![false; register_count];
-    for i in 0..param_count {
-        pinned[i] = true;
-    }
-    
-    // Identify contiguous windows
-    for inst in &func.instructions {
-        let mut defs = Vec::new();
+use super::liveness::instruction_def_use;
+
+/// Reuses non-parameter registers only when their complete live intervals do
+/// not overlap. Operand windows become relative constraints, so they remain
+/// contiguous after their members are assigned physical slots.
+///
+/// Returns `false` without modifying `func` when overlapping windows impose
+/// incompatible constraints. The caller then retains dense compaction only.
+pub fn allocate_registers(
+    func: &mut BytecodeFunction,
+    intervals: &[Option<(usize, usize)>],
+    register_count: usize,
+) -> bool {
+    let parameter_count = func.param_count as usize;
+    let mut constraints = WeightedUnionFind::new(register_count);
+
+    for instruction in &func.instructions {
+        let mut definitions = Vec::new();
         let mut uses = Vec::new();
-        let mut use_ranges = Vec::new();
-        use super::liveness::instruction_def_use;
-        instruction_def_use(inst, &mut defs, &mut uses, &mut use_ranges);
-        for &(start, count) in &use_ranges {
-            if count > 1 {
-                for i in 0..count {
-                    let reg = (start.raw() + i as u16) as usize;
-                    pinned[reg] = true;
-                    remap[reg] = Some(Reg(reg as u16));
+        let mut ranges = Vec::new();
+        instruction_def_use(instruction, &mut definitions, &mut uses, &mut ranges);
+        for (start, count) in ranges {
+            for offset in 1..count as usize {
+                if !constraints.union(
+                    start.raw() as usize,
+                    start.raw() as usize + offset,
+                    offset as i32,
+                ) {
+                    return false;
                 }
             }
         }
     }
-    
-    let mut phys_reg_intervals: Vec<Vec<(usize, usize)>> = vec![Vec::new(); register_count];
-    let mut max_phys_reg = param_count as u16;
-    
-    for r in 0..register_count {
-        if pinned[r] {
-            max_phys_reg = max_phys_reg.max(r as u16 + 1);
-            if let Some(span) = intervals[r] {
-                phys_reg_intervals[r].push(span);
-            }
-        }
+
+    let mut groups = BTreeMap::<usize, Vec<(usize, i32)>>::new();
+    for register in 0..register_count {
+        let (root, offset) = constraints.find(register);
+        groups.entry(root).or_default().push((register, offset));
     }
-    
-    let mut sorted_intervals: Vec<(usize, (usize, usize))> = intervals
-        .iter()
-        .enumerate()
-        .filter_map(|(i, &int)| int.map(|span| (i, span)))
-        .filter(|&(i, _)| !pinned[i])
-        .collect();
-        
-    sorted_intervals.sort_by_key(|&(_, span)| span.0);
-    
-    let allocate = |span: (usize, usize), phys_reg_intervals: &mut Vec<Vec<(usize, usize)>>, max_phys_reg: &mut u16| -> u16 {
-        let mut r = param_count;
-        loop {
-            if r >= phys_reg_intervals.len() {
-                phys_reg_intervals.resize(r + 1, Vec::new());
-            }
-            if r >= phys_reg_intervals.len() {
-                phys_reg_intervals.push(vec![span]);
-                *max_phys_reg = (*max_phys_reg).max(r as u16 + 1);
-                return r as u16;
-            }
-            
-            let is_free = phys_reg_intervals[r].iter().all(|&existing| {
-                existing.1 < span.0 || existing.0 > span.1
+
+    let mut requests = Vec::with_capacity(groups.len());
+    for members in groups.into_values() {
+        let min_offset = members.iter().map(|(_, offset)| *offset).min().unwrap_or(0);
+        let members = members
+            .into_iter()
+            .map(|(register, offset)| Member {
+                register,
+                offset: (offset - min_offset) as usize,
+                interval: intervals[register],
+            })
+            .collect::<Vec<_>>();
+        let width = members
+            .iter()
+            .map(|member| member.offset + 1)
+            .max()
+            .unwrap_or(1);
+        if members
+            .iter()
+            .map(|member| member.offset)
+            .collect::<BTreeSet<_>>()
+            .len()
+            != members.len()
+        {
+            return false;
+        }
+
+        let fixed_base = members
+            .iter()
+            .filter(|member| member.register < parameter_count)
+            .try_fold(None, |base, member| {
+                let candidate = member.register.checked_sub(member.offset);
+                match (base, candidate) {
+                    (_, None) => None,
+                    (None, Some(candidate)) => Some(Some(candidate)),
+                    (Some(base), Some(candidate)) if base == candidate => Some(Some(base)),
+                    _ => None,
+                }
             });
-            
-            if is_free {
-                phys_reg_intervals[r].push(span);
-                *max_phys_reg = (*max_phys_reg).max(r as u16 + 1);
-                return r as u16;
+        let Some(fixed_base) = fixed_base else {
+            return false;
+        };
+        if members.iter().any(|member| {
+            member.register >= parameter_count
+                && fixed_base.is_some_and(|base| base + member.offset < parameter_count)
+        }) {
+            return false;
+        }
+
+        let start = members
+            .iter()
+            .filter_map(|member| member.interval.map(|interval| interval.0))
+            .min()
+            .unwrap_or(usize::MAX);
+        requests.push(Request {
+            members,
+            width,
+            fixed_base,
+            start,
+        });
+    }
+    requests.sort_by_key(|request| (request.fixed_base.is_none(), request.start));
+
+    let mut occupancy = vec![Vec::<(usize, usize)>::new(); parameter_count];
+    let mut remap = vec![None; register_count];
+    for request in requests {
+        let base = match request.fixed_base {
+            Some(base)
+                if base + request.width <= register_count && fits(&request, base, &occupancy) =>
+            {
+                base
             }
-            r += 1;
+            Some(_) => return false,
+            None => {
+                let mut base = parameter_count;
+                while base + request.width <= register_count && !fits(&request, base, &occupancy) {
+                    base += 1;
+                }
+                if base + request.width > register_count {
+                    return false;
+                }
+                base
+            }
+        };
+        if occupancy.len() < base + request.width {
+            occupancy.resize(base + request.width, Vec::new());
         }
-    };
-    
-    for &(old_reg, span) in &sorted_intervals {
-        if remap[old_reg].is_none() {
-            let phys = allocate(span, &mut phys_reg_intervals, &mut max_phys_reg);
-            remap[old_reg] = Some(Reg(phys));
+        for member in request.members {
+            let physical = base + member.offset;
+            remap[member.register] = Some(Reg(physical as u16));
+            if let Some(interval) = member.interval {
+                occupancy[physical].push(interval);
+            }
         }
     }
-    
-    // For any register that has NO interval (completely dead), we still need to map it if it's used as a dummy.
-    // We map it to itself.
-    for r in 0..register_count {
-        if remap[r].is_none() {
-            remap[r] = Some(Reg(r as u16));
-        }
+
+    if remap.iter().any(Option::is_none) {
+        return false;
     }
-    
     for instruction in &mut func.instructions {
         super::remap_instruction_registers(instruction, &remap);
     }
-    
-    func.local_count = max_phys_reg.saturating_sub(param_count as u16);
+    let register_total = remap
+        .iter()
+        .flatten()
+        .map(|register| register.raw() as usize + 1)
+        .max()
+        .unwrap_or(parameter_count);
+    func.local_count = (register_total - parameter_count) as u16;
     func.temp_count = 0;
+    true
+}
+
+struct Member {
+    register: usize,
+    offset: usize,
+    interval: Option<(usize, usize)>,
+}
+
+struct Request {
+    members: Vec<Member>,
+    width: usize,
+    fixed_base: Option<usize>,
+    start: usize,
+}
+
+fn fits(request: &Request, base: usize, occupancy: &[Vec<(usize, usize)>]) -> bool {
+    request.members.iter().all(|member| {
+        let Some(interval) = member.interval else {
+            return true;
+        };
+        occupancy.get(base + member.offset).is_none_or(|occupied| {
+            occupied
+                .iter()
+                .all(|existing| existing.1 < interval.0 || interval.1 < existing.0)
+        })
+    })
+}
+
+struct WeightedUnionFind {
+    parent: Vec<usize>,
+    offset_to_parent: Vec<i32>,
+}
+
+impl WeightedUnionFind {
+    fn new(length: usize) -> Self {
+        Self {
+            parent: (0..length).collect(),
+            offset_to_parent: vec![0; length],
+        }
+    }
+
+    fn find(&mut self, node: usize) -> (usize, i32) {
+        if self.parent[node] == node {
+            return (node, 0);
+        }
+        let parent = self.parent[node];
+        let (root, parent_offset) = self.find(parent);
+        self.offset_to_parent[node] += parent_offset;
+        self.parent[node] = root;
+        (root, self.offset_to_parent[node])
+    }
+
+    /// Records `position(right) = position(left) + distance`.
+    fn union(&mut self, left: usize, right: usize, distance: i32) -> bool {
+        let (left_root, left_offset) = self.find(left);
+        let (right_root, right_offset) = self.find(right);
+        if left_root == right_root {
+            return right_offset == left_offset + distance;
+        }
+        self.parent[right_root] = left_root;
+        self.offset_to_parent[right_root] = left_offset + distance - right_offset;
+        true
+    }
 }

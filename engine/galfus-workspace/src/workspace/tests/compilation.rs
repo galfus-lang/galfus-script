@@ -375,6 +375,7 @@ fn compile_updates_changed_modules_and_removes_deleted_modules() {
         .find(|image| image.path().as_str() == "helper.gfs")
         .expect("helper image");
     let main_id = main.id();
+    let main_node_address = main as *const _;
     let helper_id = helper.id();
     let main_revision = main.semantic_revision();
     let helper_revision = helper.semantic_revision();
@@ -402,6 +403,11 @@ fn compile_updates_changed_modules_and_removes_deleted_modules() {
             .expect("cached main image")
             .semantic_revision(),
         main_revision
+    );
+    assert_eq!(
+        updated_graph.get(main_id).expect("cached main image") as *const _,
+        main_node_address,
+        "unchanged finalized modules must retain their graph node allocation"
     );
     assert!(
         updated_graph

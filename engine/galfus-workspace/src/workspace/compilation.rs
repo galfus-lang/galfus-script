@@ -391,6 +391,7 @@ impl Workspace {
         if let CompileState::Ready {
             semantic_revision: compiled_rev,
             package,
+            ..
         } = &self.bytecode_state.compile_state
             && *compiled_rev == semantic_revision
         {
@@ -399,9 +400,13 @@ impl Workspace {
             });
         }
 
-        let cached_graph = match &self.bytecode_state.compile_state {
-            CompileState::Stale { package, .. } => Some(package.graph()),
-            _ => None,
+        let (cached_graph, previous_finalized) = match &self.bytecode_state.compile_state {
+            CompileState::Stale {
+                package,
+                unfinalized_package,
+                ..
+            } => (Some(unfinalized_package.graph()), Some(Arc::clone(package))),
+            _ => (None, None),
         };
         let empty_graph = BytecodeGraph::new();
         let base_graph = cached_graph.unwrap_or(&empty_graph);
@@ -562,7 +567,7 @@ impl Workspace {
             .map(|c| c.limits().clone())
             .unwrap_or_default();
 
-        let package = Arc::new(
+        let unfinalized_package = Arc::new(
             PackageImage::try_new(
                 graph,
                 self.config
@@ -581,11 +586,16 @@ impl Workspace {
             .map_err(|error| CompileBlocked::CompilerError(error.to_string()))?,
         );
 
-        let package = crate::workspace::optimizer::optimize_package(package, semantic_revision)
-            .map_err(CompileBlocked::CompilerError)?;
+        let package = crate::workspace::optimizer::optimize_package(
+            Arc::clone(&unfinalized_package),
+            previous_finalized.as_deref(),
+            semantic_revision,
+        )
+        .map_err(CompileBlocked::CompilerError)?;
         self.bytecode_state.compile_state = CompileState::Ready {
             semantic_revision,
             package: Arc::clone(&package),
+            unfinalized_package,
         };
 
         Ok(CompileReport { package })

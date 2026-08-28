@@ -12,7 +12,7 @@ const MAX_INLINE_LOCALS: usize = 16;
 /// Keeping this deliberately narrow makes the transform independent from call
 /// graph ordering and prevents it from crossing async, provider, adapter, or
 /// dynamic-call boundaries.
-pub fn inline_functions(module: &mut MirModule) -> usize {
+pub fn inline_functions(module: &mut MirModule, max_function_instructions: usize) -> usize {
     let candidates = module
         .functions
         .iter()
@@ -25,7 +25,7 @@ pub fn inline_functions(module: &mut MirModule) -> usize {
         if caller.is_async {
             continue;
         }
-        inlined_calls += inline_in_function(caller, &candidates);
+        inlined_calls += inline_in_function(caller, &candidates, max_function_instructions);
     }
     inlined_calls
 }
@@ -62,6 +62,7 @@ fn is_inline_candidate(function: &MirFunction) -> bool {
 fn inline_in_function(
     caller: &mut MirFunction,
     candidates: &HashMap<galfus_core::FunctionId, MirFunction>,
+    max_function_instructions: usize,
 ) -> usize {
     let mut next_local_id = caller
         .locals
@@ -71,6 +72,11 @@ fn inline_in_function(
         .unwrap_or(0)
         + 1;
     let mut inlined_calls = 0;
+    let mut function_instructions = caller
+        .blocks
+        .iter()
+        .map(|block| block.instructions.len())
+        .sum::<usize>();
 
     for block in &mut caller.blocks {
         let mut instructions = Vec::with_capacity(block.instructions.len());
@@ -94,6 +100,11 @@ fn inline_in_function(
                 instructions.push((instruction, span));
                 continue;
             }
+            let added_instructions = args.len() + callee_block.instructions.len();
+            if function_instructions + added_instructions > max_function_instructions {
+                instructions.push((instruction, span));
+                continue;
+            }
 
             let mut local_map = HashMap::new();
             for local in &callee.locals {
@@ -103,6 +114,7 @@ fn inline_in_function(
                 caller.locals.push(LocalDecl {
                     id: replacement,
                     ty: local.ty,
+                    is_owned: local.is_owned,
                 });
             }
 
@@ -124,6 +136,7 @@ fn inline_in_function(
                 Instruction::Assign(*destination, RValue::Use(map_operand(value, &local_map))),
                 callee_block.terminator.1,
             ));
+            function_instructions += added_instructions;
             inlined_calls += 1;
         }
         block.instructions = instructions;

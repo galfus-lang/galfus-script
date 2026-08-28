@@ -1,86 +1,143 @@
+mod allocator;
+mod liveness;
 #[cfg(test)]
 mod tests;
-mod liveness;
-mod allocator;
 
 use galfus_bytecode::{
     BytecodeFunction, BytecodeGraphTransaction, BytecodeModule, Constant, ExportKind, Instruction,
     PackageImage, Reg,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use galfus_core::SemanticRevision;
 
+#[derive(Debug, Default)]
+struct PackageOptimizationReport {
+    call_graph_changed: bool,
+}
+
 pub(crate) fn optimize_package(
     package: Arc<PackageImage>,
+    previous_finalized: Option<&PackageImage>,
     semantic_revision: SemanticRevision,
 ) -> Result<Arc<PackageImage>, String> {
     let graph = package.graph();
-    let mut new_modules = Vec::new();
+    let finalized_graph = previous_finalized.map_or(graph, PackageImage::graph);
+    let method_names = global_method_names(graph.modules().map(|node| &node.module));
 
-    let mut global_method_names = HashSet::new();
+    let mut report = PackageOptimizationReport::default();
+    let mut changed_nodes = HashMap::new();
     for node in graph.modules() {
-        for func in &node.module.functions {
-            for inst in &func.instructions {
-                if let Instruction::CallMethod { name_const, .. } = inst
-                    && let Some(Constant::String(name)) =
-                        node.module.constants.constants.get(name_const.0 as usize)
-                {
-                    global_method_names.insert(name.as_str());
-                }
-            }
-        }
-    }
-
-    for node in graph.modules() {
-        let needs_pruning = module_needs_pruning(&node.module, &global_method_names);
-        let functions_need_optimization = node
-            .module
-            .functions
-            .iter()
-            .any(function_needs_optimization);
-        if !needs_pruning && !functions_need_optimization {
-            continue;
-        }
-
+        let needs_pruning = module_needs_pruning(&node.module, &method_names);
         let mut new_node = node.clone();
+        let mut changed = false;
         if needs_pruning {
-            let function_remap = prune_module(&mut new_node.module, &global_method_names);
+            #[cfg(debug_assertions)]
+            let counts_before = module_counts(&new_node.module);
+            let function_remap = prune_module(&mut new_node.module, &method_names);
             if let Some(metadata) = &mut new_node.metadata {
                 metadata.remap_functions(&function_remap);
             }
+            #[cfg(debug_assertions)]
+            emit_prune_telemetry(
+                node.path(),
+                "initial",
+                counts_before,
+                module_counts(&new_node.module),
+            );
+            changed = true;
         }
 
         for (index, func) in new_node.module.functions.iter_mut().enumerate() {
-            if !function_needs_optimization(func) {
+            let mut optimized = func.clone();
+            let calls_before = direct_call_count(&optimized);
+            let offset_remap = optimize_function(&mut optimized);
+            if optimized == *func {
                 continue;
             }
-            let offset_remap = optimize_function(func);
+            let calls_after = direct_call_count(&optimized);
+            *func = optimized;
             if let Some(metadata) = &mut new_node.metadata {
                 metadata.remap_instruction_offsets(
                     galfus_bytecode::FuncIdx(index as u16),
                     &offset_remap,
                 );
             }
+            report.call_graph_changed |= calls_before != calls_after;
+            changed = true;
         }
 
-        new_modules.push(new_node);
+        if changed
+            || finalized_graph
+                .get(node.id())
+                .is_none_or(|previous| previous != &new_node)
+        {
+            changed_nodes.insert(node.id(), new_node);
+        }
     }
 
-    if new_modules.is_empty() {
+    if report.call_graph_changed {
+        let post_optimization_names = global_method_names(graph.modules().map(|node| {
+            changed_nodes
+                .get(&node.id())
+                .map_or(&node.module, |changed| &changed.module)
+        }));
+        for node in graph.modules() {
+            let current = changed_nodes.get(&node.id()).unwrap_or(node);
+            if !module_needs_pruning(&current.module, &post_optimization_names) {
+                continue;
+            }
+            let mut pruned = current.clone();
+            #[cfg(debug_assertions)]
+            let counts_before = module_counts(&pruned.module);
+            let function_remap = prune_module(&mut pruned.module, &post_optimization_names);
+            if let Some(metadata) = &mut pruned.metadata {
+                metadata.remap_functions(&function_remap);
+            }
+            #[cfg(debug_assertions)]
+            emit_prune_telemetry(
+                node.path(),
+                "post-call-graph",
+                counts_before,
+                module_counts(&pruned.module),
+            );
+            changed_nodes.insert(node.id(), pruned);
+        }
+    }
+
+    changed_nodes.retain(|id, node| {
+        !finalized_graph
+            .get(*id)
+            .is_some_and(|previous| previous == node)
+    });
+
+    let removed_modules = finalized_graph
+        .modules()
+        .filter(|node| graph.get(node.id()).is_none())
+        .map(|node| node.id())
+        .collect::<Vec<_>>();
+    if changed_nodes.is_empty()
+        && removed_modules.is_empty()
+        && finalized_graph.edges() == graph.edges()
+    {
+        if let Some(previous_finalized) = previous_finalized {
+            return Ok(Arc::new(previous_finalized.clone()));
+        }
         return Ok(package);
     }
 
     let transaction = BytecodeGraphTransaction {
-        base_version: graph.version(),
+        base_version: finalized_graph.version(),
         semantic_revision,
-        upserted_modules: new_modules,
-        removed_modules: vec![],
+        upserted_modules: changed_nodes.into_values().collect(),
+        removed_modules,
         edges: graph.edges().to_vec(),
     };
 
-    let new_graph = graph.apply(transaction).map_err(|e| e.to_string())?;
+    let new_graph = finalized_graph
+        .apply(transaction)
+        .map_err(|e| e.to_string())?;
 
     PackageImage::try_new(
         new_graph,
@@ -95,10 +152,61 @@ pub(crate) fn optimize_package(
     .map_err(|e| e.to_string())
 }
 
-fn function_needs_optimization(function: &BytecodeFunction) -> bool {
-    let mut optimized = function.clone();
-    optimize_function(&mut optimized);
-    optimized != *function
+#[cfg(debug_assertions)]
+fn module_counts(module: &BytecodeModule) -> (usize, usize) {
+    (module.functions.len(), module.constants.constants.len())
+}
+
+#[cfg(debug_assertions)]
+fn emit_prune_telemetry(
+    path: &galfus_core::ModulePath,
+    stage: &str,
+    before: (usize, usize),
+    after: (usize, usize),
+) {
+    if std::env::var_os("GALFUS_FINALIZATION_TELEMETRY").is_some() {
+        eprintln!(
+            "finalization module={} stage={} functions retained={} removed={} constants retained={} removed={}",
+            path.as_str(),
+            stage,
+            after.0,
+            before.0.saturating_sub(after.0),
+            after.1,
+            before.1.saturating_sub(after.1),
+        );
+    }
+}
+
+fn global_method_names<'a>(modules: impl Iterator<Item = &'a BytecodeModule>) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for module in modules {
+        for function in &module.functions {
+            for instruction in &function.instructions {
+                if let Instruction::CallMethod { name_const, .. } = instruction
+                    && let Some(Constant::String(name)) =
+                        module.constants.constants.get(name_const.0 as usize)
+                {
+                    names.insert(name.clone());
+                }
+            }
+        }
+    }
+    names
+}
+
+fn direct_call_count(function: &BytecodeFunction) -> usize {
+    function
+        .instructions
+        .iter()
+        .filter(|instruction| {
+            matches!(
+                instruction,
+                Instruction::Call { .. }
+                    | Instruction::CreateFuture { .. }
+                    | Instruction::TailCall { .. }
+            )
+        })
+        .count()
 }
 
 fn optimize_function(func: &mut BytecodeFunction) -> Vec<Option<usize>> {
@@ -217,44 +325,51 @@ fn optimize_function(func: &mut BytecodeFunction) -> Vec<Option<usize>> {
         })
         .collect();
     func.instructions = rewritten;
-    
-    // Preliminary normalization
+
     compact_registers(func);
-    
-    // CFG-aware liveness register reuse
+
     let register_count =
         func.param_count as usize + func.local_count as usize + func.temp_count as usize;
     let mut blocks = liveness::build_cfg(&func.instructions, register_count);
     liveness::compute_liveness(&mut blocks, &func.instructions, register_count);
     let intervals = liveness::compute_intervals(&blocks, &func.instructions, register_count);
-    
-    if func.name.contains("main") || func.name.contains("Point::move") || func.name.contains("scale") || func.name.contains("sum") {
-        println!("==== BEFORE ALLOCATOR FOR {} ====", func.name);
-        for (i, inst) in func.instructions.iter().enumerate() {
-            println!("{:03}: {:?}", i, inst);
-        }
+    if supports_liveness_allocation(&func.instructions)
+        && allocator::allocate_registers(func, &intervals, register_count)
+    {
+        compact_registers(func);
     }
-    
-    allocator::allocate_registers(func, &intervals, register_count);
-    
-    if func.name.contains("main") || func.name.contains("Point::move") || func.name.contains("scale") || func.name.contains("sum") {
-        println!("==== AFTER ALLOCATOR FOR {} ====", func.name);
-        for (i, inst) in func.instructions.iter().enumerate() {
-            println!("{:03}: {:?}", i, inst);
-        }
-    }
-    
-    compact_registers(func);
-    
-    if func.name.contains("main") || func.name.contains("Point::move") || func.name.contains("scale") || func.name.contains("sum") {
-        println!("==== AFTER FINAL COMPACT FOR {} ====", func.name);
-        for (i, inst) in func.instructions.iter().enumerate() {
-            println!("{:03}: {:?}", i, inst);
-        }
-    }
-
 
     offset_remap
+}
+
+fn supports_liveness_allocation(instructions: &[Instruction]) -> bool {
+    !instructions.iter().any(|instruction| {
+        matches!(
+            instruction,
+            Instruction::AllocLocal { .. }
+                | Instruction::LoadField { .. }
+                | Instruction::StoreField { .. }
+                | Instruction::NewArray { .. }
+                | Instruction::LoadIndex { .. }
+                | Instruction::StoreIndex { .. }
+                | Instruction::NewChoice { .. }
+                | Instruction::Copy { .. }
+                | Instruction::Instanceof { .. }
+                | Instruction::Call { .. }
+                | Instruction::TailCall { .. }
+                | Instruction::CallMethod { .. }
+                | Instruction::CallDynamic { .. }
+                | Instruction::AwaitFuture { .. }
+                | Instruction::CreateFuture { .. }
+                | Instruction::CreateAwaitFuture { .. }
+                | Instruction::CallInternalThread { .. }
+                | Instruction::CreateIndirectFuture { .. }
+                | Instruction::AwaitAll { .. }
+                | Instruction::AwaitRace { .. }
+                | Instruction::Len { .. }
+                | Instruction::CopyArray { .. }
+        )
+    })
 }
 
 fn jump_target(index: usize, offset: i32) -> usize {
@@ -851,7 +966,7 @@ fn visit_instruction_registers_mut(
     }
 }
 
-fn is_called_method(name: &str, global_method_names: &HashSet<&str>) -> bool {
+fn is_called_method(name: &str, global_method_names: &HashSet<String>) -> bool {
     let mut candidate = name;
     loop {
         if global_method_names.contains(candidate) {
@@ -864,7 +979,7 @@ fn is_called_method(name: &str, global_method_names: &HashSet<&str>) -> bool {
     }
 }
 
-fn module_needs_pruning(module: &BytecodeModule, global_method_names: &HashSet<&str>) -> bool {
+fn module_needs_pruning(module: &BytecodeModule, global_method_names: &HashSet<String>) -> bool {
     let (reachable_functions, reachable_constants) =
         collect_reachable_indices(module, global_method_names);
     reachable_functions.len() != module.functions.len()
@@ -873,7 +988,7 @@ fn module_needs_pruning(module: &BytecodeModule, global_method_names: &HashSet<&
 
 fn collect_reachable_indices(
     module: &BytecodeModule,
-    global_method_names: &HashSet<&str>,
+    global_method_names: &HashSet<String>,
 ) -> (HashSet<usize>, HashSet<usize>) {
     let mut reachable_functions = HashSet::new();
     let mut reachable_constants = HashSet::new();
@@ -947,7 +1062,7 @@ fn collect_reachable_indices(
 
 pub(crate) fn prune_module(
     module: &mut BytecodeModule,
-    global_method_names: &HashSet<&str>,
+    global_method_names: &HashSet<String>,
 ) -> Vec<Option<galfus_bytecode::FuncIdx>> {
     let old_funcs_len = module.functions.len();
     let (reachable_functions, reachable_constants) =

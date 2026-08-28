@@ -79,7 +79,11 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
 
     pub(super) fn declare_local(&mut self, symbol: Option<SymbolId>, ty: TypeId) -> LocalId {
         let local_id = self.builder.next_local();
-        self.locals.push(LocalDecl { id: local_id, ty });
+        self.locals.push(LocalDecl {
+            id: local_id,
+            ty,
+            is_owned: self.builder.is_owned_type(ty),
+        });
         if let Some(sym) = symbol {
             self.symbol_to_local.insert(sym, local_id);
         }

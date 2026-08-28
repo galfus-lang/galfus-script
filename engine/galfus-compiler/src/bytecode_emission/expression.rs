@@ -7,9 +7,14 @@ use galfus_ir::mir::{Constant as MirConstant, MirBinaryOp, MirUnaryOp, Operand, 
 
 impl<'a, 'b> FnEmitter<'a, 'b> {
     pub fn emit_rvalue(&mut self, dest: Reg, rvalue: &RValue) {
+        self.known_immediates.remove(&dest);
         match rvalue {
             RValue::Use(operand) => {
                 self.load_operand_to(operand, dest);
+
+                if let Some(immediate) = self.immediate_value(operand) {
+                    self.known_immediates.insert(dest, immediate);
+                }
 
                 if let Operand::Constant(constant) = operand
                     && self.is_numeric_constant(constant)
@@ -685,6 +690,9 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                 self.free_temp_if_operand(lhs);
             }
             RValue::Cast(operand, ty) => {
+                let immediate = self
+                    .immediate_value(operand)
+                    .and_then(|immediate| self.cast_immediate(immediate, *ty));
                 let src = self.operand_reg(operand);
                 let type_idx = crate::bytecode_emission::types::lower_type(self.ctx, *ty);
                 self.instructions.push(Instruction::Cast {
@@ -693,6 +701,9 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     type_idx,
                 });
                 self.free_temp_if_operand(operand);
+                if let Some(immediate) = immediate {
+                    self.known_immediates.insert(dest, immediate);
+                }
             }
             RValue::Copy(operand) => {
                 let src = self.operand_reg(operand);
@@ -1189,6 +1200,9 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
     }
 
     fn immediate_value(&self, operand: &Operand) -> Option<ImmediateValue> {
+        if let Operand::Local(local) = operand {
+            return self.known_immediates.get(&Reg(local.raw() as u16)).copied();
+        }
         let Operand::Constant(constant) = operand else {
             return None;
         };
@@ -1199,6 +1213,48 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
             MirConstant::Uint64(value) => Some(ImmediateValue::U64(*value)),
             MirConstant::Float32(value) => Some(ImmediateValue::F32(value.to_bits())),
             MirConstant::Float64(value) => Some(ImmediateValue::F64(value.to_bits())),
+            _ => None,
+        }
+    }
+
+    fn cast_immediate(&self, immediate: ImmediateValue, ty: TypeId) -> Option<ImmediateValue> {
+        let ty = crate::bytecode_emission::types::resolve_type_with_substitutions(self.ctx, ty);
+        let table = self.ctx.type_result.layer().table();
+        let TypeKind::Primitive(primitive) = table.kind(ty)? else {
+            return None;
+        };
+        match (immediate, primitive) {
+            (ImmediateValue::I32(value), PrimitiveType::Int32) => Some(ImmediateValue::I32(value)),
+            (ImmediateValue::I32(value), PrimitiveType::Int64) => {
+                Some(ImmediateValue::I64(value as i64))
+            }
+            (ImmediateValue::I32(value), PrimitiveType::Uint32) => {
+                Some(ImmediateValue::U32(value as u32))
+            }
+            (ImmediateValue::I32(value), PrimitiveType::Uint64) => {
+                Some(ImmediateValue::U64(value as u64))
+            }
+            (ImmediateValue::I32(value), PrimitiveType::Float32) => {
+                Some(ImmediateValue::F32((value as f32).to_bits()))
+            }
+            (ImmediateValue::I32(value), PrimitiveType::Float64) => {
+                Some(ImmediateValue::F64((value as f64).to_bits()))
+            }
+            (ImmediateValue::F64(value), PrimitiveType::Float32) => Some(ImmediateValue::F32(
+                (f64::from_bits(value) as f32).to_bits(),
+            )),
+            (ImmediateValue::F64(value), PrimitiveType::Float64) => {
+                Some(ImmediateValue::F64(value))
+            }
+            (ImmediateValue::F32(value), PrimitiveType::Float64) => Some(ImmediateValue::F64(
+                (f32::from_bits(value) as f64).to_bits(),
+            )),
+            (ImmediateValue::I64(value), PrimitiveType::Int64) => Some(ImmediateValue::I64(value)),
+            (ImmediateValue::U32(value), PrimitiveType::Uint32) => Some(ImmediateValue::U32(value)),
+            (ImmediateValue::U64(value), PrimitiveType::Uint64) => Some(ImmediateValue::U64(value)),
+            (ImmediateValue::F32(value), PrimitiveType::Float32) => {
+                Some(ImmediateValue::F32(value))
+            }
             _ => None,
         }
     }

@@ -5,7 +5,7 @@ use galfus_ir::mir;
 
 use super::LowerCtx;
 use galfus_bytecode::Instruction;
-use galfus_bytecode::instruction::{GlobalIdx, Reg};
+use galfus_bytecode::instruction::{GlobalIdx, ImmediateValue, Reg};
 use galfus_ir::mir::{
     Constant as MirConstant, Instruction as MirInstruction, MirFunction, Operand, Terminator,
 };
@@ -29,6 +29,7 @@ pub struct FnEmitter<'a, 'b> {
     label_pcs: collections::HashMap<usize, usize>,
     pending_jumps: Vec<(usize, usize, JumpKind)>,
     direct_await_candidates: collections::HashMap<Reg, Box<str>>,
+    pub(super) known_immediates: collections::HashMap<Reg, ImmediateValue>,
     pub instruction_spans: collections::HashMap<usize, galfus_core::Span>,
 }
 
@@ -51,6 +52,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
             label_pcs: collections::HashMap::new(),
             pending_jumps: Vec::new(),
             direct_await_candidates: collections::HashMap::new(),
+            known_immediates: collections::HashMap::new(),
             instruction_spans: collections::HashMap::new(),
         }
     }
@@ -769,7 +771,12 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                 } => {
                     let cond_reg = self.operand_reg(cond);
 
-                    if true_args.is_empty() {
+                    if true_args.is_empty()
+                        && false_args.is_empty()
+                        && next_block == Some(*true_block)
+                    {
+                        self.emit_jump(block_labels[false_block], JumpKind::IfFalse(cond_reg));
+                    } else if true_args.is_empty() {
                         self.emit_jump(block_labels[true_block], JumpKind::IfTrue(cond_reg));
 
                         let false_target_params = self.target_params(*false_block);

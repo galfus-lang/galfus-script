@@ -137,11 +137,13 @@ impl Workspace {
         if let CompileState::Ready {
             semantic_revision,
             package,
+            unfinalized_package,
         } = &self.bytecode_state.compile_state
         {
             self.bytecode_state.compile_state = CompileState::Stale {
                 semantic_revision: *semantic_revision,
                 package: Arc::clone(package),
+                unfinalized_package: Arc::clone(unfinalized_package),
             };
         }
     }

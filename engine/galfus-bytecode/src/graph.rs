@@ -42,7 +42,7 @@ impl From<Span> for DebugLocation {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ExecutionMetadata {
     spans: BTreeMap<instruction::FuncIdx, BTreeMap<usize, DebugLocation>>,
 }
@@ -107,7 +107,7 @@ impl ExecutionMetadata {
 }
 
 /// The compiled artifact for one source module.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BytecodeNode {
     pub id: ModuleId,
     pub path: ModulePath,

@@ -7,3 +7,5 @@ edition = "2024"
 sysinfo = "0.30"
 cli-table = "0.4"
 regex = "1.10"
+serde.workspace = true
+serde_json.workspace = true
