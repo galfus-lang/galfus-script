@@ -292,6 +292,9 @@ impl PrivateHeap {
 
     // State Machine Cycle Collector (Bacon & Rajan Algorithm)
     pub fn collect_cycles(&mut self) {
+        if self.roots.is_empty() {
+            return;
+        }
         self.mark_roots();
         self.scan_roots();
         self.collect_roots();

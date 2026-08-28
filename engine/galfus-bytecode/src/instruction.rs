@@ -90,6 +90,36 @@ impl ChoiceLayoutIdx {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ImmediateBinaryOp {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Remainder,
+    Equal,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    ShiftLeft,
+    ShiftRight,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ImmediateValue {
+    I32(i32),
+    I64(i64),
+    U32(u32),
+    U64(u64),
+    F32(u32),
+    F64(u64),
+}
+
 // =========================================================================
 // Opcode Instruction Set
 // =========================================================================
@@ -445,6 +475,13 @@ pub enum Instruction {
         lhs: Reg,
         rhs: Reg,
     },
+    /// Typed binary operation with an exact-width immediate right operand.
+    BinaryImmediate {
+        dest: Reg,
+        lhs: Reg,
+        operation: ImmediateBinaryOp,
+        rhs: ImmediateValue,
+    },
     Fallback {
         dest: Reg,
         src: Reg,
@@ -579,6 +616,24 @@ pub enum Instruction {
         arg_types: Box<[TypeIdx]>,
         return_type: TypeIdx,
     },
+    /// Creates and immediately awaits a Future without materializing its handle.
+    CreateAwaitFuture {
+        dest: Reg,
+        operation: Box<str>,
+        args_start: Reg,
+        arg_count: u8,
+        arg_types: Box<[TypeIdx]>,
+        return_type: TypeIdx,
+    },
+    /// Calls an internal synchronous operation without materializing a Future.
+    CallInternalThread {
+        dest: Reg,
+        operation: Box<str>,
+        args_start: Reg,
+        arg_count: u8,
+        arg_types: Box<[TypeIdx]>,
+        return_type: TypeIdx,
+    },
     CreateIndirectFuture {
         dest: Reg,
         func_reg: Reg,
@@ -607,5 +662,11 @@ pub enum Instruction {
         dest: Reg,
         dest_start: Reg,
         src: Reg,
+    },
+    CallInternalMath {
+        dest: Reg,
+        operation: u8,
+        args_start: Reg,
+        arg_count: u8,
     },
 }

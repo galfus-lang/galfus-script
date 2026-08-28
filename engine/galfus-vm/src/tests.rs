@@ -3,6 +3,28 @@ use std::sync;
 use super::*;
 
 #[test]
+fn thread_execution_storage_is_allocated_on_demand() {
+    let mut thread = thread::VmThreadState::test_new();
+
+    assert!(thread.call_stack.is_empty());
+    assert!(thread.registers.is_empty());
+
+    thread
+        .push_frame(
+            galfus_core::ModuleId::new(0),
+            galfus_bytecode::FuncIdx(0),
+            0,
+            None,
+            1,
+            &[] as *const [galfus_bytecode::Instruction],
+        )
+        .expect("a frame within the quota must allocate its registers");
+
+    assert_eq!(thread.call_stack.len(), 1);
+    assert!(!thread.registers.is_empty());
+}
+
+#[test]
 fn test_vm_creation() {
     let image = galfus_bytecode::BytecodeModule {
         name: "test".to_string(),

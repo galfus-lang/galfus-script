@@ -346,7 +346,7 @@ impl Workspace {
         FrontendRoots::new(roots)
     }
 
-    /// Compile the workspace into a [`BytecodeGraph`].
+    /// Compile the workspace into an optimized, validated [`PackageImage`].
     ///
     /// Gate rules:
     /// - Returns `Err(CompileBlocked::Dirty)` if `check()` has not been called
@@ -391,6 +391,7 @@ impl Workspace {
         if let CompileState::Ready {
             semantic_revision: compiled_rev,
             package,
+            ..
         } = &self.bytecode_state.compile_state
             && *compiled_rev == semantic_revision
         {
@@ -399,9 +400,13 @@ impl Workspace {
             });
         }
 
-        let cached_graph = match &self.bytecode_state.compile_state {
-            CompileState::Stale { package, .. } => Some(package.graph()),
-            _ => None,
+        let (cached_graph, previous_finalized) = match &self.bytecode_state.compile_state {
+            CompileState::Stale {
+                package,
+                unfinalized_package,
+                ..
+            } => (Some(unfinalized_package.graph()), Some(Arc::clone(package))),
+            _ => (None, None),
         };
         let empty_graph = BytecodeGraph::new();
         let base_graph = cached_graph.unwrap_or(&empty_graph);
@@ -446,16 +451,12 @@ impl Workspace {
             .collect();
         while let Some(id) = queue.pop() {
             if reachable_modules.insert(id) {
-                for edge in semantic_graph.import_edges() {
-                    if edge.from() == id {
-                        let to = edge
-                            .to()
-                            .or_else(|| path_to_id.get(edge.target_path()).copied());
-                        if let Some(to) = to {
-                            queue.push(to);
-                        }
-                    }
-                }
+                queue.extend(semantic_graph.dependencies_of(id));
+                queue.extend(
+                    semantic_graph
+                        .unresolved_dependency_paths_of(id)
+                        .filter_map(|path| path_to_id.get(path).copied()),
+                );
             }
         }
 
@@ -566,7 +567,7 @@ impl Workspace {
             .map(|c| c.limits().clone())
             .unwrap_or_default();
 
-        let package = Arc::new(
+        let unfinalized_package = Arc::new(
             PackageImage::try_new(
                 graph,
                 self.config
@@ -584,9 +585,17 @@ impl Workspace {
             )
             .map_err(|error| CompileBlocked::CompilerError(error.to_string()))?,
         );
+
+        let package = crate::workspace::optimizer::optimize_package(
+            Arc::clone(&unfinalized_package),
+            previous_finalized.as_deref(),
+            semantic_revision,
+        )
+        .map_err(CompileBlocked::CompilerError)?;
         self.bytecode_state.compile_state = CompileState::Ready {
             semantic_revision,
             package: Arc::clone(&package),
+            unfinalized_package,
         };
 
         Ok(CompileReport { package })
@@ -713,30 +722,5 @@ impl Workspace {
             ));
         };
         Ok((alias.clone(), exports))
-    }
-
-    pub fn optimize(&mut self) -> Result<CompileReport, CompileBlocked> {
-        let (package, semantic_revision) = match &self.bytecode_state.compile_state {
-            CompileState::Ready {
-                package,
-                semantic_revision,
-            } => (package, *semantic_revision),
-            _ => return Err(CompileBlocked::MissingConfiguration),
-        };
-
-        let optimized_package =
-            crate::workspace::optimizer::optimize_package(package, semantic_revision)
-                .map_err(CompileBlocked::CompilerError)?;
-
-        let new_package = Arc::new(optimized_package);
-
-        self.bytecode_state.compile_state = CompileState::Ready {
-            semantic_revision,
-            package: Arc::clone(&new_package),
-        };
-
-        Ok(CompileReport {
-            package: new_package,
-        })
     }
 }

@@ -171,7 +171,8 @@ pub(super) fn race_winner_uses_event_sequence_then_member_index() {
                 operation: PendingOperation::Future,
                 active: Arc::new(AtomicBool::new(true)),
             },
-            results: vec![None, None, None],
+            results: None,
+            remaining_results: 0,
             winner: None,
             armed: false,
         },
@@ -190,6 +191,47 @@ pub(super) fn race_winner_uses_event_sequence_then_member_index() {
             .as_ref()
             .map(|(sequence, index, result)| (*sequence, *index, result.clone())),
         Some((EventSequence(1), 0, Ok(BoundaryValue::I32(1))))
+    );
+}
+
+#[test]
+pub(super) fn all_results_preserve_member_order_when_completions_arrive_out_of_order() {
+    let mut orchestrator = Orchestrator::test_new();
+    let coordinator_id = CoordinatorId::new(1);
+    let thread_id = ThreadId::new(1);
+    let module_id = ModuleId::new(1);
+    orchestrator.aggregate_coordinators.insert(
+        coordinator_id,
+        AggregateCoordinator {
+            mode: AggregateMode::All,
+            future_ids: vec![FutureId::new(1), FutureId::new(2), FutureId::new(3)],
+            pending: PendingContinuation {
+                thread_id,
+                continuation: galfus_vm::Continuation::for_provider(Reg(0), module_id, TypeIdx(0)),
+                module_id,
+                return_type: TypeIdx(0),
+                stack: vec![],
+                operation: PendingOperation::Future,
+                active: Arc::new(AtomicBool::new(true)),
+            },
+            results: Some(vec![None, None, None]),
+            remaining_results: 3,
+            winner: None,
+            armed: false,
+        },
+    );
+
+    orchestrator.complete_aggregate_member(coordinator_id, 2, Ok(BoundaryValue::I32(3)));
+    orchestrator.complete_aggregate_member(coordinator_id, 0, Ok(BoundaryValue::I32(1)));
+    orchestrator.complete_aggregate_member(coordinator_id, 1, Ok(BoundaryValue::I32(2)));
+
+    assert_eq!(
+        orchestrator.aggregate_coordinators[&coordinator_id].results,
+        Some(vec![
+            Some(Ok(BoundaryValue::I32(1))),
+            Some(Ok(BoundaryValue::I32(2))),
+            Some(Ok(BoundaryValue::I32(3))),
+        ])
     );
 }
 

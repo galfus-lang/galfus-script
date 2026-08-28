@@ -44,6 +44,7 @@ pub struct MirModule {
 pub struct LocalDecl {
     pub id: LocalId,
     pub ty: TypeId,
+    pub is_owned: bool,
 }
 
 #[derive(Debug, Clone)]

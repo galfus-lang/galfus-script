@@ -5,7 +5,7 @@ use galfus_ir::mir;
 
 use super::LowerCtx;
 use galfus_bytecode::Instruction;
-use galfus_bytecode::instruction::{GlobalIdx, Reg};
+use galfus_bytecode::instruction::{GlobalIdx, ImmediateValue, Reg};
 use galfus_ir::mir::{
     Constant as MirConstant, Instruction as MirInstruction, MirFunction, Operand, Terminator,
 };
@@ -28,6 +28,8 @@ pub struct FnEmitter<'a, 'b> {
     next_label_id: usize,
     label_pcs: collections::HashMap<usize, usize>,
     pending_jumps: Vec<(usize, usize, JumpKind)>,
+    direct_await_candidates: collections::HashMap<Reg, Box<str>>,
+    pub(super) known_immediates: collections::HashMap<Reg, ImmediateValue>,
     pub instruction_spans: collections::HashMap<usize, galfus_core::Span>,
 }
 
@@ -49,6 +51,8 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
             next_label_id: 0,
             label_pcs: collections::HashMap::new(),
             pending_jumps: Vec::new(),
+            direct_await_candidates: collections::HashMap::new(),
+            known_immediates: collections::HashMap::new(),
             instruction_spans: collections::HashMap::new(),
         }
     }
@@ -180,7 +184,8 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
             block_labels.insert(bb.id, self.new_label());
         }
 
-        for bb in &self.func.blocks {
+        for (block_index, bb) in self.func.blocks.iter().enumerate() {
+            let next_block = self.func.blocks.get(block_index + 1).map(|block| block.id);
             let label = block_labels[&bb.id];
             self.emit_label(label);
 
@@ -247,6 +252,116 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     } => {
                         let builtin_name = self.ctx.function_names.get(func).map(|s| s.to_string());
                         if let Some(_name) = builtin_name {
+                            let native_math_name = _name
+                                .rsplit("::")
+                                .next()
+                                .filter(|name| name.starts_with("__internal_math_"));
+                            if let Some(native_math_name) = native_math_name {
+                                let start_reg = if args.is_empty() {
+                                    Reg(0)
+                                } else {
+                                    let reg = self.alloc_temp();
+                                    let mut temp_regs = vec![reg];
+                                    for _ in 1..args.len() {
+                                        temp_regs.push(self.alloc_temp());
+                                    }
+                                    for (i, arg_op) in args.iter().enumerate() {
+                                        self.load_operand_to(arg_op, temp_regs[i]);
+                                    }
+                                    reg
+                                };
+                                let operation = match native_math_name {
+                                    "__internal_math_is_nan" => 0,
+                                    "__internal_math_is_finite" => 1,
+                                    "__internal_math_is_infinite" => 2,
+                                    "__internal_math_sqrt" => 3,
+                                    "__internal_math_hypot" => 4,
+                                    "__internal_math_sin" => 5,
+                                    "__internal_math_cos" => 6,
+                                    "__internal_math_tan" => 7,
+                                    "__internal_math_log" => 8,
+                                    "__internal_math_log2" => 9,
+                                    "__internal_math_log10" => 10,
+                                    _ => unreachable!("recognized math intrinsic"),
+                                };
+                                self.instructions.push(Instruction::CallInternalMath {
+                                    dest: Reg(destination.raw() as u16),
+                                    operation,
+                                    args_start: start_reg,
+                                    arg_count: args.len() as u8,
+                                });
+                                if !args.is_empty() {
+                                    self.free_temps(args.len() as u16);
+                                }
+                                continue;
+                            }
+                            let native_thread_name = _name.rsplit("::").next().filter(|name| {
+                                matches!(
+                                    *name,
+                                    "__internal_thread_get"
+                                        | "__internal_thread_is_running"
+                                        | "__internal_thread_is_exited"
+                                        | "__internal_thread_exit_reason"
+                                        | "__internal_thread_send"
+                                        | "__internal_thread_has_messages"
+                                        | "__internal_thread_get_message"
+                                        | "__internal_thread_try_receive"
+                                )
+                            });
+                            if let Some(operation) = native_thread_name {
+                                let start_reg = if args.is_empty() {
+                                    Reg(0)
+                                } else {
+                                    let reg = self.alloc_temp();
+                                    let mut temp_regs = vec![reg];
+                                    for _ in 1..args.len() {
+                                        temp_regs.push(self.alloc_temp());
+                                    }
+                                    for (i, arg_op) in args.iter().enumerate() {
+                                        self.load_operand_to(arg_op, temp_regs[i]);
+                                    }
+                                    reg
+                                };
+                                let return_type = self
+                                    .func
+                                    .locals
+                                    .iter()
+                                    .find(|local| local.id == *destination)
+                                    .expect("native call destination must be a local")
+                                    .ty;
+                                let return_type =
+                                    match self.ctx.type_result.layer().table().kind(return_type) {
+                                        Some(galfus_frontend::TypeKind::GenericInstance {
+                                            arguments,
+                                            ..
+                                        }) => arguments.first().copied().unwrap_or(return_type),
+                                        _ => return_type,
+                                    };
+                                let arg_types = args
+                                    .iter()
+                                    .map(|argument| {
+                                        let ty = self.get_operand_type(argument);
+                                        crate::bytecode_emission::types::lower_type(self.ctx, ty)
+                                    })
+                                    .collect();
+                                self.instructions.push(Instruction::CallInternalThread {
+                                    dest: Reg(destination.raw() as u16),
+                                    operation: operation.into(),
+                                    args_start: start_reg,
+                                    arg_count: args.len() as u8,
+                                    arg_types,
+                                    return_type: crate::bytecode_emission::types::lower_type(
+                                        self.ctx,
+                                        return_type,
+                                    ),
+                                });
+                                self.direct_await_candidates
+                                    .insert(Reg(destination.raw() as u16), operation.into());
+                                if !args.is_empty() {
+                                    self.free_temps(args.len() as u16);
+                                }
+                                continue;
+                            }
                             let native_async_name = _name
                                 .rsplit("::")
                                 .next()
@@ -335,12 +450,36 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                     arg_types,
                                     return_type,
                                 });
-
+                                if let Some(name) =
+                                    native_async_name.filter(|name| name.starts_with("__internal_"))
+                                {
+                                    self.direct_await_candidates
+                                        .insert(Reg(destination.raw() as u16), name.into());
+                                }
                                 if !args.is_empty() {
                                     self.free_temps(args.len() as u16);
                                 }
                                 continue;
                             }
+                        }
+
+                        if !*is_external
+                            && args.len() == 1
+                            && let mir::Operand::Local(argument) = &args[0]
+                        {
+                            let func_idx = *self.ctx.function_map.get(func).unwrap_or_else(|| {
+                                panic!(
+                                    "missing lowered function mapping for {:?} while emitting {} ({:?})",
+                                    func, self.func.name, self.func.id
+                                )
+                            });
+                            self.instructions.push(Instruction::Call {
+                                dest: Reg(destination.raw() as u16),
+                                func: func_idx,
+                                args_start: Reg(argument.raw() as u16),
+                                arg_count: 1,
+                            });
+                            continue;
                         }
 
                         let start_reg = self.alloc_temp();
@@ -439,6 +578,43 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                             .ty;
                         let return_type =
                             crate::bytecode_emission::types::lower_type(self.ctx, payload_type);
+                        if let Some(Instruction::CallInternalThread { dest, .. }) =
+                            self.instructions.last_mut()
+                            && *dest == fut_reg
+                        {
+                            *dest = Reg(destination.raw() as u16);
+                            self.direct_await_candidates.remove(&fut_reg);
+                            continue;
+                        }
+                        if let Some(operation) = self.direct_await_candidates.remove(&fut_reg)
+                            && let Some(Instruction::CreateFuture {
+                                dest,
+                                func: _,
+                                args_start,
+                                arg_count,
+                                arg_types,
+                                return_type: future_return_type,
+                            }) = self.instructions.last_mut()
+                            && *dest == fut_reg
+                            && *future_return_type == return_type
+                        {
+                            let args_start = *args_start;
+                            let arg_count = *arg_count;
+                            let arg_types = std::mem::take(arg_types);
+                            *self
+                                .instructions
+                                .last_mut()
+                                .expect("future instruction exists") =
+                                Instruction::CreateAwaitFuture {
+                                    dest: Reg(destination.raw() as u16),
+                                    operation,
+                                    args_start,
+                                    arg_count,
+                                    arg_types,
+                                    return_type,
+                                };
+                            continue;
+                        }
                         self.instructions.push(Instruction::AwaitFuture {
                             dest: Reg(destination.raw() as u16),
                             future_id: fut_reg,
@@ -595,17 +771,40 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                 } => {
                     let cond_reg = self.operand_reg(cond);
 
-                    let true_trampoline = self.new_label();
-                    self.emit_jump(true_trampoline, JumpKind::IfTrue(cond_reg));
+                    if true_args.is_empty()
+                        && false_args.is_empty()
+                        && next_block == Some(*true_block)
+                    {
+                        self.emit_jump(block_labels[false_block], JumpKind::IfFalse(cond_reg));
+                    } else if true_args.is_empty() {
+                        self.emit_jump(block_labels[true_block], JumpKind::IfTrue(cond_reg));
 
-                    let false_target_params = self.target_params(*false_block);
-                    self.emit_parallel_copies(&false_target_params, false_args);
-                    self.emit_jump(block_labels[false_block], JumpKind::Unconditional);
+                        let false_target_params = self.target_params(*false_block);
+                        self.emit_parallel_copies(&false_target_params, false_args);
+                        if next_block != Some(*false_block) {
+                            self.emit_jump(block_labels[false_block], JumpKind::Unconditional);
+                        }
+                    } else if false_args.is_empty() {
+                        self.emit_jump(block_labels[false_block], JumpKind::IfFalse(cond_reg));
 
-                    self.emit_label(true_trampoline);
-                    let true_target_params = self.target_params(*true_block);
-                    self.emit_parallel_copies(&true_target_params, true_args);
-                    self.emit_jump(block_labels[true_block], JumpKind::Unconditional);
+                        let true_target_params = self.target_params(*true_block);
+                        self.emit_parallel_copies(&true_target_params, true_args);
+                        if next_block != Some(*true_block) {
+                            self.emit_jump(block_labels[true_block], JumpKind::Unconditional);
+                        }
+                    } else {
+                        let true_trampoline = self.new_label();
+                        self.emit_jump(true_trampoline, JumpKind::IfTrue(cond_reg));
+
+                        let false_target_params = self.target_params(*false_block);
+                        self.emit_parallel_copies(&false_target_params, false_args);
+                        self.emit_jump(block_labels[false_block], JumpKind::Unconditional);
+
+                        self.emit_label(true_trampoline);
+                        let true_target_params = self.target_params(*true_block);
+                        self.emit_parallel_copies(&true_target_params, true_args);
+                        self.emit_jump(block_labels[true_block], JumpKind::Unconditional);
+                    }
 
                     self.free_temp_if_operand(cond);
                 }

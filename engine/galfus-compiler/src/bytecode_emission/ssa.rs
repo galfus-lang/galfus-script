@@ -67,6 +67,7 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
                 self.new_locals.push(LocalDecl {
                     id: phi_id,
                     ty: phi_decl.ty,
+                    is_owned: phi_decl.is_owned,
                 });
 
                 self.block_parameters
@@ -155,6 +156,7 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
                     self.new_locals.push(LocalDecl {
                         id: new_id,
                         ty: target_decl.ty,
+                        is_owned: target_decl.is_owned,
                     });
                     *target = new_id;
                     self.write_variable(block, orig_target, new_id);
@@ -192,6 +194,7 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
                     self.new_locals.push(LocalDecl {
                         id: new_id,
                         ty: target_decl.ty,
+                        is_owned: target_decl.is_owned,
                     });
                     *destination = new_id;
                     self.write_variable(block, orig_target, new_id);
@@ -217,6 +220,7 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
                     self.new_locals.push(LocalDecl {
                         id: new_id,
                         ty: target_decl.ty,
+                        is_owned: target_decl.is_owned,
                     });
                     *destination = new_id;
                     self.write_variable(block, orig_target, new_id);
@@ -241,6 +245,7 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
                     self.new_locals.push(LocalDecl {
                         id: new_id,
                         ty: target_decl.ty,
+                        is_owned: target_decl.is_owned,
                     });
                     *destination = new_id;
                     self.write_variable(block, orig_target, new_id);
@@ -261,6 +266,7 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
                     self.new_locals.push(LocalDecl {
                         id: new_id,
                         ty: target_decl.ty,
+                        is_owned: target_decl.is_owned,
                     });
                     *destination = new_id;
                     self.write_variable(block, orig_target, new_id);
@@ -287,6 +293,7 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
                     self.new_locals.push(LocalDecl {
                         id: new_id,
                         ty: target_decl.ty,
+                        is_owned: target_decl.is_owned,
                     });
                     *destination = new_id;
                     self.write_variable(block, orig_target, new_id);

@@ -29,7 +29,6 @@ pub fn run_compile(
 
     let compile_report = workspace
         .compile()
-        .and_then(|_| workspace.optimize())
         .map_err(|error| anyhow::anyhow!("workspace compilation failed: {error:?}"))?;
 
     let bytecode = compile_report
@@ -44,9 +43,10 @@ pub fn run_compile(
     let version_str = format!("{}.{}.{}", major, minor, patch);
     let tag = CURRENT_PRODUCER_VERSION.tag().unwrap_or("stable");
 
-    let cache_dir = dirs::home_dir()
-        .context("Could not determine home directory")?
-        .join(".galfus")
+    let cache_dir = std::env::var_os("GALFUS_CACHE_DIR")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".galfus")))
+        .context("Could not determine cache directory")?
         .join("hosts")
         .join(tag)
         .join(&version_str);

@@ -146,12 +146,15 @@ pub enum CompileState {
     Stale {
         semantic_revision: SemanticRevision,
         package: Arc<PackageImage>,
+        unfinalized_package: Arc<PackageImage>,
     },
     /// A compiled package is available and up-to-date with the last check.
     Ready {
         semantic_revision: SemanticRevision,
         /// The immutable package produced by the last successful compile.
         package: Arc<PackageImage>,
+        /// Pre-finalization graph retained for incremental invalidation.
+        unfinalized_package: Arc<PackageImage>,
     },
     /// The last compilation attempt failed.
     Failed {

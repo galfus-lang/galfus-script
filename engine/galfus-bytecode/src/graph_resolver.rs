@@ -66,11 +66,11 @@ impl graph::BytecodeGraph {
                 .modules
                 .get(&module_id)
                 .expect("path index refers to loaded module");
-            let target_export = target
-                .module
-                .exports
-                .iter()
-                .find(|export| export.symbol_name == import.symbol_name)
+            let target_export = self
+                .export_indexes
+                .get(&module_id)
+                .and_then(|exports| exports.get(&import.symbol_name))
+                .and_then(|index| target.module.exports.get(*index))
                 .ok_or_else(|| GraphResolutionError::ImportSymbolNotExported {
                     importer: id,
                     module_path: import.module_name.clone(),

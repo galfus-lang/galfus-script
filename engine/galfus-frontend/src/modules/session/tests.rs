@@ -557,7 +557,7 @@ fn check_exposes_semantic_modules_in_canonical_module_id_order() {
     let module_ids = session
         .semantic_graph()
         .modules()
-        .map(SemanticModule::id)
+        .map(|module| module.id())
         .collect::<Vec<_>>();
     assert_eq!(
         module_ids,
@@ -587,6 +587,7 @@ fn snapshot_preserves_the_checked_frontend_state() {
         roots: &FrontendRoots::default(),
     });
     let snapshot = session.snapshot(initial_report.semantic_revision);
+    assert!(Arc::ptr_eq(&snapshot.modules()[0], &session.modules()[0]));
 
     let updated = SourceFile::new(
         SourceId::new(1),

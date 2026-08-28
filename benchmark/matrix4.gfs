@@ -1,0 +1,86 @@
+import { println } from "std/io"
+import { now } from "std/time"
+import { concat } from "text"
+import { stringify } from "format"
+
+fn matrix4(): i64 {
+  var a00: i64 = 1000000000
+  var a01: i64 = 1000000001
+  var a02: i64 = 1000000002
+  var a03: i64 = 1000000003
+  var a10: i64 = 1000000004
+  var a11: i64 = 1000000005
+  var a12: i64 = 1000000006
+  var a13: i64 = 1000000007
+  var a20: i64 = 1000000008
+  var a21: i64 = 1000000009
+  var a22: i64 = 1000000010
+  var a23: i64 = 1000000011
+  var a30: i64 = 1000000012
+  var a31: i64 = 1000000013
+  var a32: i64 = 1000000014
+  var a33: i64 = 1000000015
+  const b00: i64 = 1000000001
+  const b01: i64 = 1000000002
+  const b02: i64 = 1000000003
+  const b03: i64 = 1000000004
+  const b10: i64 = 1000000002
+  const b11: i64 = 1000000001
+  const b12: i64 = 1000000004
+  const b13: i64 = 1000000003
+  const b20: i64 = 1000000003
+  const b21: i64 = 1000000004
+  const b22: i64 = 1000000001
+  const b23: i64 = 1000000002
+  const b30: i64 = 1000000004
+  const b31: i64 = 1000000003
+  const b32: i64 = 1000000002
+  const b33: i64 = 1000000001
+  var checksum: i64 = 0
+
+  for _ in 0..1000000 {
+    const c00 = (a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30) % 1000000007
+    const c01 = (a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31) % 1000000007
+    const c02 = (a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32) % 1000000007
+    const c03 = (a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33) % 1000000007
+    const c10 = (a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30) % 1000000007
+    const c11 = (a10 * b01 + a11 * b11 + a12 * b21 + a13 * b31) % 1000000007
+    const c12 = (a10 * b02 + a11 * b12 + a12 * b22 + a13 * b32) % 1000000007
+    const c13 = (a10 * b03 + a11 * b13 + a12 * b23 + a13 * b33) % 1000000007
+    const c20 = (a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30) % 1000000007
+    const c21 = (a20 * b01 + a21 * b11 + a22 * b21 + a23 * b31) % 1000000007
+    const c22 = (a20 * b02 + a21 * b12 + a22 * b22 + a23 * b32) % 1000000007
+    const c23 = (a20 * b03 + a21 * b13 + a22 * b23 + a23 * b33) % 1000000007
+    const c30 = (a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30) % 1000000007
+    const c31 = (a30 * b01 + a31 * b11 + a32 * b21 + a33 * b31) % 1000000007
+    const c32 = (a30 * b02 + a31 * b12 + a32 * b22 + a33 * b32) % 1000000007
+    const c33 = (a30 * b03 + a31 * b13 + a32 * b23 + a33 * b33) % 1000000007
+    a00 = c00
+    a01 = c01
+    a02 = c02
+    a03 = c03
+    a10 = c10
+    a11 = c11
+    a12 = c12
+    a13 = c13
+    a20 = c20
+    a21 = c21
+    a22 = c22
+    a23 = c23
+    a30 = c30
+    a31 = c31
+    a32 = c32
+    a33 = c33
+    checksum += a00 + a11 + a22 + a33
+  }
+  return checksum
+}
+
+export fn main(_args: [[u8]]): i32 {
+  const start = now()
+  const result = matrix4()
+  const end = now()
+  println(concat("RESULT=", stringify(result)))
+  println(concat("TIME_MS=", stringify(end - start)))
+  return 0
+}

@@ -1,55 +1,55 @@
-fn(async) __internal_math_is_nan(f: f64): bool
-fn(async) __internal_math_is_finite(f: f64): bool
-fn(async) __internal_math_is_infinite(f: f64): bool
-fn(async) __internal_math_sqrt(f: f64): f64
-fn(async) __internal_math_hypot(x: f64, y: f64): f64
-fn(async) __internal_math_sin(f: f64): f64
-fn(async) __internal_math_cos(f: f64): f64
-fn(async) __internal_math_tan(f: f64): f64
-fn(async) __internal_math_log(f: f64): f64
-fn(async) __internal_math_log2(f: f64): f64
-fn(async) __internal_math_log10(f: f64): f64
+fn __internal_math_is_nan(f: f64): bool
+fn __internal_math_is_finite(f: f64): bool
+fn __internal_math_is_infinite(f: f64): bool
+fn __internal_math_sqrt(f: f64): f64
+fn __internal_math_hypot(x: f64, y: f64): f64
+fn __internal_math_sin(f: f64): f64
+fn __internal_math_cos(f: f64): f64
+fn __internal_math_tan(f: f64): f64
+fn __internal_math_log(f: f64): f64
+fn __internal_math_log2(f: f64): f64
+fn __internal_math_log10(f: f64): f64
 
 export fn isNaN(f: f64): bool {
-    return await __internal_math_is_nan(f)
+    return __internal_math_is_nan(f)
 }
 
 export fn isFinite(f: f64): bool {
-    return await __internal_math_is_finite(f)
+    return __internal_math_is_finite(f)
 }
 
 export fn isInfinite(f: f64): bool {
-    return await __internal_math_is_infinite(f)
+    return __internal_math_is_infinite(f)
 }
 
 export fn sqrt(f: f64): f64 {
-    return await __internal_math_sqrt(f)
+    return __internal_math_sqrt(f)
 }
 
 export fn hypot(x: f64, y: f64): f64 {
-    return await __internal_math_hypot(x, y)
+    return __internal_math_hypot(x, y)
 }
 
 export fn sin(f: f64): f64 {
-    return await __internal_math_sin(f)
+    return __internal_math_sin(f)
 }
 
 export fn cos(f: f64): f64 {
-    return await __internal_math_cos(f)
+    return __internal_math_cos(f)
 }
 
 export fn tan(f: f64): f64 {
-    return await __internal_math_tan(f)
+    return __internal_math_tan(f)
 }
 
 export fn log(f: f64): f64 {
-    return await __internal_math_log(f)
+    return __internal_math_log(f)
 }
 
 export fn log2(f: f64): f64 {
-    return await __internal_math_log2(f)
+    return __internal_math_log2(f)
 }
 
 export fn log10(f: f64): f64 {
-    return await __internal_math_log10(f)
+    return __internal_math_log10(f)
 }

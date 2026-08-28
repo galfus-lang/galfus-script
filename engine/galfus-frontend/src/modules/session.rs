@@ -20,7 +20,7 @@ use crate::{
 use galfus_core::{
     Diagnostic, DiagnosticBag, ModuleId, ModulePath, NodeId, Revision, SourceFile, SymbolId,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -89,8 +89,9 @@ pub struct FrontendReport {
 
 #[derive(Default)]
 pub struct FrontendSession {
-    pub(super) modules: Vec<SemanticModule>,
+    pub(super) modules: Vec<Arc<SemanticModule>>,
     module_by_path: HashMap<ModulePath, usize>,
+    reverse_imports: BTreeMap<ModuleId, Box<[ModuleId]>>,
     semantic_graph: SemanticModuleGraph,
     pub diagnostics: DiagnosticBag,
     string_table: crate::StringTable,
@@ -131,9 +132,6 @@ impl FrontendSession {
 
             if let Some(index) = existing_index {
                 changed_modules.insert(self.modules[index].id());
-                changed_modules.extend(
-                    self.transitive_dependents([self.modules[index].id()], &update.catalog),
-                );
                 self.modules[index] = self.parse_module(input, update.source_revision);
             } else {
                 changed_modules.insert(input.module_id);
@@ -141,8 +139,11 @@ impl FrontendSession {
                 self.modules.push(module);
             }
             self.rebuild_module_index();
-            changed_modules.extend(self.transitive_dependents([input.module_id], &update.catalog));
         }
+
+        self.rebuild_reverse_import_index(&update.catalog);
+        changed_modules
+            .extend(self.transitive_dependents(changed_modules.iter().copied(), &update.catalog));
 
         self.type_check_modules(&changed_modules, &update.catalog);
         self.rebuild_diagnostics(&update.catalog);
@@ -177,7 +178,7 @@ impl FrontendSession {
         &self.semantic_graph
     }
 
-    pub fn modules(&self) -> &[SemanticModule] {
+    pub fn modules(&self) -> &[Arc<SemanticModule>] {
         &self.modules
     }
 
@@ -232,7 +233,7 @@ impl FrontendSession {
         &mut self,
         input: &FrontendSource<'_>,
         source_revision: Revision,
-    ) -> SemanticModule {
+    ) -> Arc<SemanticModule> {
         let parse_result = parse(input.source);
         let resolve_result = resolve(
             input.source,
@@ -242,7 +243,7 @@ impl FrontendSession {
         let graph = resolve_result.into_graph();
         self.next_semantic_revision += 1;
 
-        SemanticModule {
+        Arc::new(SemanticModule {
             id: input.module_id,
             source_id: input.source.id(),
             path: input.path.clone(),
@@ -252,7 +253,7 @@ impl FrontendSession {
             source: input.source.clone(),
             graph,
             type_result: None,
-        }
+        })
     }
 
     fn rebuild_module_index(&mut self) {
@@ -267,25 +268,73 @@ impl FrontendSession {
     fn transitive_dependents(
         &self,
         roots: impl IntoIterator<Item = ModuleId>,
-        catalog: &galfus_contract::CapabilityCatalog,
+        _catalog: &galfus_contract::CapabilityCatalog,
     ) -> HashSet<ModuleId> {
         let mut changed = roots.into_iter().collect::<HashSet<_>>();
         let mut pending = changed.iter().copied().collect::<Vec<_>>();
         while let Some(target) = pending.pop() {
-            for (index, module) in self.modules.iter().enumerate() {
-                if changed.contains(&module.id()) {
-                    continue;
-                }
-                if self.module_imports(index).iter().any(|import| {
-                    self.import_target_index(index, import.source.as_str(), catalog)
-                        .is_some_and(|target_index| self.modules[target_index].id() == target)
-                }) {
-                    changed.insert(module.id());
-                    pending.push(module.id());
+            for dependent in self
+                .reverse_imports
+                .get(&target)
+                .into_iter()
+                .flat_map(|dependents| dependents.iter().copied())
+            {
+                if changed.insert(dependent) {
+                    pending.push(dependent);
                 }
             }
         }
         changed
+    }
+
+    fn rebuild_reverse_import_index(&mut self, catalog: &galfus_contract::CapabilityCatalog) {
+        let mut reverse_imports = BTreeMap::<ModuleId, Vec<ModuleId>>::new();
+        for module_index in 0..self.modules.len() {
+            let module_id = self.modules[module_index].id();
+            let mut dependencies = self
+                .module_imports(module_index)
+                .into_iter()
+                .filter_map(|import| {
+                    self.import_target_index(module_index, import.source.as_str(), catalog)
+                })
+                .collect::<Vec<_>>();
+
+            if let Some(root) = self.modules[module_index].graph().syntax().root() {
+                let implicit = collect_implicit_dependencies(
+                    self.modules[module_index].graph().syntax(),
+                    root,
+                );
+                if implicit.requires_iterable {
+                    dependencies.extend(self.import_target_index(
+                        module_index,
+                        "std/iterable",
+                        catalog,
+                    ));
+                }
+                if implicit.has_match {
+                    dependencies.extend(self.import_target_index(
+                        module_index,
+                        "std/constraints",
+                        catalog,
+                    ));
+                }
+            }
+
+            for dependency in dependencies {
+                reverse_imports
+                    .entry(self.modules[dependency].id())
+                    .or_default()
+                    .push(module_id);
+            }
+        }
+        self.reverse_imports = reverse_imports
+            .into_iter()
+            .map(|(id, mut dependents)| {
+                dependents.sort_by_key(|dependent| dependent.raw());
+                dependents.dedup();
+                (id, dependents.into_boxed_slice())
+            })
+            .collect();
     }
 
     fn rebuild_diagnostics(&mut self, catalog: &galfus_contract::CapabilityCatalog) {
@@ -541,27 +590,28 @@ impl FrontendSession {
             if !changed_modules.contains(&self.modules[module_index].id()) {
                 continue;
             }
-            if self.modules[module_index].type_result.is_some() {
+            let module = Arc::make_mut(&mut self.modules[module_index]);
+            if module.type_result.is_some() {
                 self.next_semantic_revision += 1;
-                self.modules[module_index].semantic_revision =
+                module.semantic_revision =
                     galfus_core::SemanticRevision::new(self.next_semantic_revision);
             }
             let result = check_definition_types_with_surfaces(
-                self.modules[module_index].source(),
-                self.modules[module_index].graph(),
+                module.source(),
+                module.graph(),
                 previous_result,
                 imported_type,
                 &self.string_table,
                 catalog.is_provider_module(
-                    self.modules[module_index]
+                    module
                         .path()
                         .as_str()
                         .strip_suffix(".gfs")
-                        .unwrap_or(self.modules[module_index].path().as_str()),
+                        .unwrap_or(module.path().as_str()),
                 ),
             );
 
-            self.modules[module_index].type_result = Some(result);
+            module.type_result = Some(result);
         }
     }
 

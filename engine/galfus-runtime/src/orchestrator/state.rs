@@ -27,23 +27,28 @@ impl Orchestrator {
             failure: None,
             pending_continuations: HashMap::new(),
             startup_plans: HashMap::new(),
-            request_id_manager: galfus_core::id_manager::IdManager::new(1),
+            request_id_manager: galfus_core::id_manager::LocalIdManager::new(1),
             request_generations: HashMap::new(),
-            future_id_manager: galfus_core::id_manager::IdManager::new(1),
+            future_id_manager: galfus_core::id_manager::LocalIdManager::new(1),
             future_generations: HashMap::new(),
-            coordinator_id_manager: galfus_core::id_manager::IdManager::new(1),
+            coordinator_id_manager: galfus_core::id_manager::LocalIdManager::new(1),
             adapter_bindings: None,
             initialization_complete: Arc::new(AtomicBool::new(true)),
             shutting_down: false,
             shutdown_report: None,
             cancellation_report: CancellationReport::default(),
             completion_metrics: CompletionMetrics::default(),
+            #[cfg(feature = "metrics")]
+            future_metrics: FutureMetrics::default(),
             late_completions: VecDeque::new(),
             root_thread_id: None,
             future_workers: HashMap::new(),
             thread_exit_waits: HashMap::new(),
             mailbox_future_waits: HashMap::new(),
-            timer_future_waits: Vec::new(),
+            mailbox_future_wait_targets: HashMap::new(),
+            mailbox_deadlines: BTreeSet::new(),
+            mailbox_wait_sequence: 0,
+            timer_future_waits: BTreeSet::new(),
             virtual_time_ms: 0,
             future_registry: FutureRegistry::new(),
             aggregate_coordinators: HashMap::new(),
@@ -94,6 +99,11 @@ impl Orchestrator {
 
     pub(crate) fn completion_metrics(&self) -> &CompletionMetrics {
         &self.completion_metrics
+    }
+
+    #[cfg(feature = "metrics")]
+    pub(crate) fn future_metrics(&self) -> &FutureMetrics {
+        &self.future_metrics
     }
 
     pub(crate) fn set_startup_plan(

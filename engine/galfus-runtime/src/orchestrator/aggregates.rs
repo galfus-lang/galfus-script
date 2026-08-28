@@ -13,7 +13,8 @@ pub(crate) struct AggregateCoordinator {
     pub(crate) mode: AggregateMode,
     pub(crate) future_ids: Vec<galfus_core::FutureId>,
     pub(crate) pending: PendingContinuation,
-    pub(crate) results: Vec<Option<Result<BoundaryValue, ExecutionFailure>>>,
+    pub(crate) results: Option<Vec<Option<Result<BoundaryValue, ExecutionFailure>>>>,
+    pub(crate) remaining_results: usize,
     pub(crate) winner: Option<(
         EventSequence,
         usize,
@@ -32,11 +33,16 @@ impl Orchestrator {
         let Some(coordinator) = self.aggregate_coordinators.get_mut(&coordinator_id) else {
             return;
         };
-        if index >= coordinator.results.len() || coordinator.results[index].is_some() {
+        if index >= coordinator.future_ids.len() {
             return;
         }
-        coordinator.results[index] = Some(result.clone());
-        if matches!(coordinator.mode, AggregateMode::Race) {
+        if let Some(results) = &mut coordinator.results {
+            if results[index].is_some() {
+                return;
+            }
+            results[index] = Some(result.clone());
+            coordinator.remaining_results -= 1;
+        } else {
             let sequence = self
                 .active_event_sequence
                 .expect("aggregate completions are processed by an event");
@@ -62,9 +68,11 @@ impl Orchestrator {
             return;
         };
         let result = match coordinator.mode {
-            AggregateMode::All if coordinator.results.iter().all(Option::is_some) => {
+            AggregateMode::All if coordinator.remaining_results == 0 => {
                 let values = coordinator
                     .results
+                    .as_ref()
+                    .expect("all aggregate stores member results")
                     .iter()
                     .map(|result| result.as_ref().expect("all results are present").clone())
                     .collect::<Result<Vec<_>, _>>();

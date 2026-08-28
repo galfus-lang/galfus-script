@@ -97,7 +97,7 @@ impl PackageVersions {
 /// and cannot be replaced independently after publication.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PackageImage {
-    graph: BytecodeGraph,
+    graph: std::sync::Arc<BytecodeGraph>,
     target: ExecutionTarget,
     entry_point: Option<PackageEntryPoint>,
     metadata: PackageMetadata,
@@ -174,7 +174,7 @@ impl PackageImage {
 
         Ok(Self {
             versions: PackageVersions::for_bytecode(graph.format_version()),
-            graph,
+            graph: std::sync::Arc::new(graph),
             target,
             entry_point,
             metadata,
@@ -273,7 +273,12 @@ impl PackageImage {
     }
 
     pub fn graph(&self) -> &BytecodeGraph {
-        &self.graph
+        self.graph.as_ref()
+    }
+
+    /// Returns a shared handle to the immutable executable graph.
+    pub fn graph_handle(&self) -> std::sync::Arc<BytecodeGraph> {
+        self.graph.clone()
     }
 
     pub fn target(&self) -> &ExecutionTarget {
@@ -332,7 +337,7 @@ impl PackageImage {
                 actual: package.graph.format_version(),
             });
         }
-        package.graph.rebuild_transient_indexes()?;
+        std::sync::Arc::make_mut(&mut package.graph).rebuild_transient_indexes()?;
         Self::validate_adapter_requirements(
             &package.graph,
             package.entry_point.as_ref(),

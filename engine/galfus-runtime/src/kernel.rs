@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 /// Manages thread lifecycle, scheduling queues, and timers.
 pub struct VirtualKernel {
-    thread_id_manager: galfus_core::id_manager::IdManager<ThreadId>,
+    thread_id_manager: galfus_core::id_manager::LocalIdManager<ThreadId>,
     registry: ThreadRegistry,
     pub(crate) runnable: RunnableQueue,
     blocked: BlockedQueue,
@@ -19,7 +19,7 @@ pub struct VirtualKernel {
 impl VirtualKernel {
     pub fn new() -> Self {
         Self {
-            thread_id_manager: galfus_core::id_manager::IdManager::new(1),
+            thread_id_manager: galfus_core::id_manager::LocalIdManager::new(1),
             registry: ThreadRegistry::new(),
             runnable: RunnableQueue::new(),
             blocked: BlockedQueue::new(),

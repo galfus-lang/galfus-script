@@ -117,6 +117,15 @@ impl VirtualMachine {
     ) -> Result<VmStep, VmError> {
         match *instr {
             // Category B: Unary & Binary Operations
+            Instruction::BinaryImmediate {
+                dest,
+                lhs,
+                operation,
+                rhs,
+            } => {
+                let value = super::immediate_binary_value(thread.read_reg(lhs), rhs, operation)?;
+                thread.write_reg(dest, value);
+            }
             Instruction::Add { dest, lhs, rhs } => {
                 impl_binary_op!(self, thread, dest, lhs, rhs, +);
             }

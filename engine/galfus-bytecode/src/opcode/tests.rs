@@ -26,10 +26,12 @@ fn decoder_distinguishes_incompatible_removed_and_unknown_input() {
 
 #[test]
 fn decoder_accepts_current_instruction_tags() {
-    assert_eq!(
-        decode_opcode(CURRENT_BYTECODE_FORMAT_VERSION, 62)
-            .expect("CreateFuture is a current opcode")
-            .raw(),
-        62
-    );
+    for opcode in (0..=34).chain(46..=58).chain(61..=72) {
+        assert_eq!(
+            decode_opcode(CURRENT_BYTECODE_FORMAT_VERSION, opcode)
+                .expect("current opcode must decode")
+                .raw(),
+            opcode
+        );
+    }
 }

@@ -40,6 +40,7 @@ pub struct ThreadControlBlock {
     pub id: ThreadId,
     pub state: ThreadState,
     pub mailbox: Option<Arc<Mutex<VecDeque<MailboxMessage>>>>,
+    pub quota: Arc<galfus_vm::quota::ThreadQuota>,
     pub key: Option<String>,
     pub vm_state: Option<VmThreadState>,
 }
@@ -50,6 +51,7 @@ pub struct ThreadRegistry {
     tcbs: HashMap<ThreadId, ThreadControlBlock>,
     keys: HashMap<String, ThreadId>,
     exited_order: VecDeque<ThreadId>,
+    active_count: usize,
 }
 
 const MAX_EXITED_TOMBSTONES: usize = 1024;
@@ -60,6 +62,7 @@ impl ThreadRegistry {
             tcbs: HashMap::new(),
             keys: HashMap::new(),
             exited_order: VecDeque::new(),
+            active_count: 0,
         }
     }
 
@@ -93,10 +96,12 @@ impl ThreadRegistry {
                 id,
                 state: ThreadState::Created,
                 mailbox: Some(Arc::new(Mutex::new(VecDeque::new()))),
+                quota: thread.thread_quota().clone(),
                 key,
                 vm_state: Some(thread),
             },
         );
+        self.active_count += 1;
         Ok(())
     }
 
@@ -111,16 +116,11 @@ impl ThreadRegistry {
     }
 
     pub fn get_thread_quota(&self, id: ThreadId) -> Option<Arc<galfus_vm::quota::ThreadQuota>> {
-        self.tcbs
-            .get(&id)
-            .and_then(|tcb| tcb.vm_state.as_ref().map(|vm| vm.thread_quota().clone()))
+        self.tcbs.get(&id).map(|tcb| tcb.quota.clone())
     }
 
     pub fn active_count(&self) -> usize {
-        self.tcbs
-            .values()
-            .filter(|tcb| !tcb.state.is_exited())
-            .count()
+        self.active_count
     }
 
     pub fn get_exit_code(&self, id: ThreadId) -> Option<i32> {
@@ -223,6 +223,7 @@ impl ThreadRegistry {
             tcb.vm_state = None;
             tcb.mailbox = None;
             tcb.state = ThreadState::Exited(result);
+            self.active_count -= 1;
             self.exited_order.push_back(id);
             while self.exited_order.len() > MAX_EXITED_TOMBSTONES {
                 let Some(expired_id) = self.exited_order.pop_front() else {
@@ -248,6 +249,9 @@ impl ThreadRegistry {
     pub fn cancel(&mut self, id: ThreadId) -> bool {
         self.exited_order.retain(|exited_id| *exited_id != id);
         if let Some(tcb) = self.tcbs.remove(&id) {
+            if !tcb.state.is_exited() {
+                self.active_count -= 1;
+            }
             if let Some(key) = tcb.key {
                 self.keys.remove(&key);
             }

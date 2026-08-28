@@ -2,6 +2,7 @@
 mod tests;
 
 use crate::{SourceId, Span};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RowCol {
@@ -12,9 +13,9 @@ pub struct RowCol {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SourceFile {
     id: SourceId,
-    name: String,
-    text: String,
-    row_starts: Vec<usize>,
+    name: Arc<str>,
+    text: Arc<str>,
+    row_starts: Arc<[usize]>,
 }
 
 impl SourceFile {
@@ -31,9 +32,9 @@ impl SourceFile {
 
         Self {
             id,
-            name,
-            text,
-            row_starts,
+            name: Arc::from(name),
+            text: Arc::from(text),
+            row_starts: Arc::from(row_starts),
         }
     }
 
@@ -42,11 +43,11 @@ impl SourceFile {
     }
 
     pub fn name(&self) -> &str {
-        self.name.as_str()
+        self.name.as_ref()
     }
 
     pub fn text(&self) -> &str {
-        self.text.as_str()
+        self.text.as_ref()
     }
 
     pub fn len(&self) -> usize {

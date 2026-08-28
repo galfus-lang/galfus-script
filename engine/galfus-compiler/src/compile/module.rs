@@ -113,6 +113,13 @@ pub fn compile_changed_modules(
     }
     let specialized_targets = ws_ctx.state.specialised_id_to_target.clone();
 
+    for module_index in &affected_modules {
+        let mir = mir_modules[*module_index]
+            .as_mut()
+            .expect("affected module has MIR");
+        crate::compile::passes::run(mir, crate::compile::passes::MirPassConfiguration::default())?;
+    }
+
     // Phase 2: Compile each module independently.
     let mut outputs = Vec::new();
     for mod_idx in 0..modules.len() {

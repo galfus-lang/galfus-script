@@ -1,6 +1,8 @@
 use std::collections::VecDeque;
 use std::sync;
+use std::sync::Condvar;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
 use crate::event::{EventSequence, RuntimeEvent};
@@ -20,6 +22,10 @@ pub enum EventDeliveryError {
 
 pub trait RuntimeEventSink: Send + Sync {
     fn submit(&self, event: RuntimeEvent) -> Result<(), EventDeliveryError>;
+
+    fn has_pending_events(&self) -> bool {
+        false
+    }
 }
 
 pub trait ExecutionDriver: KernelDriver {
@@ -28,6 +34,11 @@ pub trait ExecutionDriver: KernelDriver {
     fn drain_events(&self) -> Vec<(EventSequence, RuntimeEvent)>;
 
     fn has_pending_events(&self) -> bool;
+
+    /// Number of additional tasks that may begin execution without queueing behind workers.
+    fn available_task_capacity(&self) -> usize {
+        usize::MAX
+    }
 
     fn configure_limits(&self, _limits: &LimitsMetadata) -> Result<(), EventDeliveryError> {
         Ok(())
@@ -39,6 +50,8 @@ pub struct NativeEventBridge {
     receiver: Mutex<std::sync::mpsc::Receiver<(EventSequence, RuntimeEvent)>>,
     next_sequence: Mutex<EventSequence>,
     pending: Mutex<usize>,
+    notification_pending: AtomicBool,
+    events_available: Condvar,
     capacity: usize,
     limit: Mutex<usize>,
 }
@@ -61,6 +74,8 @@ impl NativeEventBridge {
             receiver: Mutex::new(receiver),
             next_sequence: Mutex::new(EventSequence::FIRST),
             pending: Mutex::new(0),
+            notification_pending: AtomicBool::new(false),
+            events_available: Condvar::new(),
             capacity,
             limit: Mutex::new(capacity),
         }
@@ -81,11 +96,28 @@ impl NativeEventBridge {
         let mut pending = self.pending.lock().unwrap();
         let events = self.receiver.lock().unwrap().try_iter().collect::<Vec<_>>();
         *pending = pending.saturating_sub(events.len());
+        self.notification_pending.store(false, Ordering::Release);
+        if *pending != 0 && !self.notification_pending.swap(true, Ordering::AcqRel) {
+            self.events_available.notify_one();
+        }
         events
     }
 
     pub fn has_pending(&self) -> bool {
         *self.pending.lock().unwrap() != 0
+    }
+
+    /// Blocks until an event is available or the caller's stop condition becomes true.
+    pub fn wait_for_event_or(&self, stop: impl Fn() -> bool) {
+        let mut pending = self.pending.lock().unwrap();
+        while *pending == 0 && !stop() {
+            pending = self.events_available.wait(pending).unwrap();
+        }
+    }
+
+    /// Wakes event-loop waiters after an external worker changes state.
+    pub fn notify_waiters(&self) {
+        self.events_available.notify_all();
     }
 }
 
@@ -123,7 +155,14 @@ impl RuntimeEventSink for NativeEventBridge {
 
         *pending += 1;
         *sequence = next;
+        if !self.notification_pending.swap(true, Ordering::AcqRel) {
+            self.events_available.notify_one();
+        }
         Ok(())
+    }
+
+    fn has_pending_events(&self) -> bool {
+        self.has_pending()
     }
 }
 

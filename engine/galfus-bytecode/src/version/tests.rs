@@ -9,7 +9,7 @@ use super::{
 fn formats_are_read_from_workspace_metadata() {
     assert_eq!(
         CURRENT_BYTECODE_FORMAT_VERSION,
-        BytecodeFormatVersion::new(2, 0, 0)
+        BytecodeFormatVersion::new(2, 1, 0)
     );
     assert_eq!(
         CURRENT_PACKAGE_FORMAT_VERSION,

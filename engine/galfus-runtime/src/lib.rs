@@ -33,6 +33,8 @@ use galfus_contract::{
 use galfus_vm::{VirtualMachine, VmPanic, VmValue};
 
 pub use driver::CooperativeDriver;
+#[cfg(feature = "metrics")]
+pub use execution::FutureMetrics;
 pub use execution::{
     CancellationReport, CompletionMetrics, Execution, ExecutionHandle, ExecutionState,
     ShutdownReport,
@@ -159,7 +161,7 @@ impl Runtime {
         let entry = package
             .entry_point()
             .ok_or(RuntimeError::MissingPackageEntry)?;
-        let graph = sync::Arc::new(package.graph().clone());
+        let graph = package.graph_handle();
         let module_id = graph
             .modules()
             .find(|module| module.path() == entry.module_path())

@@ -1,12 +1,13 @@
 use crate::StringTable;
 use crate::modules::{SemanticModule, SemanticModuleGraph};
 use galfus_core::SemanticRevision;
+use std::sync::Arc;
 
 /// Immutable frontend result consumed by the compilation phase.
 #[derive(Clone)]
 pub struct FrontendSnapshot {
     semantic_revision: SemanticRevision,
-    modules: Vec<SemanticModule>,
+    modules: Vec<Arc<SemanticModule>>,
     semantic_graph: SemanticModuleGraph,
     string_table: StringTable,
 }
@@ -14,7 +15,7 @@ pub struct FrontendSnapshot {
 impl FrontendSnapshot {
     pub(crate) fn new(
         semantic_revision: SemanticRevision,
-        modules: Vec<SemanticModule>,
+        modules: Vec<Arc<SemanticModule>>,
         semantic_graph: SemanticModuleGraph,
         string_table: StringTable,
     ) -> Self {
@@ -30,7 +31,7 @@ impl FrontendSnapshot {
         self.semantic_revision
     }
 
-    pub fn modules(&self) -> &[SemanticModule] {
+    pub fn modules(&self) -> &[Arc<SemanticModule>] {
         self.modules.as_slice()
     }
 

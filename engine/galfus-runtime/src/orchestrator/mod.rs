@@ -10,6 +10,8 @@ pub(crate) mod startup;
 
 use crate::driver::{ExecutionDriver, RuntimeEventSink};
 use crate::event::{EventSequence, RuntimeEvent};
+#[cfg(feature = "metrics")]
+use crate::execution::FutureMetrics;
 use crate::execution::{CancellationReport, CompletionMetrics};
 use crate::kernel::VirtualKernel;
 use crate::task::execution_stack;
@@ -37,7 +39,12 @@ pub(crate) mod lifecycle;
 pub(crate) mod state;
 
 pub(crate) use aggregates::{AggregateCoordinator, AggregateMode};
-pub(crate) use future_waits::{MailboxFutureWait, TimerFutureWait};
+pub(crate) use future_waits::{MailboxDeadline, MailboxFutureWait, TimerFutureWait};
+#[derive(Default)]
+pub(crate) struct MailboxWaitQueues {
+    any_sender: VecDeque<MailboxFutureWait>,
+    by_sender: HashMap<crate::registry::ThreadId, VecDeque<MailboxFutureWait>>,
+}
 pub(crate) struct Orchestrator {
     kernel: VirtualKernel,
     driver: Option<Rc<dyn ExecutionDriver>>,
@@ -52,17 +59,19 @@ pub(crate) struct Orchestrator {
     pub(crate) failure: Option<galfus_contract::ExecutionFailure>,
     pending_continuations: HashMap<PendingKey, PendingContinuation>,
     startup_plans: HashMap<crate::registry::ThreadId, StartupPlan>,
-    request_id_manager: galfus_core::id_manager::IdManager<RequestId>,
+    request_id_manager: galfus_core::id_manager::LocalIdManager<RequestId>,
     request_generations: HashMap<u32, u32>,
-    future_id_manager: galfus_core::id_manager::IdManager<FutureId>,
+    future_id_manager: galfus_core::id_manager::LocalIdManager<FutureId>,
     future_generations: HashMap<u32, u32>,
-    coordinator_id_manager: galfus_core::id_manager::IdManager<CoordinatorId>,
+    coordinator_id_manager: galfus_core::id_manager::LocalIdManager<CoordinatorId>,
     adapter_bindings: Option<Arc<std::sync::Mutex<galfus_contract::AdapterBindings>>>,
     initialization_complete: Arc<AtomicBool>,
     shutting_down: bool,
     shutdown_report: Option<AdapterBindingsCloseReport>,
     cancellation_report: CancellationReport,
     completion_metrics: CompletionMetrics,
+    #[cfg(feature = "metrics")]
+    future_metrics: FutureMetrics,
     late_completions: VecDeque<LateCompletion>,
     root_thread_id: Option<crate::registry::ThreadId>,
     future_workers:
@@ -71,8 +80,14 @@ pub(crate) struct Orchestrator {
         crate::registry::ThreadId,
         Vec<(crate::registry::ThreadId, galfus_core::FutureLease)>,
     >,
-    mailbox_future_waits: HashMap<crate::registry::ThreadId, Vec<MailboxFutureWait>>,
-    timer_future_waits: Vec<TimerFutureWait>,
+    mailbox_future_waits: HashMap<crate::registry::ThreadId, MailboxWaitQueues>,
+    mailbox_future_wait_targets: HashMap<
+        (crate::registry::ThreadId, galfus_core::FutureId),
+        (crate::registry::ThreadId, galfus_core::FutureLease),
+    >,
+    mailbox_deadlines: BTreeSet<MailboxDeadline>,
+    mailbox_wait_sequence: u64,
+    timer_future_waits: BTreeSet<TimerFutureWait>,
     virtual_time_ms: u64,
     pub(crate) future_registry: FutureRegistry,
     aggregate_coordinators: HashMap<galfus_core::CoordinatorId, AggregateCoordinator>,

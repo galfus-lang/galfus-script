@@ -728,7 +728,20 @@ impl<'a> DeclarationTypeChecker<'a> {
                         node,
                         "__internal_* functions are reserved for internal core modules".to_string(),
                     );
-                } else if !is_async {
+                } else if !is_async
+                    && !name.starts_with("__internal_math_")
+                    && !matches!(
+                        name.as_str(),
+                        "__internal_thread_get"
+                            | "__internal_thread_is_running"
+                            | "__internal_thread_is_exited"
+                            | "__internal_thread_exit_reason"
+                            | "__internal_thread_send"
+                            | "__internal_thread_has_messages"
+                            | "__internal_thread_get_message"
+                            | "__internal_thread_try_receive"
+                    )
+                {
                     self.report_cannot_infer_type(
                         node,
                         format!(

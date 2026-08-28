@@ -257,6 +257,10 @@ pub fn validate_bytecode_module(
                     check_reg(src, &mut errors);
                     check_reg(fallback, &mut errors);
                 }
+                Instruction::BinaryImmediate { dest, lhs, .. } => {
+                    check_reg(dest, &mut errors);
+                    check_reg(lhs, &mut errors);
+                }
 
                 // Category C
                 Instruction::Jump { offset } => {
@@ -538,9 +542,60 @@ pub fn validate_bytecode_module(
                     arg_count,
                     ref arg_types,
                     return_type,
+                    ..
                 } => {
                     check_reg(dest, &mut errors);
                     check_func(func_idx, &mut errors);
+                    if arg_types.len() != arg_count as usize {
+                        errors.push(BytecodeValidationError::FutureArgumentTypeCountMismatch {
+                            func_name: func_name.clone(),
+                            instr_idx,
+                            expected_count: arg_count as usize,
+                            found_count: arg_types.len(),
+                        });
+                    }
+                    for &ty in arg_types {
+                        check_type(ty, &mut errors);
+                    }
+                    check_type(return_type, &mut errors);
+                    if arg_count > 0 {
+                        check_reg(Reg(args_start.raw() + arg_count as u16 - 1), &mut errors);
+                    }
+                }
+                Instruction::CreateAwaitFuture {
+                    dest,
+                    args_start,
+                    arg_count,
+                    ref arg_types,
+                    return_type,
+                    ..
+                } => {
+                    check_reg(dest, &mut errors);
+                    if arg_types.len() != arg_count as usize {
+                        errors.push(BytecodeValidationError::FutureArgumentTypeCountMismatch {
+                            func_name: func_name.clone(),
+                            instr_idx,
+                            expected_count: arg_count as usize,
+                            found_count: arg_types.len(),
+                        });
+                    }
+                    for &ty in arg_types {
+                        check_type(ty, &mut errors);
+                    }
+                    check_type(return_type, &mut errors);
+                    if arg_count > 0 {
+                        check_reg(Reg(args_start.raw() + arg_count as u16 - 1), &mut errors);
+                    }
+                }
+                Instruction::CallInternalThread {
+                    dest,
+                    args_start,
+                    arg_count,
+                    ref arg_types,
+                    return_type,
+                    ..
+                } => {
+                    check_reg(dest, &mut errors);
                     if arg_types.len() != arg_count as usize {
                         errors.push(BytecodeValidationError::FutureArgumentTypeCountMismatch {
                             func_name: func_name.clone(),
@@ -613,6 +668,24 @@ pub fn validate_bytecode_module(
                     check_reg(dest, &mut errors);
                     check_reg(dest_start, &mut errors);
                     check_reg(src, &mut errors);
+                }
+                Instruction::CallInternalMath {
+                    dest,
+                    operation,
+                    args_start,
+                    arg_count,
+                } => {
+                    check_reg(dest, &mut errors);
+                    if operation > 10 {
+                        errors.push(BytecodeValidationError::InvalidConstantIndex {
+                            func_name: func_name.clone(),
+                            instr_idx,
+                            index: ConstIdx(operation as u16),
+                        });
+                    }
+                    if arg_count > 0 {
+                        check_reg(Reg(args_start.raw() + arg_count as u16 - 1), &mut errors);
+                    }
                 }
                 _ => {
                     // AOT specialized instructions (AddI32, etc.) are pre-validated

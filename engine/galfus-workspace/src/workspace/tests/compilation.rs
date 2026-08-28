@@ -33,6 +33,58 @@ fn workspace_package_loader_checks_and_compiles_its_loaded_sources() {
 }
 
 #[test]
+fn compile_finalizes_the_package_and_caches_the_result() {
+    let mut workspace = Workspace::new();
+    workspace
+        .load_manifest(
+            toml::from_str(
+                r#"
+            [module]
+            name = "compile-finalization"
+            target = "app"
+            [entry]
+            path = "main.gfs"
+            "#,
+            )
+            .expect("valid configuration"),
+        )
+        .expect("configuration loads");
+    workspace
+        .load_module(
+            "main.gfs",
+            br#"
+            export fn main(args: [[u8]]): i32 {
+                return 0
+            }
+
+            fn unused(): i32 {
+                return 1
+            }
+            "#,
+        )
+        .expect("valid entry module");
+
+    assert!(workspace.check().is_valid);
+    let first = workspace.compile().expect("workspace compiles").package;
+    let main = first
+        .graph()
+        .modules()
+        .find(|module| module.path().as_str() == "main.gfs")
+        .expect("entry bytecode module");
+    assert!(
+        main.module
+            .functions
+            .iter()
+            .all(|function| function.name != "unused"),
+        "compile() must return the finalized package"
+    );
+    assert!(first.graph().validate().is_ok());
+
+    let second = workspace.compile().expect("cached compilation").package;
+    assert!(Arc::ptr_eq(&first, &second));
+}
+
+#[test]
 fn check_includes_configured_entry_and_exports_as_semantic_roots() {
     let mut workspace = Workspace::new();
     workspace
@@ -323,6 +375,7 @@ fn compile_updates_changed_modules_and_removes_deleted_modules() {
         .find(|image| image.path().as_str() == "helper.gfs")
         .expect("helper image");
     let main_id = main.id();
+    let main_node_address = main as *const _;
     let helper_id = helper.id();
     let main_revision = main.semantic_revision();
     let helper_revision = helper.semantic_revision();
@@ -350,6 +403,11 @@ fn compile_updates_changed_modules_and_removes_deleted_modules() {
             .expect("cached main image")
             .semantic_revision(),
         main_revision
+    );
+    assert_eq!(
+        updated_graph.get(main_id).expect("cached main image") as *const _,
+        main_node_address,
+        "unchanged finalized modules must retain their graph node allocation"
     );
     assert!(
         updated_graph

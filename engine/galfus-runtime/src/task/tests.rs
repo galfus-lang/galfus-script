@@ -170,6 +170,35 @@ fn codec_rejects_an_array_with_a_different_declared_element_type() {
 }
 
 #[test]
+fn codec_type_mismatches_keep_the_existing_diagnostic_values() {
+    let module = module(vec![BytecodeType::Int32]);
+    let heap = galfus_vm::thread::PrivateHeap::test_new();
+
+    assert_eq!(
+        decode_from_thread_heap(&heap, VmValue::Uint8(7), TypeIdx(0), &module),
+        Err(galfus_contract::BoundaryCodecError::TypeMismatch {
+            expected: "Int32".to_string(),
+            found: "Uint8(7)".to_string(),
+        })
+    );
+
+    let mut heap = galfus_vm::thread::PrivateHeap::test_new();
+    assert_eq!(
+        encode_into_thread_heap(
+            &mut heap,
+            BoundaryValue::U8(7),
+            TypeIdx(0),
+            galfus_core::ModuleId::new(1),
+            &module,
+        ),
+        Err(galfus_contract::BoundaryCodecError::TypeMismatch {
+            expected: "Int32".to_string(),
+            found: "U8(7)".to_string(),
+        })
+    );
+}
+
+#[test]
 fn codec_round_trips_nullable_values() {
     let module = module(vec![
         BytecodeType::Int32,

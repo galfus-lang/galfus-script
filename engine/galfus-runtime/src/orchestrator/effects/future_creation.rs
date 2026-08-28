@@ -6,6 +6,141 @@ use galfus_contract::{BoundaryValue, ExecutionFailure, ExecutionFailureKind};
 use galfus_core::ModuleId;
 
 impl Orchestrator {
+    pub(super) fn handle_create_await_future(
+        &mut self,
+        thread_id: crate::registry::ThreadId,
+        mut thread: galfus_vm::thread::VmThreadState,
+        continuation: galfus_vm::Continuation,
+        module_id: ModuleId,
+        operation: Box<str>,
+        args: Vec<galfus_vm::VmValue>,
+        arg_types: &[TypeIdx],
+        return_type: TypeIdx,
+    ) {
+        let encoded_args = {
+            let module = &self
+                .vm
+                .as_ref()
+                .unwrap()
+                .graph
+                .get(module_id)
+                .unwrap()
+                .module;
+            let mut encoded_args = Vec::with_capacity(args.len());
+            for (arg, ty) in args.into_iter().zip(arg_types.iter()) {
+                match crate::task::decode_from_thread_heap(&thread.heap, arg, *ty, module) {
+                    Ok(value) => encoded_args.push(value),
+                    Err(_) if matches!(arg, galfus_vm::VmValue::Function { .. }) => {
+                        let galfus_vm::VmValue::Function {
+                            module_id,
+                            func_idx,
+                        } = arg
+                        else {
+                            unreachable!();
+                        };
+                        encoded_args.push(BoundaryValue::Function {
+                            module_id: module_id.raw(),
+                            func_idx: func_idx.raw(),
+                        });
+                    }
+                    Err(error) => {
+                        self.failure = Some(
+                            ExecutionFailure::new(
+                                ExecutionFailureKind::BoundaryCodecFailure,
+                                format!("invalid future argument: {error:?}"),
+                            )
+                            .with_thread_id(thread_id)
+                            .with_module_id(module_id.raw().into())
+                            .with_stack(execution_stack(&thread)),
+                        );
+                        self.kernel.cancel(thread_id);
+                        return;
+                    }
+                };
+            }
+            encoded_args
+        };
+
+        if let Some(result) = self.try_complete_internal_await(thread_id, &operation, &encoded_args)
+        {
+            let module = &self
+                .vm
+                .as_ref()
+                .unwrap()
+                .graph
+                .get(module_id)
+                .unwrap()
+                .module;
+            let value = match result.and_then(|value| {
+                crate::task::encode_into_thread_heap(
+                    &mut thread.heap,
+                    value,
+                    return_type,
+                    module_id,
+                    module,
+                )
+                .map_err(|error| {
+                    ExecutionFailure::new(
+                        ExecutionFailureKind::BoundaryCodecFailure,
+                        format!("invalid asynchronous result: {error:?}"),
+                    )
+                })
+            }) {
+                Ok(value) => value,
+                Err(error) => {
+                    self.failure = Some(
+                        error
+                            .with_thread_id(thread_id)
+                            .with_stack(execution_stack(&thread)),
+                    );
+                    self.kernel.cancel(thread_id);
+                    return;
+                }
+            };
+            #[cfg(feature = "metrics")]
+            {
+                self.future_metrics.internal_await_immediate += 1;
+            }
+            self.resume_or_fail_front(thread_id, thread, continuation, value);
+            return;
+        }
+
+        #[cfg(feature = "metrics")]
+        {
+            self.future_metrics.created += 1;
+            self.future_metrics.boundary_arguments += encoded_args.len();
+            self.future_metrics.internal_await_suspended += 1;
+        }
+        let Some(future_lease) = self.allocate_future_lease(thread_id, &thread) else {
+            return;
+        };
+        let future_id = future_lease.id;
+
+        let activation = crate::orchestrator::future_registry::Activation::Internal {
+            operation: operation.into(),
+            args: encoded_args,
+        };
+        if let Err(error) = self.future_registry.insert_direct_await(
+            thread_id,
+            future_id,
+            return_type,
+            module_id,
+            activation,
+        ) {
+            self.failure = Some(error.with_stack(execution_stack(&thread)));
+            self.kernel.cancel(thread_id);
+            return;
+        }
+        self.handle_future_wait(
+            thread_id,
+            thread,
+            continuation,
+            future_id,
+            module_id,
+            return_type,
+        );
+    }
+
     pub(super) fn handle_create_future(
         &mut self,
         thread_id: crate::registry::ThreadId,
@@ -18,6 +153,11 @@ impl Orchestrator {
         arg_types: Box<[TypeIdx]>,
         return_type: TypeIdx,
     ) {
+        #[cfg(feature = "metrics")]
+        {
+            self.future_metrics.created += 1;
+            self.future_metrics.boundary_arguments += args.len();
+        }
         let Some(future_lease) = self.allocate_future_lease(thread_id, &thread) else {
             return;
         };
@@ -98,6 +238,11 @@ impl Orchestrator {
         arg_types: Box<[TypeIdx]>,
         return_type: TypeIdx,
     ) {
+        #[cfg(feature = "metrics")]
+        {
+            self.future_metrics.created += 1;
+            self.future_metrics.boundary_arguments += args.len();
+        }
         let Some(future_lease) = self.allocate_future_lease(thread_id, &thread) else {
             return;
         };

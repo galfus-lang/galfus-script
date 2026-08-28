@@ -491,6 +491,8 @@ version = "0.0.0"
 dependencies = [
  "cli-table",
  "regex",
+ "serde",
+ "serde_json",
  "sysinfo",
 ]
 
@@ -516,6 +518,7 @@ dependencies = [
  "clap",
  "dialoguer",
  "dirs",
+ "galfus-bytecode",
  "galfus-contract",
  "galfus-core",
  "galfus-host-native",

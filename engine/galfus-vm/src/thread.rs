@@ -39,8 +39,8 @@ impl VmThreadState {
         thread_quota: std::sync::Arc<crate::quota::ThreadQuota>,
     ) -> Self {
         Self {
-            call_stack: Vec::with_capacity(thread_quota.limits().max_call_depth),
-            registers: vec![Value::Null; 4096],
+            call_stack: Vec::new(),
+            registers: Vec::new(),
             current_register_base: 0,
             current_register_top: 0,
             current_frame_has_objects: false,
@@ -84,7 +84,7 @@ impl VmThreadState {
         let new_top = register_base + register_count;
         if new_top > self.registers.len() {
             self.registers
-                .resize(new_top.max(self.registers.len() * 2), Value::Null);
+                .resize(new_top.max(self.registers.len().max(64) * 2), Value::Null);
         }
         self.current_register_base = register_base;
         self.current_register_top = new_top;

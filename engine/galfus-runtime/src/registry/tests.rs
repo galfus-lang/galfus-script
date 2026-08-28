@@ -38,6 +38,7 @@ fn registry_keeps_the_mailbox_and_key_while_a_thread_is_running() {
     assert!(registry.contains(id));
     assert_eq!(registry.lookup_key("worker"), Some(id));
     assert_eq!(registry.state(id), Some(ThreadState::Created));
+    assert!(registry.get_thread_quota(id).is_some());
     let message = registry
         .get_mailbox(id)
         .unwrap()

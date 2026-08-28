@@ -6,6 +6,7 @@ use crate::{
     BytecodeFunction, BytecodeModule, ConstantPool, DebugLocation, ExportSlot, ImportSlot,
 };
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 fn compiled_module(id: ModuleId, revision: SemanticRevision) -> BytecodeNode {
     BytecodeNode {
@@ -76,6 +77,36 @@ fn apply_returns_a_new_validated_snapshot() {
     );
     assert_eq!(next.deps_of(main).collect::<Vec<_>>(), vec![utilities]);
     assert_eq!(next.dependents_of(utilities), vec![main]);
+}
+
+#[test]
+fn snapshots_share_unchanged_modules() {
+    let retained = ModuleId::new(1);
+    let added = ModuleId::new(2);
+    let graph = BytecodeGraph::new()
+        .apply(transaction(
+            &BytecodeGraph::new(),
+            SemanticRevision::new(1),
+            vec![compiled_module(retained, SemanticRevision::new(1))],
+            vec![],
+            vec![],
+        ))
+        .expect("initial transaction is valid");
+
+    let next = graph
+        .apply(transaction(
+            &graph,
+            SemanticRevision::new(2),
+            vec![compiled_module(added, SemanticRevision::new(2))],
+            vec![],
+            vec![],
+        ))
+        .expect("transaction is valid");
+
+    assert!(Arc::ptr_eq(
+        graph.modules.get(&retained).expect("retained module"),
+        next.modules.get(&retained).expect("retained module"),
+    ));
 }
 
 #[test]
@@ -392,16 +423,28 @@ fn validation_collects_all_errors_in_canonical_module_order() {
     let forward = BytecodeGraph {
         version: 0,
         format_version: CURRENT_BYTECODE_FORMAT_VERSION,
-        modules: BTreeMap::from([(first, first_node.clone()), (second, second_node.clone())]),
+        modules: BTreeMap::from([
+            (first, Arc::new(first_node.clone())),
+            (second, Arc::new(second_node.clone())),
+        ]),
         ids_by_path: BTreeMap::new(),
         edges: Vec::new(),
+        dependencies: BTreeMap::new(),
+        dependents: BTreeMap::new(),
+        export_indexes: BTreeMap::new(),
     };
     let reverse = BytecodeGraph {
         version: 0,
         format_version: CURRENT_BYTECODE_FORMAT_VERSION,
-        modules: BTreeMap::from([(second, second_node), (first, first_node)]),
+        modules: BTreeMap::from([
+            (second, Arc::new(second_node)),
+            (first, Arc::new(first_node)),
+        ]),
         ids_by_path: BTreeMap::new(),
         edges: Vec::new(),
+        dependencies: BTreeMap::new(),
+        dependents: BTreeMap::new(),
+        export_indexes: BTreeMap::new(),
     };
 
     let forward_errors = forward.validate().expect_err("graph must be invalid");
@@ -435,4 +478,23 @@ fn execution_metadata_resolves_the_span_for_an_instruction() {
         Some(DebugLocation::new(18, 27))
     );
     assert_eq!(metadata.location_for(function, 5), None);
+}
+
+#[test]
+fn execution_metadata_remaps_retained_function_spans() {
+    let removed = instruction::FuncIdx(0);
+    let retained = instruction::FuncIdx(1);
+    let remapped = instruction::FuncIdx(0);
+    let span = galfus_core::Span::new(galfus_core::SourceId::new(9), 18, 27);
+    let mut metadata = ExecutionMetadata::default();
+    metadata.set_function_spans(removed, HashMap::from([(1, span)]));
+    metadata.set_function_spans(retained, HashMap::from([(4, span)]));
+
+    metadata.remap_functions(&[None, Some(remapped)]);
+
+    assert_eq!(metadata.location_for(removed, 1), None);
+    assert_eq!(
+        metadata.location_for(remapped, 4),
+        Some(DebugLocation::new(18, 27))
+    );
 }

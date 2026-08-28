@@ -40,7 +40,6 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
     }
     let compile_report = workspace
         .compile()
-        .and_then(|_| workspace.optimize())
         .map_err(|error| anyhow::anyhow!("workspace compilation failed: {error:?}"))?;
     let args = cli_args
         .iter()
@@ -49,6 +48,15 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
 
     if std::env::var("GALFUS_DEBUG_BYTECODE").is_ok() {
         println!("{:#?}", compile_report.package.graph());
+    }
+    if std::env::var("GALFUS_DEBUG_BYTECODE_STATS").is_ok() {
+        let statistics = galfus_bytecode::collect_package_statistics(&compile_report.package)
+            .context("could not collect bytecode statistics")?;
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&statistics)
+                .context("could not serialize bytecode statistics")?
+        );
     }
 
     let providers =

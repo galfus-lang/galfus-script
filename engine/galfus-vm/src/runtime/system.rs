@@ -133,6 +133,58 @@ impl VirtualMachine {
                     });
                 }
             }
+            Instruction::CallInternalMath {
+                dest,
+                operation,
+                args_start,
+                arg_count,
+            } => {
+                let float = |index: u8| -> Result<f64, VmError> {
+                    if index >= arg_count {
+                        return Err(VmError::TypeMismatch {
+                            expected: "math argument".to_string(),
+                            found: "missing argument".to_string(),
+                        });
+                    }
+                    let value = thread.read_reg(Reg(args_start.raw() + index as u16));
+                    match value {
+                        Value::Float64(value) => Ok(value),
+                        Value::Float32(value) => Ok(value as f64),
+                        Value::Int8(value) => Ok(value as f64),
+                        Value::Int16(value) => Ok(value as f64),
+                        Value::Int32(value) => Ok(value as f64),
+                        Value::Int64(value) => Ok(value as f64),
+                        Value::Uint8(value) => Ok(value as f64),
+                        Value::Uint16(value) => Ok(value as f64),
+                        Value::Uint32(value) => Ok(value as f64),
+                        Value::Uint64(value) => Ok(value as f64),
+                        value => Err(VmError::TypeMismatch {
+                            expected: "number".to_string(),
+                            found: format!("{value:?}"),
+                        }),
+                    }
+                };
+                let value = match operation {
+                    0 => Value::Bool(float(0)?.is_nan()),
+                    1 => Value::Bool(float(0)?.is_finite()),
+                    2 => Value::Bool(float(0)?.is_infinite()),
+                    3 => Value::Float64(galfus_core::normalize_f64(float(0)?.sqrt())),
+                    4 => Value::Float64(galfus_core::normalize_f64(float(0)?.hypot(float(1)?))),
+                    5 => Value::Float64(galfus_core::normalize_f64(float(0)?.sin())),
+                    6 => Value::Float64(galfus_core::normalize_f64(float(0)?.cos())),
+                    7 => Value::Float64(galfus_core::normalize_f64(float(0)?.tan())),
+                    8 => Value::Float64(galfus_core::normalize_f64(float(0)?.ln())),
+                    9 => Value::Float64(galfus_core::normalize_f64(float(0)?.log2())),
+                    10 => Value::Float64(galfus_core::normalize_f64(float(0)?.log10())),
+                    _ => {
+                        return Err(VmError::TypeMismatch {
+                            expected: "internal math operation".to_string(),
+                            found: operation.to_string(),
+                        });
+                    }
+                };
+                thread.write_reg(dest, value);
+            }
             Instruction::CreateFuture {
                 dest,
                 func: func_idx,
@@ -184,6 +236,66 @@ impl VirtualMachine {
                         return_type,
                     },
                     continuation: Continuation::for_future_handle(dest),
+                });
+            }
+            Instruction::CreateAwaitFuture {
+                dest,
+                ref operation,
+                args_start,
+                arg_count,
+                ref arg_types,
+                return_type,
+            } => {
+                let mut args = Vec::with_capacity(arg_count as usize);
+                for i in 0..arg_count {
+                    let val = thread.read_reg(Reg(args_start.raw() + i as u16));
+                    thread.retain_anchor_val(&val);
+                    args.push(val);
+                }
+                let module_id = thread
+                    .call_stack
+                    .last()
+                    .ok_or(VmError::EmptyCallStack)?
+                    .module_id;
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::CreateAwaitFuture {
+                        module_id,
+                        operation: operation.clone(),
+                        args,
+                        arg_types: arg_types.clone(),
+                        return_type,
+                    },
+                    continuation: Continuation::for_provider(dest, module_id, return_type),
+                });
+            }
+            Instruction::CallInternalThread {
+                dest,
+                ref operation,
+                args_start,
+                arg_count,
+                ref arg_types,
+                return_type,
+            } => {
+                let mut args = Vec::with_capacity(arg_count as usize);
+                for i in 0..arg_count {
+                    let val = thread.read_reg(Reg(args_start.raw() + i as u16));
+                    thread.retain_anchor_val(&val);
+                    args.push(val);
+                }
+                let module_id = thread
+                    .call_stack
+                    .last()
+                    .ok_or(VmError::EmptyCallStack)?
+                    .module_id;
+                return Ok(VmStep::Suspend {
+                    effect: VmEffect::InternalThreadCall {
+                        module_id,
+                        operation: operation.clone(),
+                        args,
+                        arg_types: arg_types.clone(),
+                        return_type,
+                    },
+                    continuation: Continuation::for_provider(dest, module_id, return_type),
                 });
             }
             Instruction::CreateIndirectFuture {
