@@ -34,7 +34,7 @@ mod tests;
 mod typeofs;
 mod variants;
 
-use crate::{FunctionParameterType, ModuleAst, SyntaxNodeKind, TypeLayer, bind_types};
+use crate::{FunctionParameterType, ModuleAst, SymbolKind, SyntaxNodeKind, TypeLayer, bind_types};
 use galfus_core::{DiagnosticBag, NodeId, SourceFile, SymbolId, TypeId};
 pub use model::*;
 use std::collections::HashMap;
@@ -48,10 +48,12 @@ struct DeclarationTypeChecker<'a> {
     diagnostics: DiagnosticBag,
     ownership_metadata: OwnershipMetadata,
     imported_member_types: HashMap<ImportedMemberKey, TypeId>,
+    imported_struct_fields: HashMap<SymbolId, Vec<ImportedStructField>>,
     imported_symbol_constraints: HashMap<SymbolId, LoweredImportedConstraint>,
     imported_path_constraints: HashMap<NodeId, LoweredImportedConstraint>,
     imported_symbol_choices: HashMap<SymbolId, LoweredImportedChoice>,
     imported_path_choices: HashMap<NodeId, LoweredImportedChoice>,
+    imported_symbol_enum_values: HashMap<SymbolId, Vec<(String, i64)>>,
     active_type_substitutions: Vec<HashMap<SymbolId, TypeId>>,
     imported_generic_params: HashMap<SymbolId, SymbolId>,
     control_targets: Vec<control_flow::ControlTarget>,
@@ -90,10 +92,12 @@ impl<'a> DeclarationTypeChecker<'a> {
             diagnostics: DiagnosticBag::new(),
             ownership_metadata: OwnershipMetadata::default(),
             imported_member_types: HashMap::new(),
+            imported_struct_fields: HashMap::new(),
             imported_symbol_constraints: HashMap::new(),
             imported_path_constraints: HashMap::new(),
             imported_symbol_choices: HashMap::new(),
             imported_path_choices: HashMap::new(),
+            imported_symbol_enum_values: HashMap::new(),
             active_type_substitutions: Vec::new(),
             imported_generic_params: HashMap::new(),
             control_targets: Vec::new(),
@@ -118,10 +122,12 @@ impl<'a> DeclarationTypeChecker<'a> {
             diagnostics: previous_result.diagnostics,
             ownership_metadata: previous_result.ownership_metadata,
             imported_member_types: HashMap::new(),
+            imported_struct_fields: previous_result.imported_struct_fields,
             imported_symbol_constraints: HashMap::new(),
             imported_path_constraints: HashMap::new(),
             imported_symbol_choices: previous_result.imported_symbol_choices,
             imported_path_choices: previous_result.imported_path_choices,
+            imported_symbol_enum_values: previous_result.imported_symbol_enum_values,
             active_type_substitutions: Vec::new(),
             imported_generic_params: HashMap::new(),
             control_targets: Vec::new(),
@@ -137,9 +143,13 @@ impl<'a> DeclarationTypeChecker<'a> {
             self.layer,
             self.diagnostics,
             self.ownership_metadata,
-            self.imported_symbol_choices,
-            self.imported_path_choices,
-            self.range_desugars,
+            TypeCheckSupplementalData {
+                imported_symbol_choices: self.imported_symbol_choices,
+                imported_path_choices: self.imported_path_choices,
+                imported_struct_fields: self.imported_struct_fields,
+                imported_symbol_enum_values: self.imported_symbol_enum_values,
+                range_desugars: self.range_desugars,
+            },
         )
     }
 
@@ -250,6 +260,24 @@ impl<'a> DeclarationTypeChecker<'a> {
         }
     }
 
+    fn bind_imported_struct_fields(
+        &mut self,
+        imported_fields: &HashMap<SymbolId, Vec<ImportedStructFieldSurface>>,
+    ) {
+        for (symbol, fields) in imported_fields {
+            let fields = fields
+                .iter()
+                .map(|field| ImportedStructField {
+                    name: field.name().to_string(),
+                    ty: self.lower_imported_type(field.ty()),
+                    has_default: field.has_default(),
+                    default_value: field.default_value(),
+                })
+                .collect();
+            self.imported_struct_fields.insert(*symbol, fields);
+        }
+    }
+
     fn bind_imported_symbol_constraints(
         &mut self,
         imported_constraints: &HashMap<SymbolId, ImportedConstraintSurface>,
@@ -318,6 +346,14 @@ impl<'a> DeclarationTypeChecker<'a> {
             let choice = self.lower_imported_choice(imported_choice);
             self.imported_path_choices.insert(*node, choice);
         }
+    }
+
+    fn bind_imported_symbol_enum_values(
+        &mut self,
+        imported_values: &HashMap<SymbolId, Vec<(String, i64)>>,
+    ) {
+        self.imported_symbol_enum_values
+            .extend(imported_values.clone());
     }
 
     fn lower_imported_choice(
@@ -435,10 +471,27 @@ impl<'a> DeclarationTypeChecker<'a> {
                     .intern_function(parameters, return_type, false)
             }
 
-            ImportedType::LocalPath { name } => self.layer.table_mut().intern_path(
-                SymbolId::new(0),
-                name.split("::").map(str::to_string).collect(),
-            ),
+            ImportedType::LocalPath { name } => {
+                let imported_symbol = self.graph.resolution().and_then(|resolution| {
+                    let name = self.string_table.get(name)?;
+                    resolution
+                        .symbols()
+                        .iter()
+                        .find(|symbol| {
+                            symbol.name() == name && symbol.kind() == SymbolKind::ImportBinding
+                        })
+                        .map(|symbol| symbol.id())
+                });
+
+                if let Some(symbol) = imported_symbol {
+                    self.layer.table_mut().intern_named(symbol)
+                } else {
+                    self.layer.table_mut().intern_path(
+                        SymbolId::new(0),
+                        name.split("::").map(str::to_string).collect(),
+                    )
+                }
+            }
 
             ImportedType::GenericParameter { symbol } => {
                 let next_id = 1_000_000 + self.imported_generic_params.len() as u32;
@@ -536,10 +589,12 @@ pub fn check_definition_types_with_surfaces(
     checker.bind_imported_symbol_types(imported_types.symbol_types());
     checker.bind_imported_path_types(imported_types.path_types());
     checker.bind_imported_member_types(imported_types.member_types());
+    checker.bind_imported_struct_fields(imported_types.struct_fields());
     checker.bind_imported_symbol_constraints(imported_types.symbol_constraints());
     checker.bind_imported_path_constraints(imported_types.path_constraints());
     checker.bind_imported_symbol_choices(imported_types.symbol_choices());
     checker.bind_imported_path_choices(imported_types.path_choices());
+    checker.bind_imported_symbol_enum_values(imported_types.symbol_enum_values());
     checker.check_definitions();
     checker.into_result()
 }

@@ -1,6 +1,7 @@
 use std::collections;
 
 use super::*;
+use galfus_frontend::ImportedStructFieldDefault;
 use std::collections::HashMap;
 
 impl<'a> MirBuilder<'a> {
@@ -558,8 +559,27 @@ impl<'a> MirBuilder<'a> {
     }
 
     pub(super) fn get_struct_fields(&self, struct_symbol: SymbolId) -> Vec<(String, TypeId)> {
+        if let Some(fields) = self.type_result.imported_struct_fields.get(&struct_symbol) {
+            return fields
+                .iter()
+                .map(|field| (field.name.clone(), field.ty))
+                .collect();
+        }
         let mut visited = collections::HashSet::new();
         self.get_struct_fields_internal(struct_symbol, &mut visited)
+    }
+
+    pub(super) fn imported_struct_field_default(
+        &self,
+        struct_symbol: SymbolId,
+        field_name: &str,
+    ) -> Option<ImportedStructFieldDefault> {
+        self.type_result
+            .imported_struct_fields
+            .get(&struct_symbol)?
+            .iter()
+            .find(|field| field.name == field_name)
+            .and_then(|field| field.default_value)
     }
 
     pub(super) fn get_struct_fields_internal(
@@ -665,7 +685,8 @@ impl<'a> MirBuilder<'a> {
                     let resolution = self.graph.resolution()?;
                     let is_struct = resolution
                         .symbol(*symbol)
-                        .is_some_and(|sd| sd.kind() == SymbolKind::Struct);
+                        .is_some_and(|sd| sd.kind() == SymbolKind::Struct)
+                        || self.type_result.imported_struct_fields.contains_key(symbol);
                     if is_struct {
                         return Some(*symbol);
                     }

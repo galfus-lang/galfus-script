@@ -80,7 +80,8 @@ pub fn struct_symbol_for_type(ctx: &LowerCtx, ty: TypeId) -> Option<SymbolId> {
                 let resolution = ctx.graph.resolution()?;
                 let is_struct = resolution
                     .symbol(*symbol)
-                    .is_some_and(|sd| sd.kind() == SymbolKind::Struct);
+                    .is_some_and(|sd| sd.kind() == SymbolKind::Struct)
+                    || ctx.type_result.imported_struct_fields.contains_key(symbol);
                 if is_struct {
                     return Some(*symbol);
                 }

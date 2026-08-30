@@ -476,6 +476,7 @@ fn validate_rvalue_operands(
         | RValue::Copy(operand)
         | RValue::MemberAccess(operand, _)
         | RValue::ChoiceVariantIs(operand, _)
+        | RValue::ImportedChoiceVariantIs(operand, _, _)
         | RValue::Instanceof(operand, _)
         | RValue::Cast(operand, _) => {
             validate_operand(operand, func, initialized, errors);

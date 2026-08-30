@@ -154,6 +154,13 @@ exit_code = 0
 stdout = "ok\n"
 
 [[case]]
+name = "workspace imports propagate exported surfaces across module chains"
+path = "cases/13_modules_and_workspaces/import_export_matrix"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
 name = "CLI arguments reach the entry function as byte arrays"
 path = "cases/14_runtime_and_providers/cli_args.gfs"
 command = "run"

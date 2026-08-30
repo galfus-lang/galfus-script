@@ -72,7 +72,6 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                 | PrimitiveType::Uint16
                                 | PrimitiveType::Uint32
                                 | PrimitiveType::Uint64
-                                | PrimitiveType::Float16
                                 | PrimitiveType::Float32
                                 | PrimitiveType::Float64
                         ))
@@ -731,9 +730,21 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                 });
                 self.free_temp_if_operand(operand);
             }
+            RValue::ImportedChoiceVariantIs(operand, choice_name, variant_name) => {
+                let src = self.operand_reg(operand);
+                let type_idx = crate::bytecode_emission::types::lower_imported_choice_variant_type(
+                    self.ctx,
+                    choice_name,
+                    variant_name,
+                );
+                self.instructions.push(Instruction::Instanceof {
+                    dest,
+                    src,
+                    type_idx,
+                });
+                self.free_temp_if_operand(operand);
+            }
             RValue::LoadGlobal(name) => {
-                // Find global index. For simplicity, we can just use 0 if not found,
-                // or we can map it to global index.
                 let global_idx = self
                     .ctx
                     .graph
@@ -742,8 +753,8 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                         let name_id = self.ctx.string_table.get(name);
                         res.symbols()
                             .iter()
-                            .position(|s| name_id.is_some() && s.name() == name_id.unwrap())
-                            .map(|idx| idx as u16)
+                            .find(|symbol| name_id.is_some() && symbol.name() == name_id.unwrap())
+                            .map(|symbol| symbol.id().raw() as u16)
                     })
                     .unwrap_or(0);
                 self.instructions.push(Instruction::LoadGlobal {
@@ -1315,13 +1326,21 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
         let obj_type = self.get_operand_type(obj_operand);
         let table = self.ctx.type_result.layer().table();
         let resolved_type = crate::bytecode_emission::types::resolve_alias_type(self.ctx, obj_type);
-
+        let imported_fields = match table.kind(resolved_type) {
+            Some(TypeKind::Named { symbol }) => self.ctx.imported_struct_fields.get(symbol),
+            _ => None,
+        };
         let field_idx = if matches!(table.kind(resolved_type), Some(TypeKind::Tuple { .. })) {
             field_name.parse::<u16>().unwrap_or(0)
         } else if let Some(symbol) = self.struct_symbol_for_type(obj_type) {
             let struct_fields =
                 crate::bytecode_emission::types::get_struct_fields(self.ctx, symbol);
             struct_fields
+                .iter()
+                .position(|(name, _)| name == field_name)
+                .unwrap_or(0) as u16
+        } else if let Some(fields) = imported_fields {
+            fields
                 .iter()
                 .position(|(name, _)| name == field_name)
                 .unwrap_or(0) as u16
@@ -1543,7 +1562,11 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     let resolution = self.ctx.graph.resolution()?;
                     let is_struct_or_choice = resolution.symbol(*symbol).is_some_and(|sd| {
                         sd.kind() == SymbolKind::Struct || sd.kind() == SymbolKind::Choice
-                    });
+                    }) || self
+                        .ctx
+                        .type_result
+                        .imported_struct_fields
+                        .contains_key(symbol);
                     if is_struct_or_choice {
                         return Some(*symbol);
                     }

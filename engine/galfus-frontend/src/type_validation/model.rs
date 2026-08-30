@@ -275,6 +275,61 @@ pub struct ImportedMemberKey {
     member: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportedStructFieldDefault {
+    Null,
+    EmptyArray,
+    Integer(i64),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportedStructFieldSurface {
+    name: String,
+    ty: ImportedType,
+    has_default: bool,
+    default_value: Option<ImportedStructFieldDefault>,
+}
+
+impl ImportedStructFieldSurface {
+    pub fn new(
+        name: String,
+        ty: ImportedType,
+        has_default: bool,
+        default_value: Option<ImportedStructFieldDefault>,
+    ) -> Self {
+        Self {
+            name,
+            ty,
+            has_default,
+            default_value,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        self.name.as_str()
+    }
+
+    pub fn ty(&self) -> &ImportedType {
+        &self.ty
+    }
+
+    pub fn has_default(&self) -> bool {
+        self.has_default
+    }
+
+    pub fn default_value(&self) -> Option<ImportedStructFieldDefault> {
+        self.default_value
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportedStructField {
+    pub name: String,
+    pub ty: TypeId,
+    pub has_default: bool,
+    pub default_value: Option<ImportedStructFieldDefault>,
+}
+
 impl ImportedMemberKey {
     pub fn new(namespace: SymbolId, owner: impl Into<String>, member: impl Into<String>) -> Self {
         Self {
@@ -302,10 +357,12 @@ pub struct ImportedSurfaceTypes {
     symbol_types: HashMap<SymbolId, ImportedType>,
     path_types: HashMap<NodeId, ImportedType>,
     member_types: HashMap<ImportedMemberKey, ImportedType>,
+    struct_fields: HashMap<SymbolId, Vec<ImportedStructFieldSurface>>,
     symbol_constraints: HashMap<SymbolId, ImportedConstraintSurface>,
     path_constraints: HashMap<NodeId, ImportedConstraintSurface>,
     symbol_choices: HashMap<SymbolId, ImportedChoiceSurface>,
     path_choices: HashMap<NodeId, ImportedChoiceSurface>,
+    symbol_enum_values: HashMap<SymbolId, Vec<(String, i64)>>,
 }
 
 impl ImportedSurfaceTypes {
@@ -325,6 +382,10 @@ impl ImportedSurfaceTypes {
         &self.member_types
     }
 
+    pub fn struct_fields(&self) -> &HashMap<SymbolId, Vec<ImportedStructFieldSurface>> {
+        &self.struct_fields
+    }
+
     pub fn symbol_constraints(&self) -> &HashMap<SymbolId, ImportedConstraintSurface> {
         &self.symbol_constraints
     }
@@ -341,6 +402,10 @@ impl ImportedSurfaceTypes {
         &self.path_choices
     }
 
+    pub fn symbol_enum_values(&self) -> &HashMap<SymbolId, Vec<(String, i64)>> {
+        &self.symbol_enum_values
+    }
+
     pub fn insert_symbol_type(&mut self, symbol: SymbolId, ty: ImportedType) {
         self.symbol_types.insert(symbol, ty);
     }
@@ -351,6 +416,14 @@ impl ImportedSurfaceTypes {
 
     pub fn insert_member_type(&mut self, key: ImportedMemberKey, ty: ImportedType) {
         self.member_types.insert(key, ty);
+    }
+
+    pub fn insert_struct_fields(
+        &mut self,
+        symbol: SymbolId,
+        fields: Vec<ImportedStructFieldSurface>,
+    ) {
+        self.struct_fields.insert(symbol, fields);
     }
 
     pub fn insert_symbol_constraint(
@@ -373,12 +446,18 @@ impl ImportedSurfaceTypes {
         self.path_choices.insert(node, choice);
     }
 
+    pub fn insert_symbol_enum_values(&mut self, symbol: SymbolId, values: Vec<(String, i64)>) {
+        self.symbol_enum_values.insert(symbol, values);
+    }
+
     pub fn extend(&mut self, other: ImportedSurfaceTypes) {
         self.symbol_types.extend(other.symbol_types);
         self.path_types.extend(other.path_types);
         self.member_types.extend(other.member_types);
+        self.struct_fields.extend(other.struct_fields);
         self.symbol_constraints.extend(other.symbol_constraints);
         self.path_constraints.extend(other.path_constraints);
+        self.symbol_enum_values.extend(other.symbol_enum_values);
         self.symbol_choices.extend(other.symbol_choices);
         self.path_choices.extend(other.path_choices);
     }
@@ -404,6 +483,8 @@ pub struct TypeCheckResult {
     pub(super) ownership_metadata: OwnershipMetadata,
     pub imported_symbol_choices: HashMap<SymbolId, LoweredImportedChoice>,
     pub imported_path_choices: HashMap<NodeId, LoweredImportedChoice>,
+    pub imported_struct_fields: HashMap<SymbolId, Vec<ImportedStructField>>,
+    pub imported_symbol_enum_values: HashMap<SymbolId, Vec<(String, i64)>>,
     pub(super) range_desugars: HashMap<NodeId, RangeDesugarTarget>,
 }
 
@@ -413,15 +494,22 @@ pub enum RangeDesugarTarget {
     Stepped,
 }
 
+#[derive(Default)]
+pub(super) struct TypeCheckSupplementalData {
+    pub(super) imported_symbol_choices: HashMap<SymbolId, LoweredImportedChoice>,
+    pub(super) imported_path_choices: HashMap<NodeId, LoweredImportedChoice>,
+    pub(super) imported_struct_fields: HashMap<SymbolId, Vec<ImportedStructField>>,
+    pub(super) imported_symbol_enum_values: HashMap<SymbolId, Vec<(String, i64)>>,
+    pub(super) range_desugars: HashMap<NodeId, RangeDesugarTarget>,
+}
+
 impl TypeCheckResult {
     pub fn new(layer: TypeLayer, diagnostics: DiagnosticBag) -> Self {
         Self::with_ownership_metadata(
             layer,
             diagnostics,
             OwnershipMetadata::default(),
-            HashMap::new(),
-            HashMap::new(),
-            HashMap::new(),
+            TypeCheckSupplementalData::default(),
         )
     }
 
@@ -429,17 +517,17 @@ impl TypeCheckResult {
         layer: TypeLayer,
         diagnostics: DiagnosticBag,
         ownership_metadata: OwnershipMetadata,
-        imported_symbol_choices: HashMap<SymbolId, LoweredImportedChoice>,
-        imported_path_choices: HashMap<NodeId, LoweredImportedChoice>,
-        range_desugars: HashMap<NodeId, RangeDesugarTarget>,
+        supplemental: TypeCheckSupplementalData,
     ) -> Self {
         Self {
             layer,
             diagnostics,
             ownership_metadata,
-            imported_symbol_choices,
-            imported_path_choices,
-            range_desugars,
+            imported_symbol_choices: supplemental.imported_symbol_choices,
+            imported_path_choices: supplemental.imported_path_choices,
+            imported_struct_fields: supplemental.imported_struct_fields,
+            imported_symbol_enum_values: supplemental.imported_symbol_enum_values,
+            range_desugars: supplemental.range_desugars,
         }
     }
 

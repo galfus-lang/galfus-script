@@ -100,6 +100,7 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
                 | RValue::Cast(op, _)
                 | RValue::Copy(op)
                 | RValue::ChoiceVariantIs(op, _)
+                | RValue::ImportedChoiceVariantIs(op, _, _)
                 | RValue::Instanceof(op, _)
                 | RValue::Len(op) => {
                     self.replace_operand(block, op);

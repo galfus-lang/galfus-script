@@ -34,6 +34,7 @@ pub struct LowerCtx<'a> {
     pub function_names: HashMap<FunctionId, String>,
     pub function_return_types: HashMap<FunctionId, TypeId>,
     pub function_param_types: HashMap<FunctionId, Vec<TypeId>>,
+    pub imported_struct_fields: HashMap<SymbolId, Vec<(String, TypeId)>>,
     pub active_substitutions: HashMap<SymbolId, TypeId>,
     pub mir_constants: &'a [MirConstant],
 }
@@ -69,6 +70,19 @@ impl<'a> LowerCtx<'a> {
             function_names: HashMap::new(),
             function_return_types: HashMap::new(),
             function_param_types: HashMap::new(),
+            imported_struct_fields: type_result
+                .imported_struct_fields
+                .iter()
+                .map(|(symbol, fields)| {
+                    (
+                        *symbol,
+                        fields
+                            .iter()
+                            .map(|field| (field.name.clone(), field.ty))
+                            .collect(),
+                    )
+                })
+                .collect(),
             active_substitutions: HashMap::new(),
             mir_constants,
         }

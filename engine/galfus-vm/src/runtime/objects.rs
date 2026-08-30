@@ -274,7 +274,9 @@ impl VirtualMachine {
                     let mut elements = Vec::new();
                     for i in 0..count as usize {
                         let src_reg = Reg(start.raw() + i as u16);
-                        elements.push(thread.read_reg(src_reg));
+                        let value = thread.read_reg(src_reg);
+                        thread.retain_edge_val(&value);
+                        elements.push(value);
                     }
                     let obj_ref = thread.heap.alloc(HeapObject::Tuple { elements })?;
                     thread.write_reg(dest, Value::Object(obj_ref));

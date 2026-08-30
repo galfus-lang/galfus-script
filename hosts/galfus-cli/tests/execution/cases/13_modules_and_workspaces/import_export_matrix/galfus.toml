@@ -1,0 +1,7 @@
+[module]
+name = "execution-import-export-matrix"
+target = "app"
+
+[entry]
+path = "src/main.gfs"
+function = "start"

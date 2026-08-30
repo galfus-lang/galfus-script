@@ -477,6 +477,7 @@ fn replace_rvalue_operands(rvalue: &mut RValue, replace: &mut impl FnMut(&mut Op
         | RValue::Copy(operand)
         | RValue::MemberAccess(operand, _)
         | RValue::ChoiceVariantIs(operand, _)
+        | RValue::ImportedChoiceVariantIs(operand, _, _)
         | RValue::Instanceof(operand, _)
         | RValue::Len(operand) => replace(operand),
         RValue::BinaryOp(_, lhs, rhs) | RValue::ArrayIndex(lhs, rhs) => {
@@ -663,6 +664,7 @@ fn collect_rvalue_uses(rvalue: &RValue, used: &mut HashSet<galfus_ir::mir::Local
         | RValue::Copy(operand)
         | RValue::MemberAccess(operand, _)
         | RValue::ChoiceVariantIs(operand, _)
+        | RValue::ImportedChoiceVariantIs(operand, _, _)
         | RValue::Instanceof(operand, _)
         | RValue::Len(operand) => collect_operand(operand, used),
         RValue::BinaryOp(_, lhs, rhs) | RValue::ArrayIndex(lhs, rhs) => {

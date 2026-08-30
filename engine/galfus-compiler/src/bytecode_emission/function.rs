@@ -200,12 +200,25 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                             reg: Reg(local.raw() as u16),
                         });
                     }
-                    MirInstruction::StoreGlobal(_name, op) => {
-                        let global_idx = 0;
+                    MirInstruction::StoreGlobal(name, op) => {
+                        let global_idx = self
+                            .ctx
+                            .graph
+                            .resolution()
+                            .and_then(|res| {
+                                let name_id = self.ctx.string_table.get(name);
+                                res.symbols()
+                                    .iter()
+                                    .find(|symbol| {
+                                        name_id.is_some() && symbol.name() == name_id.unwrap()
+                                    })
+                                    .map(|symbol| symbol.id().raw() as u16)
+                            })
+                            .unwrap_or(0);
                         let val_reg = self.operand_reg(op);
                         self.instructions.push(Instruction::StoreGlobal {
                             module_id: galfus_core::ModuleId::new(0),
-                            global_idx: GlobalIdx(global_idx as u16),
+                            global_idx: GlobalIdx(global_idx),
                             src: val_reg,
                         });
                         self.free_temp_if_operand(op);

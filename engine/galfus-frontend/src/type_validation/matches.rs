@@ -473,6 +473,7 @@ impl<'a> DeclarationTypeChecker<'a> {
         if let Some(variant_name_node) = self.graph.syntax().child(pattern, 1) {
             self.layer.bind_node_type(variant_name_node, variant_ty);
         }
+        self.layer.bind_node_type(pattern, variant_ty);
 
         true
     }

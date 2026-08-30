@@ -1,6 +1,6 @@
 use crate::{
     ImportedChoiceSurface, ImportedChoiceVariant, ImportedConstraintMember,
-    ImportedConstraintSurface, ImportedType, SymbolKind,
+    ImportedConstraintSurface, ImportedStructFieldDefault, ImportedType, SymbolKind,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,6 +160,14 @@ impl ModuleSurfaceExport {
                 .collect(),
         )
     }
+
+    pub(super) fn imported_enum_values(&self) -> Vec<(String, i64)> {
+        self.members
+            .iter()
+            .filter(|member| member.kind() == SymbolKind::EnumVariant)
+            .map(|member| (member.name.clone(), member.enum_value.unwrap_or_default()))
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,6 +176,9 @@ pub struct ModuleSurfaceMember {
     kind: SymbolKind,
     ty: Option<ImportedType>,
     payload_types: Vec<ImportedType>,
+    enum_value: Option<i64>,
+    has_default: bool,
+    default_value: Option<ImportedStructFieldDefault>,
 }
 
 impl ModuleSurfaceMember {
@@ -177,6 +188,38 @@ impl ModuleSurfaceMember {
             kind,
             ty,
             payload_types: Vec::new(),
+            enum_value: None,
+            has_default: false,
+            default_value: None,
+        }
+    }
+
+    pub fn with_default(
+        name: String,
+        kind: SymbolKind,
+        ty: Option<ImportedType>,
+        default_value: Option<ImportedStructFieldDefault>,
+    ) -> Self {
+        Self {
+            name,
+            kind,
+            ty,
+            payload_types: Vec::new(),
+            enum_value: None,
+            has_default: true,
+            default_value,
+        }
+    }
+
+    pub fn enum_variant(name: String, value: i64) -> Self {
+        Self {
+            name,
+            kind: SymbolKind::EnumVariant,
+            ty: None,
+            payload_types: Vec::new(),
+            enum_value: Some(value),
+            has_default: false,
+            default_value: None,
         }
     }
 
@@ -186,6 +229,9 @@ impl ModuleSurfaceMember {
             kind,
             ty: None,
             payload_types,
+            enum_value: None,
+            has_default: false,
+            default_value: None,
         }
     }
 
@@ -203,5 +249,13 @@ impl ModuleSurfaceMember {
 
     pub fn payload_types(&self) -> &[ImportedType] {
         self.payload_types.as_slice()
+    }
+
+    pub fn has_default(&self) -> bool {
+        self.has_default
+    }
+
+    pub fn default_value(&self) -> Option<ImportedStructFieldDefault> {
+        self.default_value
     }
 }

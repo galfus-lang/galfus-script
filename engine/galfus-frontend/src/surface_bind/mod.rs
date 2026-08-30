@@ -3,8 +3,9 @@ mod export;
 mod tests;
 
 use crate::{
-    ImportedMemberKey, ImportedSurfaceTypes, ImportedType, ModuleAst, ResolutionLayer, StringTable,
-    SymbolKind, SyntaxNodeKind, TypeCheckResult, TypeKind,
+    ImportedMemberKey, ImportedStructFieldDefault, ImportedStructFieldSurface,
+    ImportedSurfaceTypes, ImportedType, ModuleAst, ResolutionLayer, StringTable, SymbolKind,
+    SyntaxNodeKind, TypeCheckResult, TypeKind,
     type_validation::{
         ImportedChoiceSurface, ImportedConstraintSurface, ImportedFunctionParameterType,
     },
@@ -230,6 +231,7 @@ impl ModuleSurface {
 }
 
 pub fn build_module_surface(
+    source: &galfus_core::SourceFile,
     graph: &ModuleAst,
     type_result: &TypeCheckResult,
     string_table: &StringTable,
@@ -253,8 +255,13 @@ pub fn build_module_surface(
                     .and_then(|ty| transport_type(resolution, type_result, string_table, ty))
             };
 
-            let members =
-                surface_members_for_export(graph, type_result, string_table, export.symbol());
+            let members = surface_members_for_export(
+                source,
+                graph,
+                type_result,
+                string_table,
+                export.symbol(),
+            );
             let generic_parameters = surface_generic_parameters(
                 graph,
                 export.symbol(),
@@ -328,6 +335,9 @@ pub fn imported_surface_types_for_named_export(
     if export.kind() == SymbolKind::Choice {
         imported_types.insert_symbol_choice(local_symbol, export.imported_choice_surface(None));
     }
+    if export.kind() == SymbolKind::Enum {
+        imported_types.insert_symbol_enum_values(local_symbol, export.imported_enum_values());
+    }
 
     for member in export.members() {
         if let Some(ty) = surface.imported_member_path_type_for_named_export(
@@ -340,10 +350,30 @@ pub fn imported_surface_types_for_named_export(
         }
     }
 
+    if export.kind() == SymbolKind::Struct {
+        let fields = export
+            .members()
+            .iter()
+            .filter(|member| member.kind() == SymbolKind::StructField)
+            .filter_map(|member| {
+                member.ty().cloned().map(|ty| {
+                    ImportedStructFieldSurface::new(
+                        member.name().to_string(),
+                        ty,
+                        member.has_default(),
+                        member.default_value(),
+                    )
+                })
+            })
+            .collect();
+        imported_types.insert_struct_fields(local_symbol, fields);
+    }
+
     imported_types
 }
 
 fn surface_members_for_export(
+    source: &galfus_core::SourceFile,
     graph: &ModuleAst,
     type_result: &TypeCheckResult,
     string_table: &StringTable,
@@ -373,14 +403,23 @@ fn surface_members_for_export(
                         .symbol_type(*member_symbol)
                         .and_then(|ty| transport_type(resolution, type_result, string_table, ty))?;
 
-                    Some((
-                        member.declaration(),
-                        ModuleSurfaceMember::new(
-                            string_table.resolve(*name).unwrap_or("").to_string(),
+                    let name = string_table.resolve(*name).unwrap_or("").to_string();
+                    let has_default = member.kind() == SymbolKind::StructField
+                        && struct_field_has_default(graph, resolution, *member_symbol);
+                    let default_value =
+                        struct_field_default_value(source, graph, resolution, *member_symbol);
+                    let surface_member = if has_default {
+                        ModuleSurfaceMember::with_default(
+                            name,
                             member.kind(),
                             Some(ty),
-                        ),
-                    ))
+                            default_value,
+                        )
+                    } else {
+                        ModuleSurfaceMember::new(name, member.kind(), Some(ty))
+                    };
+
+                    Some((member.declaration(), surface_member))
                 }
 
                 SymbolKind::ConstraintFunction => {
@@ -431,7 +470,177 @@ fn surface_members_for_export(
         })
         .collect::<Vec<_>>();
     members.sort_by_key(|(declaration, _)| declaration.raw());
+    if resolution
+        .symbol(symbol)
+        .is_some_and(|item| item.kind() == SymbolKind::Enum)
+    {
+        for (declaration, member) in &mut members {
+            let value = enum_variant_value(graph, source, resolution, symbol, *declaration);
+            *member = ModuleSurfaceMember::enum_variant(member.name().to_string(), value);
+        }
+    }
     members.into_iter().map(|(_, member)| member).collect()
+}
+
+fn node_contains_kind(graph: &ModuleAst, node: NodeId, kind: SyntaxNodeKind) -> bool {
+    let Some(node) = graph.syntax().node(node) else {
+        return false;
+    };
+
+    node.kind() == kind
+        || node
+            .children()
+            .iter()
+            .any(|child| node_contains_kind(graph, *child, kind))
+}
+
+fn struct_field_has_default(
+    graph: &ModuleAst,
+    resolution: &ResolutionLayer,
+    field_symbol: SymbolId,
+) -> bool {
+    let Some(root) = graph.syntax().root() else {
+        return false;
+    };
+    let Some(field) = find_struct_field(graph, resolution, root, field_symbol) else {
+        return false;
+    };
+
+    node_contains_kind(graph, field, SyntaxNodeKind::StructFieldDefault)
+}
+
+fn struct_field_default_value(
+    source: &galfus_core::SourceFile,
+    graph: &ModuleAst,
+    resolution: &ResolutionLayer,
+    field_symbol: SymbolId,
+) -> Option<ImportedStructFieldDefault> {
+    let root = graph.syntax().root()?;
+    let field = find_struct_field(graph, resolution, root, field_symbol)?;
+    let default = graph
+        .syntax()
+        .first_child_of_kind(field, SyntaxNodeKind::StructFieldDefault)?;
+    let expression = graph.syntax().child(default, 0)?;
+
+    match graph.syntax().node(expression)?.kind() {
+        SyntaxNodeKind::NullLiteral => Some(ImportedStructFieldDefault::Null),
+        SyntaxNodeKind::ArrayLiteral
+            if graph
+                .syntax()
+                .node(expression)
+                .is_some_and(|array| array.children().is_empty()) =>
+        {
+            Some(ImportedStructFieldDefault::EmptyArray)
+        }
+        SyntaxNodeKind::IntegerLiteral => source
+            .slice(graph.syntax().node(expression)?.span())?
+            .parse::<i64>()
+            .ok()
+            .map(ImportedStructFieldDefault::Integer),
+        _ => None,
+    }
+}
+
+fn find_struct_field(
+    graph: &ModuleAst,
+    resolution: &ResolutionLayer,
+    node: NodeId,
+    field_symbol: SymbolId,
+) -> Option<NodeId> {
+    if graph
+        .syntax()
+        .node(node)
+        .is_some_and(|field| field.kind() == SyntaxNodeKind::StructField)
+        && graph
+            .syntax()
+            .first_child_of_kind(node, SyntaxNodeKind::Identifier)
+            .and_then(|identifier| resolution.declaration_symbol(identifier))
+            == Some(field_symbol)
+    {
+        return Some(node);
+    }
+
+    graph
+        .syntax()
+        .node(node)?
+        .children()
+        .iter()
+        .find_map(|child| find_struct_field(graph, resolution, *child, field_symbol))
+}
+
+fn enum_variant_value(
+    graph: &ModuleAst,
+    source: &galfus_core::SourceFile,
+    resolution: &crate::ResolutionLayer,
+    enum_symbol: SymbolId,
+    variant_declaration: NodeId,
+) -> i64 {
+    let Some(root) = graph.syntax().root() else {
+        return 0;
+    };
+    let Some(enum_item) = find_enum_item(graph, resolution, root, enum_symbol) else {
+        return 0;
+    };
+    let Some(variants) = graph
+        .syntax()
+        .first_child_of_kind(enum_item, SyntaxNodeKind::EnumVariantList)
+    else {
+        return 0;
+    };
+
+    let mut value = 0i64;
+    for variant in graph
+        .syntax()
+        .node(variants)
+        .into_iter()
+        .flat_map(|node| node.children())
+    {
+        if let Some(explicit) = graph
+            .syntax()
+            .first_child_of_kind(*variant, SyntaxNodeKind::EnumDiscriminant)
+            .and_then(|discriminant| graph.syntax().child(discriminant, 0))
+            .and_then(|expression| source.slice(graph.syntax().node(expression)?.span()))
+            .and_then(|text| text.parse::<i64>().ok())
+        {
+            value = explicit;
+        }
+        if graph
+            .syntax()
+            .first_child_of_kind(*variant, SyntaxNodeKind::Identifier)
+            .and_then(|identifier| resolution.declaration_symbol(identifier))
+            == resolution.declaration_symbol(variant_declaration)
+        {
+            return value;
+        }
+        value += 1;
+    }
+    0
+}
+
+fn find_enum_item(
+    graph: &ModuleAst,
+    resolution: &crate::ResolutionLayer,
+    node: NodeId,
+    enum_symbol: SymbolId,
+) -> Option<NodeId> {
+    if graph
+        .syntax()
+        .node(node)
+        .is_some_and(|item| item.kind() == SyntaxNodeKind::EnumItem)
+        && graph
+            .syntax()
+            .first_child_of_kind(node, SyntaxNodeKind::Identifier)
+            .and_then(|identifier| resolution.declaration_symbol(identifier))
+            == Some(enum_symbol)
+    {
+        return Some(node);
+    }
+    graph
+        .syntax()
+        .node(node)?
+        .children()
+        .iter()
+        .find_map(|child| find_enum_item(graph, resolution, *child, enum_symbol))
 }
 
 fn surface_generic_parameters(
@@ -658,8 +867,11 @@ fn transport_type(
         }
         TypeKind::Named { symbol } => {
             let symbol_data = resolution.symbol(symbol)?;
-            if symbol_data.kind() == SymbolKind::TypeAlias
-                && let Some(target_ty) = result.layer().symbol_type(symbol)
+            if matches!(
+                symbol_data.kind(),
+                SymbolKind::TypeAlias | SymbolKind::ImportBinding
+            ) && let Some(target_ty) = result.layer().symbol_type(symbol)
+                && target_ty != ty
             {
                 return transport_type(resolution, result, string_table, target_ty);
             }
@@ -670,6 +882,28 @@ fn transport_type(
             Some(ImportedType::LocalPath { name })
         }
         TypeKind::Path { root, segments } => {
+            if root == SymbolId::new(0)
+                && let Some(name) = segments.first()
+                && let Some(name_id) = string_table.get(name)
+                && let Some(symbol) = resolution.lookup_symbol(resolution.module_scope(), name_id)
+                && resolution
+                    .symbol(symbol)
+                    .is_some_and(|symbol| symbol.kind() == SymbolKind::ImportBinding)
+                && let Some(target_ty) = result.layer().symbol_type(symbol)
+                && target_ty != ty
+            {
+                return transport_type(resolution, result, string_table, target_ty);
+            }
+
+            if resolution
+                .symbol(root)
+                .is_some_and(|symbol| symbol.kind() == SymbolKind::ImportBinding)
+                && let Some(target_ty) = result.layer().symbol_type(root)
+                && target_ty != ty
+            {
+                return transport_type(resolution, result, string_table, target_ty);
+            }
+
             let symbol_data = resolution.symbol(root)?;
             let mut name = string_table
                 .resolve(symbol_data.name())

@@ -2,7 +2,7 @@ use std::collections;
 
 use super::function::FunctionBuilder;
 use galfus_core::{NodeId, TypeId};
-use galfus_frontend::{SyntaxNode, SyntaxNodeKind, TypeKind};
+use galfus_frontend::{ImportedStructFieldDefault, SyntaxNode, SyntaxNodeKind, TypeKind};
 use galfus_ir::mir::*;
 
 impl<'b, 'a> FunctionBuilder<'b, 'a> {
@@ -93,8 +93,29 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     }
 
                     if !found_in_spread {
-                        // Try default value
-                        if let Some(default_expr) =
+                        if let Some(default) =
+                            self.imported_struct_field_default(struct_symbol, &field_name)
+                        {
+                            match default {
+                                ImportedStructFieldDefault::Null => {
+                                    fields.push(Operand::Constant(Constant::Null));
+                                }
+                                ImportedStructFieldDefault::EmptyArray => {
+                                    let temp_id = self.declare_local(None, field_ty);
+                                    self.current_instructions.push((
+                                        Instruction::Assign(
+                                            temp_id,
+                                            RValue::NewArray(field_ty, Vec::new()),
+                                        ),
+                                        None,
+                                    ));
+                                    fields.push(Operand::Local(temp_id));
+                                }
+                                ImportedStructFieldDefault::Integer(value) => {
+                                    fields.push(Operand::Constant(Constant::Int32(value as i32)));
+                                }
+                            }
+                        } else if let Some(default_expr) =
                             self.find_struct_field_default_expr(struct_symbol, &field_name)
                         {
                             let op = self.lower_expression(default_expr);
@@ -266,11 +287,18 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
             element_types.push(ty);
         }
 
+        let tuple_from_type = |ty| {
+            let ty = self.builder.resolve_alias_type(ty);
+            matches!(
+                self.builder.type_result.layer().table().kind(ty),
+                Some(TypeKind::Tuple { elements: tuple_elements }) if tuple_elements.len() == element_types.len()
+            )
+            .then_some(ty)
+        };
         let ty = self
-            .builder
-            .type_result
-            .layer()
             .node_type(expr_id)
+            .and_then(tuple_from_type)
+            .or_else(|| tuple_from_type(self.return_type))
             .unwrap_or_else(|| self.builder.find_tuple_type(&element_types));
 
         let temp_id = self.declare_local(None, ty);

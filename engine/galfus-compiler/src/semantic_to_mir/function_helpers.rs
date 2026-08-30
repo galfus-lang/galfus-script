@@ -1,6 +1,8 @@
 use super::function::FunctionBuilder;
 use super::*;
-use galfus_frontend::{AssignmentOperatorKind, BinaryOperatorKind, UnaryOperatorKind};
+use galfus_frontend::{
+    AssignmentOperatorKind, BinaryOperatorKind, ImportedStructFieldDefault, UnaryOperatorKind,
+};
 
 impl<'b, 'a> FunctionBuilder<'b, 'a> {
     pub(super) fn lower_binary_op(&self, op_node_id: NodeId) -> MirBinaryOp {
@@ -82,6 +84,15 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
     ) -> Option<NodeId> {
         self.builder
             .find_struct_field_default_expr(struct_symbol, field_name)
+    }
+
+    pub(super) fn imported_struct_field_default(
+        &self,
+        struct_symbol: SymbolId,
+        field_name: &str,
+    ) -> Option<ImportedStructFieldDefault> {
+        self.builder
+            .imported_struct_field_default(struct_symbol, field_name)
     }
 
     pub(super) fn get_struct_fields(&self, struct_symbol: SymbolId) -> Vec<(String, TypeId)> {

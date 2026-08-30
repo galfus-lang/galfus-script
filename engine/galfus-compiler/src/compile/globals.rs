@@ -45,7 +45,6 @@ fn canonical_global_ref(
     modules: &[CompiledModule],
     mod_idx: usize,
     local_pos: u16,
-    string_table: &galfus_frontend::StringTable,
 ) -> Result<(galfus_core::ModuleId, GlobalIdx)> {
     let module = modules
         .get(mod_idx)
@@ -57,8 +56,7 @@ fn canonical_global_ref(
         )
     })?;
     let symbol = resolution
-        .symbols()
-        .get(local_pos as usize)
+        .symbol(galfus_core::SymbolId::new(local_pos as u32))
         .ok_or_else(|| {
             anyhow::anyhow!(
                 "missing local/global symbol at position `{local_pos}` in module `{}`",
@@ -95,11 +93,10 @@ fn canonical_global_ref(
             )
         })?;
         let target_global_idx = target_resolution
-            .symbols()
+            .exports()
             .iter()
-            .position(|target_symbol| {
-                string_table.resolve(target_symbol.name()).unwrap_or("") == imported_name
-            })
+            .find(|export| export.name() == imported_name)
+            .map(|export| export.symbol().raw())
             .ok_or_else(|| {
                 anyhow::anyhow!(
                     "could not locate imported global `{}` in module `{}`",
@@ -117,7 +114,6 @@ pub(super) fn rewrite_global_indices(
     instructions: &mut [Instruction],
     modules: &[CompiledModule],
     mod_idx: usize,
-    string_table: &galfus_frontend::StringTable,
 ) -> Result<()> {
     for instruction in instructions {
         match instruction {
@@ -132,7 +128,7 @@ pub(super) fn rewrite_global_indices(
                 ..
             } => {
                 (*module_id, *global_idx) =
-                    canonical_global_ref(modules, mod_idx, global_idx.raw(), string_table)?;
+                    canonical_global_ref(modules, mod_idx, global_idx.raw())?;
             }
             _ => {}
         }

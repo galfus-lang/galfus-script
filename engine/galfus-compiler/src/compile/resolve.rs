@@ -1,6 +1,6 @@
 use crate::input::CompiledModule;
 use galfus_core::{FunctionId, NodeId, SymbolId};
-use galfus_frontend::{SymbolKind, SyntaxNodeKind};
+use galfus_frontend::{SymbolKind, SyntaxNodeKind, TypeKind};
 
 pub(super) fn collect_call_targets(
     blocks: &[galfus_ir::mir::BasicBlock],
@@ -82,6 +82,7 @@ fn collect_rvalue_function_targets(value: &galfus_ir::mir::RValue, targets: &mut
         | RValue::Copy(operand)
         | RValue::MemberAccess(operand, _)
         | RValue::ChoiceVariantIs(operand, _)
+        | RValue::ImportedChoiceVariantIs(operand, _, _)
         | RValue::Instanceof(operand, _)
         | RValue::Len(operand) => collect_operand_function_target(operand, targets),
         RValue::BinaryOp(_, left, right) | RValue::ArrayIndex(left, right) => {
@@ -214,6 +215,46 @@ pub(super) fn resolve_import_target(
                         }
                     }
                 }
+            }
+        }
+
+        if let Some(syntax_node) = module.graph().syntax().node(node_id)
+            && syntax_node.kind() == SyntaxNodeKind::PathExpression
+            && let Some(receiver) = syntax_node.child(0)
+            && let Some(receiver_symbol) = resolution.reference_symbol(receiver).or_else(|| {
+                module
+                    .graph()
+                    .syntax()
+                    .first_child_of_kind(receiver, SyntaxNodeKind::Identifier)
+                    .and_then(|identifier| resolution.reference_symbol(identifier))
+            })
+            && let Some(receiver_ty) = module
+                .type_result()
+                .and_then(|result| result.layer().symbol_type(receiver_symbol))
+            && let Some(TypeKind::Named {
+                symbol: type_symbol,
+            }) = module
+                .type_result()
+                .and_then(|result| result.layer().table().kind(receiver_ty))
+            && let Some(import) = resolution
+                .imports()
+                .iter()
+                .find(|import| import.local_symbol() == *type_symbol)
+            && let Some(imported_name) = import.imported_name()
+            && let Some(member_node) = syntax_node.child(1)
+            && let Some(member_data) = module.graph().syntax().node(member_node)
+            && let Some(member_name) = module.source().slice(member_data.span())
+            && let Some(target_idx) = import_target_index(modules, mod_idx, import.source())
+            && let Some(target_resolution) = modules[target_idx].graph().resolution()
+        {
+            let anchored_name = format!("{imported_name}::{member_name}");
+            if let Some(export) = target_resolution.exports().iter().find(|export| {
+                export.kind() == SymbolKind::Function && export.name() == anchored_name
+            }) {
+                return Some((
+                    modules[target_idx].id(),
+                    FunctionId::new(export.symbol().raw()),
+                ));
             }
         }
 

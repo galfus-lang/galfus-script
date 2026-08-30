@@ -1,0 +1,6 @@
+export type BaseCount = i32
+export type BaseOptionalCount = BaseCount | null
+
+export constraint Measurable {
+  fn measure(self): BaseCount
+}

@@ -47,6 +47,23 @@ var color: Color = new(Color) {
 }
 
 #[test]
+fn check_accepts_empty_array_for_contextual_struct_field_type() {
+    let (_source, _graph, result, _string_table) = check_source(
+        r#"
+struct Response {
+  headers: [([u8], [u8])],
+}
+
+var response: Response = new(Response) {
+  headers: [],
+}
+"#,
+    );
+
+    assert!(!result.has_errors());
+}
+
+#[test]
 fn check_binds_struct_literal_type() {
     let (_, graph, result, string_table) = check_source(
         r#"

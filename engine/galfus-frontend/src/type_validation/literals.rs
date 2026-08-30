@@ -26,15 +26,6 @@ impl<'a> DeclarationTypeChecker<'a> {
     ) -> Option<TypeId> {
         let elements = self.graph.syntax().node(node)?.children().to_vec();
 
-        if elements.is_empty() {
-            self.report_empty_array_literal(node);
-
-            let error = self.layer.table_mut().error();
-            self.layer.bind_node_type(node, error);
-
-            return Some(error);
-        }
-
         let expected_element_type = expected.and_then(|expected_ty| {
             let resolved = self.resolve_alias_type(expected_ty);
             match self.layer.table().kind(resolved) {
@@ -42,6 +33,22 @@ impl<'a> DeclarationTypeChecker<'a> {
                 _ => None,
             }
         });
+
+        if elements.is_empty() {
+            if let Some(element) = expected_element_type {
+                let ty = self.layer.table_mut().intern_array(element);
+                self.layer.bind_node_type(node, ty);
+
+                return Some(ty);
+            }
+
+            self.report_empty_array_literal(node);
+
+            let error = self.layer.table_mut().error();
+            self.layer.bind_node_type(node, error);
+
+            return Some(error);
+        }
 
         let mut element_types = Vec::new();
 
