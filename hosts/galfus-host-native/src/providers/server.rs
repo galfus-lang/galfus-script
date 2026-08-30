@@ -541,44 +541,69 @@ impl NativeServerProvider {
         internal_tx: std::sync::mpsc::Sender<ServerCommand>,
     ) {
         tokio::spawn(async move {
-            match stream.next().await {
-                Some(Ok(msg)) => {
-                    let (code, data) = match msg {
-                        tokio_tungstenite::tungstenite::Message::Text(text) => {
-                            (1, Some(text.into_bytes()))
+            loop {
+                match stream.next().await {
+                    Some(Ok(tokio_tungstenite::tungstenite::Message::Ping(_)))
+                    | Some(Ok(tokio_tungstenite::tungstenite::Message::Pong(_))) => continue,
+                    Some(Ok(msg)) => {
+                        let (code, data, should_resume) = match msg {
+                            tokio_tungstenite::tungstenite::Message::Text(text) => {
+                                (1, Some(text.into_bytes()), true)
+                            }
+                            tokio_tungstenite::tungstenite::Message::Binary(data) => {
+                                (2, Some(data), true)
+                            }
+                            tokio_tungstenite::tungstenite::Message::Close(close) => (
+                                close.map(|frame| frame.code.into()).unwrap_or(1000) as i32,
+                                None,
+                                false,
+                            ),
+                            _ => continue,
+                        };
+
+                        let values = BoundaryValue::Tuple(vec![
+                            BoundaryValue::I32(code),
+                            data.map(BoundaryValue::Bytes)
+                                .unwrap_or(BoundaryValue::Null),
+                        ]);
+                        let _ = waiter.injector.inject_system_response(
+                            waiter.thread_id,
+                            waiter.lease,
+                            Ok(values),
+                        );
+
+                        if should_resume {
+                            let _ = internal_tx
+                                .send(ServerCommand::InternalWsUpgraded { ws_id, stream });
                         }
-                        tokio_tungstenite::tungstenite::Message::Binary(data) => (2, Some(data)),
-                        tokio_tungstenite::tungstenite::Message::Close(close) => (
-                            close.map(|frame| frame.code.into()).unwrap_or(1000) as i32,
-                            None,
-                        ),
-                        // Ping/Pong are transport frames. Preserve the stream and
-                        // let the Galfus loop await the next application message.
-                        _ => (0, Some(vec![])),
-                    };
-
-                    let mut values = vec![BoundaryValue::I32(code)];
-                    values.push(
-                        data.map(BoundaryValue::Bytes)
-                            .unwrap_or(BoundaryValue::Null),
-                    );
-                    let _ = waiter.injector.inject_system_response(
-                        waiter.thread_id,
-                        waiter.lease,
-                        Ok(BoundaryValue::Tuple(values)),
-                    );
-
-                    if code != 1000 && code != 1001 {
-                        let _ =
-                            internal_tx.send(ServerCommand::InternalWsUpgraded { ws_id, stream });
+                        return;
                     }
-                }
-                _ => {
-                    let _ = waiter.injector.inject_system_response(
-                        waiter.thread_id,
-                        waiter.lease,
-                        Ok(BoundaryValue::Null),
-                    );
+                    Some(Err(error)) => {
+                        let values = BoundaryValue::Tuple(vec![
+                            BoundaryValue::I32(-1),
+                            BoundaryValue::Bytes(error.to_string().into_bytes()),
+                        ]);
+                        let _ = waiter.injector.inject_system_response(
+                            waiter.thread_id,
+                            waiter.lease,
+                            Ok(values),
+                        );
+                        return;
+                    }
+                    None => {
+                        let values = BoundaryValue::Tuple(vec![
+                            BoundaryValue::I32(-1),
+                            BoundaryValue::Bytes(
+                                b"WebSocket stream ended without a close frame".to_vec(),
+                            ),
+                        ]);
+                        let _ = waiter.injector.inject_system_response(
+                            waiter.thread_id,
+                            waiter.lease,
+                            Ok(values),
+                        );
+                        return;
+                    }
                 }
             }
         });

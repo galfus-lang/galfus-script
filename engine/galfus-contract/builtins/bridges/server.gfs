@@ -165,16 +165,31 @@ export fn Server::start(server: Server): null {
                     null { break },
                     WsMessageTuple p {
                         const (p_status, p_msg) = p
+                        if p_status < 0 {
+                            instanceof p_msg {
+                                [u8] err {
+                                    const ws_config2 = copy server.websocket
+                                    const onError = ws_config2.onError
+                                    onError(copy ws, p_status, err)
+                                },
+                                null {
+                                    const ws_config2 = copy server.websocket
+                                    const onError = ws_config2.onError
+                                    onError(copy ws, p_status, "WebSocket error without detail")
+                                }
+                            }
+                            break
+                        }
                         instanceof p_msg {
                             null {
-                                const ws_config2 = copy server.websocket
-                                const onClose = ws_config2.onClose
+                                const ws_config3 = copy server.websocket
+                                const onClose = ws_config3.onClose
                                 onClose(copy ws, p_status)
                                 break
                             },
                             [u8] msg {
-                                const ws_config3 = copy server.websocket
-                                const onMessage = ws_config3.onMessage
+                                const ws_config4 = copy server.websocket
+                                const onMessage = ws_config4.onMessage
                                 onMessage(copy ws, p_status, msg)
                             }
                         }

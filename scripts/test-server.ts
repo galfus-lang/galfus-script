@@ -1,3 +1,5 @@
+import { connect } from "node:net";
+
 const SERVER_URL = "http://127.0.0.1:8080";
 const SERVER_COMMAND = ["./target/debug/galfus-cli", "run", "examples/server_auto.gfs"];
 const READY_TIMEOUT_MS = 10_000;
@@ -7,6 +9,34 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+async function mirrorOutput(
+  stream: ReadableStream<Uint8Array>,
+  output: { value: string },
+  destination: typeof process.stdout,
+): Promise<void> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const text = decoder.decode(value, { stream: true });
+    output.value += text;
+    destination.write(text);
+  }
+  const trailing = decoder.decode();
+  output.value += trailing;
+  destination.write(trailing);
+}
+
+async function waitFor(condition: () => boolean, timeoutMs: number, message: string): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (condition()) return;
+    await Bun.sleep(25);
+  }
+  throw new Error(message);
 }
 
 async function waitForServer(serverProcess: Bun.Subprocess): Promise<void> {
@@ -161,6 +191,52 @@ async function testWebSocket(message: string | Uint8Array): Promise<void> {
   });
 }
 
+async function testWebSocketError(serverOutput: { value: string }): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const socket = connect(8080, "127.0.0.1");
+    let handshakeComplete = false;
+    let response = "";
+    const timeout = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("Timeout esperando o servidor rejeitar o frame WebSocket inválido."));
+    }, WEBSOCKET_TIMEOUT_MS);
+
+    socket.on("connect", () => {
+      socket.write(
+        "GET /ws HTTP/1.1\r\n"
+          + "Host: 127.0.0.1:8080\r\n"
+          + "Connection: Upgrade\r\n"
+          + "Upgrade: websocket\r\n"
+          + "Sec-WebSocket-Version: 13\r\n"
+          + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
+      );
+    });
+    socket.on("data", (chunk) => {
+      response += chunk.toString();
+      if (!handshakeComplete && response.includes("\r\n\r\n")) {
+        handshakeComplete = true;
+        // FIN + RSV1 + masked empty text frame. RSV1 without an extension is invalid.
+        socket.write(Buffer.from([0xc1, 0x80, 0, 0, 0, 0]));
+      }
+    });
+    socket.on("close", () => {
+      clearTimeout(timeout);
+      if (handshakeComplete) resolve();
+      else reject(new Error("O handshake WebSocket inválido não foi concluído."));
+    });
+    socket.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+  });
+
+  await waitFor(
+    () => serverOutput.value.includes("WebSocket error with status") && serverOutput.value.includes("-1"),
+    WEBSOCKET_TIMEOUT_MS,
+    "onError não foi chamado após o frame WebSocket inválido.",
+  );
+}
+
 async function testBindConflict(): Promise<void> {
   const process = Bun.spawn(SERVER_COMMAND, { stdout: "ignore", stderr: "ignore" });
   const timeout = Symbol("timeout");
@@ -179,40 +255,48 @@ async function main(): Promise<void> {
   assert(await build.exited === 0, "Falha ao construir o Galfus CLI.");
 
   console.log("Iniciando o servidor Galfus nativo...");
-  const serverProcess = Bun.spawn(SERVER_COMMAND, { stdout: "inherit", stderr: "inherit" });
+  const serverProcess = Bun.spawn(SERVER_COMMAND, { stdout: "pipe", stderr: "pipe" });
+  const serverStdout = { value: "" };
+  const serverStderr = { value: "" };
+  const stdoutTask = mirrorOutput(serverProcess.stdout, serverStdout, process.stdout);
+  const stderrTask = mirrorOutput(serverProcess.stderr, serverStderr, process.stderr);
 
   try {
     await waitForServer(serverProcess);
 
-    console.log("[1/7] Testando HTTP/1.1...");
+    console.log("[1/8] Testando HTTP/1.1...");
     const http1 = await curl(["--http1.1", "--silent", "--show-error", "--dump-header", "-", "--output", "-", `${SERVER_URL}/api/data`]);
     assertHttpResponse(http1.stdout, "HTTP/1.1");
 
-    console.log("[2/7] Testando HTTP/2 h2c...");
+    console.log("[2/8] Testando HTTP/2 h2c...");
     const http2 = await curl(["--http2-prior-knowledge", "--silent", "--show-error", "--dump-header", "-", "--output", "-", `${SERVER_URL}/api/data`]);
     assertHttpResponse(http2.stdout, "HTTP/2");
 
-    console.log("[3/7] Testando Response com campos padrão...");
+    console.log("[3/8] Testando Response com campos padrão...");
     const notFound = await curl(["--http1.1", "--silent", "--show-error", "--dump-header", "-", "--output", "-", `${SERVER_URL}/missing`]);
     assertStatusResponse(notFound.stdout, 404);
 
-    console.log("[4/7] Testando Request, URL e headers...");
+    console.log("[4/8] Testando Request, URL e headers...");
     await testRequestContract();
 
-    console.log("[5/7] Testando requisições concorrentes...");
+    console.log("[5/8] Testando requisições concorrentes...");
     await testConcurrentRequests();
 
-    console.log("[6/7] Testando WebSocket texto e binário...");
+    console.log("[6/8] Testando WebSocket texto e binário...");
     await testWebSocket("Hello WebSocket in Galfus!");
     await testWebSocket(new TextEncoder().encode("binary WebSocket payload"));
 
-    console.log("[7/7] Testando conflito de porta...");
+    console.log("[7/8] Testando onError do WebSocket...");
+    await testWebSocketError(serverStdout);
+
+    console.log("[8/8] Testando conflito de porta...");
     await testBindConflict();
     console.log("Todos os testes passaram.");
   } finally {
     console.log("Encerrando o servidor...");
     if (serverProcess.exitCode === null) serverProcess.kill();
     await serverProcess.exited;
+    await Promise.all([stdoutTask, stderrTask]);
   }
 }
 
