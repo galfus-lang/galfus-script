@@ -16,6 +16,12 @@ crossbeam-channel = "0.5"
 ureq.workspace = true
 tungstenite.workspace = true
 url.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
 
 [dev-dependencies]
 galfus-workspace = { path = "../../engine/galfus-workspace" }

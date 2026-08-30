@@ -3,6 +3,7 @@ pub mod fs;
 pub mod http;
 pub mod io;
 pub mod net;
+pub mod server;
 pub mod time;
 pub mod websocket;
 
@@ -21,4 +22,5 @@ pub fn default_providers(metadata: PackageMetadata) -> Providers {
             "websocket",
             Box::new(websocket::NativeWebSocketProvider::new()),
         )
+        .with_host("server", Box::new(server::NativeServerProvider::new()))
 }
