@@ -16,13 +16,12 @@ pub enum PrimitiveType {
     Uint16,
     Uint32,
     Uint64,
-    Float16,
     Float32,
     Float64,
 }
 
 impl PrimitiveType {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 12] = [
         Self::Null,
         Self::Bool,
         Self::Int8,
@@ -33,7 +32,6 @@ impl PrimitiveType {
         Self::Uint16,
         Self::Uint32,
         Self::Uint64,
-        Self::Float16,
         Self::Float32,
         Self::Float64,
     ];
@@ -50,7 +48,6 @@ impl PrimitiveType {
             Self::Uint16 => "u16",
             Self::Uint32 => "u32",
             Self::Uint64 => "u64",
-            Self::Float16 => "f16",
             Self::Float32 => "f32",
             Self::Float64 => "f64",
         }
@@ -68,7 +65,7 @@ impl PrimitiveType {
     }
 
     pub fn is_float(self) -> bool {
-        matches!(self, Self::Float16 | Self::Float32 | Self::Float64)
+        matches!(self, Self::Float32 | Self::Float64)
     }
 }
 

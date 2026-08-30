@@ -6,22 +6,21 @@ import ansi from "format/ansi"
 fn stringifyColored(value: Parsed | [u8] | Stringable): [u8] {
   return instanceof value {
     [u8] text => ansi::green()::apply(text),
-    bool flag => ansi::magenta()::apply(stringify(value)),
+    bool flag => ansi::magenta()::apply(stringify(flag)),
     null => ansi::style()::dim()::apply("null"),
     
-    i8 n => ansi::yellow()::apply(stringify(value)),
-    i16 n => ansi::yellow()::apply(stringify(value)),
-    i32 n => ansi::yellow()::apply(stringify(value)),
-    i64 n => ansi::yellow()::apply(stringify(value)),
-    u8 n => ansi::yellow()::apply(stringify(value)),
-    u16 n => ansi::yellow()::apply(stringify(value)),
-    u32 n => ansi::yellow()::apply(stringify(value)),
-    u64 n => ansi::yellow()::apply(stringify(value)),
-    f16 n => ansi::yellow()::apply(stringify(value)),
-    f32 n => ansi::yellow()::apply(stringify(value)),
-    f64 n => ansi::yellow()::apply(stringify(value)),
+    i8 n => ansi::yellow()::apply(stringify(n)),
+    i16 n => ansi::yellow()::apply(stringify(n)),
+    i32 n => ansi::yellow()::apply(stringify(n)),
+    i64 n => ansi::yellow()::apply(stringify(n)),
+    u8 n => ansi::yellow()::apply(stringify(n)),
+    u16 n => ansi::yellow()::apply(stringify(n)),
+    u32 n => ansi::yellow()::apply(stringify(n)),
+    u64 n => ansi::yellow()::apply(stringify(n)),
+    f32 n => ansi::yellow()::apply(stringify(n)),
+    f64 n => ansi::yellow()::apply(stringify(n)),
     
-    Stringable item => ansi::cyan()::apply(stringify(value)),
+    Stringable item => ansi::cyan()::apply(stringify(item)),
   }
 }
 
@@ -68,7 +67,10 @@ fn buildMessage(
   return msg
 }
 
-export fn log(message: [u8], ...values: [Parsed | [u8] | Stringable]): null {
+export fn log(
+  message: [u8],
+  ...values: [Parsed | [u8] | Stringable]
+): null {
   println(buildMessage("", ansi::style(), message, values))
   return null
 }

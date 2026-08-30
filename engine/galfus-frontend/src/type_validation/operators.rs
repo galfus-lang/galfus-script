@@ -409,7 +409,6 @@ impl<'a> DeclarationTypeChecker<'a> {
                 | PrimitiveType::Uint16
                 | PrimitiveType::Uint32
                 | PrimitiveType::Uint64
-                | PrimitiveType::Float16
                 | PrimitiveType::Float32
                 | PrimitiveType::Float64
         )
@@ -481,7 +480,6 @@ impl<'a> DeclarationTypeChecker<'a> {
 
     fn float_rank(&self, primitive: PrimitiveType) -> u8 {
         match primitive {
-            PrimitiveType::Float16 => 16,
             PrimitiveType::Float32 => 32,
             PrimitiveType::Float64 => 64,
             _ => 0,

@@ -404,7 +404,6 @@ fn primitive_type_by_name(name: &str) -> Option<PrimitiveType> {
         "u16" => Some(PrimitiveType::Uint16),
         "u32" => Some(PrimitiveType::Uint32),
         "u64" => Some(PrimitiveType::Uint64),
-        "f16" => Some(PrimitiveType::Float16),
         "f32" => Some(PrimitiveType::Float32),
         "f64" => Some(PrimitiveType::Float64),
         _ => None,

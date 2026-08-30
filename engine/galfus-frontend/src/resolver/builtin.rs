@@ -3,8 +3,8 @@ use crate::builtin_constraints::{BUILTIN_CONSTRAINTS, BuiltinConstraint};
 use galfus_core::ScopeId;
 
 const BUILTIN_TYPES: &[&str] = &[
-    "null", "bool", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f16", "f32", "f64",
-    "int", "uint", "float",
+    "null", "bool", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "int",
+    "uint", "float",
 ];
 
 impl<'a> Resolver<'a> {

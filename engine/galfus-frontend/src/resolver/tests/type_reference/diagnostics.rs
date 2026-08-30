@@ -103,3 +103,22 @@ fn resolve_reports_excluded_primitive_names_as_unknown_types() {
 
     assert!(resolve_result.has_errors());
 }
+
+#[test]
+fn resolve_reports_f16_as_an_unknown_type() {
+    let source = source(
+        r#"
+        fn main(value: f16): null {
+            return
+        }
+        "#,
+    );
+
+    let parse_result = parse(&source);
+    assert!(!parse_result.has_errors());
+
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
+
+    assert!(resolve_result.has_errors());
+}

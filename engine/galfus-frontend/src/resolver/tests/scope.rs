@@ -45,7 +45,7 @@ fn resolve_creates_builtin_scope() {
     assert_eq!(builtin_scope.kind(), ScopeKind::Builtin);
     assert!(builtin_scope.symbol(string_table.intern("i8")).is_some());
     assert!(builtin_scope.symbol(string_table.intern("i32")).is_some());
-    assert!(builtin_scope.symbol(string_table.intern("f16")).is_some());
+    assert!(builtin_scope.symbol(string_table.intern("f16")).is_none());
     assert!(
         builtin_scope
             .symbol(string_table.intern("String"))
