@@ -1,7 +1,11 @@
 import { connect } from "node:net";
 
 const SERVER_URL = "http://127.0.0.1:8080";
-const SERVER_COMMAND = ["./target/debug/galfus-cli", "run", "examples/server_auto.gfs"];
+const SERVER_COMMAND = [
+  "./target/debug/galfus-cli",
+  "run",
+  "examples/server_auto.gfs",
+];
 const READY_TIMEOUT_MS = 10_000;
 const WEBSOCKET_TIMEOUT_MS = 5_000;
 
@@ -30,7 +34,11 @@ async function mirrorOutput(
   destination.write(trailing);
 }
 
-async function waitFor(condition: () => boolean, timeoutMs: number, message: string): Promise<void> {
+async function waitFor(
+  condition: () => boolean,
+  timeoutMs: number,
+  message: string,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (condition()) return;
@@ -45,7 +53,9 @@ async function waitForServer(serverProcess: Bun.Subprocess): Promise<void> {
 
   while (Date.now() < deadline) {
     if (serverProcess.exitCode !== null) {
-      throw new Error(`O servidor encerrou antes de ficar pronto (exit code ${serverProcess.exitCode}).`);
+      throw new Error(
+        `O servidor encerrou antes de ficar pronto (exit code ${serverProcess.exitCode}).`,
+      );
     }
 
     try {
@@ -60,11 +70,18 @@ async function waitForServer(serverProcess: Bun.Subprocess): Promise<void> {
     }
   }
 
-  throw new Error(`O servidor não ficou pronto em ${READY_TIMEOUT_MS} ms: ${String(lastError)}`);
+  throw new Error(
+    `O servidor não ficou pronto em ${READY_TIMEOUT_MS} ms: ${String(lastError)}`,
+  );
 }
 
-async function curl(args: string[]): Promise<{ stdout: string; stderr: string }> {
-  const process = Bun.spawn(["curl", ...args], { stdout: "pipe", stderr: "pipe" });
+async function curl(
+  args: string[],
+): Promise<{ stdout: string; stderr: string }> {
+  const process = Bun.spawn(["curl", ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   const [exitCode, stdout, stderr] = await Promise.all([
     process.exited,
     new Response(process.stdout).text(),
@@ -78,14 +95,26 @@ async function curl(args: string[]): Promise<{ stdout: string; stderr: string }>
   return { stdout, stderr };
 }
 
-function assertHttpResponse(output: string, protocol: "HTTP/1.1" | "HTTP/2"): void {
+function assertHttpResponse(
+  output: string,
+  protocol: "HTTP/1.1" | "HTTP/2",
+): void {
   const separator = output.indexOf("\r\n\r\n");
-  assert(separator >= 0, `curl não retornou headers HTTP completos:\n${output}`);
+  assert(
+    separator >= 0,
+    `curl não retornou headers HTTP completos:\n${output}`,
+  );
 
   const headers = output.slice(0, separator);
   const body = output.slice(separator + 4);
-  assert(new RegExp(`^${protocol.replace(".", "\\.")} 200(?:\\s|$)`).test(headers), `Esperava ${protocol} 200, recebido:\n${headers}`);
-  assert(/^content-type:\s*application\/json\b/im.test(headers), `Content-Type inválido:\n${headers}`);
+  assert(
+    new RegExp(`^${protocol.replace(".", "\\.")} 200(?:\\s|$)`).test(headers),
+    `Esperava ${protocol} 200, recebido:\n${headers}`,
+  );
+  assert(
+    /^content-type:\s*application\/json\b/im.test(headers),
+    `Content-Type inválido:\n${headers}`,
+  );
   let payload: unknown;
   try {
     payload = JSON.parse(body);
@@ -93,53 +122,130 @@ function assertHttpResponse(output: string, protocol: "HTTP/1.1" | "HTTP/2"): vo
     throw new Error(`Resposta declarada como JSON, mas inválida: ${body}`);
   }
   assert(
-    typeof payload === "object" && payload !== null && "status" in payload && payload.status === "ok",
+    typeof payload === "object" &&
+      payload !== null &&
+      "status" in payload &&
+      payload.status === "ok",
     `Payload inesperado: ${body}`,
   );
 }
 
 function assertStatusResponse(output: string, status: number): void {
   const separator = output.indexOf("\r\n\r\n");
-  assert(separator >= 0, `curl não retornou headers HTTP completos:\n${output}`);
   assert(
-    new RegExp(`^HTTP/1\\.1 ${status}(?:\\s|$)`).test(output.slice(0, separator)),
+    separator >= 0,
+    `curl não retornou headers HTTP completos:\n${output}`,
+  );
+  assert(
+    new RegExp(`^HTTP/1\\.1 ${status}(?:\\s|$)`).test(
+      output.slice(0, separator),
+    ),
     `Esperava HTTP/1.1 ${status}, recebido:\n${output.slice(0, separator)}`,
   );
 }
 
 function splitHttpResponse(output: string): { headers: string; body: string } {
   const separator = output.indexOf("\r\n\r\n");
-  assert(separator >= 0, `curl não retornou headers HTTP completos:\n${output}`);
-  return { headers: output.slice(0, separator), body: output.slice(separator + 4) };
+  assert(
+    separator >= 0,
+    `curl não retornou headers HTTP completos:\n${output}`,
+  );
+  return {
+    headers: output.slice(0, separator),
+    body: output.slice(separator + 4),
+  };
 }
 
 async function testRequestContract(): Promise<void> {
-  const url = await curl(["--http1.1", "--silent", "--show-error", "--dump-header", "-", "--output", "-", `${SERVER_URL}/url?check=1`]);
+  const url = await curl([
+    "--http1.1",
+    "--silent",
+    "--show-error",
+    "--dump-header",
+    "-",
+    "--output",
+    "-",
+    `${SERVER_URL}/url?check=1`,
+  ]);
   const urlResponse = splitHttpResponse(url.stdout);
-  assert(/^HTTP\/1\.1 200(?:\s|$)/.test(urlResponse.headers), `Query string não chegou ao Request:\n${urlResponse.headers}`);
-  assert(urlResponse.body === "url-ok", `Corpo inesperado para URL: ${urlResponse.body}`);
+  assert(
+    /^HTTP\/1\.1 200(?:\s|$)/.test(urlResponse.headers),
+    `Query string não chegou ao Request:\n${urlResponse.headers}`,
+  );
+  assert(
+    urlResponse.body === "url-ok",
+    `Corpo inesperado para URL: ${urlResponse.body}`,
+  );
 
   const body = "echo body \u{1F680}";
   const echo = await curl([
-    "--http1.1", "--silent", "--show-error", "--request", "POST",
-    "--header", "Content-Type: text/plain", "--data-binary", body,
-    "--dump-header", "-", "--output", "-", `${SERVER_URL}/echo`,
+    "--http1.1",
+    "--silent",
+    "--show-error",
+    "--request",
+    "POST",
+    "--header",
+    "Content-Type: text/plain",
+    "--data-binary",
+    body,
+    "--dump-header",
+    "-",
+    "--output",
+    "-",
+    `${SERVER_URL}/echo`,
   ]);
   const echoResponse = splitHttpResponse(echo.stdout);
-  assert(/^HTTP\/1\.1 201(?:\s|$)/.test(echoResponse.headers), `Método POST não chegou ao Request:\n${echoResponse.headers}`);
-  assert(/^content-type:\s*application\/octet-stream\b/im.test(echoResponse.headers), `Header Content-Type ausente:\n${echoResponse.headers}`);
-  assert(/^x-server-test:\s*echo\b/im.test(echoResponse.headers), `Segundo header de resposta ausente:\n${echoResponse.headers}`);
-  assert(echoResponse.body === body, `Corpo do Request não foi preservado: ${echoResponse.body}`);
+  assert(
+    /^HTTP\/1\.1 201(?:\s|$)/.test(echoResponse.headers),
+    `Método POST não chegou ao Request:\n${echoResponse.headers}`,
+  );
+  assert(
+    /^content-type:\s*application\/octet-stream\b/im.test(echoResponse.headers),
+    `Header Content-Type ausente:\n${echoResponse.headers}`,
+  );
+  assert(
+    /^x-server-test:\s*echo\b/im.test(echoResponse.headers),
+    `Segundo header de resposta ausente:\n${echoResponse.headers}`,
+  );
+  assert(
+    echoResponse.body === body,
+    `Corpo do Request não foi preservado: ${echoResponse.body}`,
+  );
 
   const requestHeader = await curl([
-    "--http1.1", "--silent", "--show-error", "--header", "X-Request-Test: present",
-    "--dump-header", "-", "--output", "-", `${SERVER_URL}/request-header`,
+    "--http1.1",
+    "--silent",
+    "--show-error",
+    "--header",
+    "X-Request-Test: present",
+    "--dump-header",
+    "-",
+    "--output",
+    "-",
+    `${SERVER_URL}/request-header`,
   ]);
   const requestHeaderResponse = splitHttpResponse(requestHeader.stdout);
-  assert(/^HTTP\/1\.1 200(?:\s|$)/.test(requestHeaderResponse.headers), `Header não chegou ao Request:\n${requestHeaderResponse.headers}`);
-  assert(requestHeaderResponse.body === "header-ok", `Header do Request não foi preservado: ${requestHeaderResponse.body}`);
+  assert(
+    /^HTTP\/1\.1 200(?:\s|$)/.test(requestHeaderResponse.headers),
+    `Header não chegou ao Request:\n${requestHeaderResponse.headers}`,
+  );
+  assert(
+    requestHeaderResponse.body === "header-ok",
+    `Header do Request não foi preservado: ${requestHeaderResponse.body}`,
+  );
 
-  const method = await curl(["--http1.1", "--silent", "--show-error", "--request", "GET", "--dump-header", "-", "--output", "-", `${SERVER_URL}/echo`]);
+  const method = await curl([
+    "--http1.1",
+    "--silent",
+    "--show-error",
+    "--request",
+    "GET",
+    "--dump-header",
+    "-",
+    "--output",
+    "-",
+    `${SERVER_URL}/echo`,
+  ]);
   assertStatusResponse(method.stdout, 405);
 }
 
@@ -148,7 +254,10 @@ async function testConcurrentRequests(): Promise<void> {
     Array.from({ length: 8 }, () => fetch(`${SERVER_URL}/api/data`)),
   );
   for (const response of responses) {
-    assert(response.status === 200, `Resposta concorrente inválida: ${response.status}`);
+    assert(
+      response.status === 200,
+      `Resposta concorrente inválida: ${response.status}`,
+    );
     await response.body?.cancel();
   }
 }
@@ -156,25 +265,36 @@ async function testConcurrentRequests(): Promise<void> {
 async function webSocketMessageToText(data: unknown): Promise<string> {
   if (typeof data === "string") return data;
   if (data instanceof Blob) return data.text();
-  if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) return new TextDecoder().decode(data);
-  throw new Error(`Tipo de mensagem WebSocket inesperado: ${Object.prototype.toString.call(data)}`);
+  if (data instanceof ArrayBuffer || ArrayBuffer.isView(data))
+    return new TextDecoder().decode(data);
+  throw new Error(
+    `Tipo de mensagem WebSocket inesperado: ${Object.prototype.toString.call(data)}`,
+  );
 }
 
 async function testWebSocket(message: string | Uint8Array): Promise<void> {
-  const expected = typeof message === "string" ? message : new TextDecoder().decode(message);
+  const expected =
+    typeof message === "string" ? message : new TextDecoder().decode(message);
 
   await new Promise<void>((resolve, reject) => {
     const ws = new WebSocket("ws://127.0.0.1:8080/ws");
     const timeout = setTimeout(() => {
       ws.close();
-      reject(new Error(`Timeout de ${WEBSOCKET_TIMEOUT_MS} ms esperando o echo WebSocket.`));
+      reject(
+        new Error(
+          `Timeout de ${WEBSOCKET_TIMEOUT_MS} ms esperando o echo WebSocket.`,
+        ),
+      );
     }, WEBSOCKET_TIMEOUT_MS);
 
     ws.onopen = () => ws.send(message);
     ws.onmessage = async (event) => {
       try {
         const received = await webSocketMessageToText(event.data);
-        assert(received === expected, `Echo WebSocket divergente: esperado ${expected}, recebido ${received}`);
+        assert(
+          received === expected,
+          `Echo WebSocket divergente: esperado ${expected}, recebido ${received}`,
+        );
         clearTimeout(timeout);
         ws.close(1000, "test complete");
         ws.onclose = () => resolve();
@@ -191,24 +311,30 @@ async function testWebSocket(message: string | Uint8Array): Promise<void> {
   });
 }
 
-async function testWebSocketError(serverOutput: { value: string }): Promise<void> {
+async function testWebSocketError(serverOutput: {
+  value: string;
+}): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const socket = connect(8080, "127.0.0.1");
     let handshakeComplete = false;
     let response = "";
     const timeout = setTimeout(() => {
       socket.destroy();
-      reject(new Error("Timeout esperando o servidor rejeitar o frame WebSocket inválido."));
+      reject(
+        new Error(
+          "Timeout esperando o servidor rejeitar o frame WebSocket inválido.",
+        ),
+      );
     }, WEBSOCKET_TIMEOUT_MS);
 
     socket.on("connect", () => {
       socket.write(
-        "GET /ws HTTP/1.1\r\n"
-          + "Host: 127.0.0.1:8080\r\n"
-          + "Connection: Upgrade\r\n"
-          + "Upgrade: websocket\r\n"
-          + "Sec-WebSocket-Version: 13\r\n"
-          + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
+        "GET /ws HTTP/1.1\r\n" +
+          "Host: 127.0.0.1:8080\r\n" +
+          "Connection: Upgrade\r\n" +
+          "Upgrade: websocket\r\n" +
+          "Sec-WebSocket-Version: 13\r\n" +
+          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
       );
     });
     socket.on("data", (chunk) => {
@@ -222,7 +348,8 @@ async function testWebSocketError(serverOutput: { value: string }): Promise<void
     socket.on("close", () => {
       clearTimeout(timeout);
       if (handshakeComplete) resolve();
-      else reject(new Error("O handshake WebSocket inválido não foi concluído."));
+      else
+        reject(new Error("O handshake WebSocket inválido não foi concluído."));
     });
     socket.on("error", (error) => {
       clearTimeout(timeout);
@@ -231,49 +358,100 @@ async function testWebSocketError(serverOutput: { value: string }): Promise<void
   });
 
   await waitFor(
-    () => serverOutput.value.includes("WebSocket error with status") && serverOutput.value.includes("-1"),
+    () =>
+      serverOutput.value.includes("WebSocket error with status") &&
+      serverOutput.value.includes("-1"),
     WEBSOCKET_TIMEOUT_MS,
     "onError não foi chamado após o frame WebSocket inválido.",
   );
 }
 
 async function testBindConflict(): Promise<void> {
-  const process = Bun.spawn(SERVER_COMMAND, { stdout: "ignore", stderr: "ignore" });
+  const process = Bun.spawn(SERVER_COMMAND, {
+    stdout: "ignore",
+    stderr: "ignore",
+  });
   const timeout = Symbol("timeout");
-  const result = await Promise.race([process.exited, Bun.sleep(3_000).then(() => timeout)]);
+  const result = await Promise.race([
+    process.exited,
+    Bun.sleep(3_000).then(() => timeout),
+  ]);
   if (result === timeout) {
     process.kill();
     await process.exited;
-    throw new Error("O segundo servidor não falhou ao tentar usar uma porta ocupada.");
+    throw new Error(
+      "O segundo servidor não falhou ao tentar usar uma porta ocupada.",
+    );
   }
   assert(result !== 0, "O segundo servidor deveria encerrar com erro de bind.");
 }
 
 async function main(): Promise<void> {
   console.log("Construindo o Galfus CLI...");
-  const build = Bun.spawn(["cargo", "build", "-p", "galfus-cli"], { stdout: "inherit", stderr: "inherit" });
-  assert(await build.exited === 0, "Falha ao construir o Galfus CLI.");
+  const build = Bun.spawn(["cargo", "build", "-p", "galfus-cli"], {
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  assert((await build.exited) === 0, "Falha ao construir o Galfus CLI.");
 
   console.log("Iniciando o servidor Galfus nativo...");
-  const serverProcess = Bun.spawn(SERVER_COMMAND, { stdout: "pipe", stderr: "pipe" });
+  const serverProcess = Bun.spawn(SERVER_COMMAND, {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   const serverStdout = { value: "" };
   const serverStderr = { value: "" };
-  const stdoutTask = mirrorOutput(serverProcess.stdout, serverStdout, process.stdout);
-  const stderrTask = mirrorOutput(serverProcess.stderr, serverStderr, process.stderr);
+  const stdoutTask = mirrorOutput(
+    serverProcess.stdout,
+    serverStdout,
+    process.stdout,
+  );
+  const stderrTask = mirrorOutput(
+    serverProcess.stderr,
+    serverStderr,
+    process.stderr,
+  );
 
   try {
     await waitForServer(serverProcess);
 
     console.log("[1/8] Testando HTTP/1.1...");
-    const http1 = await curl(["--http1.1", "--silent", "--show-error", "--dump-header", "-", "--output", "-", `${SERVER_URL}/api/data`]);
+    const http1 = await curl([
+      "--http1.1",
+      "--silent",
+      "--show-error",
+      "--dump-header",
+      "-",
+      "--output",
+      "-",
+      `${SERVER_URL}/api/data`,
+    ]);
     assertHttpResponse(http1.stdout, "HTTP/1.1");
 
     console.log("[2/8] Testando HTTP/2 h2c...");
-    const http2 = await curl(["--http2-prior-knowledge", "--silent", "--show-error", "--dump-header", "-", "--output", "-", `${SERVER_URL}/api/data`]);
+    const http2 = await curl([
+      "--http2-prior-knowledge",
+      "--silent",
+      "--show-error",
+      "--dump-header",
+      "-",
+      "--output",
+      "-",
+      `${SERVER_URL}/api/data`,
+    ]);
     assertHttpResponse(http2.stdout, "HTTP/2");
 
     console.log("[3/8] Testando Response com campos padrão...");
-    const notFound = await curl(["--http1.1", "--silent", "--show-error", "--dump-header", "-", "--output", "-", `${SERVER_URL}/missing`]);
+    const notFound = await curl([
+      "--http1.1",
+      "--silent",
+      "--show-error",
+      "--dump-header",
+      "-",
+      "--output",
+      "-",
+      `${SERVER_URL}/missing`,
+    ]);
     assertStatusResponse(notFound.stdout, 404);
 
     console.log("[4/8] Testando Request, URL e headers...");
