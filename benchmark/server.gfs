@@ -1,0 +1,30 @@
+import { Request, Response, Server, WebSocket, WebSocketConfig } from "std/server"
+import { parse, ParseResult } from "format"
+
+fn serverPort(args: [[u8]]): i32 {
+    return instanceof args[-1] {
+        [u8] value => match parse<i32>(value) {
+            ParseResult::Ok(port) => port,
+            _ => 18080
+        },
+        null => 18080
+    }
+}
+
+export fn main(args: [[u8]]): i32 {
+    const server = new(Server) {
+        port: serverPort(args),
+        fetch: fn(_req: Request): Response {
+            return new(Response) {}
+        },
+        websocket: new(WebSocketConfig) {
+            onOpen: fn(_ws: WebSocket, _status: i32): null => null,
+            onMessage: fn(_ws: WebSocket, _status: i32, _message: [u8]): null => null,
+            onClose: fn(_ws: WebSocket, _status: i32): null => null,
+            onError: fn(_ws: WebSocket, _status: i32, _error: [u8]): null => null
+        }
+    }
+
+    server::start()
+    return 0
+}

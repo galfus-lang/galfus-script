@@ -1,0 +1,4 @@
+import { BaseCount, BaseOptionalCount } from "./types.gfs"
+
+export type Count = BaseCount
+export type OptionalCount = BaseOptionalCount

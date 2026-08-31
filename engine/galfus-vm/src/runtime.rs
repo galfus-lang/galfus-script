@@ -98,8 +98,8 @@ pub enum VmEffect {
         arg_types: Box<[TypeIdx]>,
         return_type: TypeIdx,
     },
-    FutureDropped {
-        future_id: galfus_core::FutureId,
+    FuturesDropped {
+        future_ids: Vec<galfus_core::FutureId>,
     },
     AdapterHandleDropped {
         binding_id: BindingId,

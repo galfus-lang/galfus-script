@@ -22,6 +22,15 @@ pub fn lower_module(
         None,
     );
 
+    let imported_structs = ctx
+        .imported_struct_fields
+        .keys()
+        .copied()
+        .collect::<Vec<_>>();
+    for symbol in imported_structs {
+        crate::bytecode_emission::types::get_or_create_struct_layout(&mut ctx, symbol);
+    }
+
     for (i, func) in mir_module.functions.iter().enumerate() {
         ctx.function_map.insert(func.id, FuncIdx(i as u16));
         ctx.function_names.insert(func.id, func.name.clone());

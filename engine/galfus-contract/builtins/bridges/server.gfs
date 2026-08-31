@@ -1,0 +1,205 @@
+import { createThread } from "std/thread"
+
+type UrlInfo = ([u8], [u8], [u8], [u8], [u8], [u8], [u8], [u8])
+
+export struct URL {
+    href: [u8],
+    protocol: [u8],
+    host: [u8],
+    hostname: [u8],
+    pathname: [u8],
+    search: [u8],
+    hash: [u8],
+    origin: [u8]
+}
+
+export fn getPathname(url: URL): [u8] => url.pathname
+
+export type Header = ([u8], [u8])
+
+export fn header(name: [u8], value: [u8]): ([u8], [u8]) => (name, value)
+
+export struct Request {
+    id: u64,
+    url: URL,
+    method: [u8],
+    headers: [Header],
+    body: [u8] | null
+}
+
+export struct Response {
+    status: i32 = 200,
+    headers: [Header] = [],
+    body: [u8] | null = null
+}
+
+export fn upgradeToWs(): Response {
+    return new(Response) {
+        status: 101,
+        headers: []
+    }
+}
+// Compatibility helper for code that builds responses outside a struct literal.
+// A WebSocket upgrade is represented by HTTP status 101, not a struct field.
+export fn createResponse(status: i32, headers: [Header], body: [u8] | null, is_ws_upgrade: bool): Response {
+    if is_ws_upgrade {
+        return new(Response) {
+            status: 101,
+            headers: headers,
+            body: body
+        }
+    }
+    return new(Response) {
+        status: status,
+        headers: headers,
+        body: body
+    }
+}
+export struct WebSocket {
+    id: u64
+}
+
+export fn(async) ws_send(ws: WebSocket, data: [u8]): bool {
+    return await __provider_server_ws_send(ws.id, data)
+}
+
+export fn(async) ws_close(ws: WebSocket): bool {
+    return await __provider_server_ws_close(ws.id)
+}
+
+export struct WsMessage {
+    status: i32,
+    msg: [u8] | null
+}
+
+type RequestTuple = (u64, UrlInfo, [u8], [Header], [u8] | null)
+export type WsMessageTuple = (i32, [u8] | null)
+
+fn(async) __provider_server_bind(port: i32): u64
+fn(async) __provider_server_accept(server_id: u64): (u64, ([u8], [u8], [u8], [u8], [u8], [u8], [u8], [u8]), [u8], [([u8], [u8])], [u8] | null)
+fn(async) __provider_server_respond(req_id: u64, status: i32, headers: [([u8], [u8])], body: [u8] | null, is_upgrade: bool): bool
+fn(async) __provider_server_ws_receive(ws_id: u64): (i32, [u8] | null) | null
+fn(async) __provider_server_ws_send(ws_id: u64, data: [u8]): bool
+fn(async) __provider_server_ws_close(ws_id: u64): bool
+
+export struct WebSocketConfig {
+    onOpen: fn(WebSocket, i32): null,
+    onMessage: fn(WebSocket, i32, [u8]): null,
+    onClose: fn(WebSocket, i32): null,
+    onError: fn(WebSocket, i32, [u8]): null
+}
+
+export fn createWebSocketConfig(
+    onOpenCb: fn(WebSocket, i32): null,
+    onMessageCb: fn(WebSocket, i32, [u8]): null,
+    onCloseCb: fn(WebSocket, i32): null,
+    onErrorCb: fn(WebSocket, i32, [u8]): null
+): WebSocketConfig {
+    return new(WebSocketConfig) {
+        onOpen: onOpenCb,
+        onMessage: onMessageCb,
+        onClose: onCloseCb,
+        onError: onErrorCb
+    }
+}
+
+export struct Server {
+    port: i32,
+    fetch: fn(Request): Response,
+    websocket: WebSocketConfig
+}
+
+export fn createServer(port: i32, fetch: fn(Request): Response, websocket: WebSocketConfig): Server {
+    return new(Server) {
+        port: port,
+        fetch: fetch,
+        websocket: websocket
+    }
+}
+
+export fn Server::start(server: Server): null {
+    const server_id = await __provider_server_bind(server.port)
+    loop {
+        const reqTuple = await __provider_server_accept(server_id)
+        const (reqId, reqUrl, reqMethod, reqHeaders, reqBody) = reqTuple
+        const (href, protocol, host, hostname, pathname, search, hash, origin) = reqUrl
+        const url = new(URL) {
+            href: href,
+            protocol: protocol,
+            host: host,
+            hostname: hostname,
+            pathname: pathname,
+            search: search,
+            hash: hash,
+            origin: origin
+        }
+        const req = new(Request) {
+            id: reqId,
+            url: url,
+            method: reqMethod,
+            headers: reqHeaders,
+            body: reqBody
+        }
+        const req_id = req.id
+        
+        const fetchCb = (copy server).fetch
+        const fetch_req = copy req
+        const res = fetchCb(fetch_req)
+        
+        const res_status = res.status
+        const is_upgrade = res_status == 101
+        const res_headers = copy res.headers
+        const res_body = copy res.body
+        
+        await __provider_server_respond(copy req_id, copy res_status, res_headers, res_body, is_upgrade)
+        
+        if is_upgrade {
+            const ws = new(WebSocket) { id: req_id }
+            const ws_config1 = copy server.websocket
+            const onOpen = ws_config1.onOpen
+            onOpen(copy ws, res_status)
+            
+            loop {
+                const payload = await __provider_server_ws_receive(copy req_id)
+                instanceof payload {
+                    null { break },
+                    WsMessageTuple p {
+                        const (p_status, p_msg) = p
+                        if p_status < 0 {
+                            instanceof p_msg {
+                                [u8] err {
+                                    const ws_config2 = copy server.websocket
+                                    const onError = ws_config2.onError
+                                    onError(copy ws, p_status, err)
+                                },
+                                null {
+                                    const ws_config2 = copy server.websocket
+                                    const onError = ws_config2.onError
+                                    onError(copy ws, p_status, "WebSocket error without detail")
+                                }
+                            }
+                            break
+                        }
+                        instanceof p_msg {
+                            null {
+                                const ws_config3 = copy server.websocket
+                                const onClose = ws_config3.onClose
+                                onClose(copy ws, p_status)
+                                break
+                            },
+                            [u8] msg {
+                                const ws_config4 = copy server.websocket
+                                const onMessage = ws_config4.onMessage
+                                onMessage(copy ws, p_status, msg)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return null
+}
+
+export fn(async) WebSocket::send(ws: WebSocket, data: [u8]): bool => ws_send(ws, data)
+export fn(async) WebSocket::close(ws: WebSocket): bool => ws_close(ws)

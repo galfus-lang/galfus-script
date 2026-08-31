@@ -1,0 +1,58 @@
+import { Count, OptionalCount } from "./middle.gfs"
+import { Measurable } from "./types.gfs"
+
+export const DEFAULT: Count = 2
+
+export struct Counter {
+  value: Count,
+  direction: Direction,
+  result: Result<Count>,
+}
+
+export fn Counter::increment(self, amount: Count): Count {
+  return self.value + amount
+}
+
+export fn createCounter(value: Count): Counter {
+  return new(Counter) {
+    value: value,
+    direction: Direction::North,
+    result: Result::Ok(value),
+  }
+}
+
+export enum Direction { North(7), South }
+
+export choice Result<T> { Ok(T), Err(Count) }
+
+export fn add(left: Count, right: Count): Count {
+  return left + right
+}
+
+export fn optional(value: Count): OptionalCount {
+  return value
+}
+
+export struct Label satisfies Measurable {
+  size: Count,
+}
+
+export fn Label::measure(self): Count {
+  return self.size
+}
+
+export fn measure<T: Measurable>(value: T): Count {
+  return value::measure()
+}
+
+export fn configure(value: Count, factor: Count = 2): Count {
+  return value * factor
+}
+
+export fn sum(start: Count, ...rest: [Count]): Count {
+  return start
+}
+
+export fn identity<T>(value: T): T {
+  return value
+}

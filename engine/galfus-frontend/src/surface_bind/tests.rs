@@ -39,7 +39,7 @@ fn module_surface_records_exported_type_definitions() {
     let type_result = check_declaration_types(&source, graph, &string_table, false);
     assert!(!type_result.has_errors());
 
-    let surface = build_module_surface(graph, &type_result, &string_table);
+    let surface = build_module_surface(&source, graph, &type_result, &string_table);
 
     assert_eq!(surface.exports().len(), 3);
     assert_eq!(
@@ -73,7 +73,7 @@ fn module_surface_imports_exported_type_as_local_binding() {
     let type_result = check_declaration_types(&source, graph, &string_table, false);
     assert!(!type_result.has_errors());
 
-    let surface = build_module_surface(graph, &type_result, &string_table);
+    let surface = build_module_surface(&source, graph, &type_result, &string_table);
     let local_symbol = SymbolId::new(42);
 
     assert_eq!(
@@ -105,7 +105,7 @@ fn module_surface_imports_exported_type_as_namespace_path() {
     let type_result = check_declaration_types(&source, graph, &string_table, false);
     assert!(!type_result.has_errors());
 
-    let surface = build_module_surface(graph, &type_result, &string_table);
+    let surface = build_module_surface(&source, graph, &type_result, &string_table);
     let namespace = SymbolId::new(7);
 
     assert_eq!(
@@ -142,7 +142,7 @@ fn module_surface_records_exported_function_signature() {
     let type_result = check_declaration_types(&source, graph, &string_table, false);
     assert!(!type_result.has_errors());
 
-    let surface = build_module_surface(graph, &type_result, &string_table);
+    let surface = build_module_surface(&source, graph, &type_result, &string_table);
     let add = surface.export("add").unwrap();
 
     assert_eq!(add.kind(), SymbolKind::Function);

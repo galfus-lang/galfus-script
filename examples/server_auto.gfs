@@ -1,0 +1,82 @@
+import { Server, Request, Response, URL, WebSocket, WebSocketConfig, upgradeToWs } from "std/server"
+import { log } from "log"
+import { equals } from "text"
+
+export fn main(_args: [[u8]]): i32 {
+    const server = new(Server) {
+        port: 8080,
+        fetch: fn(req: Request): Response {
+            if equals(req.url.pathname, "/api/data") {
+                return new(Response) {
+                    headers: [("Content-Type", "application/json")],
+                    body: '{"status": "ok"}'
+                }
+            }
+
+            if equals(req.url.pathname, "/ws") {
+                return upgradeToWs()
+            }
+
+            if equals(req.url.pathname, "/url") {
+                if equals(req.url.search, "check=1") {
+                    return new(Response) { body: "url-ok" }
+                }
+                return new(Response) { status: 400, body: "invalid query" }
+            }
+
+            if equals(req.url.pathname, "/echo") {
+                if equals(req.method, "POST") {
+                    instanceof req.body {
+                        [u8] body {
+                            return new(Response) {
+                                status: 201,
+                                headers: [("Content-Type", "application/octet-stream"), ("X-Server-Test", "echo")],
+                                body: body
+                            }
+                        },
+                        null { return new(Response) { status: 400, body: "missing body" } }
+                    }
+                }
+                return new(Response) { status: 405, body: "method not allowed" }
+            }
+
+            if equals(req.url.pathname, "/request-header") {
+                for item in req.headers {
+                    const (name, value) = item
+                    if equals(name, "x-request-test") {
+                        if equals(value, "present") {
+                            return new(Response) { body: "header-ok" }
+                        }
+                    }
+                }
+                return new(Response) { status: 400, body: "missing header" }
+            }
+
+            return new(Response) { status: 404 }
+        },
+        websocket: new(WebSocketConfig) {
+            onOpen: fn(ws: WebSocket, statusCode: i32): null {
+                log("WebSocket opened with status {}", statusCode)
+                return null
+            },
+            onMessage: fn(ws: WebSocket, statusCode: i32, msg: [u8]): null {
+                log("WebSocket message with status {} ({} bytes)", statusCode, msg.length)
+                ws::send(msg)
+                return null
+            },
+            onClose: fn(ws: WebSocket, statusCode: i32): null {
+                log("WebSocket closed with status {}", statusCode)
+                return null
+            },
+            onError: fn(ws: WebSocket, statusCode: i32, err: [u8]): null {
+                log("WebSocket error with status {}: {}", statusCode, err)
+                return null
+            }
+        }
+    }
+
+    log("Starting Server on port {}", server.port)
+    server::start()
+
+    return 0
+}

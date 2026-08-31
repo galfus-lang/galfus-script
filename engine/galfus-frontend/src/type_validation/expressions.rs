@@ -297,7 +297,6 @@ impl<'a> DeclarationTypeChecker<'a> {
                 | PrimitiveType::Uint16
                 | PrimitiveType::Uint32
                 | PrimitiveType::Uint64
-                | PrimitiveType::Float16
                 | PrimitiveType::Float32
                 | PrimitiveType::Float64,
             )) => Some(expected),
@@ -339,9 +338,9 @@ impl<'a> DeclarationTypeChecker<'a> {
         let expected = self.resolve_alias_type(expected?);
 
         match self.layer.table().kind(expected) {
-            Some(TypeKind::Primitive(
-                PrimitiveType::Float16 | PrimitiveType::Float32 | PrimitiveType::Float64,
-            )) => Some(expected),
+            Some(TypeKind::Primitive(PrimitiveType::Float32 | PrimitiveType::Float64)) => {
+                Some(expected)
+            }
             _ => None,
         }
     }

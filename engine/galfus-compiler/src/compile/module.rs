@@ -272,6 +272,51 @@ fn compile_single_module(
         let _ = (local_id, slot);
     }
 
+    // Global imports do not occupy a function slot, but still establish a
+    // runtime dependency. This ensures an exporting module runs its
+    // `__init_module` before an imported global is read.
+    let mut imported_globals = Vec::new();
+    if let Some(resolution) = modules[mod_idx].graph().resolution() {
+        for import in resolution.imports() {
+            let Some(symbol_name) = import.imported_name() else {
+                continue;
+            };
+            let Some(target_mod_idx) =
+                crate::compile::resolve::import_target_index(modules, mod_idx, import.source())
+            else {
+                continue;
+            };
+            let target_module = &modules[target_mod_idx];
+            let Some(target_resolution) = target_module.graph().resolution() else {
+                continue;
+            };
+            let Some(export) = target_resolution
+                .exports()
+                .iter()
+                .find(|export| export.name() == symbol_name)
+            else {
+                continue;
+            };
+            if matches!(export.kind(), SymbolKind::Var | SymbolKind::Const) {
+                imported_globals.push((
+                    target_module.id(),
+                    target_module.path().as_str().to_string(),
+                    symbol_name.to_string(),
+                ));
+            }
+        }
+    }
+    imported_globals.sort();
+    imported_globals.dedup();
+    for (_, module_name, symbol_name) in imported_globals {
+        import_slots.push(ImportSlot {
+            module_name,
+            symbol_name,
+            ty: TypeIdx(0),
+            kind: galfus_bytecode::ImportKind::Global,
+        });
+    }
+
     // Build local func map: local func_id → local FuncIdx (0-based within this module).
     let mut local_func_map: HashMap<galfus_core::FunctionId, FuncIdx> = HashMap::new();
     for (i, func) in mir_mod.functions.iter().enumerate() {
@@ -359,6 +404,15 @@ fn compile_single_module(
         proxy_name,
     );
 
+    let imported_structs = ctx
+        .imported_struct_fields
+        .keys()
+        .copied()
+        .collect::<Vec<_>>();
+    for symbol in imported_structs {
+        crate::bytecode_emission::types::get_or_create_struct_layout(&mut ctx, symbol);
+    }
+
     // Register local functions in ctx.
     for func in &mir_mod.functions {
         let local_idx = local_func_map[&func.id];
@@ -424,7 +478,7 @@ fn compile_single_module(
         }
         execution_metadata.set_function_spans(local_func_idx, function_spans);
 
-        rewrite_global_indices(&mut instructions, modules, mod_idx, string_table)?;
+        rewrite_global_indices(&mut instructions, modules, mod_idx)?;
 
         functions.push(BytecodeFunction {
             name: mir_func.name.clone(),

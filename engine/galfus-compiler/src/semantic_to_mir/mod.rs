@@ -268,6 +268,19 @@ impl<'a> MirBuilder<'a> {
         let table = self.type_result.layer().table();
 
         match table.kind(ty) {
+            Some(TypeKind::GenericInstance { base, .. }) => match table.kind(*base) {
+                Some(TypeKind::Named { symbol }) => self
+                    .graph
+                    .resolution()
+                    .and_then(|resolution| resolution.symbol(*symbol))
+                    .is_some_and(|symbol| {
+                        self.string_table.resolve(symbol.name()) == Some("Future")
+                    }),
+                Some(TypeKind::Path { segments, .. }) => {
+                    segments.last().is_some_and(|segment| segment == "Future")
+                }
+                _ => false,
+            },
             Some(TypeKind::Named { symbol }) => self
                 .graph
                 .resolution()

@@ -109,6 +109,7 @@ pub enum Instruction {
     Await {
         future: Operand,
         destination: LocalId,
+        drop_future: bool,
     },
     AwaitAll {
         futures: Vec<Operand>,
@@ -184,6 +185,7 @@ pub enum RValue {
     ArrayIndex(Operand, Operand),
     Choice(TypeId, String, Option<Operand>),
     ChoiceVariantIs(Operand, SymbolId),
+    ImportedChoiceVariantIs(Operand, String, String),
     Instanceof(Operand, TypeId),
     LoadGlobal(String),
     Len(Operand),

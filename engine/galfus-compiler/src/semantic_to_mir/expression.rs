@@ -210,6 +210,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                                 res.symbol(sym).map(|s| s.kind()),
                                 Some(galfus_frontend::SymbolKind::Var)
                                     | Some(galfus_frontend::SymbolKind::Const)
+                                    | Some(galfus_frontend::SymbolKind::ImportBinding)
                             );
                             if is_global {
                                 let name = res
@@ -561,8 +562,9 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                         .then(|| self.call_target_symbol(target_node))
                         .flatten()
                 });
-                let is_dynamic_anchored_method =
-                    anchored_receiver.is_some() && anchored_function_symbol.is_none();
+                let is_dynamic_anchored_method = anchored_receiver.is_some()
+                    && anchored_function_symbol.is_none()
+                    && !self.is_imported_struct_receiver(anchored_receiver.unwrap());
 
                 // Detect constraint method call: receiver is of a constraint type.
                 // Example: `item::stringify()` where `item: Stringable`.
@@ -782,6 +784,30 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                         }
                         _ => {}
                     }
+                }
+                if let Some(variant_symbol) =
+                    resolution.and_then(|resolution| resolution.path_reference_symbol(expr_id))
+                    && self
+                        .owner_symbol_for_member(variant_symbol, SymbolKind::Enum)
+                        .is_some()
+                {
+                    let value = self.get_enum_variant_value(variant_symbol);
+                    return Operand::Constant(Constant::Int32(value as i32));
+                }
+                if let Some(resolution) = resolution
+                    && let Some(root) = syntax.child(expr_id, 0)
+                    && let Some(owner_symbol) = resolution.reference_symbol(root)
+                    && let Some(member) = syntax.child(expr_id, 1)
+                    && let Some(values) = self
+                        .builder
+                        .type_result
+                        .imported_symbol_enum_values
+                        .get(&owner_symbol)
+                    && let Some((_, value)) = values
+                        .iter()
+                        .find(|(name, _)| name == self.builder.node_text(member))
+                {
+                    return Operand::Constant(Constant::Int32(*value as i32));
                 }
                 Operand::Constant(Constant::Null)
             }
@@ -1017,11 +1043,15 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 let future_op = self.lower_expression(target_node);
                 let ty = self.node_type(expr_id).unwrap_or_else(|| TypeId::new(0));
                 let temp_id = self.declare_local(None, ty);
+                let drop_future = syntax
+                    .node(target_node)
+                    .is_some_and(|target| target.kind() == SyntaxNodeKind::CallExpression);
 
                 self.current_instructions.push((
                     Instruction::Await {
                         future: future_op,
                         destination: temp_id,
+                        drop_future,
                     },
                     None,
                 ));
@@ -1196,6 +1226,28 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                         == function_name.as_str()
             })
             .map(|symbol| symbol.id())
+    }
+
+    /// Methods whose receiver has an imported struct type are regular anchored
+    /// calls. Their function symbol belongs to the imported module, so there is
+    /// no local symbol to return here; the tagged path is resolved into an
+    /// import slot during bytecode compilation.
+    fn is_imported_struct_receiver(&self, receiver: NodeId) -> bool {
+        let Some(receiver_ty) = self.node_type(receiver) else {
+            return false;
+        };
+        let receiver_ty = self.builder.resolve_alias_type(receiver_ty);
+        let Some(TypeKind::Named { symbol }) =
+            self.builder.type_result.layer().table().kind(receiver_ty)
+        else {
+            return false;
+        };
+
+        self.builder
+            .graph
+            .resolution()
+            .and_then(|resolution| resolution.import_for_symbol(*symbol))
+            .is_some()
     }
 
     fn specialize_generic_call(

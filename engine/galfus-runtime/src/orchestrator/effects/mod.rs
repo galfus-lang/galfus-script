@@ -21,8 +21,8 @@ impl Orchestrator {
         continuation: galfus_vm::Continuation,
     ) {
         match effect {
-            galfus_vm::VmEffect::FutureDropped { future_id } => {
-                self.handle_future_dropped(thread_id, thread, continuation, future_id)
+            galfus_vm::VmEffect::FuturesDropped { future_ids } => {
+                self.handle_future_dropped(thread_id, thread, continuation, future_ids)
             }
             galfus_vm::VmEffect::AdapterHandleDropped {
                 binding_id,

@@ -257,9 +257,6 @@ impl Workspace {
                 PrimitiveType::Uint64 => Ok(BoundaryType::U64),
                 PrimitiveType::Float32 => Ok(BoundaryType::F32),
                 PrimitiveType::Float64 => Ok(BoundaryType::F64),
-                PrimitiveType::Float16 => {
-                    Err("f16 is not supported by the boundary ABI".to_string())
-                }
             },
             Some(TypeKind::Named { symbol }) => {
                 if let Some(symbol_data) = resolution.symbol(*symbol)
@@ -698,6 +695,7 @@ impl Workspace {
                     })
                     .collect::<Result<Vec<_>, _>>()
                     .ok()?;
+
                 let return_type = Self::boundary_type(
                     table,
                     resolution,

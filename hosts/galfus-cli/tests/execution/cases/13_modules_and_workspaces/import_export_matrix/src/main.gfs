@@ -1,0 +1,29 @@
+import api from "./api.gfs"
+import { Counter, DEFAULT, Direction, Label, Result, configure, createCounter, identity, measure, optional, sum } from "./api.gfs"
+import { println } from "std/io"
+
+export fn start(_args: [[u8]]): i32 {
+  const counter = createCounter(40)
+  if counter.value != 40 { return 1 }
+  if <i32> counter.direction != 7 { return 2 }
+  const stored = counter.result
+  const stored_value = match stored { Result::Ok(value) => value, Result::Err(_) => 0 }
+  if stored_value != 40 { return 3 }
+  if counter::increment(2) != 42 { return 1 }
+  if api::add(20, 22) != 42 { return 4 }
+  if DEFAULT != 2 { return 11 }
+  const maybe = optional(42)
+  if instanceof maybe { i32 value => value != 42, null => true } { return 5 }
+  if <i32> Direction::North != 7 { return 6 }
+  const label = new(Label) { size: 9 }
+  if measure(label) != 9 || label::measure() != 9 { return 7 }
+  if configure(21) != 42 || configure(7, 6) != 42 { return 8 }
+  if sum(42, 2, 4) != 42 { return 9 }
+  const identity_result = identity(Result::Ok(42))
+  match identity_result {
+    Result::Ok(value) { if value != 42 { return 10 } },
+    Result::Err(_) { return 10 },
+  }
+  println("ok")
+  return 0
+}

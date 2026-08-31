@@ -193,7 +193,9 @@ impl<'a> DeclarationTypeChecker<'a> {
 
             let symbol_data = resolution.symbol(symbol)?;
 
-            if symbol_data.kind() != SymbolKind::Struct {
+            if symbol_data.kind() != SymbolKind::Struct
+                && !self.imported_struct_fields.contains_key(&symbol)
+            {
                 return None;
             }
 
@@ -215,6 +217,16 @@ impl<'a> DeclarationTypeChecker<'a> {
     }
 
     pub(super) fn struct_fields(&self, struct_symbol: SymbolId) -> Vec<StructFieldInfo> {
+        if let Some(fields) = self.imported_struct_fields.get(&struct_symbol) {
+            return fields
+                .iter()
+                .map(|field| StructFieldInfo {
+                    name: field.name.clone(),
+                    ty: field.ty,
+                    has_default: field.has_default,
+                })
+                .collect();
+        }
         let mut visited = HashSet::new();
         self.struct_fields_with_visited(struct_symbol, &mut visited)
     }
@@ -626,7 +638,9 @@ impl<'a> DeclarationTypeChecker<'a> {
 
         let resolution = self.graph.resolution()?;
 
-        if resolution.symbol(*symbol)?.kind() != SymbolKind::Struct {
+        if resolution.symbol(*symbol)?.kind() != SymbolKind::Struct
+            && !self.imported_struct_fields.contains_key(symbol)
+        {
             return None;
         }
 

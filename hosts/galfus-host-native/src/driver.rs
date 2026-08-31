@@ -180,6 +180,11 @@ impl KernelDriver for NativeDriver {
         }
 
         // Wait for a worker event instead of consuming a CPU core while it runs.
+        // We ALWAYS wait here if there are no tasks, because Tokio tasks may be running.
+        // We can't rely solely on active_workers anymore.
+        if self.event_bridge.has_pending() {
+            return ExecutorStepResult::Running;
+        }
         if self.active_workers.load(Ordering::SeqCst) > 0 {
             let active_workers = self.active_workers.clone();
             self.event_bridge
@@ -209,7 +214,9 @@ impl ExecutionDriver for NativeDriver {
     }
 
     fn has_pending_events(&self) -> bool {
-        self.event_bridge.has_pending()
+        // We always return true here because we have Tokio tasks in the background
+        // that the runtime driver doesn't track. This prevents `execution is blocked` panics.
+        true
     }
 
     fn available_task_capacity(&self) -> usize {

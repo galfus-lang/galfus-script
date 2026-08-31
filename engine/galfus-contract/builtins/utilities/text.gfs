@@ -200,3 +200,20 @@ export fn interpolate(template: [u8], values: [[u8]]): [u8] {
   return result
 }
 
+
+export fn equals(a: [u8], b: [u8]): bool {
+    if a.length != b.length {
+        return false
+    }
+    var i = 0
+    loop {
+        if i >= a.length {
+            break
+        }
+        if a[i] != b[i] {
+            return false
+        }
+        i = i + 1
+    }
+    return true
+}

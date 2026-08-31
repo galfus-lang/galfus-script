@@ -220,7 +220,7 @@ fn dropping_the_last_future_handle_notifies_the_orchestrator() {
     thread.write_reg(Reg(0), Value::Future(galfus_core::FutureId::new(7)));
 
     let VmStep::Suspend {
-        effect: VmEffect::FutureDropped { future_id },
+        effect: VmEffect::FuturesDropped { future_ids },
         continuation,
     } = vm
         .execute_with_budget(&mut thread, 1)
@@ -228,7 +228,7 @@ fn dropping_the_last_future_handle_notifies_the_orchestrator() {
     else {
         panic!("last future handle must notify the runtime");
     };
-    assert_eq!(future_id, galfus_core::FutureId::new(7));
+    assert_eq!(future_ids, vec![galfus_core::FutureId::new(7)]);
     vm.resume(
         galfus_core::ThreadId::new(1),
         &mut thread,
@@ -259,4 +259,38 @@ fn dropping_one_of_multiple_future_handles_keeps_the_future_alive() {
         vm.execute_with_budget(&mut thread, 1),
         Ok(VmStep::Continue)
     ));
+}
+
+#[test]
+fn dropping_a_composite_value_releases_its_last_future_handle() {
+    let module_id = galfus_core::ModuleId::new(1);
+    let graph = graph_with_node(BytecodeNode {
+        id: module_id,
+        path: galfus_core::ModulePath::new("future_in_tuple_drop.gfs").expect("valid module path"),
+        semantic_revision: galfus_core::SemanticRevision::new(0),
+        module: create_test_module(vec![Instruction::Drop { reg: Reg(0) }], vec![]),
+        metadata: None,
+    });
+    let vm = VirtualMachine::new(std::sync::Arc::new(graph));
+    let mut thread = thread::VmThreadState::test_new();
+    vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![])
+        .unwrap();
+    let tuple = thread
+        .heap
+        .alloc(HeapObject::Tuple {
+            elements: vec![Value::Future(galfus_core::FutureId::new(11))],
+        })
+        .expect("tuple allocation succeeds");
+    thread.write_reg(Reg(0), Value::Object(tuple));
+
+    let VmStep::Suspend {
+        effect: VmEffect::FuturesDropped { future_ids },
+        ..
+    } = vm
+        .execute_with_budget(&mut thread, 1)
+        .expect("drop reaches the notification point")
+    else {
+        panic!("dropping the last composite future handle must notify the runtime");
+    };
+    assert_eq!(future_ids, vec![galfus_core::FutureId::new(11)]);
 }

@@ -409,6 +409,7 @@ fn validate_basic_block(
             mir::Instruction::Await {
                 future,
                 destination,
+                ..
             } => {
                 validate_operand(future, func, initialized, errors);
                 if !func.locals.iter().any(|decl| decl.id == *destination) {
@@ -476,6 +477,7 @@ fn validate_rvalue_operands(
         | RValue::Copy(operand)
         | RValue::MemberAccess(operand, _)
         | RValue::ChoiceVariantIs(operand, _)
+        | RValue::ImportedChoiceVariantIs(operand, _, _)
         | RValue::Instanceof(operand, _)
         | RValue::Cast(operand, _) => {
             validate_operand(operand, func, initialized, errors);

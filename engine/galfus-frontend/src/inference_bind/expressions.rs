@@ -259,7 +259,6 @@ impl<'a> ExpressionInferrer<'a> {
                 | PrimitiveType::Uint16
                 | PrimitiveType::Uint32
                 | PrimitiveType::Uint64
-                | PrimitiveType::Float16
                 | PrimitiveType::Float32
                 | PrimitiveType::Float64,
             )) => Some(expected),
@@ -302,7 +301,7 @@ impl<'a> ExpressionInferrer<'a> {
 
         match self.layer.table().kind(expected) {
             Some(TypeKind::Primitive(
-                PrimitiveType::Float16 | PrimitiveType::Float32 | PrimitiveType::Float64,
+                PrimitiveType::Float32 | PrimitiveType::Float64,
             )) => Some(expected),
             _ => None,
         }

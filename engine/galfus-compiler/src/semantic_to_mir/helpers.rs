@@ -12,7 +12,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
         matches!(
             resolution.path_reference_kind(target),
             Some(PathReferenceKind::ChoiceVariant)
-        )
+        ) || self.get_choice_variant_payload(target).is_some()
     }
 
     pub(super) fn get_choice_variant_payload(
@@ -20,9 +20,96 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
         node: NodeId,
     ) -> Option<(String, TypeId, Vec<TypeId>)> {
         let resolution = self.builder.graph.resolution()?;
-        let variant_symbol = resolution.path_reference_symbol(node)?;
-        let owner_symbol = self.owner_symbol_for_member(variant_symbol, SymbolKind::Choice)?;
+        let syntax = self.builder.graph.syntax();
+        let mut target = node;
+        while syntax
+            .node(target)
+            .is_some_and(|node| node.kind() == SyntaxNodeKind::GenericExpression)
+        {
+            target = syntax.child(target, 0)?;
+        }
 
+        if let Some(variant_symbol) = resolution.path_reference_symbol(target)
+            && let Some(owner_symbol) =
+                self.owner_symbol_for_member(variant_symbol, SymbolKind::Choice)
+        {
+            let owner_type = self
+                .builder
+                .type_result
+                .layer()
+                .symbol_type(owner_symbol)
+                .unwrap_or_else(|| TypeId::new(0));
+            let variant_name = self
+                .builder
+                .string_table
+                .resolve(resolution.symbol(variant_symbol)?.name())
+                .unwrap_or("")
+                .to_string();
+            if resolution
+                .symbol(owner_symbol)
+                .is_some_and(|symbol| symbol.kind() == SymbolKind::ImportBinding)
+            {
+                let choice = self
+                    .builder
+                    .type_result
+                    .imported_symbol_choices
+                    .get(&owner_symbol)
+                    .or_else(|| {
+                        let owner_name = self
+                            .builder
+                            .string_table
+                            .resolve(resolution.symbol(owner_symbol)?.name())?;
+                        self.builder
+                            .type_result
+                            .imported_path_choices
+                            .values()
+                            .find(|choice| choice.name == owner_name)
+                    })?;
+                let variant = choice
+                    .variants
+                    .iter()
+                    .find(|variant| variant.name == variant_name)?;
+                return Some((
+                    variant.name.clone(),
+                    owner_type,
+                    variant.payload_types.clone(),
+                ));
+            }
+            let payload_types = self.choice_variant_payload_types(owner_symbol, variant_symbol);
+
+            return Some((variant_name, owner_type, payload_types));
+        }
+
+        let owner_symbol = resolution.reference_symbol(target).or_else(|| {
+            syntax
+                .child(target, 0)
+                .and_then(|root| resolution.reference_symbol(root))
+        })?;
+        let choice_name = syntax
+            .child(target, 0)
+            .map(|root| self.builder.node_text(root).to_string())?;
+        let choice = self
+            .builder
+            .type_result
+            .imported_symbol_choices
+            .get(&owner_symbol)
+            .or_else(|| {
+                self.builder
+                    .type_result
+                    .imported_path_choices
+                    .values()
+                    .find(|choice| choice.name == choice_name)
+            })?;
+        let variant_name = self
+            .builder
+            .graph
+            .syntax()
+            .child(target, 1)
+            .map(|part| self.builder.node_text(part))?;
+        let variant = choice
+            .variants
+            .iter()
+            .find(|variant| variant.name == variant_name)?;
         let owner_type = self
             .builder
             .type_result
@@ -30,16 +117,11 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
             .symbol_type(owner_symbol)
             .unwrap_or_else(|| TypeId::new(0));
 
-        let variant_name = self
-            .builder
-            .string_table
-            .resolve(resolution.symbol(variant_symbol)?.name())
-            .unwrap_or("")
-            .to_string();
-
-        let payload_types = self.choice_variant_payload_types(owner_symbol, variant_symbol);
-
-        Some((variant_name, owner_type, payload_types))
+        Some((
+            variant.name.clone(),
+            owner_type,
+            variant.payload_types.clone(),
+        ))
     }
 
     pub(super) fn owner_symbol_for_member(

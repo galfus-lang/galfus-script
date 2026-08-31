@@ -143,12 +143,26 @@ impl<'a> DeclarationTypeChecker<'a> {
     }
 
     fn resolve_alias_type_with_visited(&self, ty: TypeId, visited: &mut Vec<SymbolId>) -> TypeId {
-        let Some(TypeKind::Named { symbol }) = self.layer.table().kind(ty).cloned() else {
+        let Some(resolution) = self.graph.resolution() else {
             return ty;
         };
 
-        let Some(resolution) = self.graph.resolution() else {
-            return ty;
+        let symbol = match self.layer.table().kind(ty).cloned() {
+            Some(TypeKind::Named { symbol }) => symbol,
+            Some(TypeKind::Path { root, segments }) if root == SymbolId::new(0) => {
+                let Some(name) = segments.first() else {
+                    return ty;
+                };
+                let Some(name_id) = self.string_table.get(name) else {
+                    return ty;
+                };
+                let Some(symbol) = resolution.lookup_symbol(resolution.module_scope(), name_id)
+                else {
+                    return ty;
+                };
+                symbol
+            }
+            _ => return ty,
         };
 
         let Some(symbol_data) = resolution.symbol(symbol) else {

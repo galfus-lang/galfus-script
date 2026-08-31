@@ -569,24 +569,61 @@ impl FrontendSession {
             })
             .collect::<Vec<_>>();
 
-        let surfaces = self
+        let mut surfaces = self
             .modules
             .iter()
             .zip(baseline_results.iter())
             .map(|(module, result)| {
-                build_module_surface(module.graph(), result, &self.string_table)
+                build_module_surface(module.source(), module.graph(), result, &self.string_table)
             })
             .collect::<Vec<_>>();
 
-        let imported_types = (0..self.modules.len())
-            .map(|module_index| {
-                self.imported_surface_types_for_module(module_index, &surfaces, catalog)
-            })
-            .collect::<Vec<_>>();
+        let mut results = baseline_results.clone();
+        for _ in 0..self.modules.len().max(1) {
+            let imported_types = (0..self.modules.len())
+                .map(|module_index| {
+                    self.imported_surface_types_for_module(module_index, &surfaces, catalog)
+                })
+                .collect::<Vec<_>>();
 
-        for ((module_index, imported_type), previous_result) in
-            imported_types.iter().enumerate().zip(baseline_results)
-        {
+            results = imported_types
+                .iter()
+                .enumerate()
+                .map(|(module_index, imported_type)| {
+                    let module = &self.modules[module_index];
+                    check_definition_types_with_surfaces(
+                        module.source(),
+                        module.graph(),
+                        baseline_results[module_index].clone(),
+                        imported_type,
+                        &self.string_table,
+                        catalog.is_provider_module(
+                            module
+                                .path()
+                                .as_str()
+                                .strip_suffix(".gfs")
+                                .unwrap_or(module.path().as_str()),
+                        ),
+                    )
+                })
+                .collect();
+
+            surfaces = self
+                .modules
+                .iter()
+                .zip(results.iter())
+                .map(|(module, result)| {
+                    build_module_surface(
+                        module.source(),
+                        module.graph(),
+                        result,
+                        &self.string_table,
+                    )
+                })
+                .collect();
+        }
+
+        for (module_index, result) in results.into_iter().enumerate() {
             if !changed_modules.contains(&self.modules[module_index].id()) {
                 continue;
             }
@@ -596,21 +633,6 @@ impl FrontendSession {
                 module.semantic_revision =
                     galfus_core::SemanticRevision::new(self.next_semantic_revision);
             }
-            let result = check_definition_types_with_surfaces(
-                module.source(),
-                module.graph(),
-                previous_result,
-                imported_type,
-                &self.string_table,
-                catalog.is_provider_module(
-                    module
-                        .path()
-                        .as_str()
-                        .strip_suffix(".gfs")
-                        .unwrap_or(module.path().as_str()),
-                ),
-            );
-
             module.type_result = Some(result);
         }
     }

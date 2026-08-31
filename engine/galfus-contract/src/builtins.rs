@@ -16,6 +16,7 @@ pub const STD_FS_SOURCE: &str = include_str!("../builtins/bridges/fs.gfs");
 pub const STD_NET_SOURCE: &str = include_str!("../builtins/bridges/net.gfs");
 pub const STD_HTTP_SOURCE: &str = include_str!("../builtins/bridges/http.gfs");
 pub const STD_WEBSOCKET_SOURCE: &str = include_str!("../builtins/bridges/websocket.gfs");
+pub const STD_SERVER_SOURCE: &str = include_str!("../builtins/bridges/server.gfs");
 
 /// Internal core modules that are built-in to the VM and auto-inferred by the language engine.
 pub static INTERNAL_CORE_MODULES: &[(&str, &str)] = &[
@@ -43,6 +44,7 @@ pub static BRIDGE_TEMPLATES: &[(&str, &str)] = &[
     ("std/net", STD_NET_SOURCE),
     ("std/http", STD_HTTP_SOURCE),
     ("std/websocket", STD_WEBSOCKET_SOURCE),
+    ("std/server", STD_SERVER_SOURCE),
 ];
 
 pub fn is_bridge_template(source: &str) -> bool {
@@ -342,3 +344,76 @@ use crate::{
     BoundaryType, CURRENT_BOUNDARY_ABI_VERSION, ProviderDescriptor, ProviderFunctionSignature,
     ProviderModuleDescriptor, provider_schema_fingerprint,
 };
+
+pub fn std_server_provider_descriptor() -> ProviderDescriptor {
+    let bytes = BoundaryType::Array(Box::new(BoundaryType::U8));
+    let header = BoundaryType::Tuple(vec![bytes.clone(), bytes.clone()]);
+
+    let url = BoundaryType::Tuple(vec![
+        bytes.clone(), // href
+        bytes.clone(), // protocol
+        bytes.clone(), // host
+        bytes.clone(), // hostname
+        bytes.clone(), // path
+        bytes.clone(), // search
+        bytes.clone(), // hash
+        bytes.clone(), // origin
+    ]);
+
+    let request = BoundaryType::Tuple(vec![
+        BoundaryType::U64, // id
+        url,
+        bytes.clone(),                                   // method
+        BoundaryType::Array(Box::new(header.clone())),   // headers
+        BoundaryType::Nullable(Box::new(bytes.clone())), // body
+    ]);
+
+    ProviderDescriptor {
+        modules: vec![ProviderModuleDescriptor {
+            module_path: "std/server".to_string(),
+            schema_fingerprint: provider_schema_fingerprint(STD_SERVER_SOURCE),
+            boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
+            exports: vec![
+                ProviderFunctionSignature {
+                    name: "server_bind".to_string(),
+                    parameter_types: vec![BoundaryType::I32],
+                    return_type: BoundaryType::U64,
+                },
+                ProviderFunctionSignature {
+                    name: "server_accept".to_string(),
+                    parameter_types: vec![BoundaryType::U64],
+                    return_type: request,
+                },
+                ProviderFunctionSignature {
+                    name: "server_respond".to_string(),
+                    parameter_types: vec![
+                        BoundaryType::U64,
+                        BoundaryType::I32,
+                        BoundaryType::Array(Box::new(header)),
+                        BoundaryType::Nullable(Box::new(bytes.clone())),
+                        BoundaryType::Bool,
+                    ],
+                    return_type: BoundaryType::Bool,
+                },
+                ProviderFunctionSignature {
+                    name: "server_ws_receive".to_string(),
+                    parameter_types: vec![BoundaryType::U64],
+                    return_type: BoundaryType::Nullable(Box::new(BoundaryType::Tuple(vec![
+                        BoundaryType::I32,
+                        BoundaryType::Nullable(Box::new(bytes.clone())),
+                    ]))),
+                },
+                ProviderFunctionSignature {
+                    name: "server_ws_send".to_string(),
+                    parameter_types: vec![BoundaryType::U64, bytes.clone()],
+                    return_type: BoundaryType::Bool,
+                },
+                ProviderFunctionSignature {
+                    name: "server_ws_close".to_string(),
+                    parameter_types: vec![BoundaryType::U64],
+                    return_type: BoundaryType::Bool,
+                },
+            ],
+        }],
+    }
+}

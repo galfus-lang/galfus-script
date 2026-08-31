@@ -321,11 +321,9 @@ jobs:
 
       - name: Purge CDN Cache
         env:
-          # Assumindo a mesma secret STORAGE_KEY como você instruiu
-          ACCESS_KEY: ${{ secrets.STORAGE_KEY }}
-          # O ID numérico da sua Pull Zone na Bunny (ex: 123456)
+          ACCESS_KEY: ${{ secrets.CDN_API_KEY }}
           PULL_ZONE_ID: ${{ secrets.PULL_ZONE_ID }}
         run: |
-          curl -X POST "https://api.bunny.net/pullzone/${PULL_ZONE_ID}/purgeCache" \
+          curl -f -X POST "https://api.bunny.net/pullzone/${PULL_ZONE_ID}/purgeCache" \
             -H "AccessKey: ${ACCESS_KEY}" \
             -H "Accept: application/json"

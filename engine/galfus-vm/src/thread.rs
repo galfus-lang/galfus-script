@@ -3,7 +3,7 @@ use crate::runtime::Value;
 use crate::runtime::{CallFrame, HeapObject, RuntimeModuleState};
 use galfus_bytecode::instruction::Reg;
 use galfus_core::ModuleId;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub use crate::heap::PrivateHeap;
 
@@ -235,32 +235,86 @@ impl VmThreadState {
     }
 
     pub fn contains_future_handle(&self, future_id: galfus_core::FutureId) -> bool {
-        self.registers
+        let mut visited = HashSet::new();
+        self.registers[..self.current_register_top]
             .iter()
-            .any(|value| matches!(value, Value::Future(id) if *id == future_id))
-            || self.module_states.values().any(|state| {
-                state
-                    .globals
-                    .iter()
-                    .any(|value| matches!(value, Value::Future(id) if *id == future_id))
-            })
-            || self
-                .heap
-                .iter_live_objects()
-                .any(|(_, object)| match object {
-                    HeapObject::Struct { fields, .. } | HeapObject::Tuple { elements: fields } => {
-                        fields
+            .chain(
+                self.module_states
+                    .values()
+                    .flat_map(|state| state.globals.iter()),
+            )
+            .any(|value| self.value_contains_future(value, future_id, &mut visited))
+    }
+
+    pub fn future_handles_in_value(&self, value: Value) -> Vec<galfus_core::FutureId> {
+        let mut future_ids = Vec::new();
+        let mut visited = HashSet::new();
+        self.collect_futures_in_value(&value, &mut visited, &mut future_ids);
+        future_ids.sort_unstable();
+        future_ids.dedup();
+        future_ids
+    }
+
+    fn value_contains_future(
+        &self,
+        value: &Value,
+        future_id: galfus_core::FutureId,
+        visited: &mut HashSet<crate::runtime::VmObjectRef>,
+    ) -> bool {
+        match value {
+            Value::Future(id) => *id == future_id,
+            Value::Object(object_ref) if visited.insert(*object_ref) => {
+                self.heap
+                    .get_object(*object_ref)
+                    .is_ok_and(|object| match object {
+                        HeapObject::Struct { fields, .. }
+                        | HeapObject::Tuple { elements: fields } => fields
                             .iter()
-                            .any(|value| matches!(value, Value::Future(id) if *id == future_id))
+                            .any(|field| self.value_contains_future(field, future_id, visited)),
+                        HeapObject::Array { elements, .. } => elements
+                            .iter()
+                            .any(|element| self.value_contains_future(element, future_id, visited)),
+                        HeapObject::Choice { payload, .. } => {
+                            self.value_contains_future(payload, future_id, visited)
+                        }
+                        HeapObject::AdapterHandle { .. } => false,
+                    })
+            }
+            _ => false,
+        }
+    }
+
+    fn collect_futures_in_value(
+        &self,
+        value: &Value,
+        visited: &mut HashSet<crate::runtime::VmObjectRef>,
+        future_ids: &mut Vec<galfus_core::FutureId>,
+    ) {
+        match value {
+            Value::Future(future_id) => future_ids.push(*future_id),
+            Value::Object(object_ref) if visited.insert(*object_ref) => {
+                if let Ok(object) = self.heap.get_object(*object_ref) {
+                    match object {
+                        HeapObject::Struct { fields, .. }
+                        | HeapObject::Tuple { elements: fields } => {
+                            for field in fields {
+                                self.collect_futures_in_value(field, visited, future_ids);
+                            }
+                        }
+                        HeapObject::Array { elements, .. } => {
+                            for element in elements {
+                                self.collect_futures_in_value(element, visited, future_ids);
+                            }
+                        }
+                        HeapObject::Choice { payload, .. } => {
+                            self.collect_futures_in_value(payload, visited, future_ids);
+                        }
+                        HeapObject::AdapterHandle { .. } => {}
                     }
-                    HeapObject::Array { elements, .. } => elements
-                        .iter()
-                        .any(|value| matches!(value, Value::Future(id) if *id == future_id)),
-                    HeapObject::Choice { payload, .. } => {
-                        matches!(payload, Value::Future(id) if *id == future_id)
-                    }
-                    HeapObject::AdapterHandle { .. } => false,
-                })
+                }
+            }
+            _ => {}
+        }
     }
 }
 

@@ -57,6 +57,14 @@ ureq = "2.12"
 tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 url = "2.5"
 
+# HTTP/2 Server and Async I/O (Restricted to native network isolation)
+hyper = "1.0"
+hyper-util = { version = "0.1", features = ["full"] }
+http-body-util = "0.1"
+tokio = { version = "1.0", features = ["rt", "net", "sync", "macros"] }
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+
 [profile.dev]
 opt-level = 0
 

@@ -11,9 +11,19 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
         Some((owner_symbol, variant_symbol))
     }
 
-    fn get_imported_choice_variant(&self, pattern: NodeId) -> Option<(String, Vec<TypeId>)> {
+    fn get_imported_choice_variant(
+        &self,
+        pattern: NodeId,
+    ) -> Option<(String, String, Vec<TypeId>)> {
         let resolution = self.builder.graph.resolution()?;
-        if let Some(owner_symbol) = resolution.reference_symbol(pattern)
+        let owner_symbol = resolution.reference_symbol(pattern).or_else(|| {
+            self.builder
+                .graph
+                .syntax()
+                .child(pattern, 0)
+                .and_then(|root| resolution.reference_symbol(root))
+        });
+        if let Some(owner_symbol) = owner_symbol
             && let Some(choice) = self
                 .builder
                 .type_result
@@ -27,7 +37,11 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 .child(pattern, 1)
                 .map(|node| self.builder.node_text(node))?;
             let variant = choice.variants.iter().find(|v| v.name == variant_name)?;
-            return Some((variant.name.clone(), variant.payload_types.clone()));
+            return Some((
+                choice.name.clone(),
+                variant.name.clone(),
+                variant.payload_types.clone(),
+            ));
         }
 
         let variant_ty = self.builder.type_result.layer().node_type(pattern)?;
@@ -50,7 +64,11 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
             .find(|c| c.name == *choice_name)?;
         let variant = choice.variants.iter().find(|v| v.name == *variant_name)?;
 
-        Some((variant.name.clone(), variant.payload_types.clone()))
+        Some((
+            choice.name.clone(),
+            variant.name.clone(),
+            variant.payload_types.clone(),
+        ))
     }
 
     pub(super) fn lower_pattern_check(
@@ -223,7 +241,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                                 let payload_node = syntax.node(payload_node_id).unwrap();
                                 let payload_patterns = payload_node.children();
 
-                                let payload_types = if let Some((_, imported_payload_types)) =
+                                let payload_types = if let Some((_, _, imported_payload_types)) =
                                     self.get_imported_choice_variant(pattern_node_id)
                                 {
                                     imported_payload_types
@@ -313,14 +331,9 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                             });
                         }
                     }
-                } else if let Some((variant_name, payload_types)) =
+                } else if let Some((choice_name, variant_name, payload_types)) =
                     self.get_imported_choice_variant(pattern_node_id)
                 {
-                    let variant_ty = syntax
-                        .child(pattern_node_id, 1)
-                        .and_then(|variant| self.builder.type_result.layer().node_type(variant))
-                        .unwrap();
-
                     let bool_ty = self
                         .builder
                         .type_result
@@ -332,7 +345,11 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     self.current_instructions.push((
                         Instruction::Assign(
                             cond_temp,
-                            RValue::Instanceof(subject.clone(), variant_ty),
+                            RValue::ImportedChoiceVariantIs(
+                                subject.clone(),
+                                choice_name,
+                                variant_name.clone(),
+                            ),
                         ),
                         None,
                     ));

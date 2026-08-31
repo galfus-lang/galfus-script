@@ -192,7 +192,14 @@ impl VirtualMachine {
 
         casted.ok_or_else(|| VmError::TypeMismatch {
             expected: format!("{:?}", ty),
-            found: format!("{:?}", val),
+            found: match val {
+                Value::Object(reference) => thread
+                    .heap
+                    .get_object(*reference)
+                    .map(|object| format!("{object:?}"))
+                    .unwrap_or_else(|_| format!("{val:?}")),
+                _ => format!("{val:?}"),
+            },
         })
     }
 }
