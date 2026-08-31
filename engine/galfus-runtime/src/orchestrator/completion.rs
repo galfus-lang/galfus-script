@@ -166,6 +166,7 @@ impl Orchestrator {
         let adapter_proxy_module = self
             .future_registry
             .adapter_proxy_module(thread_id, future_id);
+        let request_id = self.future_registry.request_id(thread_id, future_id);
 
         let binding_id = adapter_proxy_module.as_deref().and_then(|proxy_module| {
             self.adapter_bindings
@@ -255,6 +256,9 @@ impl Orchestrator {
         if is_direct_await {
             let _ = self.future_registry.discard(thread_id, future_id);
             self.free_future_id(future_id);
+        }
+        if let Some(request_id) = request_id {
+            self.free_request_id(request_id);
         }
         self.completion_metrics.accepted += 1;
     }

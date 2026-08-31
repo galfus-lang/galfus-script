@@ -389,6 +389,19 @@ fn test_async_call_emits_typed_future_instruction() {
     );
 
     let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
+    let main_mir = mir_module
+        .functions
+        .iter()
+        .find(|function| function.name == "main")
+        .expect("main function should be lowered");
+    assert!(
+        main_mir
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .any(|(instruction, _)| matches!(instruction, Instruction::Drop(_))),
+        "Future handles must be released when their scope ends"
+    );
     let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
     let main = module
         .functions
@@ -415,6 +428,55 @@ fn test_async_call_emits_typed_future_instruction() {
         module.types[instruction.2.raw() as usize],
         galfus_bytecode::BytecodeType::Int32
     ));
+}
+
+#[test]
+fn test_direct_await_drops_its_temporary_future_handle() {
+    let source_id = SourceId::new(0);
+    let code = r#"
+        struct Future<T> { id: i64 }
+
+        fn(async) load(value: i32): i32 {
+            return value
+        }
+
+        fn(async) main(): i32 {
+            return await load(7)
+        }
+    "#;
+    let source = SourceFile::new(source_id, "direct_await.gfs".to_string(), code.to_string());
+    let parse_result = parse(&source);
+    let mut string_table = galfus_frontend::StringTable::new();
+    let graph = resolve(&source, parse_result.into_graph(), &mut string_table).into_graph();
+    let type_result = check_definition_types(
+        &source,
+        &graph,
+        check_declaration_types(&source, &graph, &string_table, false),
+        &string_table,
+        false,
+    );
+    assert!(
+        !type_result.has_errors(),
+        "Typecheck error: {:?}",
+        type_result.diagnostics()
+    );
+
+    let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
+    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let main = module
+        .functions
+        .iter()
+        .find(|function| function.name == "main")
+        .expect("main function should be emitted");
+    assert!(
+        main.instructions
+            .windows(2)
+            .any(|instructions| matches!(instructions, [
+                galfus_bytecode::Instruction::AwaitFuture { future_id, .. },
+                galfus_bytecode::Instruction::Drop { reg },
+            ] if future_id == reg)),
+        "a direct await must drop its temporary future handle after resuming"
+    );
 }
 
 #[test]

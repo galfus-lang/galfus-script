@@ -580,6 +580,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     MirInstruction::Await {
                         future,
                         destination,
+                        drop_future,
                     } => {
                         let fut_reg = self.operand_reg(future);
                         let payload_type = self
@@ -633,6 +634,9 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                             future_id: fut_reg,
                             return_type,
                         });
+                        if *drop_future {
+                            self.instructions.push(Instruction::Drop { reg: fut_reg });
+                        }
                         self.free_temp_if_operand(future);
                     }
                     MirInstruction::AwaitAll {

@@ -1043,11 +1043,15 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 let future_op = self.lower_expression(target_node);
                 let ty = self.node_type(expr_id).unwrap_or_else(|| TypeId::new(0));
                 let temp_id = self.declare_local(None, ty);
+                let drop_future = syntax
+                    .node(target_node)
+                    .is_some_and(|target| target.kind() == SyntaxNodeKind::CallExpression);
 
                 self.current_instructions.push((
                     Instruction::Await {
                         future: future_op,
                         destination: temp_id,
+                        drop_future,
                     },
                     None,
                 ));

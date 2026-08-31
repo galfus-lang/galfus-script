@@ -369,6 +369,18 @@ impl FutureRegistry {
         }
     }
 
+    pub fn request_id(
+        &self,
+        owner_thread_id: ThreadId,
+        future_id: galfus_core::FutureId,
+    ) -> Option<galfus_core::RequestId> {
+        let record = self.records.get(&(owner_thread_id, future_id))?;
+        match &record.state {
+            FutureState::Running(Activation::Provider { request_id, .. })
+            | FutureState::Running(Activation::Adapter { request_id, .. }) => *request_id,
+            _ => None,
+        }
+    }
     pub fn add_waiter(
         &mut self,
         owner_thread_id: ThreadId,

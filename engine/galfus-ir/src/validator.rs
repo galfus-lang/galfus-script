@@ -409,6 +409,7 @@ fn validate_basic_block(
             mir::Instruction::Await {
                 future,
                 destination,
+                ..
             } => {
                 validate_operand(future, func, initialized, errors);
                 if !func.locals.iter().any(|decl| decl.id == *destination) {

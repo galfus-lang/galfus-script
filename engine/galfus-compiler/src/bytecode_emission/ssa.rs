@@ -254,6 +254,7 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
                 Instruction::Await {
                     future,
                     destination,
+                    ..
                 } => {
                     self.replace_operand(block, future);
                     let orig_target = *destination;

@@ -109,6 +109,7 @@ pub enum Instruction {
     Await {
         future: Operand,
         destination: LocalId,
+        drop_future: bool,
     },
     AwaitAll {
         futures: Vec<Operand>,

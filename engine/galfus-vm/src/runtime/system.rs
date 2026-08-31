@@ -12,12 +12,15 @@ impl VirtualMachine {
             // Category E: Memory Ownership
             Instruction::Drop { reg } => {
                 let value = thread.read_reg(reg);
+                let future_ids = thread.future_handles_in_value(value);
                 thread.write_reg(reg, Value::Null);
-                if let Value::Future(future_id) = value
-                    && !thread.contains_future_handle(future_id)
-                {
+                let future_ids = future_ids
+                    .into_iter()
+                    .filter(|future_id| !thread.contains_future_handle(*future_id))
+                    .collect::<Vec<_>>();
+                if !future_ids.is_empty() {
                     return Ok(VmStep::Suspend {
-                        effect: VmEffect::FutureDropped { future_id },
+                        effect: VmEffect::FuturesDropped { future_ids },
                         continuation: Continuation::new(None),
                     });
                 }

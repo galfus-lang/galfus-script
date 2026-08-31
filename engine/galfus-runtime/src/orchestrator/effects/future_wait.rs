@@ -11,27 +11,34 @@ impl Orchestrator {
         thread_id: crate::registry::ThreadId,
         thread: galfus_vm::thread::VmThreadState,
         continuation: galfus_vm::Continuation,
-        future_id: galfus_core::FutureId,
+        future_ids: Vec<galfus_core::FutureId>,
     ) {
         #[cfg(feature = "metrics")]
         {
-            self.future_metrics.dropped += 1;
+            self.future_metrics.dropped += future_ids.len();
         }
-        self.remove_mailbox_future_wait(thread_id, future_id);
-        let disposition = match self.future_registry.discard(thread_id, future_id) {
-            Ok(disposition) => disposition,
-            Err(error) => {
-                self.failure = Some(error.with_stack(execution_stack(&thread)));
-                self.kernel.cancel(thread_id);
-                return;
+        for future_id in future_ids {
+            self.remove_mailbox_future_wait(thread_id, future_id);
+            let disposition = match self.future_registry.discard(thread_id, future_id) {
+                Ok(disposition) => disposition,
+                Err(error) => {
+                    self.failure = Some(error.with_stack(execution_stack(&thread)));
+                    self.kernel.cancel(thread_id);
+                    return;
+                }
+            };
+            match disposition {
+                crate::orchestrator::future_registry::DiscardDisposition::Running(activation) => {
+                    self.cancel_future_activation(thread_id, future_id, activation);
+                    self.free_future_id(future_id);
+                }
+                crate::orchestrator::future_registry::DiscardDisposition::Created
+                | crate::orchestrator::future_registry::DiscardDisposition::Terminal => {
+                    self.free_future_id(future_id);
+                }
+                crate::orchestrator::future_registry::DiscardDisposition::Retained => {}
             }
-        };
-        if let crate::orchestrator::future_registry::DiscardDisposition::Running(activation) =
-            disposition
-        {
-            self.cancel_future_activation(thread_id, future_id, activation);
         }
-        self.free_future_id(future_id);
         self.resume_or_fail_front(thread_id, thread, continuation, galfus_vm::VmValue::Null);
     }
 
