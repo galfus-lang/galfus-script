@@ -174,6 +174,60 @@ fn unwrap(value: Outcome<i32>): i32 {
 }
 
 #[test]
+fn check_infers_match_type_from_direct_block_returns() {
+    let (_source, graph, result, _string_table) = check_source(
+        r#"
+choice Outcome<T> {
+  Ok(T),
+  Err([u8]),
+}
+
+fn unwrap(value: Outcome<i32>): i32 {
+  var result = match value {
+    Outcome::Ok(result) {
+      return result
+    },
+    Outcome::Err(_) {
+      return 0
+    },
+  }
+  return 0
+}
+"#,
+    );
+
+    let match_expression = find_node_by_kind(&graph, SyntaxNodeKind::MatchExpression).unwrap();
+    let match_type = result.layer().node_type(match_expression).unwrap();
+
+    assert_eq!(
+        result.layer().table().kind(match_type),
+        Some(&TypeKind::Primitive(PrimitiveType::Int32))
+    );
+}
+
+#[test]
+fn check_accepts_statement_match_with_returning_arm() {
+    let (_source, _graph, result, _string_table) = check_source(
+        r#"
+choice Outcome {
+  Ok(i32),
+  Err,
+}
+
+fn validate(value: Outcome): i32 {
+  match value {
+    Outcome::Ok(result) { if result != 42 { return 1 } },
+    Outcome::Err { return 1 },
+  }
+  return 0
+}
+"#,
+    );
+
+    assert!(!result.has_errors());
+}
+
+#[test]
 fn check_reports_choice_payload_pattern_count_mismatch() {
     let source = source(
         r#"

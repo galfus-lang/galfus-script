@@ -35,10 +35,20 @@ impl<'a> DeclarationTypeChecker<'a> {
         self.check_match_arm_order(arm_nodes.as_slice());
         self.check_choice_match_exhaustiveness(node, subject_type, arm_nodes.as_slice());
 
+        let direct_block_returns_are_values = arm_nodes
+            .iter()
+            .copied()
+            .all(|arm| self.match_arm_has_direct_block_return(arm));
+
         let mut arm_types = Vec::new();
 
         for arm in arm_nodes.iter().copied() {
-            let Some(arm_type) = self.check_match_arm_type(arm, subject_type, expected) else {
+            let Some(arm_type) = self.check_match_arm_type(
+                arm,
+                subject_type,
+                expected,
+                direct_block_returns_are_values,
+            ) else {
                 continue;
             };
 
@@ -62,8 +72,12 @@ impl<'a> DeclarationTypeChecker<'a> {
             arm_types.clear();
 
             for arm in arm_nodes {
-                let Some(arm_type) = self.check_match_arm_type(arm, subject_type, Some(expected))
-                else {
+                let Some(arm_type) = self.check_match_arm_type(
+                    arm,
+                    subject_type,
+                    Some(expected),
+                    direct_block_returns_are_values,
+                ) else {
                     continue;
                 };
 
@@ -142,6 +156,7 @@ impl<'a> DeclarationTypeChecker<'a> {
         arm: NodeId,
         subject_type: TypeId,
         expected: Option<TypeId>,
+        direct_block_returns_are_values: bool,
     ) -> Option<TypeId> {
         let pattern = self.graph.syntax().child(arm, 0)?;
         let body = self
@@ -152,17 +167,53 @@ impl<'a> DeclarationTypeChecker<'a> {
 
         self.check_match_pattern_type(pattern, subject_type);
 
-        self.infer_match_arm_body_type(body, expected)
+        self.infer_match_arm_body_type(body, expected, direct_block_returns_are_values)
+    }
+
+    fn match_arm_has_direct_block_return(&self, arm: NodeId) -> bool {
+        let Some(body) = self
+            .graph
+            .syntax()
+            .child(arm, 1)
+            .and_then(|body| self.graph.syntax().child(body, 0))
+        else {
+            return false;
+        };
+        let Some(body_node) = self.graph.syntax().node(body) else {
+            return false;
+        };
+
+        body_node.kind() == SyntaxNodeKind::Block
+            && body_node.children().last().is_some_and(|statement| {
+                self.graph
+                    .syntax()
+                    .node(*statement)
+                    .is_some_and(|node| node.kind() == SyntaxNodeKind::ReturnStatement)
+                    && self.graph.syntax().child(*statement, 0).is_some()
+            })
     }
 
     fn infer_match_arm_body_type(
         &mut self,
         body: NodeId,
         expected: Option<TypeId>,
+        direct_block_returns_are_values: bool,
     ) -> Option<TypeId> {
         let body_node = self.graph.syntax().node(body)?;
 
         if body_node.kind() == SyntaxNodeKind::Block {
+            if direct_block_returns_are_values
+                && let Some(return_statement) = body_node.children().last().copied()
+                && self
+                    .graph
+                    .syntax()
+                    .node(return_statement)
+                    .is_some_and(|node| node.kind() == SyntaxNodeKind::ReturnStatement)
+                && let Some(return_expression) = self.graph.syntax().child(return_statement, 0)
+            {
+                return self.infer_expression_type_with_expected(return_expression, expected);
+            }
+
             return Some(
                 expected.unwrap_or_else(|| self.layer.table().primitive(PrimitiveType::Null)),
             );
