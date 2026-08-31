@@ -1,16 +1,30 @@
 import { read } from 'std/io'
 import { stringify, parse, ParseResult } from 'format'
 import { cyan, green } from 'format/ansi'
-import { log } from 'log'
+import { log, error } from 'log'
+
+import { NAME_DEFAULT } from "./another"
+
+fn(async) getInt(): i32 {
+  return 20
+}
 
 export fn main(_args: [[u8]]): i32 {
   log(green()::apply("Please enter a number:"))
+  const rr = getInt()
   var r1 = parse<i32>(read())
   var matchResult = match r1 {
-    ParseResult::Ok(v) => "Ok",
-    ParseResult::Err(e) => "Err",
+    ParseResult::Ok(v) {
+      log("Ok")
+      return v
+    },
+    ParseResult::Err(e) {
+      error("Err")
+      return 0
+    },
   }
   log("Is r1 ok? {}", matchResult)
+  log(NAME_DEFAULT)
   
   return 0
 }
