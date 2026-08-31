@@ -111,6 +111,41 @@ fn run_project_returns_the_application_exit_code() {
 }
 
 #[test]
+fn run_project_initializes_imported_string_globals() {
+    let workspace_root = env::current_dir()
+        .expect("current directory")
+        .join(".tmp")
+        .join(format!(
+            "runner-imported-string-global-{}",
+            NEXT_WORKSPACE_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+    fs::create_dir_all(workspace_root.join("src")).expect("temporary workspace");
+    fs::write(
+        workspace_root.join("galfus.toml"),
+        "[module]\nname = \"runner-test\"\ntarget = \"app\"\n[entry]\npath = \"src/main.gfs\"\n",
+    )
+    .expect("configuration");
+    fs::write(
+        workspace_root.join("src/another.gfs"),
+        "export const NAME_DEFAULT = \"Galfus\"",
+    )
+    .expect("dependency source");
+    fs::write(
+        workspace_root.join("src/main.gfs"),
+        "import { NAME_DEFAULT } from \"./another\"\nexport fn main(args: [[u8]]): i32 { return NAME_DEFAULT.length }",
+    )
+    .expect("entry source");
+
+    assert_eq!(
+        run_project(workspace_root.to_str().expect("UTF-8 workspace path"), &[])
+            .expect("runs imported string global"),
+        6
+    );
+
+    fs::remove_dir_all(workspace_root).expect("remove temporary workspace");
+}
+
+#[test]
 fn run_project_spawns_a_thread_with_the_anchored_api() {
     let source_path = env::current_dir()
         .expect("current directory")

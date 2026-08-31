@@ -78,6 +78,11 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
                 style("Runtime Error").red().bold(),
                 failure.message
             );
+            let mut cause = failure.cause.as_deref();
+            while let Some(error) = cause {
+                eprintln!("Caused by ({:?}): {}", error.kind, error.message);
+                cause = error.cause.as_deref();
+            }
             if !failure.stack.is_empty() {
                 eprintln!("\n{}", style("Stack trace:").yellow().bold());
                 for frame in &failure.stack {

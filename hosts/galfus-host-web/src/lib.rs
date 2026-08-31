@@ -92,12 +92,7 @@ impl ExecutionHost {
             )
         })?;
 
-        let result = execution.run_sync_to_completion().map_err(|e| {
-            ExecutionFailure::new(
-                galfus_contract::ExecutionFailureKind::InternalRuntimeFailure,
-                e.to_string(),
-            )
-        })?;
+        let result = execution.run_sync_to_completion()?;
 
         if let galfus_contract::BoundaryValue::I32(code) = result {
             Ok(code)

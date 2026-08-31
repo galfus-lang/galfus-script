@@ -79,12 +79,7 @@ impl ExecutionHost {
             )
         })?;
 
-        let result = execution.run_sync_to_completion().map_err(|e| {
-            ExecutionFailure::new(
-                galfus_contract::ExecutionFailureKind::InternalRuntimeFailure,
-                e.to_string(),
-            )
-        })?;
+        let result = execution.run_sync_to_completion()?;
 
         #[cfg(feature = "metrics")]
         if std::env::var_os("GALFUS_RUNTIME_METRICS").is_some()
