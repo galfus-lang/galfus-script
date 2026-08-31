@@ -7,6 +7,45 @@ use std::collections::HashSet;
 
 use crate::workspace::Workspace;
 
+fn import_path_label(
+    workspace: &Workspace,
+    current: &ModulePath,
+    candidate: &ModulePath,
+) -> String {
+    let candidate = candidate.as_str();
+    let is_builtin = galfus_contract::is_builtin_module(candidate.trim_end_matches(".gfs"));
+    let is_provider = workspace
+        .catalog
+        .is_provider_module(candidate.trim_end_matches(".gfs"));
+    if is_builtin || is_provider {
+        return candidate.trim_end_matches(".gfs").to_string();
+    }
+
+    let current_directory = current
+        .as_str()
+        .rsplit_once('/')
+        .map_or("", |(path, _)| path);
+    let target = candidate.trim_end_matches(".gfs");
+    let current_parts = current_directory.split('/').filter(|part| !part.is_empty());
+    let target_parts = target.split('/').filter(|part| !part.is_empty());
+    let mut current_parts = current_parts.peekable();
+    let mut target_parts = target_parts.peekable();
+
+    while current_parts.peek() == target_parts.peek() {
+        current_parts.next();
+        target_parts.next();
+    }
+
+    let mut relative_parts = vec![".."; current_parts.count()];
+    relative_parts.extend(target_parts);
+    let relative = relative_parts.join("/");
+    if relative.starts_with("../") {
+        relative
+    } else {
+        format!("./{relative}")
+    }
+}
+
 pub fn completion(
     workspace: &Workspace,
     path: &str,
@@ -88,18 +127,35 @@ pub fn completion(
                 if module.id() == module_id {
                     continue;
                 }
-                let mut path_str = module.path().as_str().to_string();
-                if let Some(stripped) = path_str.strip_suffix(".gfs") {
-                    path_str = stripped.to_string();
-                } else if let Some(stripped) = path_str.strip_suffix(".gfp") {
-                    path_str = stripped.to_string();
-                }
+                let path_str = import_path_label(workspace, &module_path, module.path());
 
                 if seen_labels.insert(path_str.clone()) {
                     items.push(CompletionItem {
                         label: path_str,
                         kind: Some(CompletionItemKind::MODULE),
                         detail: Some("Galfus Module".to_string()),
+                        sort_text: Some("0".to_string()),
+                        ..Default::default()
+                    });
+                }
+            }
+            for &(path_str, _) in galfus_contract::BUILTIN_MODULES {
+                if seen_labels.insert(path_str.to_string()) {
+                    items.push(CompletionItem {
+                        label: path_str.to_string(),
+                        kind: Some(CompletionItemKind::MODULE),
+                        detail: Some("Galfus Builtin Module".to_string()),
+                        sort_text: Some("0".to_string()),
+                        ..Default::default()
+                    });
+                }
+            }
+            for path_str in workspace.catalog.provider_module_paths() {
+                if seen_labels.insert(path_str.to_string()) {
+                    items.push(CompletionItem {
+                        label: path_str.to_string(),
+                        kind: Some(CompletionItemKind::MODULE),
+                        detail: Some("Galfus Provider Module".to_string()),
                         sort_text: Some("0".to_string()),
                         ..Default::default()
                     });
@@ -113,27 +169,21 @@ pub fn completion(
         }
 
         if in_named_import_list {
-            if let Some(import_item) = syntax_graph.node(item_node)
-                && let Some(source_node_id) = import_item.child(1)
+            if let Some(source_node_id) =
+                syntax_graph.first_child_of_kind(item_node, SyntaxNodeKind::ImportSource)
                 && let Some(source_node) = syntax_graph.node(source_node_id)
                 && let Some(string_node_id) = source_node.first_child()
                 && let Some(string_node) = syntax_graph.node(string_node_id)
             {
                 let literal_text = source.slice(string_node.span()).unwrap_or("");
-                let clean_path = literal_text.trim_matches('"');
-                let mut found_target_module = None;
-                for ext in ["", ".gfs", ".gfp"] {
-                    let mut p = clean_path.to_string();
-                    if !ext.is_empty() && !p.ends_with(".gfs") && !p.ends_with(".gfp") {
-                        p.push_str(ext);
-                    }
-                    if let Some(module_path) = ModulePath::new(&p)
-                        && let Some(id) = semantic_graph.module_by_path(&module_path)
-                    {
-                        found_target_module = semantic_graph.get(id);
-                        break;
-                    }
-                }
+                let clean_path = literal_text.trim_matches(['"', '\'']);
+                let found_target_module = galfus_frontend::modules::resolve_relative_import(
+                    &module_path,
+                    clean_path,
+                    Some(workspace.catalog.as_ref()),
+                )
+                .and_then(|target_path| semantic_graph.module_by_path(&target_path))
+                .and_then(|id| semantic_graph.get(id));
 
                 if let Some(target_module) = found_target_module
                     && let Some(target_resolution) = target_module.graph().resolution()

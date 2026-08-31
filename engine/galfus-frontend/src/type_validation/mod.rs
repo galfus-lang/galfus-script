@@ -39,7 +39,7 @@ use galfus_core::{DiagnosticBag, NodeId, SourceFile, SymbolId, TypeId};
 pub use model::*;
 use std::collections::HashMap;
 
-pub(crate) const IMPLICIT_FUTURE_SYMBOL: u32 = u32::MAX;
+pub const IMPLICIT_FUTURE_SYMBOL: u32 = u32::MAX;
 
 struct DeclarationTypeChecker<'a> {
     source: &'a SourceFile,

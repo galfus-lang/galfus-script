@@ -117,6 +117,8 @@ impl Workspace {
                                 .canonicalize()
                                 .unwrap_or_else(|_| file_path.clone()),
                         );
+                        #[cfg(not(target_arch = "wasm32"))]
+                        self.load_workspace_sources(file_path.as_path());
                         let manifest_path = file_path.join("galfus.toml");
                         if let Ok(manifest_str) = std::fs::read_to_string(manifest_path)
                             && let Ok(manifest) = toml::from_str(&manifest_str)
@@ -363,6 +365,48 @@ impl Workspace {
             if let Ok(s) = serde_json::to_string(&notification) {
                 responses.push(s);
             }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Workspace {
+    fn load_workspace_sources(&mut self, root: &std::path::Path) {
+        self.load_workspace_sources_in(root, root);
+    }
+
+    fn load_workspace_sources_in(&mut self, root: &std::path::Path, directory: &std::path::Path) {
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            return;
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                self.load_workspace_sources_in(root, path.as_path());
+                continue;
+            }
+            if !file_type.is_file()
+                || !matches!(
+                    path.extension().and_then(|extension| extension.to_str()),
+                    Some("gfs" | "gfp")
+                )
+            {
+                continue;
+            }
+            let Ok(relative_path) = path.strip_prefix(root) else {
+                continue;
+            };
+            let Some(relative_path) = relative_path.to_str() else {
+                continue;
+            };
+            let Ok(source) = std::fs::read(path.as_path()) else {
+                continue;
+            };
+            let _ = self.load_module(&relative_path.replace('\\', "/"), source.as_slice());
         }
     }
 }

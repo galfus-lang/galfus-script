@@ -1,6 +1,6 @@
 use galfus_core::{ModulePath, RowCol, SymbolId, TypeId};
-use galfus_frontend::ResolutionLayer;
 use galfus_frontend::modules::{FrontendSnapshot, SemanticModule};
+use galfus_frontend::{IMPLICIT_FUTURE_SYMBOL, ResolutionLayer};
 use lsp_types::{Hover, HoverContents, MarkedString, Position};
 
 use crate::workspace::Workspace;
@@ -348,8 +348,12 @@ pub(crate) fn format_type(
     match kind {
         galfus_frontend::TypeKind::Primitive(p) => p.name().to_string(),
         galfus_frontend::TypeKind::Named { symbol } => {
-            let name = get_symbol_name(snapshot, resolution, *symbol)
-                .unwrap_or_else(|| "unknown".to_string());
+            let name = if symbol.raw() == IMPLICIT_FUTURE_SYMBOL {
+                "Future".to_string()
+            } else {
+                get_symbol_name(snapshot, resolution, *symbol)
+                    .unwrap_or_else(|| "unknown".to_string())
+            };
             if with_links {
                 find_global_export_link(workspace, snapshot, &name).unwrap_or(name)
             } else {
