@@ -69,14 +69,14 @@ export struct ByteBuffer {
   length: i32
 }
 
-fn ByteBuffer::create(initialLength: i32 = DEFAULT_CAPACITY): ByteBuffer {
+export fn ByteBuffer::create(initialLength: i32 = DEFAULT_CAPACITY): ByteBuffer {
   return new(ByteBuffer) {
     data: new([u8], initialLength),
     length: 0
   }
 }
 
-fn ByteBuffer::append(self, chunk: [u8]): null {
+export fn ByteBuffer::append(self, chunk: [u8]): null {
   const required = self.length + chunk.length
   if required > self.data.length {
     var capacity = self.data.length
@@ -111,9 +111,9 @@ fn ByteBuffer::append(self, chunk: [u8]): null {
   return null
 }
 
-fn ByteBuffer::toBytes(self): [u8] => slice(self.data, 0, self.length)
+export fn ByteBuffer::toBytes(self): [u8] => slice(self.data, 0, self.length)
 
-fn(async) ByteBuffer::collect(self, stream: ReadStream<[u8]>, maxBytes: i32 = 16777216): CollectResult {
+export fn(async) ByteBuffer::collect(self, stream: ReadStream<[u8]>, maxBytes: i32 = 16777216): CollectResult {
   loop {
     const result = await stream::next()
     match result {
