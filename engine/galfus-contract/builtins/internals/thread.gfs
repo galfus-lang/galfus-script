@@ -40,35 +40,35 @@ export fn getMessage(): [u8] | null {
     return __internal_thread_get_message()
 }
 
-fn Thread::spawn(self, args: [[u8]] | null = null): bool {
+export fn Thread::spawn(self, args: [[u8]] | null = null): bool {
     return await __internal_thread_spawn(self.id, args)
 }
 
-fn Thread::isRunning(self): bool {
+export fn Thread::isRunning(self): bool {
     return __internal_thread_is_running(self.id)
 }
 
-fn Thread::isExited(self): bool {
+export fn Thread::isExited(self): bool {
     return __internal_thread_is_exited(self.id)
 }
 
-fn Thread::exitReason(self): i32 | null {
+export fn Thread::exitReason(self): i32 | null {
     return __internal_thread_exit_reason(self.id)
 }
 
-fn Thread::send(self, data: [u8]): bool {
+export fn Thread::send(self, data: [u8]): bool {
     return __internal_thread_send(self.id, data)
 }
 
-fn Thread::tryReceiveMessage(self): [u8] | null {
+export fn Thread::tryReceiveMessage(self): [u8] | null {
     return __internal_thread_try_receive(self.id)
 }
 
-fn Thread::receiveMessage(self, timeout: i32): [u8] | null {
+export fn Thread::receiveMessage(self, timeout: i32): [u8] | null {
     return await __internal_thread_receive(self.id, timeout)
 }
 
-fn Thread::wait(self): i32 | null {
+export fn Thread::wait(self): i32 | null {
     return await __internal_thread_wait(self.id)
 }
 

@@ -1,6 +1,8 @@
 import { Future } from "std/async"
 import { slice } from "text"
 
+const DEFAULT_CAPACITY = 4096
+
 export choice ReadStreamResult<Item> {
   Data(Item),
   End,
@@ -62,9 +64,16 @@ export choice CollectResult {
   Error([u8])
 }
 
-struct ByteBuffer {
+export struct ByteBuffer {
   data: [u8],
   length: i32
+}
+
+fn ByteBuffer::create(initialLength: i32 = DEFAULT_CAPACITY): ByteBuffer {
+  return new(ByteBuffer) {
+    data: new([u8], initialLength),
+    length: 0
+  }
 }
 
 fn ByteBuffer::append(self, chunk: [u8]): null {
@@ -72,7 +81,7 @@ fn ByteBuffer::append(self, chunk: [u8]): null {
   if required > self.data.length {
     var capacity = self.data.length
     if capacity == 0 {
-      capacity = 4096
+      capacity = DEFAULT_CAPACITY
     }
     loop {
       if capacity >= required {
@@ -104,23 +113,18 @@ fn ByteBuffer::append(self, chunk: [u8]): null {
 
 fn ByteBuffer::toBytes(self): [u8] => slice(self.data, 0, self.length)
 
-export fn(async) collect(stream: BytesStream, maxBytes: i32 = 16777216): CollectResult {
-  const buffer = new(ByteBuffer) {
-    data: new([u8], 0),
-    length: 0
-  }
-
+fn(async) ByteBuffer::collect(self, stream: ReadStream<[u8]>, maxBytes: i32 = 16777216): CollectResult {
   loop {
     const result = await stream::next()
     match result {
       ReadStreamResult::Data(chunk) {
-        if maxBytes < 0 || buffer.length + chunk.length > maxBytes {
+        if maxBytes >= 0 && self.length + chunk.length > maxBytes {
           await stream::cancel()
           return CollectResult::LimitExceeded
         }
-        buffer::append(chunk)
+        self::append(chunk)
       },
-      ReadStreamResult::End { return CollectResult::Data(buffer::toBytes()) },
+      ReadStreamResult::End { return CollectResult::Data(self::toBytes()) },
       ReadStreamResult::Error(message) { return CollectResult::Error(message) }
     }
   }

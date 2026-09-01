@@ -26,6 +26,7 @@ pub static INTERNAL_CORE_MODULES: &[(&str, &str)] = &[
     ("std/math", MATH_SOURCE),
     ("std/constraints", CONSTRAINTS_SOURCE),
     ("std/iterable", ITERABLE_SOURCE),
+    ("std/stream", STREAM_SOURCE),
 ];
 
 /// Utility modules that are pure Galfus Script algorithmic libraries without native bridge functions.
@@ -34,7 +35,6 @@ pub static UTILITY_MODULES: &[(&str, &str)] = &[
     ("format", FORMAT_SOURCE),
     ("format/ansi", FORMAT_ANSI_SOURCE),
     ("log", LOG_SOURCE),
-    ("std/stream", STREAM_SOURCE),
 ];
 
 /// Bridge templates for optional host capability modules.
