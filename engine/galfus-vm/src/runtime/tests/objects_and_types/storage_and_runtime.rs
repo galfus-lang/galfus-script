@@ -312,7 +312,7 @@ fn test_instanceof_matches_imported_choice_variant_by_layout_name() {
         },
     );
     provider.choice_layouts[1] = ChoiceLayout {
-        name: "ParseResult".to_string(),
+        name: "ParseResult#TypeId(42)".to_string(),
         variants: vec![
             ChoiceVariantLayout {
                 name: "Ok".to_string(),

@@ -77,6 +77,34 @@ pub(crate) fn decode_from_thread_heap(
                 )),
             }
         }
+        (BytecodeType::Struct(layout_idx), galfus_vm::VmValue::Object(reference)) => {
+            let galfus_vm::HeapObject::Struct { fields, .. } = heap
+                .get_object(reference)
+                .map_err(|_| BoundaryCodecError::UnsupportedType)?
+            else {
+                return Err(type_mismatch(
+                    expected_type,
+                    &galfus_vm::VmValue::Object(reference),
+                ));
+            };
+            let layout = module
+                .struct_layouts
+                .get(layout_idx.raw() as usize)
+                .ok_or(BoundaryCodecError::UnsupportedType)?;
+            if fields.len() != layout.fields.len() {
+                return Err(type_mismatch(
+                    expected_type,
+                    &galfus_vm::VmValue::Object(reference),
+                ));
+            }
+            let values = fields
+                .iter()
+                .cloned()
+                .zip(layout.fields.iter())
+                .map(|(field, layout)| decode_from_thread_heap(heap, field, layout.ty, module))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(BoundaryValue::Tuple(values))
+        }
         (BytecodeType::Array(element_type), galfus_vm::VmValue::Object(reference)) => {
             let galfus_vm::HeapObject::Array { elements, .. } = heap
                 .get_object(reference)
@@ -238,6 +266,36 @@ pub(crate) fn encode_into_thread_heap(
             })
             .map_err(|_| BoundaryCodecError::HeapExhausted)?,
         )),
+        (BytecodeType::Struct(layout_idx), value @ BoundaryValue::Tuple(_)) => {
+            let BoundaryValue::Tuple(values) = &value else {
+                unreachable!("struct value matched above");
+            };
+            let layout = module
+                .struct_layouts
+                .get(layout_idx.raw() as usize)
+                .ok_or(BoundaryCodecError::UnsupportedType)?;
+            if values.len() != layout.fields.len() {
+                return Err(type_mismatch(expected_type, &value));
+            }
+            let BoundaryValue::Tuple(values) = value else {
+                unreachable!("struct value matched above");
+            };
+            let fields = values
+                .into_iter()
+                .zip(layout.fields.iter())
+                .map(|(field, layout)| {
+                    encode_into_thread_heap(heap, field, layout.ty, module_id, module)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Struct {
+                    module_id,
+                    layout_idx: *layout_idx,
+                    fields,
+                })
+                .map_err(|_| BoundaryCodecError::HeapExhausted)?;
+            Ok(galfus_vm::VmValue::Object(reference))
+        }
         (BytecodeType::Array(element_type), BoundaryValue::Bytes(bytes))
             if matches!(
                 module.types.get(element_type.raw() as usize),

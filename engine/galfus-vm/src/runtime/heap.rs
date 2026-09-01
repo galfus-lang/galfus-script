@@ -217,7 +217,7 @@ impl VirtualMachine {
                         return false;
                     };
 
-                    actual_layout.name == expected_layout.name
+                    actual_layout.name.split('#').next() == expected_layout.name.split('#').next()
                         && actual_layout
                             .variants
                             .get(*variant_idx as usize)

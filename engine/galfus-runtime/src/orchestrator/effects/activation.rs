@@ -98,16 +98,63 @@ impl Orchestrator {
             .get(act_module_id)
             .unwrap()
             .module;
+        let receiver_layout = module.functions[func_idx.raw() as usize]
+            .name
+            .split_once("::")
+            .and_then(|(owner, _)| {
+                module
+                    .struct_layouts
+                    .iter()
+                    .position(|layout| layout.name == owner)
+                    .map(|index| {
+                        (
+                            galfus_bytecode::StructLayoutIdx(index as u16),
+                            &module.struct_layouts[index],
+                        )
+                    })
+            });
 
         let mut vm_args = Vec::with_capacity(args.len());
-        for (boundary, expected_ty) in args.into_iter().zip(arg_types) {
-            let vm_val = match crate::task::encode_into_thread_heap(
-                &mut worker_thread.heap,
-                boundary,
-                expected_ty,
-                act_module_id,
-                module,
-            ) {
+        for (index, (boundary, expected_ty)) in args.into_iter().zip(arg_types).enumerate() {
+            let vm_val = match match (index, &boundary, receiver_layout) {
+                (0, galfus_contract::BoundaryValue::Tuple(values), Some((layout_idx, layout))) => {
+                    (|| {
+                        if values.len() != layout.fields.len() {
+                            return Err(galfus_contract::BoundaryCodecError::UnsupportedType);
+                        }
+                        let fields = values
+                            .iter()
+                            .cloned()
+                            .zip(layout.fields.iter())
+                            .map(|(value, field)| {
+                                crate::task::encode_into_thread_heap(
+                                    &mut worker_thread.heap,
+                                    value,
+                                    field.ty,
+                                    act_module_id,
+                                    module,
+                                )
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let reference = worker_thread
+                            .heap
+                            .alloc(galfus_vm::HeapObject::Struct {
+                                module_id: act_module_id,
+                                layout_idx,
+                                fields,
+                            })
+                            .map_err(|_| galfus_contract::BoundaryCodecError::HeapExhausted)?;
+                        Ok(galfus_vm::VmValue::Object(reference))
+                    })()
+                }
+                _ => crate::task::encode_into_thread_heap(
+                    &mut worker_thread.heap,
+                    boundary,
+                    expected_ty,
+                    act_module_id,
+                    module,
+                ),
+            } {
                 Ok(value) => value,
                 Err(error) => {
                     self.failure = Some(
