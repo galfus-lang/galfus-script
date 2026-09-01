@@ -58,6 +58,10 @@ impl Continuation {
     pub fn for_future_handle(dest: Reg) -> Self {
         Self::new(Some(dest))
     }
+
+    pub fn dest(&self) -> Option<Reg> {
+        self.dest
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

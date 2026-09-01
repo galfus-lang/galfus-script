@@ -1182,6 +1182,14 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     arg_types,
                     return_type,
                 });
+                if self.ctx.function_names.get(func).is_none_or(|name| {
+                    !name
+                        .rsplit("::")
+                        .next()
+                        .is_some_and(|name| name.starts_with("__"))
+                }) {
+                    self.direct_galfus_await_candidates.insert(dest);
+                }
                 if !args.is_empty() {
                     self.free_temps(args.len() as u16);
                 }

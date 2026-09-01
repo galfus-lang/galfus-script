@@ -29,6 +29,7 @@ pub struct FnEmitter<'a, 'b> {
     label_pcs: collections::HashMap<usize, usize>,
     pending_jumps: Vec<(usize, usize, JumpKind)>,
     direct_await_candidates: collections::HashMap<Reg, Box<str>>,
+    pub(super) direct_galfus_await_candidates: collections::HashSet<Reg>,
     pub(super) known_immediates: collections::HashMap<Reg, ImmediateValue>,
     pub instruction_spans: collections::HashMap<usize, galfus_core::Span>,
 }
@@ -52,6 +53,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
             label_pcs: collections::HashMap::new(),
             pending_jumps: Vec::new(),
             direct_await_candidates: collections::HashMap::new(),
+            direct_galfus_await_candidates: collections::HashSet::new(),
             known_immediates: collections::HashMap::new(),
             instruction_spans: collections::HashMap::new(),
         }
@@ -493,6 +495,10 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                     arg_types,
                                     return_type,
                                 });
+                                if !_name.starts_with("__") {
+                                    self.direct_galfus_await_candidates
+                                        .insert(Reg(destination.raw() as u16));
+                                }
                                 if let Some(name) =
                                     native_async_name.filter(|name| name.starts_with("__internal_"))
                                 {
@@ -705,6 +711,27 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                     arg_types,
                                     return_type,
                                 };
+                            continue;
+                        }
+                        if self.direct_galfus_await_candidates.remove(&fut_reg)
+                            && let Some(Instruction::CreateFuture {
+                                dest,
+                                func,
+                                args_start,
+                                arg_count,
+                                ..
+                            }) = self.instructions.last_mut()
+                            && *dest == fut_reg
+                        {
+                            *self
+                                .instructions
+                                .last_mut()
+                                .expect("future instruction exists") = Instruction::Call {
+                                dest: Reg(destination.raw() as u16),
+                                func: *func,
+                                args_start: *args_start,
+                                arg_count: *arg_count,
+                            };
                             continue;
                         }
                         self.instructions.push(Instruction::AwaitFuture {

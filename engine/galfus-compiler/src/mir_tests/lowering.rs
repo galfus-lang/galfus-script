@@ -431,7 +431,7 @@ fn test_async_call_emits_typed_future_instruction() {
 }
 
 #[test]
-fn test_direct_await_drops_its_temporary_future_handle() {
+fn test_direct_await_calls_local_async_function_without_a_future_boundary() {
     let source_id = SourceId::new(0);
     let code = r#"
         struct Future<T> { id: i64 }
@@ -470,12 +470,17 @@ fn test_direct_await_drops_its_temporary_future_handle() {
         .expect("main function should be emitted");
     assert!(
         main.instructions
-            .windows(2)
-            .any(|instructions| matches!(instructions, [
-                galfus_bytecode::Instruction::AwaitFuture { future_id, .. },
-                galfus_bytecode::Instruction::Drop { reg },
-            ] if future_id == reg)),
-        "a direct await must drop its temporary future handle after resuming"
+            .iter()
+            .any(|instruction| matches!(instruction, galfus_bytecode::Instruction::Call { .. })),
+        "a direct await must call a local async function in the caller heap"
+    );
+    assert!(
+        !main.instructions.iter().any(|instruction| matches!(
+            instruction,
+            galfus_bytecode::Instruction::CreateFuture { .. }
+                | galfus_bytecode::Instruction::AwaitFuture { .. }
+        )),
+        "a direct local await must not cross a future boundary"
     );
 }
 

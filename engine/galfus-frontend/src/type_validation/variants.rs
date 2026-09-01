@@ -194,7 +194,17 @@ impl<'a> DeclarationTypeChecker<'a> {
 
     fn bind_value_anchor_receiver(&mut self, node: NodeId, member_type: TypeId) -> Option<TypeId> {
         let target = self.graph.syntax().child(node, 0)?;
+        let is_struct_type_target = self
+            .graph
+            .resolution()
+            .and_then(|resolution| resolution.reference_symbol(target))
+            .and_then(|symbol| self.graph.resolution()?.symbol(symbol))
+            .is_some_and(|symbol| symbol.kind() == SymbolKind::Struct);
         self.infer_expression_type(target)?;
+
+        if is_struct_type_target {
+            return Some(member_type);
+        }
 
         let TypeKind::Function(function) = self
             .layer

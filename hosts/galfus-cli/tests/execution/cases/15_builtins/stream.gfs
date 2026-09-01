@@ -1,15 +1,27 @@
-import { collect, fromBytes, CollectResult, ReadStreamResult } from "std/stream"
+import { fromBytes, ReadStreamResult } from "std/stream"
 import { println } from "std/io"
 import { equals } from "text"
 
+struct Counter {
+  value: i32
+}
+
+fn(async) increment(counter: Counter): null {
+  counter.value += 1
+}
+
 export fn main(_args: [[u8]]): i32 {
+  const counter = new(Counter) { value: 0 }
+  await increment(counter)
+  if counter.value != 1 { return 1 }
+
   const source = fromBytes("stream")
   const result = await source::next()
   match result {
     ReadStreamResult::Data(bytes) {
-      if !equals(bytes, "stream") { return 2 }
+      if !equals(bytes, "stream") { return 3 }
     },
-    _ { return 3 }
+    _ { return 4 }
   }
 
   println("ok")

@@ -106,6 +106,7 @@ impl VmThreadState {
         &mut self,
         args_start: Reg,
         arg_count: usize,
+        callee_param_count: usize,
         has_obj: Option<Reg>,
     ) -> Result<(), VmError> {
         let stack_len = self.call_stack.len();
@@ -138,6 +139,10 @@ impl VmThreadState {
             }
             self.retain_anchor_val(&val);
             self.registers[callee_base + i] = val;
+        }
+
+        for i in arg_count..callee_param_count {
+            self.registers[callee_base + i] = Value::Null;
         }
         Ok(())
     }

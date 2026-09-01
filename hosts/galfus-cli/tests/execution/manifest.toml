@@ -169,7 +169,7 @@ exit_code = 0
 stdout = "ok\n"
 
 [[case]]
-name = "stream builtin collects bytes and supports cancellation"
+name = "stream builtin preserves direct async object identity"
 path = "cases/15_builtins/stream.gfs"
 command = "run"
 exit_code = 0
