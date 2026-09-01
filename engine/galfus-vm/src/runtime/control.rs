@@ -254,6 +254,8 @@ impl VirtualMachine {
                 name_const,
                 args_start,
                 arg_count,
+                ref arg_types,
+                return_type,
             } => {
                 // Resolve method name from constant pool.
                 let method_name = match self
@@ -411,6 +413,31 @@ impl VirtualMachine {
                         ),
                     }
                 })?;
+
+                if let Some(return_type) = return_type {
+                    let mut args = Vec::with_capacity(arg_count as usize);
+                    for i in 0..arg_count {
+                        let value = thread.read_reg(Reg(args_start.raw() + i as u16));
+                        thread.retain_anchor_val(&value);
+                        args.push(value);
+                    }
+                    let module_id = thread
+                        .call_stack
+                        .last()
+                        .ok_or(VmError::EmptyCallStack)?
+                        .module_id;
+                    return Ok(VmStep::Suspend {
+                        effect: VmEffect::CreateFuture {
+                            module_id,
+                            target_module_id,
+                            func_idx: target_func_idx,
+                            args,
+                            arg_types: arg_types.clone(),
+                            return_type,
+                        },
+                        continuation: Continuation::for_future_handle(dest),
+                    });
+                }
 
                 let callee = self.get_function(target_module_id, target_func_idx)?;
 

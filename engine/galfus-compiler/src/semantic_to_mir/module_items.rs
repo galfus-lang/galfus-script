@@ -89,7 +89,7 @@ impl<'a> MirBuilder<'a> {
             }
             _ => func_type,
         };
-        let return_type = if is_async {
+        let inferred_return_type = if is_async {
             match self.type_result.layer().table().kind(callable_return_type) {
                 Some(TypeKind::GenericInstance { arguments, .. }) => {
                     arguments.first().copied().unwrap_or(callable_return_type)
@@ -99,6 +99,18 @@ impl<'a> MirBuilder<'a> {
         } else {
             callable_return_type
         };
+        let return_type = syntax
+            .node(item)
+            .and_then(|function| {
+                function.children().iter().rev().copied().find(|child| {
+                    syntax
+                        .node(*child)
+                        .is_some_and(|node| node.kind().is_type())
+                })
+            })
+            .and_then(|annotation| self.type_result.layer().node_type(annotation))
+            .map(|annotation| self.substitute_type(annotation, &type_substitutions))
+            .unwrap_or(inferred_return_type);
 
         // Reset the local ID counter for this function
         self.next_local_id = 0;
@@ -187,9 +199,11 @@ impl<'a> MirBuilder<'a> {
             .is_some_and(|node| node.kind().is_expression())
         {
             let operand = builder_ctx.lower_expression(last_node);
-            builder_ctx.terminate_block(Terminator::Return(Some(operand)));
+            if !builder_ctx.is_terminated() {
+                builder_ctx.close_current_block(Terminator::Return(Some(operand)));
+            }
         } else {
-            builder_ctx.terminate_block(Terminator::Return(None));
+            builder_ctx.close_current_block(Terminator::Return(None));
         }
         builder_ctx.flush_current_instructions();
 
@@ -302,7 +316,9 @@ impl<'a> MirBuilder<'a> {
             builder_ctx.lower_block(body);
         } else {
             let op = builder_ctx.lower_expression(body);
-            builder_ctx.terminate_block(Terminator::Return(Some(op)));
+            if !builder_ctx.is_terminated() {
+                builder_ctx.close_current_block(Terminator::Return(Some(op)));
+            }
         }
 
         let mut func = MirFunction {

@@ -525,6 +525,8 @@ pub enum Instruction {
         name_const: ConstIdx,
         args_start: Reg,
         arg_count: u8,
+        arg_types: Box<[TypeIdx]>,
+        return_type: Option<TypeIdx>,
     },
     CallDynamic {
         dest: Reg,

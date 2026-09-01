@@ -317,6 +317,18 @@ impl<'a> DeclarationTypeChecker<'a> {
                     .intern_function(parameters, return_type, false)
             }
 
+            Some(TypeKind::GenericInstance { base, arguments }) => {
+                let base = self.substitute_type(base, substitution);
+                let arguments = arguments
+                    .into_iter()
+                    .map(|argument| self.substitute_type(argument, substitution))
+                    .collect::<Vec<_>>();
+
+                self.layer
+                    .table_mut()
+                    .intern_generic_instance(base, arguments)
+            }
+
             Some(TypeKind::Error) => ty,
 
             _ => ty,
@@ -394,6 +406,70 @@ impl<'a> DeclarationTypeChecker<'a> {
         }
 
         None
+    }
+
+    pub(super) fn constraint_applications_for_type(
+        &mut self,
+        ty: TypeId,
+    ) -> Vec<ConstraintApplication> {
+        let ty = self.resolve_alias_type(ty);
+        let (symbol, struct_substitution) = match self.layer.table().kind(ty).cloned() {
+            Some(TypeKind::Named { symbol }) => (symbol, TypeSubstitution::new()),
+            Some(TypeKind::GenericInstance { base, arguments }) => {
+                let Some(TypeKind::Named { symbol }) = self.layer.table().kind(base).cloned()
+                else {
+                    return Vec::new();
+                };
+                let Some(struct_item) = self.type_item_for_symbol(symbol) else {
+                    return Vec::new();
+                };
+                let parameters =
+                    self.declaration_symbols_in_node(struct_item, &[SymbolKind::GenericParameter]);
+                if parameters.len() != arguments.len() {
+                    return Vec::new();
+                }
+                (symbol, parameters.into_iter().zip(arguments).collect())
+            }
+            _ => return Vec::new(),
+        };
+        let Some(resolution) = self.graph.resolution() else {
+            return Vec::new();
+        };
+        if resolution
+            .symbol(symbol)
+            .is_none_or(|symbol| symbol.kind() != SymbolKind::Struct)
+        {
+            return Vec::new();
+        }
+        let Some(struct_item) = self.type_item_for_symbol(symbol) else {
+            return Vec::new();
+        };
+        let constraints = self
+            .graph
+            .syntax()
+            .first_child_of_kind(struct_item, SyntaxNodeKind::SatisfiesClause)
+            .and_then(|node| self.graph.syntax().node(node))
+            .map(|node| node.children().to_vec())
+            .unwrap_or_default();
+
+        let mut applications = Vec::new();
+        for constraint_type in constraints {
+            let Ok(mut application) = self.constraint_application(constraint_type) else {
+                continue;
+            };
+            application.substitution = application
+                .substitution
+                .iter()
+                .map(|(parameter, value)| {
+                    (
+                        *parameter,
+                        self.substitute_type(*value, &struct_substitution),
+                    )
+                })
+                .collect();
+            applications.push(application);
+        }
+        applications
     }
 
     pub(super) fn type_item_for_symbol(&self, symbol: SymbolId) -> Option<NodeId> {

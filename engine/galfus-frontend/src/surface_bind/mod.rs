@@ -369,7 +369,56 @@ pub fn imported_surface_types_for_named_export(
         imported_types.insert_struct_fields(local_symbol, fields);
     }
 
+    if export.kind() == SymbolKind::Function
+        && let Some(struct_name) = imported_function_return_struct_name(export.ty())
+        && let Some(struct_export) = surface.export(struct_name)
+        && struct_export.kind() == SymbolKind::Struct
+    {
+        for member in struct_export.members() {
+            if let Some(ty) = surface.imported_member_path_type_for_named_export(
+                local_symbol,
+                struct_name,
+                member.name(),
+            ) {
+                imported_types.insert_member_type(
+                    ImportedMemberKey::new(local_symbol, struct_name, member.name()),
+                    ty,
+                );
+            }
+        }
+
+        let fields = struct_export
+            .members()
+            .iter()
+            .filter(|member| member.kind() == SymbolKind::StructField)
+            .filter_map(|member| {
+                member.ty().cloned().map(|ty| {
+                    ImportedStructFieldSurface::new(
+                        member.name().to_string(),
+                        ty,
+                        member.has_default(),
+                        member.default_value(),
+                    )
+                })
+            })
+            .collect();
+        imported_types.insert_struct_fields(local_symbol, fields);
+    }
+
     imported_types
+}
+
+fn imported_function_return_struct_name(ty: Option<&ImportedType>) -> Option<&str> {
+    let ImportedType::Function { return_type, .. } = ty? else {
+        return None;
+    };
+
+    match return_type.as_ref() {
+        ImportedType::LocalPath { name } | ImportedType::SurfacePath { name, .. } => {
+            Some(name.as_str())
+        }
+        _ => None,
+    }
 }
 
 fn surface_members_for_export(
@@ -380,6 +429,10 @@ fn surface_members_for_export(
     symbol: SymbolId,
 ) -> Vec<ModuleSurfaceMember> {
     let Some(resolution) = graph.resolution() else {
+        return Vec::new();
+    };
+
+    let Some(symbol_data) = resolution.symbol(symbol) else {
         return Vec::new();
     };
 
@@ -469,6 +522,34 @@ fn surface_members_for_export(
             }
         })
         .collect::<Vec<_>>();
+
+    let owner_name = string_table.resolve(symbol_data.name()).unwrap_or("");
+    let anchor_prefix = format!("{owner_name}::");
+    members.extend(
+        resolution
+            .symbols()
+            .iter()
+            .filter(|member| {
+                member.kind() == SymbolKind::Function
+                    && resolution.export_for_symbol(member.id()).is_some()
+                    && string_table
+                        .resolve(member.name())
+                        .is_some_and(|name| name.starts_with(anchor_prefix.as_str()))
+            })
+            .filter_map(|member| {
+                let name = string_table.resolve(member.name())?;
+                let member_name = name.strip_prefix(anchor_prefix.as_str())?.to_string();
+                let ty = type_result
+                    .layer()
+                    .symbol_type(member.id())
+                    .and_then(|ty| transport_type(resolution, type_result, string_table, ty))?;
+
+                Some((
+                    member.declaration(),
+                    ModuleSurfaceMember::new(member_name, member.kind(), Some(ty)),
+                ))
+            }),
+    );
     members.sort_by_key(|(declaration, _)| declaration.raw());
     if resolution
         .symbol(symbol)

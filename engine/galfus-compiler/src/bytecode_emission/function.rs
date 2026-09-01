@@ -70,6 +70,23 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
         self.temp_count_current = self.temp_count_current.saturating_sub(count);
     }
 
+    fn is_future_type(&self, ty: galfus_core::TypeId) -> bool {
+        match self.ctx.type_result.layer().table().kind(ty) {
+            Some(galfus_frontend::TypeKind::Named { symbol }) => {
+                self.ctx
+                    .graph
+                    .resolution()
+                    .and_then(|resolution| resolution.symbol(*symbol))
+                    .and_then(|symbol| self.ctx.string_table.resolve(symbol.name()))
+                    == Some("Future")
+            }
+            Some(galfus_frontend::TypeKind::Path { segments, .. }) => {
+                segments.last().is_some_and(|segment| segment == "Future")
+            }
+            _ => false,
+        }
+    }
+
     fn emit_parallel_copies(&mut self, dests: &[Reg], srcs: &[Operand]) {
         assert_eq!(dests.len(), srcs.len());
         if dests.is_empty() {
@@ -264,7 +281,14 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                         is_external,
                     } => {
                         let builtin_name = self.ctx.function_names.get(func).map(|s| s.to_string());
-                        if let Some(_name) = builtin_name {
+                        let is_async_target = self
+                            .ctx
+                            .function_is_async
+                            .get(func)
+                            .copied()
+                            .unwrap_or(false);
+                        if builtin_name.is_some() || is_async_target {
+                            let _name = builtin_name.as_deref().unwrap_or_default();
                             let native_math_name = _name
                                 .rsplit("::")
                                 .next()
@@ -379,8 +403,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                 .rsplit("::")
                                 .next()
                                 .filter(|name| *is_external || name.starts_with("__internal_"));
-
-                            if native_async_name.is_some() {
+                            if native_async_name.is_some() || is_async_target {
                                 let start_reg = if args.is_empty() {
                                     Reg(0) // Dummy if no args
                                 } else {
@@ -448,10 +471,17 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                         }
                                     })
                                     .collect();
-                                let return_type = crate::bytecode_emission::types::lower_type(
-                                    self.ctx,
-                                    return_type,
-                                );
+                                let return_type = self
+                                    .ctx
+                                    .async_return_type_overrides
+                                    .get(func)
+                                    .copied()
+                                    .unwrap_or_else(|| {
+                                        crate::bytecode_emission::types::lower_type(
+                                            self.ctx,
+                                            return_type,
+                                        )
+                                    });
 
                                 let func_idx = *self.ctx.function_map.get(func).unwrap_or_else(|| panic!("missing lowered function mapping for {:?} while emitting {} ({:?})",
                                     func, self.func.name, self.func.id));
@@ -521,6 +551,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                         obj,
                         args,
                         destination,
+                        return_type: constraint_return_type,
                     } => {
                         let obj_reg = self.alloc_temp();
                         self.load_operand_to(obj, obj_reg);
@@ -538,6 +569,31 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                                 self.ctx,
                                 &MirConstant::String(method_name.clone()),
                             );
+                        let future_payload = match self
+                            .ctx
+                            .type_result
+                            .layer()
+                            .table()
+                            .kind(*constraint_return_type)
+                        {
+                            Some(galfus_frontend::TypeKind::GenericInstance {
+                                base,
+                                arguments,
+                            }) if self.is_future_type(*base) => arguments.first().copied(),
+                            _ => None,
+                        };
+
+                        let mut arg_types = Vec::with_capacity(1 + args.len());
+                        arg_types.push(crate::bytecode_emission::types::lower_type(
+                            self.ctx,
+                            self.get_operand_type(obj),
+                        ));
+                        arg_types.extend(args.iter().map(|argument| {
+                            crate::bytecode_emission::types::lower_type(
+                                self.ctx,
+                                self.get_operand_type(argument),
+                            )
+                        }));
 
                         self.instructions.push(Instruction::CallMethod {
                             dest: Reg(destination.raw() as u16),
@@ -545,6 +601,10 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                             name_const,
                             args_start: obj_reg,
                             arg_count: (1 + args.len()) as u8,
+                            arg_types: arg_types.into_boxed_slice(),
+                            return_type: future_payload.map(|ty| {
+                                crate::bytecode_emission::types::lower_type(self.ctx, ty)
+                            }),
                         });
 
                         self.free_temps(1 + extra_regs.len() as u16);
@@ -590,8 +650,26 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                             .find(|local| local.id == *destination)
                             .expect("await destination must be a local")
                             .ty;
-                        let return_type =
+                        let mut return_type =
                             crate::bytecode_emission::types::lower_type(self.ctx, payload_type);
+                        if let Some(Instruction::CreateFuture {
+                            dest,
+                            return_type: future_return_type,
+                            ..
+                        }) = self.instructions.last()
+                            && *dest == fut_reg
+                        {
+                            return_type = *future_return_type;
+                        }
+                        if let Some(Instruction::CallMethod {
+                            dest,
+                            return_type: method_return_type,
+                            ..
+                        }) = self.instructions.last_mut()
+                            && *dest == fut_reg
+                        {
+                            *method_return_type = Some(return_type);
+                        }
                         if let Some(Instruction::CallInternalThread { dest, .. }) =
                             self.instructions.last_mut()
                             && *dest == fut_reg

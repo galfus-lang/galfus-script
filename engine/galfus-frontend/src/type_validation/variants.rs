@@ -1,7 +1,7 @@
 use std::collections;
 
 use super::DeclarationTypeChecker;
-use crate::{PathReferenceKind, SymbolKind, SyntaxNodeKind, TypeKind};
+use crate::{FunctionType, PathReferenceKind, SymbolKind, SyntaxNodeKind, TypeKind};
 use galfus_core::{NodeId, SymbolId, TypeId};
 use std::collections::HashMap;
 
@@ -27,8 +27,10 @@ impl<'a> DeclarationTypeChecker<'a> {
         match kind {
             PathReferenceKind::EnumVariant => self.infer_enum_variant_path_type(node),
             PathReferenceKind::ChoiceVariant => self.infer_choice_variant_path_type(node, expected),
-            PathReferenceKind::AnchorFunction => self.infer_anchor_function_path_type(node),
-            PathReferenceKind::ConstraintMember => self.infer_constraint_member_path_type(node),
+            PathReferenceKind::AnchorFunction => self.infer_bound_anchor_function_path_type(node),
+            PathReferenceKind::ConstraintMember => {
+                self.infer_bound_constraint_member_path_type(node)
+            }
             PathReferenceKind::LocalMember => {
                 let target = self.graph.syntax().child(node, 0)?;
                 let member = self.graph.syntax().child(node, 1)?;
@@ -171,6 +173,11 @@ impl<'a> DeclarationTypeChecker<'a> {
         Some(ty)
     }
 
+    fn infer_bound_anchor_function_path_type(&mut self, node: NodeId) -> Option<TypeId> {
+        let ty = self.infer_anchor_function_path_type(node)?;
+        self.bind_value_anchor_receiver(node, ty)
+    }
+
     fn infer_constraint_member_path_type(&mut self, node: NodeId) -> Option<TypeId> {
         let resolution = self.graph.resolution()?;
         let member_symbol = resolution.path_reference_symbol(node)?;
@@ -180,19 +187,61 @@ impl<'a> DeclarationTypeChecker<'a> {
         Some(ty)
     }
 
+    fn infer_bound_constraint_member_path_type(&mut self, node: NodeId) -> Option<TypeId> {
+        let ty = self.infer_constraint_member_path_type(node)?;
+        self.bind_value_anchor_receiver(node, ty)
+    }
+
+    fn bind_value_anchor_receiver(&mut self, node: NodeId, member_type: TypeId) -> Option<TypeId> {
+        let target = self.graph.syntax().child(node, 0)?;
+        self.infer_expression_type(target)?;
+
+        let TypeKind::Function(function) = self
+            .layer
+            .table()
+            .kind(self.resolve_alias_type(member_type))?
+            .clone()
+        else {
+            return Some(member_type);
+        };
+
+        let (_, parameters) = function.parameters().split_first()?;
+        let bound_type = self.bound_function_type(&function, parameters.to_vec());
+        self.layer.bind_node_type(node, bound_type);
+        Some(bound_type)
+    }
+
+    fn bound_function_type(
+        &mut self,
+        function: &FunctionType,
+        parameters: Vec<crate::FunctionParameterType>,
+    ) -> TypeId {
+        self.layer.table_mut().intern_function(
+            parameters,
+            function.return_type(),
+            function.is_external(),
+        )
+    }
+
     fn infer_value_anchor_path_type(&mut self, node: NodeId) -> Option<TypeId> {
         let target = self.graph.syntax().child(node, 0)?;
         let member = self.graph.syntax().child(node, 1)?;
         let target_type = self.infer_expression_type(target)?;
         let member_name = self.node_text(member);
-        let member_type =
-            self.constraint_function_type_for_value_anchor(target_type, member_name.as_str())?;
+        let mut member_type =
+            self.constraint_function_type_for_value_anchor(target_type, member_name.as_str());
+        if member_type.is_none() {
+            member_type =
+                self.struct_function_type_for_value_anchor(target_type, member_name.as_str());
+        }
+        let member_type = member_type?;
+        let member_type = self.bind_value_anchor_receiver(node, member_type)?;
 
         self.layer.bind_node_type(node, member_type);
         Some(member_type)
     }
 
-    fn constraint_function_type_for_value_anchor(
+    fn struct_function_type_for_value_anchor(
         &self,
         target_type: TypeId,
         member_name: &str,
@@ -205,23 +254,86 @@ impl<'a> DeclarationTypeChecker<'a> {
         let resolution = self.graph.resolution()?;
         let symbol_data = resolution.symbol(*symbol)?;
 
-        if symbol_data.kind() != SymbolKind::Constraint {
+        let mut current_symbol = *symbol;
+        let mut current_symbol_data = symbol_data;
+
+        while current_symbol_data.kind() == SymbolKind::ImportBinding
+            || current_symbol_data.kind() == SymbolKind::TypeAlias
+        {
+            if let Some(aliased_type) = self.layer.symbol_type(current_symbol)
+                && let Some(TypeKind::Named {
+                    symbol: next_symbol,
+                }) = self.layer.table().kind(aliased_type)
+            {
+                if *next_symbol == current_symbol {
+                    break;
+                }
+                if let Some(next_symbol_data) = resolution.symbol(*next_symbol) {
+                    current_symbol = *next_symbol;
+                    current_symbol_data = next_symbol_data;
+                    continue;
+                }
+            }
+            break;
+        }
+
+        if current_symbol_data.kind() != SymbolKind::Struct {
             return None;
         }
 
-        let member_scope = resolution.member_scope(*symbol)?;
-        let member_symbol = resolution.scope(member_scope).and_then(|scope| {
+        let anchored_name = format!(
+            "{}::{member_name}",
             self.string_table
-                .get(member_name)
-                .and_then(|id| scope.symbol(id))
-        })?;
-        let member_symbol_data = resolution.symbol(member_symbol)?;
+                .resolve(current_symbol_data.name())
+                .unwrap_or("")
+        );
+        let anchored_name_id = self.string_table.get(&anchored_name)?;
+        let module_scope = current_symbol_data.scope();
+        let scope = resolution.scope(module_scope)?;
+        let member_symbol = scope.symbol(anchored_name_id)?;
 
-        if member_symbol_data.kind() != SymbolKind::ConstraintFunction {
+        let member_symbol_data = resolution.symbol(member_symbol)?;
+        if member_symbol_data.kind() != SymbolKind::Function {
             return None;
         }
 
         self.layer.symbol_type(member_symbol)
+    }
+
+    fn constraint_function_type_for_value_anchor(
+        &mut self,
+        target_type: TypeId,
+        member_name: &str,
+    ) -> Option<TypeId> {
+        let target_type = self.resolve_alias_type(target_type);
+        let resolution = self.graph.resolution()?;
+
+        let constraint_function = |constraint_symbol| {
+            let member_scope = resolution.member_scope(constraint_symbol)?;
+            let member_symbol = resolution.scope(member_scope).and_then(|scope| {
+                self.string_table
+                    .get(member_name)
+                    .and_then(|id| scope.symbol(id))
+            })?;
+            (resolution.symbol(member_symbol)?.kind() == SymbolKind::ConstraintFunction)
+                .then_some(member_symbol)
+        };
+
+        if let Some(TypeKind::Named { symbol }) = self.layer.table().kind(target_type)
+            && resolution
+                .symbol(*symbol)
+                .is_some_and(|symbol| symbol.kind() == SymbolKind::Constraint)
+        {
+            return constraint_function(*symbol).and_then(|symbol| self.layer.symbol_type(symbol));
+        }
+
+        let application = self
+            .constraint_applications_for_type(target_type)
+            .into_iter()
+            .find(|application| constraint_function(application.symbol).is_some())?;
+        let member_symbol = constraint_function(application.symbol)?;
+        let member_type = self.layer.symbol_type(member_symbol)?;
+        Some(self.substitute_type(member_type, &application.substitution))
     }
 
     fn choice_variant_payload(&mut self, node: NodeId) -> Option<VariantPayload> {

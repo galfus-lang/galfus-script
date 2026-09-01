@@ -100,10 +100,11 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                         obj: subject.clone(),
                         args: vec![literal_op],
                         destination: cond_temp,
+                        return_type: bool_ty,
                     },
                     None,
                 ));
-                self.terminate_block(Terminator::Branch {
+                self.close_current_block(Terminator::Branch {
                     cond: Operand::Local(cond_temp),
                     true_block: success_block,
                     true_args: Vec::new(),
@@ -112,7 +113,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 });
             }
             SyntaxNodeKind::WildcardPattern => {
-                self.terminate_block(Terminator::Jump {
+                self.close_current_block(Terminator::Jump {
                     target: success_block,
                     args: Vec::new(),
                 });
@@ -138,7 +139,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                         ));
                     }
                 }
-                self.terminate_block(Terminator::Jump {
+                self.close_current_block(Terminator::Jump {
                     target: success_block,
                     args: Vec::new(),
                 });
@@ -191,7 +192,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                                 ),
                                 None,
                             ));
-                            self.terminate_block(Terminator::Branch {
+                            self.close_current_block(Terminator::Branch {
                                 cond: Operand::Local(cond_temp),
                                 true_block: success_block,
                                 true_args: Vec::new(),
@@ -223,7 +224,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                             ));
 
                             let payload_extract_block = self.builder.next_block();
-                            self.terminate_block(Terminator::Branch {
+                            self.close_current_block(Terminator::Branch {
                                 cond: Operand::Local(cond_temp),
                                 true_block: payload_extract_block,
                                 true_args: Vec::new(),
@@ -231,8 +232,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                                 false_args: Vec::new(),
                             });
 
-                            self.blocks.last_mut().unwrap().id = payload_extract_block;
-                            self.current_block = payload_extract_block;
+                            self.begin_block(payload_extract_block);
 
                             if let Some(payload_node_id) = syntax.first_child_of_kind(
                                 pattern_node_id,
@@ -305,27 +305,25 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                                             );
 
                                             if i < payload_patterns.len() - 1 {
-                                                self.blocks.last_mut().unwrap().id =
-                                                    next_field_block;
-                                                self.current_block = next_field_block;
+                                                self.begin_block(next_field_block);
                                             }
                                         }
                                     }
                                 } else {
-                                    self.terminate_block(Terminator::Jump {
+                                    self.close_current_block(Terminator::Jump {
                                         target: success_block,
                                         args: Vec::new(),
                                     });
                                 }
                             } else {
-                                self.terminate_block(Terminator::Jump {
+                                self.close_current_block(Terminator::Jump {
                                     target: success_block,
                                     args: Vec::new(),
                                 });
                             }
                         }
                         _ => {
-                            self.terminate_block(Terminator::Jump {
+                            self.close_current_block(Terminator::Jump {
                                 target: failure_block,
                                 args: Vec::new(),
                             });
@@ -355,7 +353,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     ));
 
                     let payload_extract_block = self.builder.next_block();
-                    self.terminate_block(Terminator::Branch {
+                    self.close_current_block(Terminator::Branch {
                         cond: Operand::Local(cond_temp),
                         true_block: payload_extract_block,
                         true_args: Vec::new(),
@@ -363,8 +361,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                         false_args: Vec::new(),
                     });
 
-                    self.blocks.last_mut().unwrap().id = payload_extract_block;
-                    self.current_block = payload_extract_block;
+                    self.begin_block(payload_extract_block);
 
                     if let Some(payload_node_id) = syntax
                         .first_child_of_kind(pattern_node_id, SyntaxNodeKind::VariantPatternPayload)
@@ -422,25 +419,24 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                                     );
 
                                     if i < payload_patterns.len() - 1 {
-                                        self.blocks.last_mut().unwrap().id = next_field_block;
-                                        self.current_block = next_field_block;
+                                        self.begin_block(next_field_block);
                                     }
                                 }
                             }
                         } else {
-                            self.terminate_block(Terminator::Jump {
+                            self.close_current_block(Terminator::Jump {
                                 target: success_block,
                                 args: Vec::new(),
                             });
                         }
                     } else {
-                        self.terminate_block(Terminator::Jump {
+                        self.close_current_block(Terminator::Jump {
                             target: success_block,
                             args: Vec::new(),
                         });
                     }
                 } else {
-                    self.terminate_block(Terminator::Jump {
+                    self.close_current_block(Terminator::Jump {
                         target: failure_block,
                         args: Vec::new(),
                     });
@@ -473,7 +469,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 ));
 
                 let type_check_success = self.builder.next_block();
-                self.terminate_block(Terminator::Branch {
+                self.close_current_block(Terminator::Branch {
                     cond: Operand::Local(cond_temp),
                     true_block: type_check_success,
                     true_args: Vec::new(),
@@ -481,8 +477,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     false_args: Vec::new(),
                 });
 
-                self.blocks.last_mut().unwrap().id = type_check_success;
-                self.current_block = type_check_success;
+                self.begin_block(type_check_success);
 
                 if let Some(binding_node_id) = syntax
                     .first_child_of_kind(pattern_node_id, SyntaxNodeKind::TypePatternBinding)
@@ -503,7 +498,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     }
                 }
 
-                self.terminate_block(Terminator::Jump {
+                self.close_current_block(Terminator::Jump {
                     target: success_block,
                     args: Vec::new(),
                 });
@@ -534,7 +529,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 ));
 
                 let struct_check_success = self.builder.next_block();
-                self.terminate_block(Terminator::Branch {
+                self.close_current_block(Terminator::Branch {
                     cond: Operand::Local(cond_temp),
                     true_block: struct_check_success,
                     true_args: Vec::new(),
@@ -542,12 +537,11 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     false_args: Vec::new(),
                 });
 
-                self.blocks.last_mut().unwrap().id = struct_check_success;
-                self.current_block = struct_check_success;
+                self.begin_block(struct_check_success);
 
                 let fields = &pattern_node.children()[1..];
                 if fields.is_empty() {
-                    self.terminate_block(Terminator::Jump {
+                    self.close_current_block(Terminator::Jump {
                         target: success_block,
                         args: Vec::new(),
                     });
@@ -607,20 +601,19 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                                 ));
                             }
                         }
-                        self.terminate_block(Terminator::Jump {
+                        self.close_current_block(Terminator::Jump {
                             target: next_field_block,
                             args: Vec::new(),
                         });
                     }
 
                     if i < fields.len() - 1 {
-                        self.blocks.last_mut().unwrap().id = next_field_block;
-                        self.current_block = next_field_block;
+                        self.begin_block(next_field_block);
                     }
                 }
             }
             _ => {
-                self.terminate_block(Terminator::Jump {
+                self.close_current_block(Terminator::Jump {
                     target: failure_block,
                     args: Vec::new(),
                 });

@@ -282,6 +282,37 @@ pub(super) fn resolve_import_target(
             }
         }
 
+        if let Some(syntax_node) = module.graph().syntax().node(node_id)
+            && syntax_node.kind() == SyntaxNodeKind::PathExpression
+            && let Some(member_node) = syntax_node.child(1)
+            && let Some(member_node_data) = module.graph().syntax().node(member_node)
+            && let Some(member_name) = module.source().slice(member_node_data.span())
+            && let Some(receiver) = syntax_node.child(0)
+            && let Some(receiver_ty) = module
+                .type_result()
+                .and_then(|result| result.layer().node_type(receiver))
+            && let Some(TypeKind::Path { segments, .. }) = module
+                .type_result()
+                .and_then(|result| result.layer().table().kind(receiver_ty))
+            && let Some(type_name) = segments.last()
+        {
+            let mut candidates = Vec::new();
+            let anchored_name = format!("{type_name}::{member_name}");
+            for target_module in modules.iter() {
+                if let Some(target_resolution) = target_module.graph().resolution() {
+                    for export in target_resolution.exports() {
+                        if export.kind() == SymbolKind::Function && export.name() == anchored_name {
+                            candidates
+                                .push((target_module.id(), FunctionId::new(export.symbol().raw())));
+                        }
+                    }
+                }
+            }
+            if candidates.len() == 1 {
+                return Some(candidates[0]);
+            }
+        }
+
         import_symbol = module
             .graph()
             .syntax()

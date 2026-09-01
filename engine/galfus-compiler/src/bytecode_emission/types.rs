@@ -35,7 +35,13 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: TypeId) -> TypeIdx {
     let ty = resolve_type_with_substitutions(ctx, ty);
 
     if let Some(&idx) = ctx.type_map.get(&ty) {
-        return idx;
+        let is_null_primitive = matches!(
+            ctx.type_result.layer().table().kind(ty),
+            Some(TypeKind::Primitive(PrimitiveType::Null))
+        );
+        if is_null_primitive || !matches!(ctx.types[idx.raw() as usize], BytecodeType::Null) {
+            return idx;
+        }
     }
 
     let next_idx = TypeIdx(ctx.types.len() as u16);
@@ -49,6 +55,15 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: TypeId) -> TypeIdx {
             let resolution = ctx.graph.resolution().unwrap();
             let sym_kind = resolution.symbol(*symbol).map(|s| s.kind());
             match sym_kind {
+                _ if ctx.imported_struct_fields.contains_key(symbol) => {
+                    let layout_idx = get_or_create_struct_layout(ctx, *symbol);
+                    BytecodeType::Struct(layout_idx)
+                }
+                _ if ctx.type_result.imported_symbol_choices.contains_key(symbol) => {
+                    let choice = ctx.type_result.imported_symbol_choices.get(symbol).unwrap();
+                    let layout_idx = get_or_create_imported_choice_layout(ctx, choice);
+                    BytecodeType::Choice(layout_idx)
+                }
                 Some(SymbolKind::Struct) => {
                     if ctx.is_adapter_proxy {
                         let name = ctx
@@ -65,19 +80,6 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: TypeId) -> TypeIdx {
                         let layout_idx = get_or_create_struct_layout(ctx, *symbol);
                         BytecodeType::Struct(layout_idx)
                     }
-                }
-                Some(SymbolKind::ImportBinding)
-                    if ctx.type_result.imported_struct_fields.contains_key(symbol) =>
-                {
-                    let layout_idx = get_or_create_struct_layout(ctx, *symbol);
-                    BytecodeType::Struct(layout_idx)
-                }
-                Some(SymbolKind::ImportBinding)
-                    if ctx.type_result.imported_symbol_choices.contains_key(symbol) =>
-                {
-                    let choice = ctx.type_result.imported_symbol_choices.get(symbol).unwrap();
-                    let layout_idx = get_or_create_imported_choice_layout(ctx, choice);
-                    BytecodeType::Choice(layout_idx)
                 }
                 Some(SymbolKind::Choice) => {
                     let layout_idx =
@@ -135,7 +137,15 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: TypeId) -> TypeIdx {
             }
         }
         Some(TypeKind::Path { root, segments }) => {
-            if *root == SymbolId::new(0)
+            if ctx.imported_struct_fields.contains_key(root) {
+                let layout_idx = get_or_create_struct_layout(ctx, *root);
+                BytecodeType::Struct(layout_idx)
+            } else if let Some(struct_symbol) =
+                imported_struct_symbol_for_path(ctx, segments.as_slice())
+            {
+                let layout_idx = get_or_create_struct_layout(ctx, struct_symbol);
+                BytecodeType::Struct(layout_idx)
+            } else if *root == SymbolId::new(0)
                 && let Some(name) = segments.first()
                 && let Some(name_id) = ctx.string_table.get(name)
                 && let Some(resolution) = ctx.graph.resolution()
@@ -206,9 +216,22 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: TypeId) -> TypeIdx {
                 .collect();
             BytecodeType::Tuple(elem_idxs)
         }
-        Some(TypeKind::GenericInstance { base, .. }) => {
-            let base_idx = crate::bytecode_emission::types::lower_type(ctx, *base);
-            ctx.types[base_idx.raw() as usize].clone()
+        Some(TypeKind::GenericInstance { base, arguments }) => {
+            if let Some(choice_symbol) = local_choice_symbol_for_type(ctx, *base) {
+                BytecodeType::Choice(get_or_create_generic_choice_layout(
+                    ctx,
+                    ty,
+                    choice_symbol,
+                    arguments,
+                ))
+            } else if let Some(choice) = imported_choice_for_type(ctx, *base) {
+                BytecodeType::Choice(get_or_create_generic_imported_choice_layout(
+                    ctx, ty, &choice, arguments,
+                ))
+            } else {
+                let base_idx = crate::bytecode_emission::types::lower_type(ctx, *base);
+                ctx.types[base_idx.raw() as usize].clone()
+            }
         }
         _ => BytecodeType::Null,
     };
@@ -216,6 +239,57 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: TypeId) -> TypeIdx {
     ctx.types[next_idx.raw() as usize] = image_type.clone();
 
     next_idx
+}
+
+fn local_choice_symbol_for_type(ctx: &LowerCtx, ty: TypeId) -> Option<SymbolId> {
+    let TypeKind::Named { symbol } = ctx.type_result.layer().table().kind(ty)? else {
+        return None;
+    };
+    ctx.graph
+        .resolution()?
+        .symbol(*symbol)
+        .filter(|symbol| symbol.kind() == SymbolKind::Choice)
+        .map(|_| *symbol)
+}
+
+fn imported_choice_for_type(
+    ctx: &LowerCtx,
+    ty: TypeId,
+) -> Option<galfus_frontend::LoweredImportedChoice> {
+    match ctx.type_result.layer().table().kind(ty)? {
+        TypeKind::Named { symbol } => ctx.type_result.imported_symbol_choices.get(symbol).cloned(),
+        TypeKind::Path { root, segments } => ctx
+            .type_result
+            .imported_symbol_choices
+            .get(root)
+            .cloned()
+            .or_else(|| {
+                ctx.type_result
+                    .imported_path_choices
+                    .values()
+                    .find(|choice| segments.iter().any(|segment| segment == &choice.name))
+                    .cloned()
+            }),
+        _ => None,
+    }
+}
+
+fn imported_struct_symbol_for_path(ctx: &LowerCtx, segments: &[String]) -> Option<SymbolId> {
+    let name = segments.last()?;
+    let table = ctx.type_result.layer().table();
+
+    ctx.imported_struct_fields.keys().copied().find(|symbol| {
+        let Some(function_ty) = ctx.type_result.layer().symbol_type(*symbol) else {
+            return false;
+        };
+        let Some(TypeKind::Function(function)) = table.kind(function_ty) else {
+            return false;
+        };
+        matches!(
+            table.kind(function.return_type()),
+            Some(TypeKind::Path { segments, .. }) if segments.last() == Some(name)
+        )
+    })
 }
 
 pub(super) fn lower_choice_variant_type(ctx: &mut LowerCtx, variant_symbol: SymbolId) -> TypeIdx {
@@ -424,6 +498,84 @@ pub fn get_or_create_choice_layout(ctx: &mut LowerCtx, choice_symbol: SymbolId) 
     });
 
     next_idx
+}
+
+fn get_or_create_generic_choice_layout(
+    ctx: &mut LowerCtx,
+    instance_ty: TypeId,
+    choice_symbol: SymbolId,
+    arguments: &[TypeId],
+) -> ChoiceLayoutIdx {
+    if let Some(&idx) = ctx.generic_choice_map.get(&instance_ty) {
+        return idx;
+    }
+
+    let resolution = ctx.graph.resolution().unwrap();
+    let choice_name = resolution
+        .symbol(choice_symbol)
+        .and_then(|symbol| ctx.string_table.resolve(symbol.name()))
+        .unwrap_or("");
+    let next_idx = ChoiceLayoutIdx(ctx.choice_layouts.len() as u16);
+    ctx.generic_choice_map.insert(instance_ty, next_idx);
+    ctx.choice_layouts.push(ChoiceLayout {
+        name: format!("{choice_name}#{:?}", instance_ty),
+        variants: Vec::new(),
+    });
+
+    let previous_substitutions = std::mem::take(&mut ctx.active_substitutions);
+    ctx.active_substitutions = previous_substitutions.clone();
+    for (parameter, argument) in choice_generic_parameters(ctx, choice_symbol)
+        .into_iter()
+        .zip(arguments.iter().copied())
+    {
+        ctx.active_substitutions.insert(parameter, argument);
+    }
+
+    let variants = get_choice_variants(ctx, choice_symbol)
+        .into_iter()
+        .map(|(name, payload_ty)| ChoiceVariantLayout {
+            name,
+            payload_ty: payload_ty.map(|ty| lower_type(ctx, ty)),
+        })
+        .collect();
+    ctx.active_substitutions = previous_substitutions;
+    ctx.choice_layouts[next_idx.raw() as usize].variants = variants;
+    next_idx
+}
+
+fn choice_generic_parameters(ctx: &LowerCtx, choice_symbol: SymbolId) -> Vec<SymbolId> {
+    let Some(root) = ctx.graph.syntax().root() else {
+        return Vec::new();
+    };
+    let Some(choice_item) =
+        crate::bytecode_emission::helpers::choice_item_node_for_symbol(ctx, root, choice_symbol)
+    else {
+        return Vec::new();
+    };
+    let Some(parameters) = ctx
+        .graph
+        .syntax()
+        .first_child_of_kind(choice_item, SyntaxNodeKind::GenericParameterList)
+    else {
+        return Vec::new();
+    };
+    let Some(node) = ctx.graph.syntax().node(parameters) else {
+        return Vec::new();
+    };
+    let Some(resolution) = ctx.graph.resolution() else {
+        return Vec::new();
+    };
+
+    node.children()
+        .iter()
+        .filter_map(|parameter| {
+            let identifier = ctx
+                .graph
+                .syntax()
+                .first_child_of_kind(*parameter, SyntaxNodeKind::Identifier)?;
+            resolution.declaration_symbol(identifier)
+        })
+        .collect()
 }
 
 pub fn resolve_alias_type(ctx: &LowerCtx, ty: TypeId) -> TypeId {
@@ -684,20 +836,7 @@ pub fn find_imported_choice_for_type(
     ctx: &LowerCtx,
     ty: TypeId,
 ) -> Option<galfus_frontend::LoweredImportedChoice> {
-    let table = ctx.type_result.layer().table();
-    let (_root, segments) = match table.kind(ty) {
-        Some(TypeKind::Path { root, segments }) => (*root, segments),
-        _ => return None,
-    };
-    if segments.len() != 1 {
-        return None;
-    }
-    let choice_name = &segments[0];
-    ctx.type_result
-        .imported_path_choices
-        .values()
-        .find(|c| c.name == *choice_name)
-        .cloned()
+    imported_choice_for_type(ctx, ty)
 }
 
 pub fn get_or_create_imported_choice_layout(
@@ -743,6 +882,57 @@ pub fn get_or_create_imported_choice_layout(
         })
         .collect();
 
+    ctx.choice_layouts[next_idx.raw() as usize].variants = variants;
+    next_idx
+}
+
+pub fn get_or_create_generic_imported_choice_layout(
+    ctx: &mut LowerCtx,
+    instance_ty: TypeId,
+    choice: &galfus_frontend::LoweredImportedChoice,
+    arguments: &[TypeId],
+) -> ChoiceLayoutIdx {
+    if let Some(&idx) = ctx.generic_choice_map.get(&instance_ty) {
+        return idx;
+    }
+
+    let next_idx = ChoiceLayoutIdx(ctx.choice_layouts.len() as u16);
+    ctx.generic_choice_map.insert(instance_ty, next_idx);
+    ctx.choice_layouts.push(ChoiceLayout {
+        name: format!("{}#{:?}", choice.name, instance_ty),
+        variants: Vec::new(),
+    });
+
+    let previous_substitutions = std::mem::take(&mut ctx.active_substitutions);
+    ctx.active_substitutions = previous_substitutions.clone();
+    for (parameter, argument) in choice
+        .generic_parameters
+        .iter()
+        .copied()
+        .zip(arguments.iter().copied())
+    {
+        ctx.active_substitutions.insert(parameter, argument);
+    }
+
+    let variants = choice
+        .variants
+        .iter()
+        .map(|variant| {
+            let payload_ty = match variant.payload_types.as_slice() {
+                [] => None,
+                [payload] => Some(lower_type(ctx, *payload)),
+                payloads => Some(lower_type(
+                    ctx,
+                    crate::bytecode_emission::helpers::find_tuple_type(ctx, payloads),
+                )),
+            };
+            ChoiceVariantLayout {
+                name: variant.name.clone(),
+                payload_ty,
+            }
+        })
+        .collect();
+    ctx.active_substitutions = previous_substitutions;
     ctx.choice_layouts[next_idx.raw() as usize].variants = variants;
     next_idx
 }

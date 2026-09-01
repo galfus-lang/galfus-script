@@ -116,11 +116,11 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
     }
 
     pub(super) fn is_terminated(&self) -> bool {
-        let block_idx = self
-            .blocks
-            .iter()
-            .position(|b| b.id == self.current_block)
-            .unwrap();
+        self.is_block_terminated(self.current_block)
+    }
+
+    pub(super) fn is_block_terminated(&self, block: BlockId) -> bool {
+        let block_idx = self.blocks.iter().position(|b| b.id == block).unwrap();
         !matches!(
             self.blocks[block_idx].terminator.0,
             Terminator::Return(None)
@@ -146,6 +146,9 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
 
         for &stmt_id in block_node.children() {
             self.lower_statement(stmt_id);
+            if self.is_terminated() {
+                break;
+            }
         }
 
         if let Some(scope_locals) = self.scopes.pop()
@@ -172,7 +175,11 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
         self.blocks[block_idx].instructions.extend(instructions);
     }
 
-    pub(super) fn terminate_block(&mut self, terminator: Terminator) {
+    /// Finalizes the active basic block without selecting a continuation.
+    ///
+    /// Control-flow constructs that own their successors (such as narrowing)
+    /// must use this together with [`Self::begin_block`].
+    pub(super) fn close_current_block(&mut self, terminator: Terminator) {
         self.flush_current_instructions();
         let block_idx = self
             .blocks
@@ -180,7 +187,10 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
             .position(|b| b.id == self.current_block)
             .unwrap();
         self.blocks[block_idx].terminator = (terminator, None);
-        let id = self.builder.next_block();
+    }
+
+    /// Materializes and selects a basic block supplied by the caller.
+    pub(super) fn begin_block(&mut self, id: BlockId) {
         let bb = BasicBlock {
             id,
             parameters: Vec::new(),
@@ -510,12 +520,15 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     let expr_ty = self.node_type(e).unwrap_or_else(|| TypeId::new(0));
                     self.insert_cast_if_needed(op, expr_ty, self.return_type)
                 });
+                if self.is_terminated() {
+                    return;
+                }
                 let ret_local = match operand.as_ref() {
                     Some(Operand::Local(local_id)) => Some(*local_id),
                     _ => None,
                 };
                 self.emit_control_flow_exit(0, ret_local);
-                self.terminate_block(Terminator::Return(operand));
+                self.close_current_block(Terminator::Return(operand));
             }
             SyntaxNodeKind::BreakStatement => {
                 let target = self
@@ -523,7 +536,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     .map(|t| (t.scope_depth, t.break_target));
                 if let Some((scope_depth, break_target)) = target {
                     self.emit_control_flow_exit(scope_depth, None);
-                    self.terminate_block(Terminator::Jump {
+                    self.close_current_block(Terminator::Jump {
                         target: break_target,
                         args: Vec::new(),
                     });
@@ -535,7 +548,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     .map(|t| (t.scope_depth, t.continue_target));
                 if let Some((scope_depth, continue_target)) = target {
                     self.emit_control_flow_exit(scope_depth, None);
-                    self.terminate_block(Terminator::Jump {
+                    self.close_current_block(Terminator::Jump {
                         target: continue_target,
                         args: Vec::new(),
                     });
@@ -560,7 +573,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 let else_block = self.builder.next_block();
                 let merge_block = self.builder.next_block();
 
-                self.terminate_block(Terminator::Branch {
+                self.close_current_block(Terminator::Branch {
                     cond,
                     true_block: then_block,
                     true_args: Vec::new(),
@@ -572,11 +585,10 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     false_args: Vec::new(),
                 });
 
-                self.blocks.last_mut().unwrap().id = then_block;
-                self.current_block = then_block;
+                self.begin_block(then_block);
                 self.lower_block(then_node);
                 if !self.is_terminated() {
-                    self.terminate_block(Terminator::Jump {
+                    self.close_current_block(Terminator::Jump {
                         target: merge_block,
                         args: Vec::new(),
                     });
@@ -585,8 +597,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 if let Some(else_clause) = else_clause_node {
                     let clause_node = syntax.node(else_clause).unwrap();
                     if let Some(child_node) = clause_node.first_child() {
-                        self.blocks.last_mut().unwrap().id = else_block;
-                        self.current_block = else_block;
+                        self.begin_block(else_block);
                         if syntax
                             .node(child_node)
                             .is_some_and(|node| node.kind() == SyntaxNodeKind::Block)
@@ -597,7 +608,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                             self.lower_statement(child_node);
                         }
                         if !self.is_terminated() {
-                            self.terminate_block(Terminator::Jump {
+                            self.close_current_block(Terminator::Jump {
                                 target: merge_block,
                                 args: Vec::new(),
                             });
@@ -605,8 +616,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     }
                 }
 
-                self.blocks.last_mut().unwrap().id = merge_block;
-                self.current_block = merge_block;
+                self.begin_block(merge_block);
             }
             SyntaxNodeKind::LoopStatement => {
                 let body_node = syntax
@@ -625,12 +635,11 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 let loop_body = self.builder.next_block();
                 let loop_end = self.builder.next_block();
 
-                self.terminate_block(Terminator::Jump {
+                self.close_current_block(Terminator::Jump {
                     target: loop_header,
                     args: Vec::new(),
                 });
-                self.blocks.last_mut().unwrap().id = loop_header;
-                self.current_block = loop_header;
+                self.begin_block(loop_header);
 
                 self.loop_targets.push(LoopTargets {
                     name: self.loop_target_name(stmt_id),
@@ -641,7 +650,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
 
                 if let Some(cond_expr) = condition_node {
                     let cond_operand = self.lower_expression(cond_expr);
-                    self.terminate_block(Terminator::Branch {
+                    self.close_current_block(Terminator::Branch {
                         cond: cond_operand,
                         true_block: loop_body,
                         true_args: Vec::new(),
@@ -649,18 +658,17 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                         false_args: Vec::new(),
                     });
                 } else {
-                    self.terminate_block(Terminator::Jump {
+                    self.close_current_block(Terminator::Jump {
                         target: loop_body,
                         args: Vec::new(),
                     });
                 }
 
-                self.blocks.last_mut().unwrap().id = loop_body;
-                self.current_block = loop_body;
+                self.begin_block(loop_body);
 
                 self.lower_block(body_node);
                 if !self.is_terminated() {
-                    self.terminate_block(Terminator::Jump {
+                    self.close_current_block(Terminator::Jump {
                         target: loop_header,
                         args: Vec::new(),
                     });
@@ -668,8 +676,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
 
                 self.loop_targets.pop();
 
-                self.blocks.last_mut().unwrap().id = loop_end;
-                self.current_block = loop_end;
+                self.begin_block(loop_end);
             }
             SyntaxNodeKind::ForStatement => {
                 let syntax = self.builder.graph.syntax();
@@ -765,6 +772,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                         obj: Operand::Local(iterable_local),
                         args: Vec::new(),
                         destination: iterator_local,
+                        return_type: actual_iterable_ty,
                     },
                     None,
                 ));
@@ -773,12 +781,11 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 let loop_body = self.builder.next_block();
                 let loop_end = self.builder.next_block();
 
-                self.terminate_block(Terminator::Jump {
+                self.close_current_block(Terminator::Jump {
                     target: loop_header,
                     args: Vec::new(),
                 });
-                self.blocks.last_mut().unwrap().id = loop_header;
-                self.current_block = loop_header;
+                self.begin_block(loop_header);
 
                 let next_local = self.declare_local(None, binding_ty);
                 self.current_instructions.push((
@@ -787,6 +794,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                         obj: Operand::Local(iterator_local),
                         args: Vec::new(),
                         destination: next_local,
+                        return_type: binding_ty,
                     },
                     None,
                 ));
@@ -802,7 +810,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     ),
                     None,
                 ));
-                self.terminate_block(Terminator::Branch {
+                self.close_current_block(Terminator::Branch {
                     cond: Operand::Local(cond_local),
                     true_block: loop_body,
                     true_args: Vec::new(),
@@ -810,8 +818,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     false_args: Vec::new(),
                 });
 
-                self.blocks.last_mut().unwrap().id = loop_body;
-                self.current_block = loop_body;
+                self.begin_block(loop_body);
                 self.lower_destructuring_binding(binding_node, Operand::Local(next_local));
                 self.loop_targets.push(LoopTargets {
                     name: self.loop_target_name(stmt_id),
@@ -821,15 +828,14 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 });
                 self.lower_block(body_node);
                 if !self.is_terminated() {
-                    self.terminate_block(Terminator::Jump {
+                    self.close_current_block(Terminator::Jump {
                         target: loop_header,
                         args: Vec::new(),
                     });
                 }
                 self.loop_targets.pop();
 
-                self.blocks.last_mut().unwrap().id = loop_end;
-                self.current_block = loop_end;
+                self.begin_block(loop_end);
             }
 
             _ => {}

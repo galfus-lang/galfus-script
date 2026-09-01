@@ -187,16 +187,11 @@ fn initialized_at_block_entries(
         let mut outgoing = initialized[&block_id].clone();
         apply_initialization_effects(block, &mut outgoing);
 
-        for (successor, args) in successor_blocks(&block.terminator.0) {
+        for (successor, _args) in successor_blocks(&block.terminator.0) {
             if !blocks.contains_key(&successor) {
                 continue;
             }
-            let mut edge_outgoing = outgoing.clone();
-            for arg in args {
-                if let Operand::Local(l) = arg {
-                    edge_outgoing.remove(l);
-                }
-            }
+            let edge_outgoing = outgoing.clone();
             let changed = match initialized.get(&successor) {
                 Some(previous) => {
                     let merged = previous
@@ -233,15 +228,6 @@ fn apply_initialization_effects(block: &BasicBlock, initialized: &mut HashSet<Lo
             mir::Instruction::Assign(_, RValue::Use(Operand::Local(l))) => {
                 initialized.remove(l);
             }
-            mir::Instruction::Call { args, .. }
-            | mir::Instruction::ConstraintCall { args, .. }
-            | mir::Instruction::IndirectCall { args, .. } => {
-                for arg in args {
-                    if let Operand::Local(l) = arg {
-                        initialized.remove(l);
-                    }
-                }
-            }
             mir::Instruction::StoreGlobal(_, Operand::Local(l)) => {
                 initialized.remove(l);
             }
@@ -260,6 +246,20 @@ fn apply_initialization_effects(block: &BasicBlock, initialized: &mut HashSet<Lo
             mir::Instruction::Drop(local) => {
                 initialized.remove(local);
             }
+            mir::Instruction::Await {
+                future: Operand::Local(l),
+                ..
+            } => {
+                initialized.remove(l);
+            }
+            mir::Instruction::AwaitAll { futures, .. }
+            | mir::Instruction::AwaitRace { futures, .. } => {
+                for fut in futures {
+                    if let Operand::Local(l) = fut {
+                        initialized.remove(l);
+                    }
+                }
+            }
             _ => {}
         }
 
@@ -267,24 +267,18 @@ fn apply_initialization_effects(block: &BasicBlock, initialized: &mut HashSet<Lo
             mir::Instruction::Assign(destination, _)
             | mir::Instruction::Call { destination, .. }
             | mir::Instruction::ConstraintCall { destination, .. }
-            | mir::Instruction::IndirectCall { destination, .. } => {
+            | mir::Instruction::IndirectCall { destination, .. }
+            | mir::Instruction::Await { destination, .. }
+            | mir::Instruction::AwaitAll { destination, .. }
+            | mir::Instruction::AwaitRace { destination, .. } => {
                 initialized.insert(*destination);
             }
             _ => {}
         }
     }
 
-    match &block.terminator.0 {
-        mir::Terminator::Return(Some(Operand::Local(l))) => {
-            initialized.remove(l);
-        }
-        mir::Terminator::Branch {
-            cond: Operand::Local(l),
-            ..
-        } => {
-            initialized.remove(l);
-        }
-        _ => {}
+    if let mir::Terminator::Return(Some(Operand::Local(local))) = &block.terminator.0 {
+        initialized.remove(local);
     }
 }
 
@@ -372,6 +366,7 @@ fn validate_basic_block(
                 obj,
                 args,
                 destination,
+                ..
             } => {
                 validate_operand(obj, func, initialized, errors);
                 for arg in args {

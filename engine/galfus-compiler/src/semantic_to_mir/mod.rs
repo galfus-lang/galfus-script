@@ -247,7 +247,7 @@ impl<'a> MirBuilder<'a> {
             return None;
         }
 
-        builder_ctx.terminate_block(Terminator::Return(None));
+        builder_ctx.close_current_block(Terminator::Return(None));
 
         let mut func = MirFunction {
             id: FunctionId::new(u32::MAX),

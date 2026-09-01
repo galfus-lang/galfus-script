@@ -159,7 +159,7 @@ fn run_project_spawns_a_thread_with_the_anchored_api() {
     fs::write(
         source_path.as_path(),
         r#"
-            import { createThread, getThread } from 'std/thread'
+            import { createThread, getThread, Thread } from 'std/thread'
 
             fn worker(args: [[u8]]): i32 {
                 var sum = 0

@@ -28,6 +28,8 @@ use galfus_bytecode::{
     ImportEdge, ImportSlot,
     instruction::{FuncIdx, TypeIdx},
 };
+use galfus_core::TypeId;
+use galfus_frontend::{ModuleAst, SymbolKind, TypeCheckResult, TypeKind};
 use std::collections::{HashMap, HashSet};
 
 pub fn compile_modules(
@@ -189,8 +191,6 @@ fn compile_single_module(
     use crate::compile::resolve::{
         collect_call_targets, resolve_import_target, resolve_local_call_target,
     };
-    use galfus_frontend::SymbolKind;
-
     let mir_mod = mir_modules[mod_idx]
         .as_ref()
         .expect("compiled module has MIR");
@@ -421,14 +421,40 @@ fn compile_single_module(
         ctx.function_return_types.insert(func.id, func.return_type);
         ctx.function_param_types
             .insert(func.id, func.parameter_types.clone());
+        ctx.function_is_async.insert(func.id, func.is_async);
     }
 
     let mut execution_metadata = galfus_bytecode::graph::ExecutionMetadata::default();
 
     // Register cross-module calls as import function slots.
-    for (&local_id, &(target_mod_idx, target_func_id)) in &cross_module_calls {
-        if let Some(&import_idx) = import_func_map.get(&(target_mod_idx, target_func_id)) {
+    for (&local_id, &(target_mod_id, target_func_id)) in &cross_module_calls {
+        if let Some(&import_idx) = import_func_map.get(&(target_mod_id, target_func_id)) {
             ctx.function_map.insert(local_id, import_idx);
+            let target_mod_idx = modules
+                .iter()
+                .position(|m| m.id() == target_mod_id)
+                .unwrap_or(0);
+            if let Some(target_mir) = &mir_modules[target_mod_idx]
+                && let Some(target_func) = target_mir
+                    .functions
+                    .iter()
+                    .find(|function| function.id == target_func_id)
+            {
+                ctx.function_is_async.insert(local_id, target_func.is_async);
+                if target_func.is_async
+                    && let Some(target_types) = modules[target_mod_idx].type_result()
+                    && let Some(return_type) = lower_imported_async_return_type(
+                        &mut ctx,
+                        modules[target_mod_idx].graph(),
+                        target_types,
+                        string_table,
+                        target_func.return_type,
+                    )
+                {
+                    ctx.async_return_type_overrides
+                        .insert(local_id, return_type);
+                }
+            }
         }
     }
 
@@ -518,4 +544,123 @@ fn compile_single_module(
         init_func_idx,
     };
     Ok((module, execution_metadata))
+}
+
+fn lower_imported_async_return_type(
+    ctx: &mut crate::bytecode_emission::LowerCtx,
+    target_graph: &ModuleAst,
+    target_types: &TypeCheckResult,
+    string_table: &galfus_frontend::StringTable,
+    return_type: TypeId,
+) -> Option<TypeIdx> {
+    let (choice_name, target_arguments) =
+        imported_choice_name_and_arguments(target_graph, target_types, string_table, return_type)?;
+    let choice = ctx
+        .type_result
+        .imported_symbol_choices
+        .values()
+        .chain(ctx.type_result.imported_path_choices.values())
+        .find(|choice| choice.name == choice_name)?
+        .clone();
+    let layout = if target_arguments.is_empty() {
+        crate::bytecode_emission::types::get_or_create_imported_choice_layout(ctx, &choice)
+    } else {
+        let arguments = target_arguments
+            .into_iter()
+            .map(|argument| translate_imported_type(ctx, target_types, argument))
+            .collect::<Option<Vec<_>>>()?;
+        let instance_ty = find_imported_choice_instance(ctx, &choice, &arguments)?;
+        crate::bytecode_emission::types::get_or_create_generic_imported_choice_layout(
+            ctx,
+            instance_ty,
+            &choice,
+            &arguments,
+        )
+    };
+    let type_idx = TypeIdx(ctx.types.len() as u16);
+    ctx.types.push(BytecodeType::Choice(layout));
+    Some(type_idx)
+}
+
+fn imported_choice_name_and_arguments(
+    graph: &ModuleAst,
+    types: &TypeCheckResult,
+    string_table: &galfus_frontend::StringTable,
+    ty: TypeId,
+) -> Option<(String, Vec<TypeId>)> {
+    let table = types.layer().table();
+    let (ty, arguments) = match table.kind(ty)? {
+        TypeKind::GenericInstance { base, arguments } => (*base, arguments.clone()),
+        _ => (ty, Vec::new()),
+    };
+    match table.kind(ty)? {
+        TypeKind::Named { symbol } => graph
+            .resolution()?
+            .symbol(*symbol)
+            .and_then(|symbol| string_table.resolve(symbol.name()))
+            .map(|name| (name.to_owned(), arguments)),
+        TypeKind::Path { segments, .. } => segments.last().cloned().map(|name| (name, arguments)),
+        _ => None,
+    }
+}
+
+fn translate_imported_type(
+    ctx: &crate::bytecode_emission::LowerCtx,
+    source_types: &TypeCheckResult,
+    source_ty: TypeId,
+) -> Option<TypeId> {
+    let target_table = ctx.type_result.layer().table();
+    (0..target_table.len())
+        .map(|index| TypeId::new(index as u32))
+        .find(|candidate| {
+            types_are_equivalent(
+                target_table,
+                *candidate,
+                source_types.layer().table(),
+                source_ty,
+            )
+        })
+}
+
+fn types_are_equivalent(
+    left_table: &galfus_frontend::TypeTable,
+    left_ty: TypeId,
+    right_table: &galfus_frontend::TypeTable,
+    right_ty: TypeId,
+) -> bool {
+    match (left_table.kind(left_ty), right_table.kind(right_ty)) {
+        (Some(TypeKind::Primitive(left)), Some(TypeKind::Primitive(right))) => left == right,
+        (Some(TypeKind::Array { element: left }), Some(TypeKind::Array { element: right })) => {
+            types_are_equivalent(left_table, *left, right_table, *right)
+        }
+        (Some(TypeKind::Tuple { elements: left }), Some(TypeKind::Tuple { elements: right })) => {
+            left.len() == right.len()
+                && left.iter().zip(right).all(|(left, right)| {
+                    types_are_equivalent(left_table, *left, right_table, *right)
+                })
+        }
+        _ => false,
+    }
+}
+
+fn find_imported_choice_instance(
+    ctx: &crate::bytecode_emission::LowerCtx,
+    choice: &galfus_frontend::LoweredImportedChoice,
+    arguments: &[TypeId],
+) -> Option<TypeId> {
+    let table = ctx.type_result.layer().table();
+    (0..table.len())
+        .map(|index| TypeId::new(index as u32))
+        .find(|ty| {
+            let Some(TypeKind::GenericInstance {
+                base,
+                arguments: candidate_arguments,
+            }) = table.kind(*ty)
+            else {
+                return false;
+            };
+            candidate_arguments == arguments
+                && crate::bytecode_emission::types::find_imported_choice_for_type(ctx, *base)
+                    .is_some_and(|candidate| candidate.name == choice.name)
+        })
 }

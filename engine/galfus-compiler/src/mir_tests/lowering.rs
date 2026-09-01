@@ -762,12 +762,84 @@ fn test_conditional_without_branch_arguments_uses_direct_targets() {
         matches!(
             choose.instructions.as_slice(),
             [
-                galfus_bytecode::Instruction::JumpFalse { offset: 3, .. },
+                galfus_bytecode::Instruction::JumpFalse { offset: 2, .. },
                 galfus_bytecode::Instruction::LoadConst { .. },
                 ..
             ],
         ),
         "{:#?}",
         choose.instructions
+    );
+}
+
+#[test]
+fn narrowing_blocks_can_await_and_return_without_implicit_continuations() {
+    let source_id = SourceId::new(0);
+    let code = r#"
+        struct Future<T> { id: i64 }
+
+        choice Result {
+            Value(i32),
+            Empty,
+        }
+
+        fn(async) ready(): i32 {
+            return 7
+        }
+
+        fn(async) narrow(value: Result): i32 {
+            match value {
+                Result::Value(_) {
+                    const number = await ready()
+                    return number
+                },
+                Result::Empty {
+                    return 0
+                },
+            }
+            return -1
+        }
+    "#;
+    let source = SourceFile::new(
+        source_id,
+        "narrowing_await.gfs".to_string(),
+        code.to_string(),
+    );
+    let parse_result = parse(&source);
+    let mut string_table = galfus_frontend::StringTable::new();
+    let graph = resolve(&source, parse_result.into_graph(), &mut string_table).into_graph();
+    let type_result = check_definition_types(
+        &source,
+        &graph,
+        check_declaration_types(&source, &graph, &string_table, false),
+        &string_table,
+        false,
+    );
+    assert!(
+        !type_result.has_errors(),
+        "Typecheck error: {:?}",
+        type_result.diagnostics()
+    );
+
+    let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
+    let narrow = mir_module
+        .functions
+        .iter()
+        .find(|function| function.name == "narrow")
+        .expect("narrow function should be emitted");
+
+    assert!(
+        narrow.blocks.iter().any(|block| {
+            matches!(block.terminator.0, Terminator::Return(Some(_)))
+                && block
+                    .instructions
+                    .iter()
+                    .any(|(instruction, _)| matches!(instruction, Instruction::Await { .. }))
+        }),
+        "the Value arm should await and return from the same explicit block"
+    );
+    assert!(
+        galfus_ir::validator::validate_module(&mir_module).is_ok(),
+        "the explicit narrowing CFG should validate"
     );
 }

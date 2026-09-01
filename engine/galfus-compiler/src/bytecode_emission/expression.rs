@@ -1008,9 +1008,36 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                 self.free_temp_if_operand(obj_operand);
             }
             RValue::Choice(choice_type, variant_name, payload_operand) => {
-                let type_idx = crate::bytecode_emission::types::lower_type(self.ctx, *choice_type);
+                let destination_type = self
+                    .func
+                    .locals
+                    .iter()
+                    .find(|local| local.id.raw() as u16 == dest.raw())
+                    .map(|local| local.ty)
+                    .unwrap_or(*choice_type);
+                let choice_type = if matches!(
+                    self.ctx.type_result.layer().table().kind(destination_type),
+                    Some(TypeKind::GenericInstance { .. })
+                ) {
+                    destination_type
+                } else if matches!(
+                    self.ctx.type_result.layer().table().kind(*choice_type),
+                    Some(TypeKind::Named { .. })
+                ) && matches!(
+                    self.ctx
+                        .type_result
+                        .layer()
+                        .table()
+                        .kind(self.func.return_type),
+                    Some(TypeKind::GenericInstance { .. })
+                ) {
+                    self.func.return_type
+                } else {
+                    destination_type
+                };
+                let type_idx = crate::bytecode_emission::types::lower_type(self.ctx, choice_type);
                 let variant_idx =
-                    if let Some(choice_symbol) = self.struct_symbol_for_type(*choice_type) {
+                    if let Some(choice_symbol) = self.struct_symbol_for_type(choice_type) {
                         let variants = crate::bytecode_emission::types::get_choice_variants(
                             self.ctx,
                             choice_symbol,
@@ -1022,7 +1049,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     } else if let Some(choice) =
                         crate::bytecode_emission::types::find_imported_choice_for_type(
                             self.ctx,
-                            *choice_type,
+                            choice_type,
                         )
                     {
                         choice

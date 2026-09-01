@@ -173,14 +173,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     });
 
                     if is_wildcard || matches_subject {
-                        if syntax
-                            .node(body)
-                            .is_some_and(|body| body.kind() == SyntaxNodeKind::Block)
-                        {
-                            self.lower_block(body);
-                            return Operand::Constant(Constant::Null);
-                        }
-                        return self.lower_expression(body);
+                        return self.lower_narrowing_arm_body(body);
                     }
                 }
 
@@ -651,6 +644,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                             obj,
                             args: extra_args,
                             destination: temp_id,
+                            return_type: ty,
                         },
                         None,
                     ));
@@ -950,8 +944,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
 
                 for arm_node in arm_nodes {
                     if let Some(block) = next_condition_block {
-                        self.blocks.last_mut().unwrap().id = block;
-                        self.current_block = block;
+                        self.begin_block(block);
                     }
 
                     let pattern_node = syntax.child(arm_node, 0).unwrap();
@@ -970,44 +963,30 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                         next_arm_block,
                     );
 
-                    self.blocks.last_mut().unwrap().id = arm_body_block;
-                    self.current_block = arm_body_block;
+                    self.begin_block(arm_body_block);
 
-                    let body_op = if syntax
-                        .node(body_node)
-                        .is_some_and(|n| n.kind() == SyntaxNodeKind::Block)
-                    {
-                        self.lower_block(body_node);
-                        Operand::Constant(Constant::Null)
-                    } else {
-                        self.lower_expression(body_node)
-                    };
-
-                    self.current_instructions.push((
-                        Instruction::Assign(match_result, RValue::Use(body_op)),
-                        None,
-                    ));
+                    let body_op = self.lower_narrowing_arm_body(body_node);
 
                     if !self.is_terminated() {
-                        self.terminate_block(Terminator::Jump {
+                        self.current_instructions.push((
+                            Instruction::Assign(match_result, RValue::Use(body_op)),
+                            None,
+                        ));
+                        self.close_current_block(Terminator::Jump {
                             target: match_end,
                             args: Vec::new(),
                         });
                     }
-
                     next_condition_block = Some(next_arm_block);
                 }
 
                 if let Some(block) = next_condition_block {
-                    self.blocks.last_mut().unwrap().id = block;
-                    self.current_block = block;
-                    self.terminate_block(Terminator::Panic(
+                    self.begin_block(block);
+                    self.close_current_block(Terminator::Panic(
                         "non-exhaustive match expression".to_string(),
                     ));
                 }
-
-                self.blocks.last_mut().unwrap().id = match_end;
-                self.current_block = match_end;
+                self.begin_block(match_end);
 
                 Operand::Local(match_result)
             }
@@ -1094,6 +1073,19 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
             }
 
             _ => Operand::Constant(Constant::Null),
+        }
+    }
+
+    fn lower_narrowing_arm_body(&mut self, body: NodeId) -> Operand {
+        let syntax = self.builder.graph.syntax();
+        if syntax
+            .node(body)
+            .is_some_and(|body| body.kind() == SyntaxNodeKind::Block)
+        {
+            self.lower_block(body);
+            Operand::Constant(Constant::Null)
+        } else {
+            self.lower_expression(body)
         }
     }
 
@@ -1237,17 +1229,17 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
             return false;
         };
         let receiver_ty = self.builder.resolve_alias_type(receiver_ty);
-        let Some(TypeKind::Named { symbol }) =
-            self.builder.type_result.layer().table().kind(receiver_ty)
-        else {
-            return false;
-        };
-
-        self.builder
-            .graph
-            .resolution()
-            .and_then(|resolution| resolution.import_for_symbol(*symbol))
-            .is_some()
+        let kind = self.builder.type_result.layer().table().kind(receiver_ty);
+        match kind {
+            Some(TypeKind::Named { symbol }) => {
+                self.builder.graph.resolution().is_some_and(|resolution| {
+                    let is_local = resolution.symbols().iter().any(|s| s.id() == *symbol);
+                    resolution.import_for_symbol(*symbol).is_some() || !is_local
+                })
+            }
+            Some(TypeKind::Path { .. }) => true,
+            _ => false,
+        }
     }
 
     fn specialize_generic_call(

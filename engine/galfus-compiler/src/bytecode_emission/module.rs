@@ -37,6 +37,7 @@ pub fn lower_module(
         ctx.function_return_types.insert(func.id, func.return_type);
         ctx.function_param_types
             .insert(func.id, func.parameter_types.clone());
+        ctx.function_is_async.insert(func.id, func.is_async);
     }
 
     let mut functions = Vec::new();

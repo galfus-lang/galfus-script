@@ -105,6 +105,7 @@ pub enum Instruction {
         obj: Operand,
         args: Vec<Operand>,
         destination: LocalId,
+        return_type: TypeId,
     },
     Await {
         future: Operand,
