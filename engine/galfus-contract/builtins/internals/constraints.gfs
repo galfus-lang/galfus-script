@@ -1,5 +1,3 @@
-import { Future } from "std/async"
-
 export constraint Iterator<Item> {
   fn next(self): Item | null
 }
@@ -11,26 +9,4 @@ export constraint Iterable<Item> {
 
 export constraint Comparable<Value> {
   fn compare(self, value: Value): bool
-}
-
-export choice ReadStreamResult<Item> {
-  Data(Item),
-  End,
-  Error([u8])
-}
-
-export choice WriteStreamResult {
-  Accepted,
-  Error([u8])
-}
-
-export constraint ReadStream<Item> {
-  fn next(self): Future<ReadStreamResult<Item>>,
-  fn cancel(self): Future<null>
-}
-
-export constraint WriteStream<Item> {
-  fn write(self, item: Item): Future<WriteStreamResult>,
-  fn finish(self): Future<WriteStreamResult>,
-  fn cancel(self): Future<null>
 }

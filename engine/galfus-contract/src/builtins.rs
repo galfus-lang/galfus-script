@@ -8,6 +8,7 @@ pub const TEXT_SOURCE: &str = include_str!("../builtins/utilities/text.gfs");
 pub const FORMAT_SOURCE: &str = include_str!("../builtins/utilities/format.gfs");
 pub const FORMAT_ANSI_SOURCE: &str = include_str!("../builtins/utilities/format/ansi.gfs");
 pub const LOG_SOURCE: &str = include_str!("../builtins/utilities/log.gfs");
+pub const STREAM_SOURCE: &str = include_str!("../builtins/utilities/stream.gfs");
 
 pub const STD_IO_SOURCE: &str = include_str!("../builtins/bridges/io.gfs");
 pub const STD_TIME_SOURCE: &str = include_str!("../builtins/bridges/time.gfs");
@@ -33,6 +34,7 @@ pub static UTILITY_MODULES: &[(&str, &str)] = &[
     ("format", FORMAT_SOURCE),
     ("format/ansi", FORMAT_ANSI_SOURCE),
     ("log", LOG_SOURCE),
+    ("std/stream", STREAM_SOURCE),
 ];
 
 /// Bridge templates for optional host capability modules.
@@ -310,6 +312,7 @@ pub static BUILTIN_MODULES: &[(&str, &str)] = &[
     ("format", FORMAT_SOURCE),
     ("format/ansi", FORMAT_ANSI_SOURCE),
     ("log", LOG_SOURCE),
+    ("std/stream", STREAM_SOURCE),
 ];
 
 pub fn is_internal_module(source: &str) -> bool {

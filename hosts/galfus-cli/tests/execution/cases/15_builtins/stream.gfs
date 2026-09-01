@@ -1,0 +1,17 @@
+import { collect, fromBytes, CollectResult, ReadStreamResult } from "std/stream"
+import { println } from "std/io"
+import { equals } from "text"
+
+export fn main(_args: [[u8]]): i32 {
+  const source = fromBytes("stream")
+  const result = await source::next()
+  match result {
+    ReadStreamResult::Data(bytes) {
+      if !equals(bytes, "stream") { return 2 }
+    },
+    _ { return 3 }
+  }
+
+  println("ok")
+  return 0
+}

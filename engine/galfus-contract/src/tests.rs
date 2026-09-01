@@ -700,6 +700,16 @@ fn test_log_source_checks() {
 }
 
 #[test]
+fn test_std_stream_source_checks() {
+    use crate::STREAM_SOURCE;
+    assert_builtin_checks("std/stream", STREAM_SOURCE);
+    assert!(STREAM_SOURCE.contains("fromBytes"));
+    assert!(STREAM_SOURCE.contains("collect"));
+    assert!(STREAM_SOURCE.contains("ReadStream"));
+    assert!(STREAM_SOURCE.contains("WriteStream"));
+}
+
+#[test]
 fn test_std_async_source_checks() {
     assert_builtin_checks("std/async", ASYNC_SOURCE);
     assert!(ASYNC_SOURCE.contains("Future"));

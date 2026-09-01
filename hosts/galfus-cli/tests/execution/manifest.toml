@@ -169,6 +169,13 @@ exit_code = 0
 stdout = "ok\n"
 
 [[case]]
+name = "stream builtin collects bytes and supports cancellation"
+path = "cases/15_builtins/stream.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
 name = "immutable bindings are rejected"
 path = "diagnostics/types/immutable_assignment.gfs"
 command = "check"
