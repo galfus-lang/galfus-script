@@ -3,6 +3,7 @@ use galfus_frontend::modules::{FrontendSnapshot, SemanticModule};
 use galfus_frontend::{IMPLICIT_FUTURE_SYMBOL, ResolutionLayer};
 use lsp_types::{Hover, HoverContents, MarkedString, Position};
 
+use crate::lsp::anchored::{enclosing_path_expression, value_anchor_function};
 use crate::workspace::Workspace;
 
 pub fn hover(workspace: &Workspace, path: &str, position: Position) -> Option<Hover> {
@@ -92,8 +93,8 @@ pub fn hover(workspace: &Workspace, path: &str, position: Position) -> Option<Ho
     {
         for &node in &nodes_to_check {
             if let Some(sym) = resolution
-                .reference_symbol(node)
-                .or_else(|| resolution.path_reference_symbol(node))
+                .path_reference_symbol(node)
+                .or_else(|| resolution.reference_symbol(node))
                 .or_else(|| resolution.type_reference_symbol(node))
                 .or_else(|| resolution.type_path_reference_symbol(node))
                 .or_else(|| resolution.declaration_symbol(node))
@@ -182,12 +183,19 @@ pub fn hover(workspace: &Workspace, path: &str, position: Position) -> Option<Ho
 
     let current_node = type_node;
 
-    let mut symbol_id = None;
-    if let Some(resolution) = semantic_module.graph().resolution() {
+    let anchored_function = enclosing_path_expression(syntax_graph, path_stack.as_slice())
+        .and_then(|path| value_anchor_function(snapshot, semantic_module, path));
+    let mut symbol_id = anchored_function
+        .filter(|(function_module_id, _)| *function_module_id == semantic_module.id())
+        .map(|(_, symbol)| symbol);
+    if let Some(resolution) = semantic_module.graph().resolution()
+        && symbol_id.is_none()
+        && anchored_function.is_none()
+    {
         for &node in nodes_to_check.iter().rev() {
             if let Some(sym) = resolution
-                .reference_symbol(node)
-                .or_else(|| resolution.path_reference_symbol(node))
+                .path_reference_symbol(node)
+                .or_else(|| resolution.reference_symbol(node))
                 .or_else(|| resolution.type_reference_symbol(node))
                 .or_else(|| resolution.type_path_reference_symbol(node))
                 .or_else(|| resolution.declaration_symbol(node))
@@ -201,6 +209,14 @@ pub fn hover(workspace: &Workspace, path: &str, position: Position) -> Option<Ho
     let mut type_name = node_type_id
         .map(|id| format_type(workspace, snapshot, semantic_module, id, true))
         .unwrap_or_else(|| "unknown".to_string());
+
+    if let Some((function_module_id, function_symbol)) = anchored_function
+        && let Some(function_module) = semantic_graph.get(function_module_id)
+        && let Some(type_result) = function_module.type_result()
+        && let Some(type_id) = type_result.layer().symbol_type(function_symbol)
+    {
+        type_name = format_type(workspace, snapshot, function_module, type_id, true);
+    }
 
     if type_name == "unknown"
         && node_type_id.is_none()

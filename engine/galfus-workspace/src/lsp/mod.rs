@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests;
 
+mod anchored;
 pub mod completion;
 pub mod definition;
 pub mod diagnostics;
@@ -69,7 +70,20 @@ impl Workspace {
 
     pub fn handle_lsp_message(&mut self, json: &str) -> Vec<String> {
         let mut responses = Vec::new();
-        let request: JsonRpcRequest = match serde_json::from_str(json) {
+        let Ok(value) = serde_json::from_str::<Value>(json) else {
+            let err_resp = JsonRpcResponse::error(Value::Null, -32700, "Parse error".into());
+            if let Ok(s) = serde_json::to_string(&err_resp) {
+                responses.push(s);
+            }
+            return responses;
+        };
+
+        // Responses to server-initiated requests do not require handling.
+        if value.get("method").is_none() {
+            return responses;
+        }
+
+        let request: JsonRpcRequest = match serde_json::from_value(value) {
             Ok(req) => req,
             Err(_) => {
                 let err_resp = JsonRpcResponse::error(Value::Null, -32700, "Parse error".into());
@@ -136,7 +150,7 @@ impl Workspace {
                         "definitionProvider": true,
                         "completionProvider": {
                             "resolveProvider": false,
-                            "triggerCharacters": ["."]
+                            "triggerCharacters": [".", ":"]
                         },
                         "semanticTokensProvider": {
                             "legend": {
@@ -365,6 +379,21 @@ impl Workspace {
             if let Ok(s) = serde_json::to_string(&notification) {
                 responses.push(s);
             }
+
+            self.refresh_semantic_tokens(responses);
+        }
+    }
+
+    fn refresh_semantic_tokens(&self, responses: &mut Vec<String>) {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(Value::String("galfus-semantic-tokens-refresh".to_string())),
+            method: "workspace/semanticTokens/refresh".to_string(),
+            params: None,
+        };
+
+        if let Ok(s) = serde_json::to_string(&request) {
+            responses.push(s);
         }
     }
 }

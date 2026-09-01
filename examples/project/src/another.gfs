@@ -1,1 +1,13 @@
 export const NAME_DEFAULT = "UM NOME"
+
+export struct Counter {
+  value: i64 = 0
+}
+
+export fn Counter::increment(self): null {
+  self.value += 1
+}
+
+export fn Counter::restart(self): null {
+  self.value = 0
+}

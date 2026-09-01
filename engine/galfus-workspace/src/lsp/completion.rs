@@ -7,6 +7,101 @@ use std::collections::HashSet;
 
 use crate::workspace::Workspace;
 
+fn node_contains_declaration(
+    syntax: &galfus_frontend::SyntaxLayer,
+    resolution: &galfus_frontend::ResolutionLayer,
+    node: galfus_core::NodeId,
+    symbol: galfus_core::SymbolId,
+) -> bool {
+    resolution.declaration_symbol(node) == Some(symbol)
+        || syntax.node(node).is_some_and(|node| {
+            node.children()
+                .iter()
+                .any(|child| node_contains_declaration(syntax, resolution, *child, symbol))
+        })
+}
+
+fn type_symbol_in_node(
+    syntax: &galfus_frontend::SyntaxLayer,
+    resolution: &galfus_frontend::ResolutionLayer,
+    node: galfus_core::NodeId,
+) -> Option<galfus_core::SymbolId> {
+    resolution
+        .type_reference_symbol(node)
+        .or_else(|| resolution.type_path_reference_symbol(node))
+        .or_else(|| {
+            syntax
+                .node(node)?
+                .children()
+                .iter()
+                .find_map(|child| type_symbol_in_node(syntax, resolution, *child))
+        })
+}
+
+fn fallback_value_type_symbol(
+    syntax: &galfus_frontend::SyntaxLayer,
+    resolution: &galfus_frontend::ResolutionLayer,
+    node: galfus_core::NodeId,
+    value_symbol: galfus_core::SymbolId,
+) -> Option<galfus_core::SymbolId> {
+    let syntax_node = syntax.node(node)?;
+    if matches!(
+        syntax_node.kind(),
+        SyntaxNodeKind::Parameter
+            | SyntaxNodeKind::RestParameter
+            | SyntaxNodeKind::VarItem
+            | SyntaxNodeKind::ConstItem
+            | SyntaxNodeKind::VarStatement
+            | SyntaxNodeKind::ConstStatement
+    ) && node_contains_declaration(syntax, resolution, node, value_symbol)
+    {
+        return type_symbol_in_node(syntax, resolution, node);
+    }
+
+    syntax_node
+        .children()
+        .iter()
+        .find_map(|child| fallback_value_type_symbol(syntax, resolution, *child, value_symbol))
+}
+
+fn append_anchored_function_completions(
+    items: &mut Vec<CompletionItem>,
+    resolution: &galfus_frontend::ResolutionLayer,
+    string_table: &galfus_frontend::StringTable,
+    owner_symbol: galfus_core::SymbolId,
+    exported_only: bool,
+) {
+    let Some(owner) = resolution.symbol(owner_symbol) else {
+        return;
+    };
+    let Some(owner_name) = string_table.resolve(owner.name()) else {
+        return;
+    };
+    let anchor_prefix = format!("{owner_name}::");
+
+    for function in resolution.symbols() {
+        if function.kind() != SymbolKind::Function
+            || (exported_only && resolution.export_for_symbol(function.id()).is_none())
+        {
+            continue;
+        }
+
+        let Some(name) = string_table.resolve(function.name()) else {
+            continue;
+        };
+        let Some(method_name) = name.strip_prefix(anchor_prefix.as_str()) else {
+            continue;
+        };
+
+        items.push(CompletionItem {
+            label: method_name.to_string(),
+            kind: Some(CompletionItemKind::METHOD),
+            sort_text: Some("0".to_string()),
+            ..Default::default()
+        });
+    }
+}
+
 fn import_path_label(
     workspace: &Workspace,
     current: &ModulePath,
@@ -221,6 +316,8 @@ pub fn completion(
     let mut is_member_access = false;
     let mut is_path_access = false;
     let mut target_node = None;
+    let mut imported_target = false;
+    let mut trailing_path_target_symbol = None;
 
     if path_stack.len() >= 2 {
         let parent_node = path_stack[path_stack.len() - 2];
@@ -265,11 +362,32 @@ pub fn completion(
             }
 
             let trim_str = if is_path { "::" } else { "." };
-            let target_offset = trimmed
-                .trim_end_matches(trim_str)
-                .trim_end()
-                .len()
-                .saturating_sub(1);
+            let target_text = trimmed.trim_end_matches(trim_str).trim_end();
+            let target_offset = target_text.len().saturating_sub(1);
+
+            if is_path {
+                let target_name = target_text
+                    .rsplit(|character: char| {
+                        !character.is_ascii_alphanumeric() && character != '_'
+                    })
+                    .next()
+                    .unwrap_or("");
+                if let Some(name_id) = string_table.get(target_name) {
+                    trailing_path_target_symbol =
+                        resolution.symbols().iter().rev().find_map(|symbol| {
+                            matches!(
+                                symbol.kind(),
+                                SymbolKind::Parameter
+                                    | SymbolKind::RestParameter
+                                    | SymbolKind::Var
+                                    | SymbolKind::Const
+                            )
+                            .then_some(symbol)
+                            .filter(|symbol| symbol.name() == name_id)
+                            .map(|symbol| symbol.id())
+                        });
+                }
+            }
 
             let mut target_path_stack = Vec::new();
             let mut curr = root;
@@ -322,12 +440,26 @@ pub fn completion(
                 .or_else(|| resolution.type_path_reference_symbol(target))
                 .or_else(|| resolution.declaration_symbol(target));
         }
-
         if target_symbol.is_none() {
-            let mut resolved_type_id;
+            target_symbol = trailing_path_target_symbol;
+        }
 
+        let target_requires_type_lookup = target_symbol
+            .and_then(|symbol| resolution.symbol(symbol))
+            .is_none_or(|symbol| {
+                !matches!(
+                    symbol.kind(),
+                    SymbolKind::Struct
+                        | SymbolKind::Enum
+                        | SymbolKind::Choice
+                        | SymbolKind::ImportBinding
+                        | SymbolKind::ImportNamespace
+                )
+            });
+
+        if target_requires_type_lookup {
             if let Some(type_result) = type_result {
-                resolved_type_id = type_result.layer().node_type(target);
+                let mut resolved_type_id = type_result.layer().node_type(target);
 
                 if resolved_type_id.is_none()
                     && let Some(n) = syntax_graph.node(target)
@@ -379,9 +511,29 @@ pub fn completion(
                         TypeKind::Named { symbol } => {
                             target_symbol = Some(*symbol);
                         }
+                        TypeKind::GenericInstance { base, .. }
+                            if matches!(
+                                type_result.layer().table().kind(*base),
+                                Some(TypeKind::Named { .. })
+                            ) =>
+                        {
+                            if let Some(TypeKind::Named { symbol }) =
+                                type_result.layer().table().kind(*base)
+                            {
+                                target_symbol = Some(*symbol);
+                            }
+                        }
                         _ => {}
                     }
                 }
+            }
+
+            if let Some(value_symbol) = target_symbol
+                && let Some(root) = syntax_graph.root()
+                && let Some(type_symbol) =
+                    fallback_value_type_symbol(syntax_graph, resolution, root, value_symbol)
+            {
+                target_symbol = Some(type_symbol);
             }
         }
 
@@ -415,6 +567,7 @@ pub fn completion(
                     {
                         final_sym = Some(export_record.symbol());
                         final_res = to_res;
+                        imported_target = true;
                     }
                 } else if symbol.kind() == SymbolKind::ImportNamespace {
                     final_sym = None; // For namespace, we just want to iterate over its exports
@@ -475,6 +628,14 @@ pub fn completion(
                     });
                 }
             }
+
+            append_anchored_function_completions(
+                &mut items,
+                final_res,
+                string_table,
+                sym,
+                imported_target,
+            );
         }
 
         if is_member_access || is_path_access {

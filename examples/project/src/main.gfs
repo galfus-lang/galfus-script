@@ -3,7 +3,7 @@ import { stringify, parse, ParseResult } from 'format'
 import { cyan, green } from 'format/ansi'
 import { log, error } from 'log'
 
-import { NAME_DEFAULT } from "./another"
+import { NAME_DEFAULT, Counter } from "./another"
 
 fn(async) getInt(): i32 {
   return 20
@@ -24,7 +24,10 @@ export fn main(_args: [[u8]]): i32 {
     },
   }
   log("Is r1 ok? {}", matchResult)
-  log(NAME_DEFAULT)
+  
+  const c = new(Counter) {}
+
+  c::increment();
   
   return 0
 }

@@ -111,7 +111,7 @@ impl Workspace {
                         revision: report.source_revision,
                         diagnostics: report.diagnostics,
                     };
-                    self.frontend_snapshot = None;
+                    self.frontend_snapshot = Some(self.frontend.snapshot(report.semantic_revision));
                 } else {
                     self.frontend_snapshot = Some(self.frontend.snapshot(report.semantic_revision));
                     self.semantic_state.check_state = CheckState::Passed {

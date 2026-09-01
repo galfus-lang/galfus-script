@@ -43,7 +43,6 @@ path = "src/main.gfs"
     )
     .unwrap();
     workspace.load_manifest(manifest).unwrap();
-
     let open_request = json!({
         "jsonrpc": "2.0",
         "method": "textDocument/didOpen",
@@ -99,7 +98,6 @@ path = "src/main.gfs"
     )
     .unwrap();
     workspace.load_manifest(manifest).unwrap();
-
     let open_request = json!({
         "jsonrpc": "2.0",
         "method": "textDocument/didOpen",
@@ -330,6 +328,203 @@ fn lsp_completion_lists_workspace_galfus_files() {
 }
 
 #[test]
+fn lsp_completion_lists_only_exported_anchored_methods_from_imported_structs() {
+    let mut workspace = Workspace::new();
+    let manifest: crate::config::WorkspaceManifest = toml::from_str(
+        r#"
+[module]
+name = "test"
+target = "app"
+[entry]
+path = "src/main.gfs"
+"#,
+    )
+    .unwrap();
+    workspace.load_manifest(manifest).unwrap();
+
+    for (path, text) in [
+        (
+            "file:///src/user.gfs",
+            r#"
+export struct User { name: [u8] }
+
+export fn User::rename(self): User { return self }
+fn User::normalize(self): User { return self }
+"#,
+        ),
+        (
+            "file:///src/main.gfs",
+            r#"
+import { User } from "./user.gfs"
+
+export fn main(user: User): null {
+  user::
+}
+
+"#,
+        ),
+    ] {
+        let request = json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": path,
+                    "languageId": "galfus",
+                    "version": 1,
+                    "text": text,
+                }
+            }
+        })
+        .to_string();
+        let _ = workspace.handle_lsp_message(&request);
+    }
+
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": 11,
+        "method": "textDocument/completion",
+        "params": {
+            "textDocument": { "uri": "file:///src/main.gfs" },
+            "position": { "line": 4, "character": 8 }
+        }
+    })
+    .to_string();
+    let responses = workspace.handle_lsp_message(&request);
+    let response: Value = serde_json::from_str(&responses[0]).unwrap();
+    let Some(items) = response["result"]["items"].as_array() else {
+        panic!("expected completion items, got {response}");
+    };
+    let labels = items
+        .iter()
+        .filter_map(|item| item["label"].as_str())
+        .collect::<Vec<_>>();
+
+    assert!(labels.contains(&"rename"), "completion labels: {labels:?}");
+    assert!(!labels.contains(&"normalize"));
+}
+
+#[test]
+fn lsp_goto_definition_resolves_value_anchored_functions() {
+    let mut workspace = Workspace::new();
+    let manifest: crate::config::WorkspaceManifest = toml::from_str(
+        r#"
+[module]
+name = "test"
+target = "app"
+[entry]
+path = "src/main.gfs"
+"#,
+    )
+    .unwrap();
+    workspace.load_manifest(manifest).unwrap();
+    workspace
+        .load_module(
+            "src/counter.gfs",
+            b"export struct Counter {}\n\nexport fn Counter::increment(self): null { return }",
+        )
+        .unwrap();
+
+    let open_request = json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didOpen",
+        "params": {
+            "textDocument": {
+                "uri": "file:///src/main.gfs",
+                "languageId": "galfus",
+                "version": 1,
+                "text": "import { Counter } from \"./counter.gfs\"\n\nfn main(): null {\n  const c = new(Counter) {}\n  c::increment()\n}"
+            }
+        }
+    })
+    .to_string();
+    let _ = workspace.handle_lsp_message(&open_request);
+
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": 12,
+        "method": "textDocument/definition",
+        "params": {
+            "textDocument": { "uri": "file:///src/main.gfs" },
+            "position": { "line": 4, "character": 5 }
+        }
+    })
+    .to_string();
+    let responses = workspace.handle_lsp_message(&request);
+    let response: Value = serde_json::from_str(&responses[0]).unwrap();
+
+    assert_eq!(response["result"]["range"]["start"]["line"], 2);
+    assert_eq!(
+        response["result"]["uri"],
+        "galfus://virtual/src/counter.gfs"
+    );
+}
+
+#[test]
+fn lsp_semantic_tokens_classify_value_anchored_functions_as_methods() {
+    let mut workspace = Workspace::new();
+    let manifest: crate::config::WorkspaceManifest = toml::from_str(
+        r#"
+[module]
+name = "test"
+target = "app"
+[entry]
+path = "src/main.gfs"
+"#,
+    )
+    .unwrap();
+    workspace.load_manifest(manifest).unwrap();
+
+    let open_request = json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didOpen",
+        "params": {
+            "textDocument": {
+                "uri": "file:///src/main.gfs",
+                "languageId": "galfus",
+                "version": 1,
+                "text": "struct Counter {}\n\nfn Counter::increment(self): null { return }\n\nfn main(): null {\n  const c = new(Counter) {}\n  c::increment()\n}"
+            }
+        }
+    })
+    .to_string();
+    let _ = workspace.handle_lsp_message(&open_request);
+
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": 13,
+        "method": "textDocument/semanticTokens/full",
+        "params": {
+            "textDocument": { "uri": "file:///src/main.gfs" }
+        }
+    })
+    .to_string();
+    let responses = workspace.handle_lsp_message(&request);
+    let response: Value = serde_json::from_str(&responses[0]).unwrap();
+    let tokens = response["result"]["data"].as_array().unwrap();
+
+    let mut line = 0u64;
+    let mut character = 0u64;
+    let mut found_increment = false;
+    for token in tokens.as_chunks::<5>().0 {
+        let line_delta = token[0].as_u64().unwrap();
+        if line_delta == 0 {
+            character += token[1].as_u64().unwrap();
+        } else {
+            line += line_delta;
+            character = token[1].as_u64().unwrap();
+        }
+
+        if line == 6 && character == 5 {
+            assert_eq!(token[3].as_u64(), Some(12));
+            found_increment = true;
+        }
+    }
+
+    assert!(found_increment, "expected a semantic token for `increment`");
+}
+
+#[test]
 fn test_lsp_did_open_and_diagnostics() {
     let mut workspace = Workspace::new();
     let manifest_toml = r#"
@@ -357,8 +552,8 @@ path = "src/main.gfs"
     .to_string();
 
     let responses = workspace.handle_lsp_message(&req);
-    // Should emit publishDiagnostics
-    assert_eq!(responses.len(), 1);
+    // Should emit publishDiagnostics and request a semantic token refresh.
+    assert_eq!(responses.len(), 2);
 
     let response_val: Value = serde_json::from_str(&responses[0]).unwrap();
     assert_eq!(response_val["method"], "textDocument/publishDiagnostics");
@@ -368,6 +563,9 @@ path = "src/main.gfs"
         !diagnostics.is_empty(),
         "Expected diagnostics for syntax error"
     );
+
+    let refresh_val: Value = serde_json::from_str(&responses[1]).unwrap();
+    assert_eq!(refresh_val["method"], "workspace/semanticTokens/refresh");
 }
 
 #[test]

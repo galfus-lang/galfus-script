@@ -1,3 +1,4 @@
+use crate::lsp::anchored::{enclosing_path_expression, value_anchor_function};
 use crate::workspace::Workspace;
 use galfus_core::{ModulePath, RowCol};
 use lsp_types::{Location, Position, Range, Url};
@@ -40,6 +41,18 @@ pub fn goto_definition(workspace: &Workspace, path: &str, position: Position) ->
 
     let resolution = semantic_module.graph().resolution()?;
 
+    if let Some(path) = enclosing_path_expression(syntax_graph, path_stack.as_slice())
+        && let Some((function_module_id, function_symbol)) =
+            value_anchor_function(snapshot, semantic_module, path)
+        && let Some(function_module) = semantic_graph.get(function_module_id)
+        && let Some(symbol) = function_module
+            .graph()
+            .resolution()?
+            .symbol(function_symbol)
+    {
+        return node_location(workspace, function_module, symbol.declaration());
+    }
+
     let mut symbol_id = None;
     let deepest = path_stack.last().copied()?;
     let deepest_node = syntax_graph.node(deepest)?;
@@ -47,8 +60,8 @@ pub fn goto_definition(workspace: &Workspace, path: &str, position: Position) ->
     if deepest_node.kind() == galfus_frontend::SyntaxNodeKind::Identifier {
         for &node in path_stack.iter().rev() {
             if let Some(sym) = resolution
-                .reference_symbol(node)
-                .or_else(|| resolution.path_reference_symbol(node))
+                .path_reference_symbol(node)
+                .or_else(|| resolution.reference_symbol(node))
                 .or_else(|| resolution.type_reference_symbol(node))
                 .or_else(|| resolution.type_path_reference_symbol(node))
                 .or_else(|| resolution.declaration_symbol(node))
