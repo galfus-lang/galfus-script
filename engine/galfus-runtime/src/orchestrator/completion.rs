@@ -1,10 +1,11 @@
 use super::*;
 
+use crate::event::{FutureResult, FutureValue};
 use crate::orchestrator::adapter_handles::stamp_adapter_handles;
 use crate::orchestrator::pending::{
     LateCompletion, MAX_LATE_COMPLETIONS, PendingContinuation, PendingKey, PendingOperation,
 };
-use crate::task::with_execution_stack;
+use crate::task::{encode_future_value_into_thread_heap, with_execution_stack};
 use galfus_contract::{BoundaryValue, ExecutionFailure, ExecutionFailureKind};
 
 impl Orchestrator {
@@ -42,7 +43,7 @@ impl Orchestrator {
             self.record_late_completion(thread_id, key);
             return;
         }
-        self.resume_pending(thread_id, pending, result, key);
+        self.resume_pending(thread_id, pending, result.map(FutureValue::Boundary), key);
         self.completion_metrics.accepted += 1;
         if let PendingKey::Request(request_id) = key {
             self.free_request_id(request_id);
@@ -53,7 +54,7 @@ impl Orchestrator {
         &mut self,
         thread_id: crate::registry::ThreadId,
         pending: PendingContinuation,
-        result: Result<BoundaryValue, ExecutionFailure>,
+        result: FutureResult,
         key: PendingKey,
     ) {
         #[cfg(feature = "metrics")]
@@ -111,7 +112,7 @@ impl Orchestrator {
                     .get(pending.module_id)
                     .expect("asynchronous call module is loaded")
                     .module;
-                let value = match crate::task::encode_into_thread_heap(
+                let value = match encode_future_value_into_thread_heap(
                     &mut thread.heap,
                     value,
                     pending.return_type,
@@ -123,7 +124,7 @@ impl Orchestrator {
                         self.failure = Some(
                             with_pending_id(ExecutionFailure::new(
                                 ExecutionFailureKind::BoundaryCodecFailure,
-                                format!("invalid asynchronous result: {error:?}"),
+                                format!("invalid asynchronous result: {error}"),
                             ))
                             .with_thread_id(thread_id)
                             .with_module_id(pending.module_id.raw().into())
@@ -161,7 +162,7 @@ impl Orchestrator {
         &mut self,
         thread_id: crate::registry::ThreadId,
         future_id: galfus_core::FutureId,
-        mut result: Result<BoundaryValue, ExecutionFailure>,
+        mut result: FutureResult,
     ) {
         let adapter_proxy_module = self
             .future_registry
@@ -173,8 +174,11 @@ impl Orchestrator {
                 .as_ref()
                 .and_then(|bindings| bindings.lock().ok()?.binding_id(proxy_module))
         });
-        if result.as_mut().is_ok_and(|value| {
-            !stamp_adapter_handles(value, adapter_proxy_module.as_deref(), binding_id)
+        if result.as_mut().is_ok_and(|value| match value {
+            FutureValue::Boundary(value) => {
+                !stamp_adapter_handles(value, adapter_proxy_module.as_deref(), binding_id)
+            }
+            FutureValue::Surface { .. } | FutureValue::Aggregate(_) => false,
         }) {
             result = Err(ExecutionFailure::new(
                 ExecutionFailureKind::BoundaryCodecFailure,
@@ -185,7 +189,7 @@ impl Orchestrator {
         let is_direct_await = self.future_registry.is_direct_await(thread_id, future_id);
 
         if !is_direct_await
-            && let (Some((payload_module_id, payload_type)), Ok(value)) = (
+            && let (Some((payload_module_id, payload_type)), Ok(FutureValue::Boundary(value))) = (
                 self.future_registry.payload_schema(thread_id, future_id),
                 &result,
             )
@@ -237,7 +241,8 @@ impl Orchestrator {
                 return;
             }
         };
-        if let (Some(proxy_module), Ok(value)) = (adapter_proxy_module, &result)
+        if let (Some(proxy_module), Ok(FutureValue::Boundary(value))) =
+            (adapter_proxy_module, &result)
             && let Err(error) = self.register_adapter_handles(&proxy_module, value)
         {
             self.failure = Some(error.with_thread_id(thread_id).with_future_id(future_id));

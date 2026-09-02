@@ -1,3 +1,9 @@
+use crate::{
+    BoundaryType, CURRENT_BOUNDARY_ABI_VERSION, ProviderDescriptor, ProviderFunctionSignature,
+    ProviderModuleDescriptor, SurfaceContract, SurfaceDirection, SurfaceField,
+    SurfaceFunctionContract, SurfaceSchema, provider_schema_fingerprint,
+};
+
 pub const ASYNC_SOURCE: &str = include_str!("../builtins/internals/async.gfs");
 pub const THREAD_SOURCE: &str = include_str!("../builtins/internals/thread.gfs");
 pub const MATH_SOURCE: &str = include_str!("../builtins/internals/math.gfs");
@@ -71,6 +77,40 @@ pub fn std_io_provider_descriptor() -> ProviderDescriptor {
                     return_type: BoundaryType::Null,
                 },
             ],
+            surface_contracts: vec![
+                SurfaceFunctionContract {
+                    provider_operation: "io_read".to_string(),
+                    bridge_symbol: "__provider_io_read".to_string(),
+                    parameters: vec![SurfaceContract::new(
+                        "std/io::__provider_io_read:terminator",
+                        1,
+                        SurfaceDirection::ToProvider,
+                        SurfaceSchema::Bytes,
+                    )],
+                    result: SurfaceContract::new(
+                        "std/io::__provider_io_read:return",
+                        1,
+                        SurfaceDirection::FromProvider,
+                        SurfaceSchema::Bytes,
+                    ),
+                },
+                SurfaceFunctionContract {
+                    provider_operation: "io_write".to_string(),
+                    bridge_symbol: "__provider_io_write".to_string(),
+                    parameters: vec![SurfaceContract::new(
+                        "std/io::__provider_io_write:text",
+                        1,
+                        SurfaceDirection::ToProvider,
+                        SurfaceSchema::Bytes,
+                    )],
+                    result: SurfaceContract::new(
+                        "std/io::__provider_io_write:return",
+                        1,
+                        SurfaceDirection::FromProvider,
+                        SurfaceSchema::Null,
+                    ),
+                },
+            ],
         }],
     }
 }
@@ -85,6 +125,17 @@ pub fn std_time_provider_descriptor() -> ProviderDescriptor {
                 name: "time_now".to_string(),
                 parameter_types: vec![],
                 return_type: BoundaryType::I64,
+            }],
+            surface_contracts: vec![SurfaceFunctionContract {
+                provider_operation: "time_now".to_string(),
+                bridge_symbol: "__provider_time_now".to_string(),
+                parameters: vec![],
+                result: SurfaceContract::new(
+                    "std/time::__provider_time_now:return",
+                    1,
+                    SurfaceDirection::FromProvider,
+                    SurfaceSchema::I64,
+                ),
             }],
         }],
     }
@@ -108,6 +159,40 @@ pub fn std_env_provider_descriptor() -> ProviderDescriptor {
                     name: "env_has".to_string(),
                     parameter_types: vec![BoundaryType::Array(Box::new(BoundaryType::U8))],
                     return_type: BoundaryType::Bool,
+                },
+            ],
+            surface_contracts: vec![
+                SurfaceFunctionContract {
+                    provider_operation: "env_get".to_string(),
+                    bridge_symbol: "__provider_env_get".to_string(),
+                    parameters: vec![SurfaceContract::new(
+                        "std/env::__provider_env_get:key",
+                        1,
+                        SurfaceDirection::ToProvider,
+                        SurfaceSchema::Bytes,
+                    )],
+                    result: SurfaceContract::new(
+                        "std/env::__provider_env_get:return",
+                        1,
+                        SurfaceDirection::FromProvider,
+                        SurfaceSchema::Optional(Box::new(SurfaceSchema::Bytes)),
+                    ),
+                },
+                SurfaceFunctionContract {
+                    provider_operation: "env_has".to_string(),
+                    bridge_symbol: "__provider_env_has".to_string(),
+                    parameters: vec![SurfaceContract::new(
+                        "std/env::__provider_env_has:key",
+                        1,
+                        SurfaceDirection::ToProvider,
+                        SurfaceSchema::Bytes,
+                    )],
+                    result: SurfaceContract::new(
+                        "std/env::__provider_env_has:return",
+                        1,
+                        SurfaceDirection::FromProvider,
+                        SurfaceSchema::Bool,
+                    ),
                 },
             ],
         }],
@@ -175,6 +260,178 @@ pub fn std_fs_provider_descriptor() -> ProviderDescriptor {
                     return_type: byte_array.clone(),
                 },
             ],
+            surface_contracts: vec![
+                SurfaceFunctionContract {
+                    provider_operation: "fs_read".to_string(),
+                    bridge_symbol: "__provider_fs_read".to_string(),
+                    parameters: vec![SurfaceContract::new(
+                        "std/fs::__provider_fs_read:path",
+                        1,
+                        SurfaceDirection::ToProvider,
+                        SurfaceSchema::Bytes,
+                    )],
+                    result: SurfaceContract::new(
+                        "std/fs::__provider_fs_read:return",
+                        1,
+                        SurfaceDirection::FromProvider,
+                        SurfaceSchema::Optional(Box::new(SurfaceSchema::Bytes)),
+                    ),
+                },
+                SurfaceFunctionContract {
+                    provider_operation: "fs_write".to_string(),
+                    bridge_symbol: "__provider_fs_write".to_string(),
+                    parameters: vec![
+                        SurfaceContract::new(
+                            "std/fs::__provider_fs_write:path",
+                            1,
+                            SurfaceDirection::ToProvider,
+                            SurfaceSchema::Bytes,
+                        ),
+                        SurfaceContract::new(
+                            "std/fs::__provider_fs_write:data",
+                            1,
+                            SurfaceDirection::ToProvider,
+                            SurfaceSchema::Bytes,
+                        ),
+                    ],
+                    result: SurfaceContract::new(
+                        "std/fs::__provider_fs_write:return",
+                        1,
+                        SurfaceDirection::FromProvider,
+                        SurfaceSchema::Bool,
+                    ),
+                },
+                SurfaceFunctionContract {
+                    provider_operation: "fs_exists".to_string(),
+                    bridge_symbol: "__provider_fs_exists".to_string(),
+                    parameters: vec![SurfaceContract::new(
+                        "std/fs::__provider_fs_exists:path",
+                        1,
+                        SurfaceDirection::ToProvider,
+                        SurfaceSchema::Bytes,
+                    )],
+                    result: SurfaceContract::new(
+                        "std/fs::__provider_fs_exists:return",
+                        1,
+                        SurfaceDirection::FromProvider,
+                        SurfaceSchema::Bool,
+                    ),
+                },
+                SurfaceFunctionContract {
+                    provider_operation: "fs_delete".to_string(),
+                    bridge_symbol: "__provider_fs_delete".to_string(),
+                    parameters: vec![SurfaceContract::new(
+                        "std/fs::__provider_fs_delete:path",
+                        1,
+                        SurfaceDirection::ToProvider,
+                        SurfaceSchema::Bytes,
+                    )],
+                    result: SurfaceContract::new(
+                        "std/fs::__provider_fs_delete:return",
+                        1,
+                        SurfaceDirection::FromProvider,
+                        SurfaceSchema::Bool,
+                    ),
+                },
+                SurfaceFunctionContract {
+                    provider_operation: "fs_is_directory".to_string(),
+                    bridge_symbol: "__provider_fs_is_directory".to_string(),
+                    parameters: vec![SurfaceContract::new(
+                        "std/fs::__provider_fs_is_directory:path",
+                        1,
+                        SurfaceDirection::ToProvider,
+                        SurfaceSchema::Bytes,
+                    )],
+                    result: SurfaceContract::new(
+                        "std/fs::__provider_fs_is_directory:return",
+                        1,
+                        SurfaceDirection::FromProvider,
+                        SurfaceSchema::Bool,
+                    ),
+                },
+                SurfaceFunctionContract {
+                    provider_operation: "fs_is_file".to_string(),
+                    bridge_symbol: "__provider_fs_is_file".to_string(),
+                    parameters: vec![SurfaceContract::new(
+                        "std/fs::__provider_fs_is_file:path",
+                        1,
+                        SurfaceDirection::ToProvider,
+                        SurfaceSchema::Bytes,
+                    )],
+                    result: SurfaceContract::new(
+                        "std/fs::__provider_fs_is_file:return",
+                        1,
+                        SurfaceDirection::FromProvider,
+                        SurfaceSchema::Bool,
+                    ),
+                },
+                SurfaceFunctionContract {
+                    provider_operation: "fs_size".to_string(),
+                    bridge_symbol: "__provider_fs_size".to_string(),
+                    parameters: vec![SurfaceContract::new(
+                        "std/fs::__provider_fs_size:path",
+                        1,
+                        SurfaceDirection::ToProvider,
+                        SurfaceSchema::Bytes,
+                    )],
+                    result: SurfaceContract::new(
+                        "std/fs::__provider_fs_size:return",
+                        1,
+                        SurfaceDirection::FromProvider,
+                        SurfaceSchema::I64,
+                    ),
+                },
+                SurfaceFunctionContract {
+                    provider_operation: "fs_list".to_string(),
+                    bridge_symbol: "__provider_fs_list".to_string(),
+                    parameters: vec![SurfaceContract::new(
+                        "std/fs::__provider_fs_list:path",
+                        1,
+                        SurfaceDirection::ToProvider,
+                        SurfaceSchema::Bytes,
+                    )],
+                    result: SurfaceContract::new(
+                        "std/fs::__provider_fs_list:return",
+                        1,
+                        SurfaceDirection::FromProvider,
+                        SurfaceSchema::Optional(Box::new(SurfaceSchema::List(Box::new(
+                            SurfaceSchema::Bytes,
+                        )))),
+                    ),
+                },
+                SurfaceFunctionContract {
+                    provider_operation: "fs_mkdir".to_string(),
+                    bridge_symbol: "__provider_fs_mkdir".to_string(),
+                    parameters: vec![SurfaceContract::new(
+                        "std/fs::__provider_fs_mkdir:path",
+                        1,
+                        SurfaceDirection::ToProvider,
+                        SurfaceSchema::Bytes,
+                    )],
+                    result: SurfaceContract::new(
+                        "std/fs::__provider_fs_mkdir:return",
+                        1,
+                        SurfaceDirection::FromProvider,
+                        SurfaceSchema::Bool,
+                    ),
+                },
+                SurfaceFunctionContract {
+                    provider_operation: "fs_normalize_path".to_string(),
+                    bridge_symbol: "__provider_fs_normalize_path".to_string(),
+                    parameters: vec![SurfaceContract::new(
+                        "std/fs::__provider_fs_normalize_path:path",
+                        1,
+                        SurfaceDirection::ToProvider,
+                        SurfaceSchema::Bytes,
+                    )],
+                    result: SurfaceContract::new(
+                        "std/fs::__provider_fs_normalize_path:return",
+                        1,
+                        SurfaceDirection::FromProvider,
+                        SurfaceSchema::Bytes,
+                    ),
+                },
+            ],
         }],
     }
 }
@@ -234,6 +491,7 @@ pub fn std_net_provider_descriptor() -> ProviderDescriptor {
                     return_type: BoundaryType::Bool,
                 },
             ],
+            surface_contracts: vec![],
         }],
     }
 }
@@ -263,6 +521,82 @@ pub fn std_http_provider_descriptor() -> ProviderDescriptor {
                     BoundaryType::Nullable(Box::new(bytes)),
                 ],
                 return_type: BoundaryType::Nullable(Box::new(response)),
+            }],
+            surface_contracts: vec![SurfaceFunctionContract {
+                provider_operation: "http_request".to_string(),
+                bridge_symbol: "__provider_http_request".to_string(),
+                parameters: vec![
+                    SurfaceContract::new(
+                        "std/http::__provider_http_request:method",
+                        1,
+                        SurfaceDirection::ToProvider,
+                        SurfaceSchema::Bytes,
+                    ),
+                    SurfaceContract::new(
+                        "std/http::__provider_http_request:url",
+                        1,
+                        SurfaceDirection::ToProvider,
+                        SurfaceSchema::Bytes,
+                    ),
+                    SurfaceContract::new(
+                        "std/http::__provider_http_request:headers",
+                        1,
+                        SurfaceDirection::ToProvider,
+                        SurfaceSchema::List(Box::new(SurfaceSchema::Struct {
+                            name: "Header".to_string(),
+                            fields: vec![
+                                SurfaceField {
+                                    name: "name".to_string(),
+                                    schema: SurfaceSchema::Bytes,
+                                },
+                                SurfaceField {
+                                    name: "value".to_string(),
+                                    schema: SurfaceSchema::Bytes,
+                                },
+                            ],
+                        })),
+                    ),
+                    SurfaceContract::new(
+                        "std/http::__provider_http_request:body",
+                        1,
+                        SurfaceDirection::ToProvider,
+                        SurfaceSchema::Optional(Box::new(SurfaceSchema::Bytes)),
+                    ),
+                ],
+                result: SurfaceContract::new(
+                    "std/http::__provider_http_request:return",
+                    1,
+                    SurfaceDirection::FromProvider,
+                    SurfaceSchema::Optional(Box::new(SurfaceSchema::Struct {
+                        name: "Response".to_string(),
+                        fields: vec![
+                            SurfaceField {
+                                name: "status".to_string(),
+                                schema: SurfaceSchema::I32,
+                            },
+                            SurfaceField {
+                                name: "headers".to_string(),
+                                schema: SurfaceSchema::List(Box::new(SurfaceSchema::Struct {
+                                    name: "Header".to_string(),
+                                    fields: vec![
+                                        SurfaceField {
+                                            name: "name".to_string(),
+                                            schema: SurfaceSchema::Bytes,
+                                        },
+                                        SurfaceField {
+                                            name: "value".to_string(),
+                                            schema: SurfaceSchema::Bytes,
+                                        },
+                                    ],
+                                })),
+                            },
+                            SurfaceField {
+                                name: "body".to_string(),
+                                schema: SurfaceSchema::Bytes,
+                            },
+                        ],
+                    })),
+                ),
             }],
         }],
     }
@@ -297,6 +631,7 @@ pub fn std_websocket_provider_descriptor() -> ProviderDescriptor {
                     return_type: BoundaryType::Bool,
                 },
             ],
+            surface_contracts: vec![],
         }],
     }
 }
@@ -343,11 +678,6 @@ impl BridgeModule {
         }
     }
 }
-use crate::{
-    BoundaryType, CURRENT_BOUNDARY_ABI_VERSION, ProviderDescriptor, ProviderFunctionSignature,
-    ProviderModuleDescriptor, provider_schema_fingerprint,
-};
-
 pub fn std_server_provider_descriptor() -> ProviderDescriptor {
     let bytes = BoundaryType::Array(Box::new(BoundaryType::U8));
     let header = BoundaryType::Tuple(vec![bytes.clone(), bytes.clone()]);
@@ -417,6 +747,7 @@ pub fn std_server_provider_descriptor() -> ProviderDescriptor {
                     return_type: BoundaryType::Bool,
                 },
             ],
+            surface_contracts: vec![],
         }],
     }
 }

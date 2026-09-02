@@ -2,10 +2,10 @@
 mod tests;
 
 use crate::driver::{ExecutionDriver, RuntimeEventSink};
-use crate::event::RuntimeEvent;
+use crate::event::{FutureValue, RuntimeEvent};
 use galfus_contract::{
     AdapterBindingsCloseReport, BoundaryValue, ExecutionFailure, ExecutionFailureKind,
-    ExecutorStepResult, ThreadResult,
+    ExecutorStepResult, SurfaceContract, SurfaceValue, ThreadResult,
 };
 use std::marker::PhantomData;
 use std::rc::Rc;
@@ -419,7 +419,7 @@ impl ExecutionHandle {
             .submit(RuntimeEvent::FutureCompleted {
                 thread_id,
                 future_lease,
-                result,
+                result: result.map(FutureValue::Boundary),
             })
             .map_err(|_| galfus_contract::MessageInjectionError::ExecutionClosed)
     }
@@ -441,6 +441,7 @@ pub(crate) struct FutureCompletionInjector {
     owner_thread_id: crate::registry::ThreadId,
     request_lease: galfus_core::RequestLease,
     future_lease: galfus_core::FutureLease,
+    surface_result: Option<SurfaceContract>,
 }
 
 impl FutureCompletionInjector {
@@ -449,12 +450,14 @@ impl FutureCompletionInjector {
         owner_thread_id: crate::registry::ThreadId,
         request_lease: galfus_core::RequestLease,
         future_lease: galfus_core::FutureLease,
+        surface_result: Option<SurfaceContract>,
     ) -> Self {
         Self {
             sink,
             owner_thread_id,
             request_lease,
             future_lease,
+            surface_result,
         }
     }
 }
@@ -469,6 +472,31 @@ impl galfus_contract::MessageInjector for FutureCompletionInjector {
         if thread_id != self.owner_thread_id || request_lease != self.request_lease {
             return Err(galfus_contract::MessageInjectionError::HostProtocolViolation);
         }
+        self.sink
+            .submit(RuntimeEvent::FutureCompleted {
+                thread_id: self.owner_thread_id,
+                future_lease: self.future_lease,
+                result: result.map(FutureValue::Boundary),
+            })
+            .map_err(|_| galfus_contract::MessageInjectionError::ExecutionClosed)
+    }
+
+    fn inject_surface_response(
+        &self,
+        thread_id: galfus_core::ThreadId,
+        request_lease: galfus_core::RequestLease,
+        result: Result<SurfaceValue, ExecutionFailure>,
+    ) -> Result<(), galfus_contract::MessageInjectionError> {
+        let Some(contract) = &self.surface_result else {
+            return Err(galfus_contract::MessageInjectionError::UnsupportedSurfaceContract);
+        };
+        if thread_id != self.owner_thread_id || request_lease != self.request_lease {
+            return Err(galfus_contract::MessageInjectionError::HostProtocolViolation);
+        }
+        let result = result.map(|value| FutureValue::Surface {
+            contract: contract.clone(),
+            value,
+        });
         self.sink
             .submit(RuntimeEvent::FutureCompleted {
                 thread_id: self.owner_thread_id,

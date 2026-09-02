@@ -2,8 +2,28 @@
 mod tests;
 
 use crate::registry::ThreadId;
+use galfus_contract::{BoundaryValue, ExecutionFailure, SurfaceContract, SurfaceValue};
 use galfus_vm::thread::VmThreadState;
 use galfus_vm::{Continuation, VmEffect};
+
+/// Heap-independent completion data retained until the owning continuation resumes.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FutureValue {
+    Boundary(BoundaryValue),
+    Surface {
+        contract: SurfaceContract,
+        value: SurfaceValue,
+    },
+    Aggregate(Vec<Self>),
+}
+
+pub type FutureResult = Result<FutureValue, ExecutionFailure>;
+
+impl From<BoundaryValue> for FutureValue {
+    fn from(value: BoundaryValue) -> Self {
+        Self::Boundary(value)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EventSequence(pub u64);
@@ -60,7 +80,7 @@ pub enum RuntimeEvent {
     FutureCompleted {
         thread_id: ThreadId,
         future_lease: galfus_core::FutureLease,
-        result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
+        result: FutureResult,
     },
     /// A dedicated worker completed a Galfus future activation.
     FutureWorkerCompleted {

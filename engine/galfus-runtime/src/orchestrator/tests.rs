@@ -1,6 +1,7 @@
 use super::*;
-use crate::event::EventSequence;
+use crate::event::{EventSequence, FutureValue};
 use crate::orchestrator::adapter::ProviderDispatchTask;
+use crate::orchestrator::future_registry::ProviderArguments;
 use crate::orchestrator::pending::PendingOperation;
 use galfus_bytecode::instruction::{Reg, TypeIdx};
 use galfus_contract::{
@@ -70,7 +71,7 @@ pub(super) fn provider_dispatch_task(called: Arc<AtomicBool>) -> ProviderDispatc
         request_lease: galfus_core::RequestLease::new(galfus_core::RequestId::new(1), 1),
         alias: "io".to_string(),
         name: "operation".to_string(),
-        args: vec![],
+        args: ProviderArguments::Boundary(vec![]),
         injector: Arc::new(NoopInjector),
         active: Arc::new(AtomicBool::new(true)),
     }
@@ -113,7 +114,7 @@ pub(super) fn provider_dispatch_reports_a_poisoned_registry_without_panicking() 
         request_lease: galfus_core::RequestLease::new(galfus_core::RequestId::new(1), 1),
         alias: "io".to_string(),
         name: "operation".to_string(),
-        args: vec![],
+        args: ProviderArguments::Boundary(vec![]),
         injector: Arc::new(FailureInjector(failures.clone())),
         active: Arc::new(AtomicBool::new(true)),
     };
@@ -190,7 +191,11 @@ pub(super) fn race_winner_uses_event_sequence_then_member_index() {
             .winner
             .as_ref()
             .map(|(sequence, index, result)| (*sequence, *index, result.clone())),
-        Some((EventSequence(1), 0, Ok(BoundaryValue::I32(1))))
+        Some((
+            EventSequence(1),
+            0,
+            Ok(FutureValue::Boundary(BoundaryValue::I32(1))),
+        ))
     );
 }
 
@@ -228,9 +233,9 @@ pub(super) fn all_results_preserve_member_order_when_completions_arrive_out_of_o
     assert_eq!(
         orchestrator.aggregate_coordinators[&coordinator_id].results,
         Some(vec![
-            Some(Ok(BoundaryValue::I32(1))),
-            Some(Ok(BoundaryValue::I32(2))),
-            Some(Ok(BoundaryValue::I32(3))),
+            Some(Ok(FutureValue::Boundary(BoundaryValue::I32(1)))),
+            Some(Ok(FutureValue::Boundary(BoundaryValue::I32(2)))),
+            Some(Ok(FutureValue::Boundary(BoundaryValue::I32(3)))),
         ])
     );
 }

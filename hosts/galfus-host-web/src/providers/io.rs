@@ -1,7 +1,7 @@
 use galfus_contract::builtins::std_io_provider_descriptor;
 use galfus_contract::{
     BoundaryValue, CancellationOutcome, ExecutionFailure, ExecutionFailureKind, HostProvider,
-    MessageInjector, ProviderDescriptor, TaskAffinity,
+    MessageInjector, ProviderDescriptor, SurfaceValue, TaskAffinity,
 };
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
@@ -119,6 +119,112 @@ impl HostProvider for WebIoProvider {
                         format!("Function {} not implemented in WebIoProvider", name),
                     )),
                 );
+            }
+        }
+    }
+
+    fn dispatch_surface(
+        &mut self,
+        thread_id: galfus_core::ThreadId,
+        request_lease: galfus_core::RequestLease,
+        name: &str,
+        args: &[SurfaceValue],
+        injector: Arc<dyn MessageInjector>,
+    ) -> bool {
+        match name {
+            "io_write" => {
+                let [SurfaceValue::Bytes(bytes)] = args else {
+                    let _ = injector.inject_surface_response(
+                        thread_id,
+                        request_lease,
+                        Err(ExecutionFailure::new(
+                            ExecutionFailureKind::ProviderFailure,
+                            "expected surface output bytes",
+                        )),
+                    );
+                    return true;
+                };
+
+                if let Some(stdout) = &self.stdout {
+                    let writer = stdout.get_writer().unwrap();
+                    let js_bytes = js_sys::Uint8Array::from(bytes.as_slice());
+                    wasm_bindgen_futures::spawn_local(async move {
+                        let promise = writer.write_with_chunk(&js_bytes);
+                        let _ = JsFuture::from(promise).await;
+                        writer.release_lock();
+                        let _ = injector.inject_surface_response(
+                            thread_id,
+                            request_lease,
+                            Ok(SurfaceValue::Null),
+                        );
+                    });
+                } else {
+                    if let Ok(text) = std::str::from_utf8(bytes) {
+                        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(text));
+                    }
+                    let _ = injector.inject_surface_response(
+                        thread_id,
+                        request_lease,
+                        Ok(SurfaceValue::Null),
+                    );
+                }
+                true
+            }
+            "io_read" => {
+                if !matches!(args, [SurfaceValue::Bytes(_)]) {
+                    let _ = injector.inject_surface_response(
+                        thread_id,
+                        request_lease,
+                        Err(ExecutionFailure::new(
+                            ExecutionFailureKind::ProviderFailure,
+                            "expected surface input terminator",
+                        )),
+                    );
+                    return true;
+                }
+
+                if let Some(stdin) = &self.stdin {
+                    let reader_val = stdin.get_reader();
+                    let reader: web_sys::ReadableStreamDefaultReader = reader_val.unchecked_into();
+                    wasm_bindgen_futures::spawn_local(async move {
+                        let promise = reader.read();
+                        let mut result_bytes = Vec::new();
+                        if let Ok(js_result) = JsFuture::from(promise).await
+                            && let Ok(value) = js_sys::Reflect::get(
+                                &js_result,
+                                &wasm_bindgen::JsValue::from_str("value"),
+                            )
+                            && !value.is_undefined()
+                            && !value.is_null()
+                        {
+                            result_bytes = js_sys::Uint8Array::new(&value).to_vec();
+                        }
+                        reader.release_lock();
+                        let _ = injector.inject_surface_response(
+                            thread_id,
+                            request_lease,
+                            Ok(SurfaceValue::Bytes(result_bytes)),
+                        );
+                    });
+                } else {
+                    let _ = injector.inject_surface_response(
+                        thread_id,
+                        request_lease,
+                        Ok(SurfaceValue::Bytes(Vec::new())),
+                    );
+                }
+                true
+            }
+            _ => {
+                let _ = injector.inject_surface_response(
+                    thread_id,
+                    request_lease,
+                    Err(ExecutionFailure::new(
+                        ExecutionFailureKind::ProviderFailure,
+                        "unknown I/O operation",
+                    )),
+                );
+                true
             }
         }
     }

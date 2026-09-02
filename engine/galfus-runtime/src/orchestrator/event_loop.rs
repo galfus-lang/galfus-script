@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::event::RuntimeEvent;
+use crate::event::{FutureValue, RuntimeEvent};
 use crate::task::RuntimeTask;
 use galfus_contract::{ExecutionFailure, ExecutionFailureKind, KernelTask};
 
@@ -167,7 +167,7 @@ impl Orchestrator {
                         self.process_event(RuntimeEvent::FutureCompleted {
                             thread_id: owner_thread_id,
                             future_lease,
-                            result: result.clone(),
+                            result: result.clone().map(FutureValue::Boundary),
                         });
                     }
                 }
@@ -259,7 +259,11 @@ impl Orchestrator {
                         .copied()
                         .unwrap_or(0)
                 {
-                    self.complete_future(owner_thread_id, future_lease.id, result);
+                    self.complete_future(
+                        owner_thread_id,
+                        future_lease.id,
+                        result.map(FutureValue::Boundary),
+                    );
                 }
             }
             RuntimeEvent::Tick { delta_ms } => {

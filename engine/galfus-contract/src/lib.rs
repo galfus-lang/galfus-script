@@ -6,6 +6,7 @@
 pub mod catalog;
 pub use catalog::*;
 pub mod builtins;
+pub mod surface;
 #[cfg(test)]
 mod tests;
 pub mod thread;
@@ -17,6 +18,7 @@ use std::sync;
 use galfus_core::{BindingId, HandleId, OpaqueTypeId};
 
 pub use builtins::*;
+pub use surface::*;
 pub use thread::*;
 pub use version::*;
 
@@ -279,6 +281,8 @@ pub enum MessageInjectionError {
     HostProtocolViolation,
     #[error("execution is closed and cannot receive the completion")]
     ExecutionClosed,
+    #[error("provider operation has no surface contract")]
+    UnsupportedSurfaceContract,
 }
 
 pub trait MessageInjector: Send + Sync {
@@ -288,6 +292,15 @@ pub trait MessageInjector: Send + Sync {
         request_lease: galfus_core::RequestLease,
         result: Result<BoundaryValue, ExecutionFailure>,
     ) -> Result<(), MessageInjectionError>;
+
+    fn inject_surface_response(
+        &self,
+        _thread_id: galfus_core::ThreadId,
+        _request_lease: galfus_core::RequestLease,
+        _result: Result<SurfaceValue, ExecutionFailure>,
+    ) -> Result<(), MessageInjectionError> {
+        Err(MessageInjectionError::UnsupportedSurfaceContract)
+    }
 }
 
 pub trait HostProvider: Send {
@@ -311,6 +324,22 @@ pub trait HostProvider: Send {
         args: &[BoundaryValue],
         injector: sync::Arc<dyn MessageInjector>,
     );
+
+    /// Dispatches arguments decoded from a declared `__provider_*` surface contract.
+    ///
+    /// Returning `false` keeps legacy providers explicit: the runtime completes the
+    /// request with a protocol error instead of silently converting structured data
+    /// back into a boundary tuple.
+    fn dispatch_surface(
+        &mut self,
+        _thread_id: galfus_core::ThreadId,
+        _request_lease: galfus_core::RequestLease,
+        _name: &str,
+        _args: &[SurfaceValue],
+        _injector: sync::Arc<dyn MessageInjector>,
+    ) -> bool {
+        false
+    }
 
     /// Notifies the provider that a pending request no longer has an execution owner.
     fn cancel(
@@ -1049,11 +1078,23 @@ pub struct ProviderModuleDescriptor {
     pub schema_fingerprint: u64,
     pub boundary_abi: BoundaryAbiVersion,
     pub exports: Vec<ProviderFunctionSignature>,
+    pub surface_contracts: Vec<SurfaceFunctionContract>,
 }
 
 impl ProviderModuleDescriptor {
     pub fn canonicalize(&mut self) {
         self.exports.sort();
+        self.surface_contracts.sort_by(|left, right| {
+            left.provider_operation
+                .cmp(&right.provider_operation)
+                .then_with(|| left.bridge_symbol.cmp(&right.bridge_symbol))
+        });
+    }
+
+    pub fn surface_contract(&self, operation: &str) -> Option<&SurfaceFunctionContract> {
+        self.surface_contracts
+            .iter()
+            .find(|contract| contract.provider_operation == operation)
     }
 }
 

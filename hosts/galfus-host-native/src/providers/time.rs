@@ -1,7 +1,7 @@
 use galfus_contract::builtins::std_time_provider_descriptor;
 use galfus_contract::{
     BoundaryValue, CancellationOutcome, ExecutionFailure, ExecutionFailureKind, HostProvider,
-    MessageInjector, ProviderDescriptor, TaskAffinity,
+    MessageInjector, ProviderDescriptor, SurfaceValue, TaskAffinity,
 };
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -43,10 +43,10 @@ impl HostProvider for NativeTimeProvider {
                     Ok(d) => d.as_millis() as i64,
                     Err(_) => 0,
                 };
-                let _ = injector.inject_system_response(
+                let _ = injector.inject_surface_response(
                     thread_id,
                     request_lease,
-                    Ok(BoundaryValue::I64(ms)),
+                    Ok(SurfaceValue::I64(ms)),
                 );
             }
             _ => {
@@ -60,6 +60,21 @@ impl HostProvider for NativeTimeProvider {
                 );
             }
         }
+    }
+
+    fn dispatch_surface(
+        &mut self,
+        thread_id: galfus_core::ThreadId,
+        request_lease: galfus_core::RequestLease,
+        name: &str,
+        args: &[SurfaceValue],
+        injector: Arc<dyn MessageInjector>,
+    ) -> bool {
+        if !args.is_empty() {
+            return false;
+        }
+        self.dispatch(thread_id, request_lease, name, &[], injector);
+        true
     }
 
     fn cancel(

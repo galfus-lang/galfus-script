@@ -1,5 +1,6 @@
 use super::*;
 
+use crate::event::FutureValue;
 use galfus_contract::BoundaryValue;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -133,7 +134,7 @@ impl Orchestrator {
             self.complete_future(
                 wait.waiting_thread_id,
                 wait.future_lease.id,
-                Ok(BoundaryValue::Bytes(message.data)),
+                Ok(FutureValue::Boundary(BoundaryValue::Bytes(message.data))),
             );
         }
     }
@@ -162,7 +163,7 @@ impl Orchestrator {
             self.complete_future(
                 wait.waiting_thread_id,
                 wait.future_lease.id,
-                Ok(BoundaryValue::Null),
+                Ok(FutureValue::Boundary(BoundaryValue::Null)),
             );
         }
     }
@@ -208,7 +209,7 @@ impl Orchestrator {
             self.complete_future(
                 wait.waiting_thread_id,
                 wait.future_lease.id,
-                Ok(BoundaryValue::Null),
+                Ok(FutureValue::Boundary(BoundaryValue::Null)),
             );
         }
     }

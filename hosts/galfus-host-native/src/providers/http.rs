@@ -1,7 +1,7 @@
 use galfus_contract::builtins::std_http_provider_descriptor;
 use galfus_contract::{
     BoundaryType, BoundaryValue, CancellationOutcome, ExecutionFailure, ExecutionFailureKind,
-    HostProvider, MessageInjector, ProviderDescriptor, TaskAffinity,
+    HostProvider, MessageInjector, ProviderDescriptor, SurfaceValue, TaskAffinity,
 };
 use std::io::Read;
 use std::sync::Arc;
@@ -12,6 +12,68 @@ impl NativeHttpProvider {
     pub fn new() -> Self {
         Self
     }
+}
+
+fn surface_bytes(value: &SurfaceValue, name: &str) -> Result<Vec<u8>, ExecutionFailure> {
+    match value {
+        SurfaceValue::Bytes(value) => Ok(value.clone()),
+        _ => Err(ExecutionFailure::new(
+            ExecutionFailureKind::ProviderFailure,
+            format!("expected surface bytes for {name}"),
+        )),
+    }
+}
+
+fn surface_headers(value: &SurfaceValue) -> Result<Vec<(String, String)>, ExecutionFailure> {
+    let SurfaceValue::List(headers) = value else {
+        return Err(ExecutionFailure::new(
+            ExecutionFailureKind::ProviderFailure,
+            "expected surface header list",
+        ));
+    };
+    headers
+        .iter()
+        .map(|header| {
+            let SurfaceValue::Struct(fields) = header else {
+                return Err(ExecutionFailure::new(
+                    ExecutionFailureKind::ProviderFailure,
+                    "expected surface header struct",
+                ));
+            };
+            let name = fields
+                .iter()
+                .find_map(|(name, value)| (name == "name").then_some(value))
+                .ok_or_else(|| {
+                    ExecutionFailure::new(
+                        ExecutionFailureKind::ProviderFailure,
+                        "missing header name",
+                    )
+                })?;
+            let value = fields
+                .iter()
+                .find_map(|(name, value)| (name == "value").then_some(value))
+                .ok_or_else(|| {
+                    ExecutionFailure::new(
+                        ExecutionFailureKind::ProviderFailure,
+                        "missing header value",
+                    )
+                })?;
+            Ok((
+                String::from_utf8(surface_bytes(name, "header name")?).map_err(|_| {
+                    ExecutionFailure::new(
+                        ExecutionFailureKind::ProviderFailure,
+                        "invalid header name",
+                    )
+                })?,
+                String::from_utf8(surface_bytes(value, "header value")?).map_err(|_| {
+                    ExecutionFailure::new(
+                        ExecutionFailureKind::ProviderFailure,
+                        "invalid header value",
+                    )
+                })?,
+            ))
+        })
+        .collect()
 }
 impl Default for NativeHttpProvider {
     fn default() -> Self {
@@ -172,6 +234,81 @@ impl HostProvider for NativeHttpProvider {
             ]))
         })();
         let _ = injector.inject_system_response(thread_id, request_lease, result);
+    }
+
+    fn dispatch_surface(
+        &mut self,
+        thread_id: galfus_core::ThreadId,
+        request_lease: galfus_core::RequestLease,
+        name: &str,
+        args: &[SurfaceValue],
+        injector: Arc<dyn MessageInjector>,
+    ) -> bool {
+        let result = (|| -> Result<SurfaceValue, ExecutionFailure> {
+            if name != "http_request" || args.len() != 4 {
+                return Err(ExecutionFailure::new(
+                    ExecutionFailureKind::ProviderFailure,
+                    "invalid surface HTTP request",
+                ));
+            }
+            let method = String::from_utf8(surface_bytes(&args[0], "method")?).map_err(|_| {
+                ExecutionFailure::new(
+                    ExecutionFailureKind::ProviderFailure,
+                    "invalid UTF-8 method",
+                )
+            })?;
+            let url = String::from_utf8(surface_bytes(&args[1], "url")?).map_err(|_| {
+                ExecutionFailure::new(ExecutionFailureKind::ProviderFailure, "invalid UTF-8 url")
+            })?;
+            let request = surface_headers(&args[2])?
+                .into_iter()
+                .fold(ureq::request(&method, &url), |request, (name, value)| {
+                    request.set(&name, &value)
+                });
+            let response = match &args[3] {
+                SurfaceValue::Bytes(body) => request.send_bytes(body),
+                SurfaceValue::Null => request.call(),
+                _ => {
+                    return Err(ExecutionFailure::new(
+                        ExecutionFailureKind::ProviderFailure,
+                        "expected nullable surface body",
+                    ));
+                }
+            }
+            .map_err(|_| {
+                ExecutionFailure::new(ExecutionFailureKind::ProviderFailure, "HTTP request failed")
+            })?;
+            let status = response.status() as i32;
+            let headers = response
+                .headers_names()
+                .into_iter()
+                .filter_map(|name| {
+                    response.header(&name).map(|value| {
+                        SurfaceValue::Struct(vec![
+                            ("name".to_string(), SurfaceValue::Bytes(name.into_bytes())),
+                            (
+                                "value".to_string(),
+                                SurfaceValue::Bytes(value.as_bytes().to_vec()),
+                            ),
+                        ])
+                    })
+                })
+                .collect();
+            let mut body = Vec::new();
+            response.into_reader().read_to_end(&mut body).map_err(|_| {
+                ExecutionFailure::new(
+                    ExecutionFailureKind::ProviderFailure,
+                    "failed to read HTTP response",
+                )
+            })?;
+            Ok(SurfaceValue::Struct(vec![
+                ("status".to_string(), SurfaceValue::I32(status)),
+                ("headers".to_string(), SurfaceValue::List(headers)),
+                ("body".to_string(), SurfaceValue::Bytes(body)),
+            ]))
+        })();
+        let _ = injector.inject_surface_response(thread_id, request_lease, result);
+        true
     }
     fn cancel(
         &mut self,

@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::task::execution_stack;
+use crate::task::{decode_surface_from_thread_heap, execution_stack};
 use galfus_bytecode::instruction::{FuncIdx, TypeIdx};
 use galfus_contract::{BoundaryValue, ExecutionFailure, ExecutionFailureKind};
 use galfus_core::ModuleId;
@@ -172,10 +172,13 @@ impl Orchestrator {
             .get(module_id)
             .unwrap()
             .module;
-        let activation_result =
-            self.future_activation(target_module_id, func_idx, args.clone(), || {
+        let activation_result = self.future_activation(
+            target_module_id,
+            func_idx,
+            args.clone(),
+            || {
                 let mut encoded_args = Vec::with_capacity(args.len());
-                for (arg, ty) in args.into_iter().zip(arg_types.iter()) {
+                for (arg, ty) in args.clone().into_iter().zip(arg_types.iter()) {
                     match crate::task::decode_from_thread_heap(&thread.heap, arg, *ty, module) {
                         Ok(value) => encoded_args.push(value),
                         Err(_) if matches!(arg, galfus_vm::VmValue::Function { .. }) => {
@@ -196,7 +199,23 @@ impl Orchestrator {
                     };
                 }
                 Ok(encoded_args)
-            });
+            },
+            |contracts| {
+                args.iter()
+                    .cloned()
+                    .zip(arg_types.iter().zip(contracts.iter()))
+                    .map(|(arg, (ty, contract))| {
+                        decode_surface_from_thread_heap(
+                            &thread.heap,
+                            &contract.schema,
+                            arg,
+                            *ty,
+                            module,
+                        )
+                    })
+                    .collect()
+            },
+        );
 
         let activation = match activation_result {
             Ok(activation) => activation,
@@ -280,10 +299,13 @@ impl Orchestrator {
             .get(target_module_id)
             .unwrap()
             .module;
-        let activation_result =
-            self.future_activation(target_module_id, func_idx, args.clone(), || {
+        let activation_result = self.future_activation(
+            target_module_id,
+            func_idx,
+            args.clone(),
+            || {
                 let mut encoded_args = Vec::with_capacity(args.len());
-                for (arg, ty) in args.into_iter().zip(arg_types.iter()) {
+                for (arg, ty) in args.clone().into_iter().zip(arg_types.iter()) {
                     match crate::task::decode_from_thread_heap(
                         &thread.heap,
                         arg,
@@ -295,7 +317,23 @@ impl Orchestrator {
                     }
                 }
                 Ok(encoded_args)
-            });
+            },
+            |contracts| {
+                args.iter()
+                    .cloned()
+                    .zip(arg_types.iter().zip(contracts.iter()))
+                    .map(|(arg, (ty, contract))| {
+                        decode_surface_from_thread_heap(
+                            &thread.heap,
+                            &contract.schema,
+                            arg,
+                            *ty,
+                            target_module,
+                        )
+                    })
+                    .collect()
+            },
+        );
 
         let activation = match activation_result {
             Ok(activation) => activation,
@@ -415,8 +453,10 @@ impl Orchestrator {
         func_idx: FuncIdx,
         args_vm: Vec<galfus_vm::VmValue>,
         encoded_args: impl FnOnce() -> Result<Vec<BoundaryValue>, galfus_contract::BoundaryCodecError>,
-    ) -> Result<crate::orchestrator::future_registry::Activation, galfus_contract::BoundaryCodecError>
-    {
+        encoded_surface_args: impl FnOnce(
+            &[galfus_contract::SurfaceContract],
+        ) -> Result<Vec<galfus_contract::SurfaceValue>, String>,
+    ) -> Result<crate::orchestrator::future_registry::Activation, String> {
         let target = &self
             .vm
             .as_ref()
@@ -435,22 +475,40 @@ impl Orchestrator {
             let alias = galfus_contract::provider_alias_from_operation(name)
                 .expect("compiled provider operations have a valid alias")
                 .to_string();
+            let surface_contract = self.provider_surface_contract(&alias, name);
+            let args = if let Some(contract) = surface_contract {
+                if contract.parameters.len() != args_vm.len() {
+                    return Err(format!(
+                        "surface contract {} expects {} arguments, received {}",
+                        contract.bridge_symbol,
+                        contract.parameters.len(),
+                        args_vm.len(),
+                    ));
+                }
+                crate::orchestrator::future_registry::ProviderArguments::Surface(
+                    encoded_surface_args(&contract.parameters)?,
+                )
+            } else {
+                crate::orchestrator::future_registry::ProviderArguments::Boundary(
+                    encoded_args().map_err(|error| format!("{error:?}"))?,
+                )
+            };
             Ok(crate::orchestrator::future_registry::Activation::Provider {
                 alias,
                 name: name.to_string(),
-                args: encoded_args()?,
+                args,
                 request_id: None,
             })
         } else if function_name.starts_with("__internal_") {
             Ok(crate::orchestrator::future_registry::Activation::Internal {
                 operation: function_name,
-                args: encoded_args()?,
+                args: encoded_args().map_err(|error| format!("{error:?}"))?,
             })
         } else if let Some((proxy_module, symbol)) = adapter_identity {
             Ok(crate::orchestrator::future_registry::Activation::Adapter {
                 proxy_module,
                 symbol,
-                args: encoded_args()?,
+                args: encoded_args().map_err(|error| format!("{error:?}"))?,
                 request_id: None,
             })
         } else {
@@ -462,5 +520,20 @@ impl Orchestrator {
                 },
             )
         }
+    }
+
+    fn provider_surface_contract(
+        &self,
+        alias: &str,
+        operation: &str,
+    ) -> Option<galfus_contract::SurfaceFunctionContract> {
+        let providers = self.vm.as_ref()?.providers()?;
+        let providers = providers.lock().ok()?;
+        let host = providers.get_host(alias)?;
+        let host = host.lock().ok()?;
+        host.descriptor()
+            .modules
+            .into_iter()
+            .find_map(|module| module.surface_contract(operation).cloned())
     }
 }

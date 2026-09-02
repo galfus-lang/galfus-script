@@ -1,5 +1,13 @@
-type Header = ([u8], [u8])
-type Response = (i32, [Header], [u8])
+export struct Header {
+    name: [u8],
+    value: [u8],
+}
+
+export struct Response {
+    status: i32,
+    headers: [Header],
+    body: [u8],
+}
 
 fn(async) __provider_http_request(method: [u8], url: [u8], headers: [Header], body: [u8] | null): Response | null
 

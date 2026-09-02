@@ -1,7 +1,7 @@
 use super::*;
 
+use crate::event::{FutureResult, FutureValue};
 use crate::orchestrator::pending::{PendingContinuation, PendingKey};
-use galfus_contract::{BoundaryValue, ExecutionFailure};
 
 #[derive(Clone, Copy)]
 pub(crate) enum AggregateMode {
@@ -13,23 +13,20 @@ pub(crate) struct AggregateCoordinator {
     pub(crate) mode: AggregateMode,
     pub(crate) future_ids: Vec<galfus_core::FutureId>,
     pub(crate) pending: PendingContinuation,
-    pub(crate) results: Option<Vec<Option<Result<BoundaryValue, ExecutionFailure>>>>,
+    pub(crate) results: Option<Vec<Option<FutureResult>>>,
     pub(crate) remaining_results: usize,
-    pub(crate) winner: Option<(
-        EventSequence,
-        usize,
-        Result<BoundaryValue, ExecutionFailure>,
-    )>,
+    pub(crate) winner: Option<(EventSequence, usize, FutureResult)>,
     pub(crate) armed: bool,
 }
 
 impl Orchestrator {
-    pub(super) fn complete_aggregate_member(
+    pub(super) fn complete_aggregate_member<V: Into<FutureValue>>(
         &mut self,
         coordinator_id: galfus_core::CoordinatorId,
         index: usize,
-        result: Result<BoundaryValue, ExecutionFailure>,
+        result: Result<V, galfus_contract::ExecutionFailure>,
     ) {
+        let result = result.map(Into::into);
         let Some(coordinator) = self.aggregate_coordinators.get_mut(&coordinator_id) else {
             return;
         };
@@ -76,7 +73,7 @@ impl Orchestrator {
                     .iter()
                     .map(|result| result.as_ref().expect("all results are present").clone())
                     .collect::<Result<Vec<_>, _>>();
-                values.map(BoundaryValue::Tuple)
+                values.map(FutureValue::Aggregate)
             }
             AggregateMode::Race => match coordinator.winner.clone() {
                 Some((_, _, result)) => result,

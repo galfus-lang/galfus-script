@@ -14,7 +14,7 @@ impl Orchestrator {
         future_id: galfus_core::FutureId,
         alias: String,
         name: String,
-        args: Vec<galfus_contract::BoundaryValue>,
+        args: crate::orchestrator::future_registry::ProviderArguments,
     ) -> Option<galfus_vm::thread::VmThreadState> {
         let vm = self.vm.as_ref().expect("VM is configured before execution");
         let Some(providers) = vm.providers() else {
@@ -30,7 +30,7 @@ impl Orchestrator {
             self.kernel.cancel(thread_id);
             return None;
         };
-        let affinity = {
+        let (affinity, surface_result) = {
             let host_arc = match providers.lock() {
                 Ok(providers) => providers.get_host(&alias),
                 Err(_) => {
@@ -76,7 +76,13 @@ impl Orchestrator {
                     return None;
                 }
             };
-            host.affinity(name.as_str())
+            let surface_result = host
+                .descriptor()
+                .modules
+                .into_iter()
+                .find_map(|module| module.surface_contract(name.as_str()).cloned())
+                .map(|contract| contract.result);
+            (host.affinity(name.as_str()), surface_result)
         };
         let request_lease = self.allocate_request_lease(thread_id, future_id, &thread)?;
         if let Err(error) =
@@ -108,6 +114,7 @@ impl Orchestrator {
                         .copied()
                         .unwrap_or(0),
                 ),
+                surface_result,
             )),
             active: self
                 .future_registry

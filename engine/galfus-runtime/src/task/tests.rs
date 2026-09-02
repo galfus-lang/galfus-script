@@ -1,11 +1,15 @@
 use super::{
-    decode_from_thread_heap, encode_into_thread_heap, execution_stack, with_execution_stack,
+    decode_from_thread_heap, decode_surface_from_thread_heap, encode_future_value_into_thread_heap,
+    encode_into_thread_heap, execution_stack, with_execution_stack,
 };
+use crate::event::FutureValue;
 use galfus_bytecode::instruction::{FuncIdx, TypeIdx};
 use galfus_bytecode::{
     BytecodeModule, BytecodeType, ChoiceLayout, ChoiceVariantLayout, ConstantPool,
 };
-use galfus_contract::{BoundaryType, BoundaryValue};
+use galfus_contract::{
+    BoundaryType, BoundaryValue, SurfaceContract, SurfaceDirection, SurfaceSchema, SurfaceValue,
+};
 use galfus_core::{BindingId, HandleId, OpaqueTypeId};
 use galfus_vm::{HeapObject, VmValue};
 
@@ -117,6 +121,56 @@ fn codec_preserves_the_declared_type_of_an_empty_array() {
             values: vec![],
         }
     );
+}
+
+#[test]
+fn surface_future_value_materializes_directly_in_the_waiting_heap() {
+    let module = module(vec![BytecodeType::Int64]);
+    let mut heap = galfus_vm::thread::PrivateHeap::test_new();
+    let contract = SurfaceContract::new(
+        "std/time::__provider_time_now:return",
+        1,
+        SurfaceDirection::FromProvider,
+        SurfaceSchema::I64,
+    );
+
+    let value = encode_future_value_into_thread_heap(
+        &mut heap,
+        FutureValue::Surface {
+            contract,
+            value: SurfaceValue::I64(42),
+        },
+        TypeIdx(0),
+        galfus_core::ModuleId::new(1),
+        &module,
+    )
+    .expect("surface value materializes without a boundary conversion");
+
+    assert_eq!(value, VmValue::Int64(42));
+}
+
+#[test]
+fn surface_argument_reads_directly_from_the_calling_heap() {
+    let module = module(vec![BytecodeType::Uint8, BytecodeType::Array(TypeIdx(0))]);
+    let mut heap = galfus_vm::thread::PrivateHeap::test_new();
+    let reference = heap
+        .alloc(HeapObject::Array {
+            module_id: galfus_core::ModuleId::new(1),
+            element_ty: TypeIdx(0),
+            elements: vec![VmValue::Uint8(b'o'), VmValue::Uint8(b'k')],
+        })
+        .expect("test heap accepts bytes");
+
+    let value = decode_surface_from_thread_heap(
+        &heap,
+        &SurfaceSchema::Bytes,
+        VmValue::Object(reference),
+        TypeIdx(1),
+        &module,
+    )
+    .expect("surface argument decodes without a boundary conversion");
+
+    assert_eq!(value, SurfaceValue::Bytes(b"ok".to_vec()));
 }
 
 #[test]

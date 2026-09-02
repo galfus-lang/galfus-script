@@ -210,6 +210,195 @@ pub(crate) fn decode_from_thread_heap(
     }
 }
 
+pub(crate) fn decode_surface_from_thread_heap(
+    heap: &galfus_vm::thread::PrivateHeap,
+    schema: &galfus_contract::SurfaceSchema,
+    value: galfus_vm::VmValue,
+    expected: galfus_bytecode::instruction::TypeIdx,
+    module: &galfus_bytecode::BytecodeModule,
+) -> Result<galfus_contract::SurfaceValue, String> {
+    use galfus_bytecode::BytecodeType;
+    use galfus_contract::{SurfaceCodecError, SurfaceSchema, SurfaceValue};
+
+    let expected_type = module
+        .types
+        .get(expected.raw() as usize)
+        .ok_or_else(|| "missing expected bytecode type".to_string())?;
+    let mismatch = || format!("surface schema {schema:?} does not match {expected_type:?}");
+    match (schema, value, expected_type) {
+        (SurfaceSchema::Null, galfus_vm::VmValue::Null, BytecodeType::Null) => {
+            Ok(SurfaceValue::Null)
+        }
+        (SurfaceSchema::Bool, galfus_vm::VmValue::Bool(value), BytecodeType::Bool) => {
+            Ok(SurfaceValue::Bool(value))
+        }
+        (SurfaceSchema::I32, galfus_vm::VmValue::Int32(value), BytecodeType::Int32) => {
+            Ok(SurfaceValue::I32(value))
+        }
+        (SurfaceSchema::I64, galfus_vm::VmValue::Int64(value), BytecodeType::Int64) => {
+            Ok(SurfaceValue::I64(value))
+        }
+        (SurfaceSchema::U32, galfus_vm::VmValue::Uint32(value), BytecodeType::Uint32) => {
+            Ok(SurfaceValue::U32(value))
+        }
+        (SurfaceSchema::U64, galfus_vm::VmValue::Uint64(value), BytecodeType::Uint64) => {
+            Ok(SurfaceValue::U64(value))
+        }
+        (SurfaceSchema::F32, galfus_vm::VmValue::Float32(value), BytecodeType::Float32) => {
+            Ok(SurfaceValue::F32(galfus_core::normalize_f32(value)))
+        }
+        (SurfaceSchema::F64, galfus_vm::VmValue::Float64(value), BytecodeType::Float64) => {
+            Ok(SurfaceValue::F64(galfus_core::normalize_f64(value)))
+        }
+        (
+            SurfaceSchema::Bytes,
+            galfus_vm::VmValue::Object(reference),
+            BytecodeType::Array(item),
+        ) if matches!(
+            module.types.get(item.raw() as usize),
+            Some(BytecodeType::Uint8)
+        ) =>
+        {
+            let galfus_vm::HeapObject::Array { elements, .. } = heap
+                .get_object(reference)
+                .map_err(|_| "surface bytes reference is invalid".to_string())?
+            else {
+                return Err(mismatch());
+            };
+            let bytes = elements
+                .iter()
+                .map(|value| match value {
+                    galfus_vm::VmValue::Uint8(value) => Ok(*value),
+                    _ => Err(mismatch()),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(SurfaceValue::Bytes(bytes))
+        }
+        (SurfaceSchema::Optional(_), galfus_vm::VmValue::Null, BytecodeType::Nullable(_)) => {
+            Ok(SurfaceValue::Null)
+        }
+        (SurfaceSchema::Optional(schema), value, BytecodeType::Nullable(item)) => {
+            decode_surface_from_thread_heap(heap, schema, value, *item, module)
+        }
+        (
+            SurfaceSchema::List(schema),
+            galfus_vm::VmValue::Object(reference),
+            BytecodeType::Array(item),
+        ) => {
+            let galfus_vm::HeapObject::Array { elements, .. } = heap
+                .get_object(reference)
+                .map_err(|_| "surface list reference is invalid".to_string())?
+            else {
+                return Err(mismatch());
+            };
+            let values = elements
+                .iter()
+                .cloned()
+                .map(|value| decode_surface_from_thread_heap(heap, schema, value, *item, module))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(SurfaceValue::List(values))
+        }
+        (
+            SurfaceSchema::Struct { fields, .. },
+            galfus_vm::VmValue::Object(reference),
+            BytecodeType::Struct(layout_idx),
+        ) => {
+            let galfus_vm::HeapObject::Struct { fields: values, .. } =
+                heap.get_object(reference)
+                    .map_err(|_| "surface struct reference is invalid".to_string())?
+            else {
+                return Err(mismatch());
+            };
+            let layout = module
+                .struct_layouts
+                .get(layout_idx.raw() as usize)
+                .ok_or_else(|| "missing struct layout".to_string())?;
+            if fields.len() != values.len() || values.len() != layout.fields.len() {
+                return Err(mismatch());
+            }
+            let values = fields
+                .iter()
+                .zip(values.iter().cloned().zip(layout.fields.iter()))
+                .map(|(field, (value, layout))| {
+                    Ok((
+                        field.name.clone(),
+                        decode_surface_from_thread_heap(
+                            heap,
+                            &field.schema,
+                            value,
+                            layout.ty,
+                            module,
+                        )?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            Ok(SurfaceValue::Struct(values))
+        }
+        (
+            SurfaceSchema::Choice { variants, .. },
+            galfus_vm::VmValue::Object(reference),
+            BytecodeType::Choice(layout_idx),
+        ) => {
+            let galfus_vm::HeapObject::Choice {
+                variant_idx,
+                payload,
+                ..
+            } = heap
+                .get_object(reference)
+                .map_err(|_| "surface choice reference is invalid".to_string())?
+            else {
+                return Err(mismatch());
+            };
+            let schema_variant = variants
+                .get(*variant_idx as usize)
+                .ok_or_else(|| "surface choice has too many variants".to_string())?;
+            let layout = module
+                .choice_layouts
+                .get(layout_idx.raw() as usize)
+                .ok_or_else(|| "missing choice layout".to_string())?;
+            let variant_layout = layout
+                .variants
+                .get(*variant_idx as usize)
+                .ok_or_else(|| "surface choice layout has too many variants".to_string())?;
+            let payload = match (schema_variant.payload.as_ref(), variant_layout.payload_ty) {
+                (None, None) => None,
+                (Some(schema), Some(payload_type)) => Some(Box::new(
+                    decode_surface_from_thread_heap(heap, schema, *payload, payload_type, module)?,
+                )),
+                _ => return Err(mismatch()),
+            };
+            Ok(SurfaceValue::Choice {
+                variant: schema_variant.name.clone(),
+                payload,
+            })
+        }
+        (
+            SurfaceSchema::Handle { .. },
+            galfus_vm::VmValue::Object(reference),
+            BytecodeType::AdapterHandle(type_id),
+        ) => {
+            let galfus_vm::HeapObject::AdapterHandle {
+                type_id: actual,
+                id,
+                ..
+            } = heap
+                .get_object(reference)
+                .map_err(|_| "surface handle reference is invalid".to_string())?
+            else {
+                return Err(mismatch());
+            };
+            if actual != type_id {
+                return Err(SurfaceCodecError::InvalidHandle.to_string());
+            }
+            Ok(SurfaceValue::Handle(galfus_contract::SurfaceHandle {
+                type_id: actual.clone(),
+                id: *id,
+            }))
+        }
+        _ => Err(mismatch()),
+    }
+}
+
 pub(crate) fn encode_into_thread_heap(
     heap: &mut galfus_vm::thread::PrivateHeap,
     value: galfus_contract::BoundaryValue,
@@ -404,6 +593,282 @@ pub(crate) fn encode_into_thread_heap(
             Ok(galfus_vm::VmValue::Object(reference))
         }
         (_, found) => Err(type_mismatch(expected_type, &found)),
+    }
+}
+
+pub(crate) fn encode_future_value_into_thread_heap(
+    heap: &mut galfus_vm::thread::PrivateHeap,
+    value: crate::event::FutureValue,
+    expected: galfus_bytecode::instruction::TypeIdx,
+    module_id: galfus_core::ModuleId,
+    module: &galfus_bytecode::BytecodeModule,
+) -> Result<galfus_vm::VmValue, String> {
+    match value {
+        crate::event::FutureValue::Boundary(value) => {
+            encode_into_thread_heap(heap, value, expected, module_id, module)
+                .map_err(|error| format!("boundary value: {error:?}"))
+        }
+        crate::event::FutureValue::Surface { contract, value } => {
+            if !contract.validates() {
+                return Err("surface contract fingerprint is invalid".to_string());
+            }
+            encode_surface_into_thread_heap(
+                heap,
+                &contract.schema,
+                value,
+                expected,
+                module_id,
+                module,
+            )
+        }
+        crate::event::FutureValue::Aggregate(values) => {
+            encode_aggregate_into_thread_heap(heap, values, expected, module_id, module)
+        }
+    }
+}
+
+fn encode_surface_into_thread_heap(
+    heap: &mut galfus_vm::thread::PrivateHeap,
+    schema: &galfus_contract::SurfaceSchema,
+    value: galfus_contract::SurfaceValue,
+    expected: galfus_bytecode::instruction::TypeIdx,
+    module_id: galfus_core::ModuleId,
+    module: &galfus_bytecode::BytecodeModule,
+) -> Result<galfus_vm::VmValue, String> {
+    use galfus_bytecode::BytecodeType;
+    use galfus_contract::{SurfaceCodecError, SurfaceSchema, SurfaceValue};
+
+    schema
+        .validate_value(&value)
+        .map_err(|error| format!("surface value: {error}"))?;
+    let expected_type = module
+        .types
+        .get(expected.raw() as usize)
+        .ok_or_else(|| "missing expected bytecode type".to_string())?;
+    let mismatch = || format!("surface schema {schema:?} does not match {expected_type:?}");
+    match (schema, value, expected_type) {
+        (SurfaceSchema::Null, SurfaceValue::Null, BytecodeType::Null) => {
+            Ok(galfus_vm::VmValue::Null)
+        }
+        (SurfaceSchema::Bool, SurfaceValue::Bool(value), BytecodeType::Bool) => {
+            Ok(galfus_vm::VmValue::Bool(value))
+        }
+        (SurfaceSchema::I32, SurfaceValue::I32(value), BytecodeType::Int32) => {
+            Ok(galfus_vm::VmValue::Int32(value))
+        }
+        (SurfaceSchema::I64, SurfaceValue::I64(value), BytecodeType::Int64) => {
+            Ok(galfus_vm::VmValue::Int64(value))
+        }
+        (SurfaceSchema::U32, SurfaceValue::U32(value), BytecodeType::Uint32) => {
+            Ok(galfus_vm::VmValue::Uint32(value))
+        }
+        (SurfaceSchema::U64, SurfaceValue::U64(value), BytecodeType::Uint64) => {
+            Ok(galfus_vm::VmValue::Uint64(value))
+        }
+        (SurfaceSchema::F32, SurfaceValue::F32(value), BytecodeType::Float32) => Ok(
+            galfus_vm::VmValue::Float32(galfus_core::normalize_f32(value)),
+        ),
+        (SurfaceSchema::F64, SurfaceValue::F64(value), BytecodeType::Float64) => Ok(
+            galfus_vm::VmValue::Float64(galfus_core::normalize_f64(value)),
+        ),
+        (SurfaceSchema::Bytes, SurfaceValue::Bytes(bytes), BytecodeType::Array(element_type))
+            if matches!(
+                module.types.get(element_type.raw() as usize),
+                Some(BytecodeType::Uint8)
+            ) =>
+        {
+            let elements = bytes.into_iter().map(galfus_vm::VmValue::Uint8).collect();
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Array {
+                    module_id,
+                    element_ty: *element_type,
+                    elements,
+                })
+                .map_err(|_| "surface bytes exceed heap quota".to_string())?;
+            Ok(galfus_vm::VmValue::Object(reference))
+        }
+        (SurfaceSchema::Optional(_), SurfaceValue::Null, BytecodeType::Nullable(_)) => {
+            Ok(galfus_vm::VmValue::Null)
+        }
+        (SurfaceSchema::Optional(inner), value, BytecodeType::Nullable(inner_type)) => {
+            encode_surface_into_thread_heap(heap, inner, value, *inner_type, module_id, module)
+        }
+        (
+            SurfaceSchema::List(item_schema),
+            SurfaceValue::List(values),
+            BytecodeType::Array(item_type),
+        ) => {
+            let elements = values
+                .into_iter()
+                .map(|value| {
+                    encode_surface_into_thread_heap(
+                        heap,
+                        item_schema,
+                        value,
+                        *item_type,
+                        module_id,
+                        module,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Array {
+                    module_id,
+                    element_ty: *item_type,
+                    elements,
+                })
+                .map_err(|_| "surface list exceeds heap quota".to_string())?;
+            Ok(galfus_vm::VmValue::Object(reference))
+        }
+        (
+            SurfaceSchema::Struct { fields, .. },
+            SurfaceValue::Struct(values),
+            BytecodeType::Struct(layout_idx),
+        ) => {
+            let layout = module
+                .struct_layouts
+                .get(layout_idx.raw() as usize)
+                .ok_or_else(|| "missing struct layout".to_string())?;
+            if fields.len() != layout.fields.len() {
+                return Err(mismatch());
+            }
+            let fields = fields
+                .iter()
+                .zip(layout.fields.iter())
+                .map(|(field_schema, field_layout)| {
+                    let value = values
+                        .iter()
+                        .find_map(|(name, value)| (name == &field_schema.name).then_some(value))
+                        .cloned()
+                        .ok_or_else(|| {
+                            SurfaceCodecError::MissingField(field_schema.name.clone()).to_string()
+                        })?;
+                    encode_surface_into_thread_heap(
+                        heap,
+                        &field_schema.schema,
+                        value,
+                        field_layout.ty,
+                        module_id,
+                        module,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Struct {
+                    module_id,
+                    layout_idx: *layout_idx,
+                    fields,
+                })
+                .map_err(|_| "surface struct exceeds heap quota".to_string())?;
+            Ok(galfus_vm::VmValue::Object(reference))
+        }
+        (
+            SurfaceSchema::Choice { variants, .. },
+            SurfaceValue::Choice { variant, payload },
+            BytecodeType::Choice(layout_idx),
+        ) => {
+            let schema_variant = variants
+                .iter()
+                .enumerate()
+                .find(|(_, candidate)| candidate.name == variant)
+                .ok_or_else(|| SurfaceCodecError::InvalidTag(variant.clone()).to_string())?;
+            let layout = module
+                .choice_layouts
+                .get(layout_idx.raw() as usize)
+                .ok_or_else(|| "missing choice layout".to_string())?;
+            let variant_layout = layout
+                .variants
+                .get(schema_variant.0)
+                .ok_or_else(|| "surface choice has too many variants".to_string())?;
+            let payload = match (
+                schema_variant.1.payload.as_ref(),
+                variant_layout.payload_ty,
+                payload,
+            ) {
+                (None, None, None) => galfus_vm::VmValue::Null,
+                (Some(schema), Some(payload_type), Some(value)) => encode_surface_into_thread_heap(
+                    heap,
+                    schema,
+                    *value,
+                    payload_type,
+                    module_id,
+                    module,
+                )?,
+                _ => return Err(mismatch()),
+            };
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Choice {
+                    module_id,
+                    layout_idx: *layout_idx,
+                    variant_idx: schema_variant.0 as u16,
+                    payload,
+                })
+                .map_err(|_| "surface choice exceeds heap quota".to_string())?;
+            Ok(galfus_vm::VmValue::Object(reference))
+        }
+        (SurfaceSchema::Handle { .. }, SurfaceValue::Handle(_), _) => {
+            Err("surface handles require a provider handle runtime representation".to_string())
+        }
+        _ => Err(mismatch()),
+    }
+}
+
+fn encode_aggregate_into_thread_heap(
+    heap: &mut galfus_vm::thread::PrivateHeap,
+    values: Vec<crate::event::FutureValue>,
+    expected: galfus_bytecode::instruction::TypeIdx,
+    module_id: galfus_core::ModuleId,
+    module: &galfus_bytecode::BytecodeModule,
+) -> Result<galfus_vm::VmValue, String> {
+    use galfus_bytecode::BytecodeType;
+
+    let expected_type = module
+        .types
+        .get(expected.raw() as usize)
+        .ok_or_else(|| "missing aggregate bytecode type".to_string())?;
+    match expected_type {
+        BytecodeType::Array(element_type) => {
+            let elements = values
+                .into_iter()
+                .map(|value| {
+                    encode_future_value_into_thread_heap(
+                        heap,
+                        value,
+                        *element_type,
+                        module_id,
+                        module,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Array {
+                    module_id,
+                    element_ty: *element_type,
+                    elements,
+                })
+                .map_err(|_| "aggregate exceeds heap quota".to_string())?;
+            Ok(galfus_vm::VmValue::Object(reference))
+        }
+        BytecodeType::Tuple(element_types) if element_types.len() == values.len() => {
+            let elements = values
+                .into_iter()
+                .zip(element_types)
+                .map(|(value, element_type)| {
+                    encode_future_value_into_thread_heap(
+                        heap,
+                        value,
+                        *element_type,
+                        module_id,
+                        module,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Tuple { elements })
+                .map_err(|_| "aggregate exceeds heap quota".to_string())?;
+            Ok(galfus_vm::VmValue::Object(reference))
+        }
+        _ => Err(format!("aggregate result does not match {expected_type:?}")),
     }
 }
 

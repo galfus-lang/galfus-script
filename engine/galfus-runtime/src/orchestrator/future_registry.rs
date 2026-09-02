@@ -2,6 +2,7 @@
 mod tests;
 
 use super::pending::PendingContinuation;
+use crate::event::FutureResult;
 use crate::registry::ThreadId;
 use galfus_bytecode::instruction::{FuncIdx, TypeIdx};
 use galfus_contract::{BoundaryValue, ExecutionFailure};
@@ -11,6 +12,12 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
+
+#[derive(Debug, Clone)]
+pub enum ProviderArguments {
+    Boundary(Vec<BoundaryValue>),
+    Surface(Vec<galfus_contract::SurfaceValue>),
+}
 
 #[derive(Debug, Clone)]
 pub enum Activation {
@@ -26,7 +33,7 @@ pub enum Activation {
     Provider {
         alias: String,
         name: String,
-        args: Vec<BoundaryValue>,
+        args: ProviderArguments,
         request_id: Option<galfus_core::RequestId>,
     },
     Adapter {
@@ -57,7 +64,7 @@ impl Activation {
             Self::Provider { alias, name, .. } => Self::Provider {
                 alias: alias.clone(),
                 name: name.clone(),
-                args: Vec::new(),
+                args: ProviderArguments::Boundary(Vec::new()),
                 request_id: None,
             },
             Self::Adapter {
@@ -78,7 +85,7 @@ impl Activation {
 pub enum FutureState {
     Created(Activation),
     Running(Activation),
-    Resolved(Result<BoundaryValue, ExecutionFailure>),
+    Resolved(FutureResult),
     Discarded,
 }
 
@@ -156,7 +163,7 @@ pub enum WaitDisposition {
     Registered,
     Resolved {
         waiter: Waiter,
-        result: Result<BoundaryValue, ExecutionFailure>,
+        result: FutureResult,
     },
     Discarded,
 }
@@ -561,12 +568,13 @@ impl FutureRegistry {
         res
     }
 
-    pub fn complete(
+    pub fn complete<V: Into<crate::event::FutureValue>>(
         &mut self,
         owner_thread_id: ThreadId,
         future_id: galfus_core::FutureId,
-        result: Result<BoundaryValue, ExecutionFailure>,
+        result: Result<V, ExecutionFailure>,
     ) -> Result<Vec<Waiter>, ExecutionFailure> {
+        let result = result.map(Into::into);
         let record = match self.records.get_mut(&(owner_thread_id, future_id)) {
             Some(r) => r,
             None => {

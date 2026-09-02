@@ -1,5 +1,6 @@
 use super::*;
 
+use crate::event::FutureValue;
 use crate::task::execution_stack;
 use galfus_bytecode::instruction::{FuncIdx, TypeIdx};
 use galfus_contract::{BoundaryValue, ExecutionFailure, ExecutionFailureKind};
@@ -660,7 +661,7 @@ impl Orchestrator {
             if aggregate_registration.is_none() && !self.block_or_fail(thread_id, thread) {
                 return None;
             }
-            self.complete_future(thread_id, future_id, result);
+            self.complete_future(thread_id, future_id, result.map(FutureValue::Boundary));
             return None;
         }
         #[cfg(feature = "metrics")]

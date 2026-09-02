@@ -1,4 +1,5 @@
 use super::*;
+use crate::event::FutureValue;
 use std::sync::{Arc, atomic::AtomicBool};
 
 fn owner() -> ThreadId {
@@ -58,7 +59,7 @@ fn resolved_future_keeps_its_cached_result_for_later_awaits() {
     assert!(matches!(
         registry.add_waiter(owner(), galfus_core::FutureId::new(7), waiter()),
         Ok(WaitDisposition::Resolved {
-            result: Ok(BoundaryValue::I32(42)),
+            result: Ok(FutureValue::Boundary(BoundaryValue::I32(42))),
             ..
         })
     ));
@@ -66,7 +67,9 @@ fn resolved_future_keeps_its_cached_result_for_later_awaits() {
         registry
             .get(owner(), galfus_core::FutureId::new(7))
             .map(|record| &record.state),
-        Some(FutureState::Resolved(Ok(BoundaryValue::I32(42))))
+        Some(FutureState::Resolved(Ok(FutureValue::Boundary(
+            BoundaryValue::I32(42)
+        ))))
     ));
 }
 
@@ -157,7 +160,9 @@ fn duplicate_completion_is_rejected_without_replacing_the_cache() {
         registry
             .get(owner(), galfus_core::FutureId::new(7))
             .map(|record| &record.state),
-        Some(FutureState::Resolved(Ok(BoundaryValue::I32(1))))
+        Some(FutureState::Resolved(Ok(FutureValue::Boundary(
+            BoundaryValue::I32(1)
+        ))))
     ));
 }
 
@@ -225,7 +230,7 @@ fn completion_drains_all_registered_waiters_once() {
     assert!(matches!(
         registry.add_waiter(owner(), galfus_core::FutureId::new(7), waiter()),
         Ok(WaitDisposition::Resolved {
-            result: Ok(BoundaryValue::I32(42)),
+            result: Ok(FutureValue::Boundary(BoundaryValue::I32(42))),
             ..
         })
     ));
