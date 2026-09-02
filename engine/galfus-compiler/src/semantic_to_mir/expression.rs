@@ -1172,7 +1172,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 && let Some(sym_data) = res.symbol(sym)
                 && matches!(
                     sym_data.kind(),
-                    SymbolKind::ImportNamespace | SymbolKind::Struct
+                    SymbolKind::ImportBinding | SymbolKind::ImportNamespace | SymbolKind::Struct
                 )
             {
                 None

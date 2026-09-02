@@ -342,6 +342,29 @@ impl VirtualMachine {
                         self.value_matches_type(thread, value, module_id, *element_type)
                     })
             }
+            (BytecodeType::Struct(layout_idx), Value::Object(reference)) => {
+                let Ok(HeapObject::Struct {
+                    module_id: value_module,
+                    layout_idx: actual_layout,
+                    fields,
+                }) = thread.heap.get_object(reference)
+                else {
+                    return false;
+                };
+                let Some(layout) = module.struct_layouts.get(layout_idx.raw() as usize) else {
+                    return false;
+                };
+                *value_module == module_id
+                    && actual_layout == layout_idx
+                    && fields.len() == layout.fields.len()
+                    && fields
+                        .iter()
+                        .cloned()
+                        .zip(layout.fields.iter())
+                        .all(|(value, field)| {
+                            self.value_matches_type(thread, value, module_id, field.ty)
+                        })
+            }
             (BytecodeType::Tuple(element_types), Value::Object(reference)) => {
                 let Ok(HeapObject::Tuple { elements }) = thread.heap.get_object(reference) else {
                     return false;

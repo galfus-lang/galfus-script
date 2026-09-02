@@ -425,10 +425,15 @@ impl VirtualMachine {
 
                 if let Some(return_type) = return_type {
                     let mut args = Vec::with_capacity(arg_count as usize);
-                    for i in 0..arg_count {
-                        let value = thread.read_reg(Reg(args_start.raw() + i as u16));
-                        thread.retain_anchor_val(&value);
-                        args.push(value);
+                    if arg_count > 0 {
+                        let receiver = thread.read_reg(obj);
+                        thread.retain_anchor_val(&receiver);
+                        args.push(receiver);
+                        for i in 1..arg_count {
+                            let value = thread.read_reg(Reg(args_start.raw() + i as u16));
+                            thread.retain_anchor_val(&value);
+                            args.push(value);
+                        }
                     }
                     let module_id = thread
                         .call_stack

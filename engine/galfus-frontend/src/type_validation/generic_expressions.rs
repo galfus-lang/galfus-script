@@ -69,7 +69,15 @@ impl<'a> DeclarationTypeChecker<'a> {
         target: NodeId,
         target_type: TypeId,
     ) -> Vec<SymbolId> {
+        if let Some(choice) = self.imported_path_choices.get(&target) {
+            return choice.generic_parameters.clone();
+        }
+
         if let Some(symbol) = self.expression_reference_symbol(target) {
+            if let Some(choice) = self.imported_symbol_choices.get(&symbol) {
+                return choice.generic_parameters.clone();
+            }
+
             let mut decl_item = self.function_item_for_symbol(symbol);
             if decl_item.is_none() {
                 decl_item = self.choice_or_struct_item_for_symbol(symbol);

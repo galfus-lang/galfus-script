@@ -1,4 +1,4 @@
-import { fromBytes, ReadStreamResult } from "std/stream"
+import { ByteBuffer, CollectResult, fromBytes, ReadStreamResult } from "std/stream"
 import { println } from "std/io"
 import { equals } from "text"
 
@@ -16,12 +16,32 @@ export fn main(_args: [[u8]]): i32 {
   if counter.value != 1 { return 1 }
 
   const source = fromBytes("stream")
+  const buffer = ByteBuffer::create()
+  if buffer.length != 0 { return 2 }
   const result = await source::next()
   match result {
     ReadStreamResult::Data(bytes) {
       if !equals(bytes, "stream") { return 3 }
     },
     _ { return 4 }
+  }
+
+  const end = await source::next()
+  var ended = false
+  match end {
+    ReadStreamResult::Data(_) { return 5 },
+    ReadStreamResult::Error(_) { return 6 },
+    ReadStreamResult::End { ended = true }
+  }
+  if !ended { return 7 }
+
+  const collected = await buffer::collect(fromBytes("collected"))
+  match collected {
+    CollectResult::Data(bytes) {
+      if !equals(bytes, "collected") { return 8 }
+    },
+    CollectResult::LimitExceeded { return 9 },
+    CollectResult::Error(_) { return 10 }
   }
 
   println("ok")

@@ -175,11 +175,9 @@ pub(super) fn resolve_import_target(
             let target_idx = import_target_index(modules, mod_idx, import.source())?;
             let target_mod = &modules[target_idx];
             let target_resolution = target_mod.graph().resolution()?;
-            if let Some(export) = target_resolution
-                .exports()
-                .iter()
-                .find(|export| export.name() == imported_name)
-            {
+            if let Some(export) = target_resolution.exports().iter().find(|export| {
+                export.kind() == SymbolKind::Function && export.name() == imported_name
+            }) {
                 return Some((target_mod.id(), FunctionId::new(export.symbol().raw())));
             }
         }

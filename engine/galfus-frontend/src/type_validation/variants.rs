@@ -329,12 +329,34 @@ impl<'a> DeclarationTypeChecker<'a> {
                 .then_some(member_symbol)
         };
 
-        if let Some(TypeKind::Named { symbol }) = self.layer.table().kind(target_type)
+        let direct_constraint = match self.layer.table().kind(target_type).cloned() {
+            Some(TypeKind::Named { symbol }) => Some((symbol, Vec::new())),
+            Some(TypeKind::GenericInstance { base, arguments }) => {
+                match self.layer.table().kind(base).cloned() {
+                    Some(TypeKind::Named { symbol }) => Some((symbol, arguments)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+
+        if let Some((constraint_symbol, arguments)) = direct_constraint
             && resolution
-                .symbol(*symbol)
+                .symbol(constraint_symbol)
                 .is_some_and(|symbol| symbol.kind() == SymbolKind::Constraint)
         {
-            return constraint_function(*symbol).and_then(|symbol| self.layer.symbol_type(symbol));
+            let member_symbol = constraint_function(constraint_symbol)?;
+            let member_type = self.layer.symbol_type(member_symbol)?;
+            if arguments.is_empty() {
+                return Some(member_type);
+            }
+
+            let substitution = self
+                .constraint_generic_parameters(constraint_symbol)
+                .into_iter()
+                .zip(arguments)
+                .collect();
+            return Some(self.substitute_type(member_type, &substitution));
         }
 
         let application = self
