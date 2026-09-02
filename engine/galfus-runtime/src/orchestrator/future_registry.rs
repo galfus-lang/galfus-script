@@ -27,7 +27,8 @@ pub enum Activation {
     },
     Internal {
         operation: String,
-        args: Vec<BoundaryValue>,
+        module_id: ModuleId,
+        args: Vec<galfus_vm::VmValue>,
     },
     Provider {
         alias: String,
@@ -56,8 +57,13 @@ impl Activation {
                 func_idx: *func_idx,
                 args: Vec::new(),
             },
-            Self::Internal { operation, .. } => Self::Internal {
+            Self::Internal {
+                operation,
+                module_id,
+                ..
+            } => Self::Internal {
                 operation: operation.clone(),
+                module_id: *module_id,
                 args: Vec::new(),
             },
             Self::Provider { alias, name, .. } => Self::Provider {

@@ -280,6 +280,7 @@ pub(super) fn owner_exit_removes_all_of_its_future_records() {
             None,
             future_registry::Activation::Internal {
                 operation: "test".to_string(),
+                module_id: ModuleId::new(1),
                 args: vec![],
             },
         )

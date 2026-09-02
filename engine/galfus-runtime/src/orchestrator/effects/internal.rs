@@ -2,36 +2,92 @@ use super::*;
 
 use crate::event::FutureValue;
 use crate::task::execution_stack;
-use galfus_bytecode::instruction::{FuncIdx, TypeIdx};
+use galfus_bytecode::instruction::TypeIdx;
 use galfus_contract::{BoundaryValue, ExecutionFailure, ExecutionFailureKind};
 use galfus_core::ModuleId;
+
+fn internal_thread_arg(
+    args: &[galfus_vm::VmValue],
+    index: usize,
+) -> Option<crate::registry::ThreadId> {
+    match args.get(index) {
+        Some(galfus_vm::VmValue::Int64(id)) if *id > 0 => {
+            u32::try_from(*id).ok().map(crate::registry::ThreadId::new)
+        }
+        _ => None,
+    }
+}
+
+fn internal_timeout_arg(args: &[galfus_vm::VmValue], index: usize) -> Option<u64> {
+    match args.get(index) {
+        Some(galfus_vm::VmValue::Int32(value)) if *value >= 0 => Some(*value as u64),
+        Some(galfus_vm::VmValue::Int64(value)) if *value >= 0 => Some(*value as u64),
+        _ => None,
+    }
+}
+
+fn internal_float_arg(args: &[galfus_vm::VmValue], index: usize) -> Option<f64> {
+    match args.get(index) {
+        Some(galfus_vm::VmValue::Float64(value)) => Some(*value),
+        Some(galfus_vm::VmValue::Float32(value)) => Some(*value as f64),
+        Some(galfus_vm::VmValue::Int64(value)) => Some(*value as f64),
+        Some(galfus_vm::VmValue::Int32(value)) => Some(*value as f64),
+        Some(galfus_vm::VmValue::Int16(value)) => Some(*value as f64),
+        Some(galfus_vm::VmValue::Int8(value)) => Some(*value as f64),
+        Some(galfus_vm::VmValue::Uint64(value)) => Some(*value as f64),
+        Some(galfus_vm::VmValue::Uint32(value)) => Some(*value as f64),
+        Some(galfus_vm::VmValue::Uint16(value)) => Some(*value as f64),
+        Some(galfus_vm::VmValue::Uint8(value)) => Some(*value as f64),
+        _ => None,
+    }
+}
+
+fn internal_bytes_arg(
+    heap: &galfus_vm::thread::PrivateHeap,
+    value: Option<&galfus_vm::VmValue>,
+) -> Option<Vec<u8>> {
+    let Some(galfus_vm::VmValue::Object(reference)) = value else {
+        return None;
+    };
+    let Ok(galfus_vm::HeapObject::Array { elements, .. }) = heap.get_object(*reference) else {
+        return None;
+    };
+    elements
+        .iter()
+        .map(|value| match value {
+            galfus_vm::VmValue::Uint8(value) => Some(*value),
+            _ => None,
+        })
+        .collect()
+}
 
 impl Orchestrator {
     pub(super) fn try_complete_internal_await(
         &mut self,
         thread_id: crate::registry::ThreadId,
+        thread_heap: &mut galfus_vm::thread::PrivateHeap,
+        module_id: ModuleId,
+        return_type: TypeIdx,
         operation: &str,
-        args: &[BoundaryValue],
-    ) -> Option<Result<BoundaryValue, ExecutionFailure>> {
-        let thread_arg = |index: usize| {
-            args.get(index).and_then(|value| match value {
-                BoundaryValue::I64(id) if *id > 0 => {
-                    u32::try_from(*id).ok().map(crate::registry::ThreadId::new)
-                }
-                _ => None,
-            })
-        };
+        args: &[galfus_vm::VmValue],
+    ) -> Option<Result<galfus_vm::VmValue, ExecutionFailure>> {
         match operation {
-            "__internal_thread_wait" => match thread_arg(0).and_then(|id| self.kernel.state(id)) {
-                Some(state) if !state.is_exited() => None,
-                Some(state) => Some(Ok(state
-                    .exit_reason()
-                    .and_then(Result::ok)
-                    .unwrap_or(BoundaryValue::Null))),
-                None => Some(Ok(BoundaryValue::Null)),
-            },
+            "__internal_thread_wait" => {
+                match internal_thread_arg(args, 0).and_then(|id| self.kernel.state(id)) {
+                    Some(state) if !state.is_exited() => None,
+                    Some(state) => Some(Ok(state
+                        .exit_reason()
+                        .and_then(Result::ok)
+                        .and_then(|val| match val {
+                            BoundaryValue::I32(code) => Some(galfus_vm::VmValue::Int32(code)),
+                            _ => None,
+                        })
+                        .unwrap_or(galfus_vm::VmValue::Null))),
+                    None => Some(Ok(galfus_vm::VmValue::Null)),
+                }
+            }
             "__internal_thread_receive" => {
-                let sender_id = thread_arg(0);
+                let sender_id = internal_thread_arg(args, 0);
                 self.kernel
                     .get_mailbox(thread_id)
                     .and_then(|mailbox| {
@@ -51,19 +107,31 @@ impl Orchestrator {
                             quota.release_mailbox_messages(1);
                             quota.release_mailbox_bytes(message.data.len());
                         }
-                        Ok(BoundaryValue::Bytes(message.data))
+                        crate::task::encode_into_thread_heap(
+                            thread_heap,
+                            BoundaryValue::Bytes(message.data),
+                            return_type,
+                            module_id,
+                            &self
+                                .vm
+                                .as_ref()
+                                .expect("VM is ready")
+                                .graph
+                                .get(module_id)
+                                .unwrap()
+                                .module,
+                        )
+                        .map_err(|error| {
+                            ExecutionFailure::new(
+                                ExecutionFailureKind::BoundaryCodecFailure,
+                                format!("invalid byte array encoding: {error:?}"),
+                            )
+                        })
                     })
             }
             "__internal_thread_sleep" => {
-                let ms = args
-                    .first()
-                    .and_then(|value| match value {
-                        BoundaryValue::I32(ms) if *ms >= 0 => Some(*ms as u64),
-                        BoundaryValue::I64(ms) if *ms >= 0 => Some(*ms as u64),
-                        _ => None,
-                    })
-                    .unwrap_or(0);
-                (ms == 0).then_some(Ok(BoundaryValue::Null))
+                let ms = internal_timeout_arg(args, 0).unwrap_or(0);
+                (ms == 0).then_some(Ok(galfus_vm::VmValue::Null))
             }
             _ => None,
         }
@@ -73,9 +141,9 @@ impl Orchestrator {
         &mut self,
         sender_id: crate::registry::ThreadId,
         target_id: Option<crate::registry::ThreadId>,
-        data: Option<&BoundaryValue>,
+        data: Option<Vec<u8>>,
     ) -> bool {
-        let (Some(target_id), Some(BoundaryValue::Bytes(data))) = (target_id, data) else {
+        let (Some(target_id), Some(data)) = (target_id, data) else {
             return false;
         };
         let Some(mailbox) = self.kernel.get_mailbox(target_id) else {
@@ -95,10 +163,7 @@ impl Orchestrator {
         mailbox
             .lock()
             .unwrap()
-            .push_back(crate::registry::MailboxMessage {
-                sender_id,
-                data: data.clone(),
-            });
+            .push_back(crate::registry::MailboxMessage { sender_id, data });
         if let Err(error) = self.kernel.unblock(target_id) {
             self.failure = Some(
                 ExecutionFailure::new(error, "runnable threads limit exceeded")
@@ -119,117 +184,102 @@ impl Orchestrator {
         module_id: ModuleId,
         operation: Box<str>,
         args: Vec<galfus_vm::VmValue>,
-        arg_types: &[TypeIdx],
         return_type: TypeIdx,
     ) {
-        let boundary_args = {
-            let module = &self
-                .vm
-                .as_ref()
-                .unwrap()
-                .graph
-                .get(module_id)
-                .unwrap()
-                .module;
-            let mut boundary_args = Vec::with_capacity(args.len());
-            for (arg, ty) in args.into_iter().zip(arg_types.iter()) {
-                match crate::task::decode_from_thread_heap(&thread.heap, arg, *ty, module) {
-                    Ok(value) => boundary_args.push(value),
-                    Err(error) => {
-                        self.failure = Some(
-                            ExecutionFailure::new(
-                                ExecutionFailureKind::BoundaryCodecFailure,
-                                format!("invalid internal argument: {error:?}"),
-                            )
-                            .with_thread_id(thread_id)
-                            .with_module_id(module_id.raw().into())
-                            .with_stack(execution_stack(&thread)),
-                        );
-                        self.kernel.cancel(thread_id);
-                        return;
-                    }
-                }
-            }
-            boundary_args
-        };
-        let thread_arg = |index: usize| {
-            boundary_args.get(index).and_then(|value| match value {
-                BoundaryValue::I64(id) if *id > 0 => {
-                    u32::try_from(*id).ok().map(crate::registry::ThreadId::new)
-                }
-                _ => None,
-            })
-        };
-        let result = match operation.as_ref() {
-            "__internal_thread_get" => Ok(BoundaryValue::I64(
-                boundary_args
-                    .first()
-                    .and_then(|value| match value {
-                        BoundaryValue::Bytes(key) => std::str::from_utf8(key).ok(),
-                        _ => None,
-                    })
-                    .and_then(|key| self.kernel.lookup_key(key))
+        let result: Result<galfus_vm::VmValue, ExecutionFailure> = match operation.as_ref() {
+            "__internal_thread_get" => Ok(galfus_vm::VmValue::Int64(
+                internal_bytes_arg(&thread.heap, args.first())
+                    .and_then(|key| std::str::from_utf8(&key).ok().map(|s| s.to_string()))
+                    .and_then(|key| self.kernel.lookup_key(&key))
                     .map(|id| id.raw() as i64)
                     .unwrap_or(-1),
             )),
-            "__internal_thread_is_running" => Ok(BoundaryValue::Bool(
-                thread_arg(0).is_some_and(|id| self.kernel.is_running(id)),
+            "__internal_thread_is_running" => Ok(galfus_vm::VmValue::Bool(
+                internal_thread_arg(&args, 0).is_some_and(|id| self.kernel.is_running(id)),
             )),
-            "__internal_thread_is_exited" => Ok(BoundaryValue::Bool(
-                thread_arg(0).is_some_and(|id| self.kernel.is_exited(id)),
+            "__internal_thread_is_exited" => Ok(galfus_vm::VmValue::Bool(
+                internal_thread_arg(&args, 0).is_some_and(|id| self.kernel.is_exited(id)),
             )),
-            "__internal_thread_exit_reason" => Ok(thread_arg(0)
+            "__internal_thread_exit_reason" => Ok(internal_thread_arg(&args, 0)
                 .and_then(|id| self.kernel.state(id))
                 .and_then(|state| state.exit_reason())
                 .and_then(|result| match result {
-                    Ok(BoundaryValue::I32(code)) => Some(BoundaryValue::I32(code)),
+                    Ok(BoundaryValue::I32(code)) => Some(galfus_vm::VmValue::Int32(code)),
                     _ => None,
                 })
-                .unwrap_or(BoundaryValue::Null)),
-            "__internal_thread_has_messages" => Ok(BoundaryValue::Bool(
+                .unwrap_or(galfus_vm::VmValue::Null)),
+            "__internal_thread_has_messages" => Ok(galfus_vm::VmValue::Bool(
                 self.kernel
                     .get_mailbox(thread_id)
                     .is_some_and(|mailbox| !mailbox.lock().unwrap().is_empty()),
             )),
             "__internal_thread_get_message" | "__internal_thread_try_receive" => {
                 let sender_id = (operation.as_ref() == "__internal_thread_try_receive")
-                    .then(|| thread_arg(0))
+                    .then(|| internal_thread_arg(&args, 0))
                     .flatten();
-                Ok(self
-                    .kernel
-                    .get_mailbox(thread_id)
-                    .and_then(|mailbox| {
-                        let mut mailbox = mailbox.lock().unwrap();
-                        let index = sender_id.map_or_else(
-                            || (!mailbox.is_empty()).then_some(0),
-                            |sender_id| {
-                                mailbox
-                                    .iter()
-                                    .position(|message| message.sender_id == sender_id)
-                            },
-                        )?;
-                        mailbox.remove(index)
-                    })
-                    .map(|message| {
+                let message = self.kernel.get_mailbox(thread_id).and_then(|mailbox| {
+                    let mut mailbox = mailbox.lock().unwrap();
+                    let index = sender_id.map_or_else(
+                        || (!mailbox.is_empty()).then_some(0),
+                        |sender_id| {
+                            mailbox
+                                .iter()
+                                .position(|message| message.sender_id == sender_id)
+                        },
+                    )?;
+                    mailbox.remove(index)
+                });
+
+                match message {
+                    Some(message) => {
                         if let Some(quota) = self.kernel.get_thread_quota(thread_id) {
                             quota.release_mailbox_messages(1);
                             quota.release_mailbox_bytes(message.data.len());
                         }
-                        BoundaryValue::Bytes(message.data)
-                    })
-                    .unwrap_or(BoundaryValue::Null))
+                        crate::task::encode_into_thread_heap(
+                            &mut thread.heap,
+                            BoundaryValue::Bytes(message.data),
+                            return_type,
+                            module_id,
+                            &self
+                                .vm
+                                .as_ref()
+                                .unwrap()
+                                .graph
+                                .get(module_id)
+                                .unwrap()
+                                .module,
+                        )
+                        .map_err(|error| {
+                            ExecutionFailure::new(
+                                ExecutionFailureKind::BoundaryCodecFailure,
+                                format!("invalid internal result: {error:?}"),
+                            )
+                        })
+                    }
+                    None => Ok(galfus_vm::VmValue::Null),
+                }
             }
-            "__internal_thread_send" => Ok(BoundaryValue::Bool(self.send_internal_thread_message(
-                thread_id,
-                thread_arg(0),
-                boundary_args.get(1),
-            ))),
+            "__internal_thread_send" => {
+                Ok(galfus_vm::VmValue::Bool(self.send_internal_thread_message(
+                    thread_id,
+                    internal_thread_arg(&args, 0),
+                    internal_bytes_arg(&thread.heap, args.get(1)),
+                )))
+            }
             _ => Err(ExecutionFailure::new(
                 ExecutionFailureKind::InvalidBytecode,
                 format!("unknown synchronous internal operation: {operation}"),
             )),
         };
-        let boundary = match result {
+
+        for arg in args {
+            if let galfus_vm::VmValue::Object(reference) = arg {
+                let _ = thread.heap.release_anchor(reference);
+            }
+        }
+
+        let value = match result {
             Ok(value) => value,
             Err(error) => {
                 self.failure = Some(
@@ -241,36 +291,7 @@ impl Orchestrator {
                 return;
             }
         };
-        let module = &self
-            .vm
-            .as_ref()
-            .unwrap()
-            .graph
-            .get(module_id)
-            .unwrap()
-            .module;
-        let value = match crate::task::encode_into_thread_heap(
-            &mut thread.heap,
-            boundary,
-            return_type,
-            module_id,
-            module,
-        ) {
-            Ok(value) => value,
-            Err(error) => {
-                self.failure = Some(
-                    ExecutionFailure::new(
-                        ExecutionFailureKind::BoundaryCodecFailure,
-                        format!("invalid internal result: {error:?}"),
-                    )
-                    .with_thread_id(thread_id)
-                    .with_module_id(module_id.raw().into())
-                    .with_stack(execution_stack(&thread)),
-                );
-                self.kernel.cancel(thread_id);
-                return;
-            }
-        };
+
         #[cfg(feature = "metrics")]
         {
             self.future_metrics.internal_immediate += 1;
@@ -281,55 +302,28 @@ impl Orchestrator {
     pub(super) fn start_internal_activation(
         &mut self,
         thread_id: crate::registry::ThreadId,
-        thread: galfus_vm::thread::VmThreadState,
+        mut thread: galfus_vm::thread::VmThreadState,
         future_id: galfus_core::FutureId,
         operation: String,
-        args: Vec<galfus_contract::BoundaryValue>,
+        args: Vec<galfus_vm::VmValue>,
         aggregate_registration: Option<(galfus_core::CoordinatorId, usize)>,
     ) -> Option<galfus_vm::thread::VmThreadState> {
-        let float_arg = |idx: usize| -> Option<f64> {
-            args.get(idx).and_then(|val| match val {
-                BoundaryValue::F64(f) => Some(*f),
-                BoundaryValue::F32(f) => Some(*f as f64),
-                BoundaryValue::I64(i) => Some(*i as f64),
-                BoundaryValue::I32(i) => Some(*i as f64),
-                BoundaryValue::I16(i) => Some(*i as f64),
-                BoundaryValue::I8(i) => Some(*i as f64),
-                BoundaryValue::U64(i) => Some(*i as f64),
-                BoundaryValue::U32(i) => Some(*i as f64),
-                BoundaryValue::U16(i) => Some(*i as f64),
-                BoundaryValue::U8(i) => Some(*i as f64),
-                _ => None,
-            })
-        };
-        let thread_arg = |index: usize| {
-            args.get(index).and_then(|value| match value {
-                BoundaryValue::I64(id) if *id > 0 => {
-                    u32::try_from(*id).ok().map(crate::registry::ThreadId::new)
-                }
-                _ => None,
-            })
-        };
         let immediate = match operation.as_str() {
             "__internal_thread_get" => {
-                let id = args
-                    .first()
-                    .and_then(|value| match value {
-                        BoundaryValue::Bytes(key) => std::str::from_utf8(key).ok(),
-                        _ => None,
-                    })
-                    .and_then(|key| self.kernel.lookup_key(key))
+                let id = internal_bytes_arg(&thread.heap, args.first())
+                    .and_then(|key| std::str::from_utf8(&key).ok().map(|s| s.to_string()))
+                    .and_then(|key| self.kernel.lookup_key(&key))
                     .map(|id| id.raw() as i64)
                     .unwrap_or(-1);
                 Some(Ok(BoundaryValue::I64(id)))
             }
             "__internal_thread_is_running" => Some(Ok(BoundaryValue::Bool(
-                thread_arg(0).is_some_and(|id| self.kernel.is_running(id)),
+                internal_thread_arg(&args, 0).is_some_and(|id| self.kernel.is_running(id)),
             ))),
             "__internal_thread_is_exited" => Some(Ok(BoundaryValue::Bool(
-                thread_arg(0).is_some_and(|id| self.kernel.is_exited(id)),
+                internal_thread_arg(&args, 0).is_some_and(|id| self.kernel.is_exited(id)),
             ))),
-            "__internal_thread_exit_reason" => Some(Ok(thread_arg(0)
+            "__internal_thread_exit_reason" => Some(Ok(internal_thread_arg(&args, 0)
                 .and_then(|id| self.kernel.state(id))
                 .and_then(|state| state.exit_reason())
                 .and_then(|result| match result {
@@ -337,9 +331,13 @@ impl Orchestrator {
                     _ => None,
                 })
                 .unwrap_or(BoundaryValue::Null))),
-            "__internal_thread_send" => Some(Ok(BoundaryValue::Bool(
-                self.send_internal_thread_message(thread_id, thread_arg(0), args.get(1)),
-            ))),
+            "__internal_thread_send" => {
+                Some(Ok(BoundaryValue::Bool(self.send_internal_thread_message(
+                    thread_id,
+                    internal_thread_arg(&args, 0),
+                    internal_bytes_arg(&thread.heap, args.get(1)),
+                ))))
+            }
             "__internal_thread_has_messages" => Some(Ok(BoundaryValue::Bool(
                 self.kernel
                     .get_mailbox(thread_id)
@@ -358,26 +356,24 @@ impl Orchestrator {
                     BoundaryValue::Bytes(message.data)
                 })
                 .unwrap_or(BoundaryValue::Null))),
-            "__internal_thread_wait" => match thread_arg(0).and_then(|id| self.kernel.state(id)) {
-                Some(state) if !state.is_exited() => {
-                    if let Some(target_id) = thread_arg(0) {
-                        self.register_thread_exit_future(target_id, thread_id, future_id);
+            "__internal_thread_wait" => {
+                match internal_thread_arg(&args, 0).and_then(|id| self.kernel.state(id)) {
+                    Some(state) if !state.is_exited() => {
+                        if let Some(target_id) = internal_thread_arg(&args, 0) {
+                            self.register_thread_exit_future(target_id, thread_id, future_id);
+                        }
+                        None
                     }
-                    None
+                    Some(state) => Some(Ok(state
+                        .exit_reason()
+                        .and_then(Result::ok)
+                        .unwrap_or(BoundaryValue::Null))),
+                    None => Some(Ok(BoundaryValue::Null)),
                 }
-                Some(state) => Some(Ok(state
-                    .exit_reason()
-                    .and_then(Result::ok)
-                    .unwrap_or(BoundaryValue::Null))),
-                None => Some(Ok(BoundaryValue::Null)),
-            },
+            }
             "__internal_thread_receive" => {
-                let sender_id = thread_arg(0);
-                let timeout_ms = args.get(1).and_then(|value| match value {
-                    BoundaryValue::I32(ms) if *ms >= 0 => Some(*ms as u64),
-                    BoundaryValue::I64(ms) if *ms >= 0 => Some(*ms as u64),
-                    _ => None,
-                });
+                let sender_id = internal_thread_arg(&args, 0);
+                let timeout_ms = internal_timeout_arg(&args, 1);
                 let message = self.kernel.get_mailbox(thread_id).and_then(|mailbox| {
                     let mut mailbox = mailbox.lock().unwrap();
                     let index = sender_id.map_or_else(
@@ -409,62 +405,59 @@ impl Orchestrator {
                 }
             }
             "__internal_math_is_nan" => {
-                let f = float_arg(0).unwrap_or(0.0);
+                let f = internal_float_arg(&args, 0).unwrap_or(0.0);
                 Some(Ok(BoundaryValue::Bool(f.is_nan())))
             }
             "__internal_math_is_finite" => {
-                let f = float_arg(0).unwrap_or(0.0);
+                let f = internal_float_arg(&args, 0).unwrap_or(0.0);
                 Some(Ok(BoundaryValue::Bool(f.is_finite())))
             }
             "__internal_math_is_infinite" => {
-                let f = float_arg(0).unwrap_or(0.0);
+                let f = internal_float_arg(&args, 0).unwrap_or(0.0);
                 Some(Ok(BoundaryValue::Bool(f.is_infinite())))
             }
             "__internal_math_sqrt" => {
-                let f = float_arg(0).unwrap_or(0.0);
+                let f = internal_float_arg(&args, 0).unwrap_or(0.0);
                 Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(f.sqrt()))))
             }
             "__internal_math_hypot" => {
-                let x = float_arg(0).unwrap_or(0.0);
-                let y = float_arg(1).unwrap_or(0.0);
+                let x = internal_float_arg(&args, 0).unwrap_or(0.0);
+                let y = internal_float_arg(&args, 1).unwrap_or(0.0);
                 Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(
                     x.hypot(y),
                 ))))
             }
             "__internal_math_sin" => {
-                let f = float_arg(0).unwrap_or(0.0);
+                let f = internal_float_arg(&args, 0).unwrap_or(0.0);
                 Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(f.sin()))))
             }
             "__internal_math_cos" => {
-                let f = float_arg(0).unwrap_or(0.0);
+                let f = internal_float_arg(&args, 0).unwrap_or(0.0);
                 Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(f.cos()))))
             }
             "__internal_math_tan" => {
-                let f = float_arg(0).unwrap_or(0.0);
+                let f = internal_float_arg(&args, 0).unwrap_or(0.0);
                 Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(f.tan()))))
             }
             "__internal_math_log" => {
-                let f = float_arg(0).unwrap_or(0.0);
+                let f = internal_float_arg(&args, 0).unwrap_or(0.0);
                 Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(f.ln()))))
             }
             "__internal_math_log2" => {
-                let f = float_arg(0).unwrap_or(0.0);
+                let f = internal_float_arg(&args, 0).unwrap_or(0.0);
                 Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(f.log2()))))
             }
             "__internal_math_log10" => {
-                let f = float_arg(0).unwrap_or(0.0);
+                let f = internal_float_arg(&args, 0).unwrap_or(0.0);
                 Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(
                     f.log10(),
                 ))))
             }
             "__internal_thread_create" => {
-                let key = args.get(1).and_then(|value| match value {
-                    BoundaryValue::Bytes(key) => String::from_utf8(key.clone()).ok(),
-                    BoundaryValue::Null => None,
-                    _ => None,
-                });
+                let key = internal_bytes_arg(&thread.heap, args.get(1))
+                    .and_then(|key| String::from_utf8(key).ok());
                 let id = match args.first() {
-                    Some(BoundaryValue::Function {
+                    Some(galfus_vm::VmValue::Function {
                         module_id,
                         func_idx,
                     }) => {
@@ -475,8 +468,8 @@ impl Orchestrator {
                             )),
                         );
                         new_thread.entry_func = Some(galfus_vm::VmValue::Function {
-                            module_id: ModuleId::new(*module_id),
-                            func_idx: FuncIdx(*func_idx),
+                            module_id: *module_id,
+                            func_idx: *func_idx,
                         });
                         match self.kernel.spawn(new_thread, key) {
                             Ok(id) => id.raw() as i64,
@@ -499,19 +492,12 @@ impl Orchestrator {
                 Some(Ok(BoundaryValue::I64(id)))
             }
             "__internal_thread_sleep" => {
-                let ms = args
-                    .first()
-                    .and_then(|v| match v {
-                        BoundaryValue::I32(m) if *m >= 0 => Some(*m as u64),
-                        BoundaryValue::I64(m) if *m >= 0 => Some(*m as u64),
-                        _ => None,
-                    })
-                    .unwrap_or(0);
+                let ms = internal_timeout_arg(&args, 0).unwrap_or(0);
                 self.register_timer_future_wait(thread_id, future_id, ms);
                 None
             }
             "__internal_thread_spawn" => {
-                let success = thread_arg(0).is_some_and(|target_id| {
+                let success = internal_thread_arg(&args, 0).is_some_and(|target_id| {
                     let Some(mut target_thread) = self.kernel.take_created_thread(target_id) else {
                         return false;
                     };
@@ -528,66 +514,69 @@ impl Orchestrator {
                                 .get(module_id)
                                 .expect("thread entry module is loaded")
                                 .module;
+
                             let argument = match args.get(1) {
-                                Some(BoundaryValue::Null) | None => Ok(galfus_vm::VmValue::Null),
-                                Some(BoundaryValue::Array { values, .. }) => {
-                                    let byte_type = module
-                                        .types
-                                        .iter()
-                                        .position(|ty| {
-                                            matches!(ty, galfus_bytecode::BytecodeType::Uint8)
-                                        })
-                                        .map(|index| TypeIdx(index as u16));
-                                    let bytes_type = byte_type.and_then(|byte_type| {
-                                        module
+                                Some(galfus_vm::VmValue::Null) | None => Ok(galfus_vm::VmValue::Null),
+                                Some(galfus_vm::VmValue::Object(reference)) => {
+                                    if let Ok(galfus_vm::HeapObject::Array { elements, .. }) = thread.heap.get_object(*reference) {
+                                        let byte_type = module
                                             .types
                                             .iter()
                                             .position(|ty| {
-                                                matches!(
-                                                    ty,
-                                                    galfus_bytecode::BytecodeType::Array(element)
-                                                        if *element == byte_type
-                                                )
+                                                matches!(ty, galfus_bytecode::BytecodeType::Uint8)
                                             })
-                                            .map(|index| TypeIdx(index as u16))
-                                    });
-                                    byte_type.zip(bytes_type).ok_or(()).and_then(
-                                        |(byte_type, bytes_type)| {
-                                            let arrays = values
+                                            .map(|index| TypeIdx(index as u16));
+                                        let bytes_type = byte_type.and_then(|byte_type| {
+                                            module
+                                                .types
                                                 .iter()
-                                                .map(|value| {
-                                                    match value {
-                                                BoundaryValue::Bytes(bytes) => Ok(
-                                                    galfus_vm::VmValue::Object(
-                                                        target_thread.heap.alloc(
-                                                            galfus_vm::HeapObject::Array {
-                                                                module_id: target_thread.call_stack.last().expect("spawned thread has an entry frame").module_id,
-                                                                element_ty: byte_type,
-                                                                elements: bytes
-                                                                    .iter()
-                                                                    .copied()
-                                                                    .map(galfus_vm::VmValue::Uint8)
-                                                                    .collect(),
-                                                            },
-                                                        ).map_err(|_| ())?,
-                                                    ),
-                                                ),
-                                                _ => Err(()),
-                                            }
+                                                .position(|ty| {
+                                                    matches!(
+                                                        ty,
+                                                        galfus_bytecode::BytecodeType::Array(element)
+                                                            if *element == byte_type
+                                                    )
                                                 })
-                                                .collect::<Result<Vec<_>, _>>()?;
-                                            Ok(galfus_vm::VmValue::Object(
-                                                target_thread
-                                                    .heap
-                                                    .alloc(galfus_vm::HeapObject::Array {
-                                                        module_id: target_thread.call_stack.last().expect("spawned thread has an entry frame").module_id,
-                                                        element_ty: bytes_type,
-                                                        elements: arrays,
+                                                .map(|index| TypeIdx(index as u16))
+                                        });
+                                        byte_type.zip(bytes_type).ok_or(()).and_then(
+                                            |(byte_type, bytes_type)| {
+                                                let arrays = elements
+                                                    .iter()
+                                                    .map(|value| {
+                                                        let bytes = internal_bytes_arg(&thread.heap, Some(value)).ok_or(())?;
+                                                        Ok(
+                                                            galfus_vm::VmValue::Object(
+                                                                target_thread.heap.alloc(
+                                                                    galfus_vm::HeapObject::Array {
+                                                                        module_id: target_thread.call_stack.last().expect("spawned thread has an entry frame").module_id,
+                                                                        element_ty: byte_type,
+                                                                        elements: bytes
+                                                                            .iter()
+                                                                            .copied()
+                                                                            .map(galfus_vm::VmValue::Uint8)
+                                                                            .collect(),
+                                                                    },
+                                                                ).map_err(|_| ())?,
+                                                            ),
+                                                        )
                                                     })
-                                                    .map_err(|_| ())?,
-                                            ))
-                                        },
-                                    )
+                                                    .collect::<Result<Vec<_>, _>>()?;
+                                                Ok(galfus_vm::VmValue::Object(
+                                                    target_thread
+                                                        .heap
+                                                        .alloc(galfus_vm::HeapObject::Array {
+                                                            module_id: target_thread.call_stack.last().expect("spawned thread has an entry frame").module_id,
+                                                            element_ty: bytes_type,
+                                                            elements: arrays,
+                                                        })
+                                                        .map_err(|_| ())?,
+                                                ))
+                                            },
+                                        )
+                                    } else {
+                                        Err(())
+                                    }
                                 }
                                 _ => Err(()),
                             };
@@ -653,6 +642,13 @@ impl Orchestrator {
                 return None;
             }
         };
+
+        for arg in args {
+            if let galfus_vm::VmValue::Object(reference) = arg {
+                let _ = thread.heap.release_anchor(reference);
+            }
+        }
+
         if let Some(result) = immediate {
             #[cfg(feature = "metrics")]
             {

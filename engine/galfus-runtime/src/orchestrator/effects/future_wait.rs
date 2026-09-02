@@ -33,11 +33,17 @@ impl Orchestrator {
                     self.free_future_id(future_id);
                 }
                 crate::orchestrator::future_registry::DiscardDisposition::Created(activation) => {
-                    if let crate::orchestrator::future_registry::Activation::GalfusFunction {
-                        args,
-                        ..
-                    } = activation
-                    {
+                    let args = match activation {
+                        crate::orchestrator::future_registry::Activation::GalfusFunction {
+                            args,
+                            ..
+                        }
+                        | crate::orchestrator::future_registry::Activation::Internal {
+                            args, ..
+                        } => Some(args),
+                        _ => None,
+                    };
+                    if let Some(args) = args {
                         for arg in args {
                             if let galfus_vm::VmValue::Object(obj_ref) = arg {
                                 let _ = thread.heap.release_anchor(obj_ref);

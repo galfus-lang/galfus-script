@@ -14,78 +14,17 @@ impl Orchestrator {
         module_id: ModuleId,
         operation: Box<str>,
         args: Vec<galfus_vm::VmValue>,
-        arg_types: &[TypeIdx],
         return_type: TypeIdx,
     ) {
-        let encoded_args = {
-            let module = &self
-                .vm
-                .as_ref()
-                .unwrap()
-                .graph
-                .get(module_id)
-                .unwrap()
-                .module;
-            let mut encoded_args = Vec::with_capacity(args.len());
-            for (arg, ty) in args.into_iter().zip(arg_types.iter()) {
-                match crate::task::decode_from_thread_heap(&thread.heap, arg, *ty, module) {
-                    Ok(value) => encoded_args.push(value),
-                    Err(_) if matches!(arg, galfus_vm::VmValue::Function { .. }) => {
-                        let galfus_vm::VmValue::Function {
-                            module_id,
-                            func_idx,
-                        } = arg
-                        else {
-                            unreachable!();
-                        };
-                        encoded_args.push(BoundaryValue::Function {
-                            module_id: module_id.raw(),
-                            func_idx: func_idx.raw(),
-                        });
-                    }
-                    Err(error) => {
-                        self.failure = Some(
-                            ExecutionFailure::new(
-                                ExecutionFailureKind::BoundaryCodecFailure,
-                                format!("invalid future argument: {error:?}"),
-                            )
-                            .with_thread_id(thread_id)
-                            .with_module_id(module_id.raw().into())
-                            .with_stack(execution_stack(&thread)),
-                        );
-                        self.kernel.cancel(thread_id);
-                        return;
-                    }
-                };
-            }
-            encoded_args
-        };
-
-        if let Some(result) = self.try_complete_internal_await(thread_id, &operation, &encoded_args)
-        {
-            let module = &self
-                .vm
-                .as_ref()
-                .unwrap()
-                .graph
-                .get(module_id)
-                .unwrap()
-                .module;
-            let value = match result.and_then(|value| {
-                crate::task::encode_into_thread_heap(
-                    &mut thread.heap,
-                    value,
-                    return_type,
-                    module_id,
-                    module,
-                )
-                .map_err(|error| {
-                    ExecutionFailure::new(
-                        ExecutionFailureKind::BoundaryCodecFailure,
-                        format!("invalid asynchronous result: {error:?}"),
-                    )
-                })
-            }) {
+        if let Some(result) = self.try_complete_internal_await(
+            thread_id,
+            &mut thread.heap,
+            module_id,
+            return_type,
+            &operation,
+            &args,
+        ) {
+            let value = match result {
                 Ok(value) => value,
                 Err(error) => {
                     self.failure = Some(
@@ -101,6 +40,11 @@ impl Orchestrator {
             {
                 self.future_metrics.internal_await_immediate += 1;
             }
+            for arg in args {
+                if let galfus_vm::VmValue::Object(reference) = arg {
+                    let _ = thread.heap.release_anchor(reference);
+                }
+            }
             self.resume_or_fail_front(thread_id, thread, continuation, value);
             return;
         }
@@ -108,7 +52,7 @@ impl Orchestrator {
         #[cfg(feature = "metrics")]
         {
             self.future_metrics.created += 1;
-            self.future_metrics.boundary_arguments += encoded_args.len();
+            self.future_metrics.boundary_arguments += args.len();
             self.future_metrics.internal_await_suspended += 1;
         }
         let Some(future_lease) = self.allocate_future_lease(thread_id, &thread) else {
@@ -118,7 +62,8 @@ impl Orchestrator {
 
         let activation = crate::orchestrator::future_registry::Activation::Internal {
             operation: operation.into(),
-            args: encoded_args,
+            module_id,
+            args,
         };
         if let Err(error) = self.future_registry.insert_direct_await(
             thread_id,
@@ -151,7 +96,7 @@ impl Orchestrator {
         target_module_id: ModuleId,
         func_idx: FuncIdx,
         args: Vec<galfus_vm::VmValue>,
-        arg_types: Box<[TypeIdx]>,
+        arg_types: &[TypeIdx],
         return_type: TypeIdx,
     ) {
         #[cfg(feature = "metrics")]
@@ -173,6 +118,7 @@ impl Orchestrator {
             .unwrap()
             .module;
         let activation_result = self.future_activation(
+            module_id,
             target_module_id,
             func_idx,
             args.clone(),
@@ -262,7 +208,7 @@ impl Orchestrator {
         module_id: ModuleId,
         func: galfus_vm::VmValue,
         args: Vec<galfus_vm::VmValue>,
-        arg_types: Box<[TypeIdx]>,
+        arg_types: &[TypeIdx],
         return_type: TypeIdx,
     ) {
         #[cfg(feature = "metrics")]
@@ -300,6 +246,7 @@ impl Orchestrator {
             .unwrap()
             .module;
         let activation_result = self.future_activation(
+            module_id,
             target_module_id,
             func_idx,
             args.clone(),
@@ -449,6 +396,7 @@ impl Orchestrator {
 
     pub(super) fn future_activation(
         &self,
+        source_module_id: ModuleId,
         target_module_id: ModuleId,
         func_idx: FuncIdx,
         args_vm: Vec<galfus_vm::VmValue>,
@@ -498,7 +446,8 @@ impl Orchestrator {
         } else if function_name.starts_with("__internal_") {
             Ok(crate::orchestrator::future_registry::Activation::Internal {
                 operation: function_name,
-                args: encoded_args().map_err(|error| format!("{error:?}"))?,
+                module_id: source_module_id,
+                args: args_vm,
             })
         } else if let Some((proxy_module, symbol)) = adapter_identity {
             Ok(crate::orchestrator::future_registry::Activation::Adapter {

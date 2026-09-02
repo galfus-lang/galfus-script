@@ -43,7 +43,12 @@ impl Orchestrator {
                     args,
                 )
             }
-            Activation::Internal { operation, args } => {
+            Activation::Internal {
+                operation,
+                module_id: _,
+
+                args,
+            } => {
                 #[cfg(feature = "metrics")]
                 {
                     self.future_metrics.internal_activations += 1;
