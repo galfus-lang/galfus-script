@@ -1,6 +1,9 @@
+import { ReadStream, ReadStreamResult, WriteStream, WriteStreamResult } from "std/stream"
+
 fn(async) __provider_net_tcp_connect(host: [u8], port: u16): u64 | null
 fn(async) __provider_net_tcp_read(socket: u64, max_bytes: u32): [u8] | null
 fn(async) __provider_net_tcp_write(socket: u64, data: [u8]): bool
+fn(async) __provider_net_tcp_finish(socket: u64): bool
 fn(async) __provider_net_tcp_close(socket: u64): bool
 
 fn(async) __provider_net_udp_bind(host: [u8], port: u16): u64 | null
@@ -8,12 +11,108 @@ fn(async) __provider_net_udp_receive(socket: u64, max_bytes: u32): ([u8], [u8], 
 fn(async) __provider_net_udp_send_to(socket: u64, host: [u8], port: u16, data: [u8]): bool
 fn(async) __provider_net_udp_close(socket: u64): bool
 
-export fn tcpConnect(host: [u8], port: u16): u64 | null => await __provider_net_tcp_connect(host, port)
-export fn tcpRead(socket: u64, maxBytes: u32): [u8] | null => await __provider_net_tcp_read(socket, maxBytes)
-export fn tcpWrite(socket: u64, data: [u8]): bool => await __provider_net_tcp_write(socket, data)
-export fn tcpClose(socket: u64): bool => await __provider_net_tcp_close(socket)
+export struct TcpStream satisfies ReadStream<[u8]>, WriteStream<[u8]> {
+    id: u64,
+    finished: bool,
+    cancelled: bool,
+}
 
-export fn udpBind(host: [u8], port: u16): u64 | null => await __provider_net_udp_bind(host, port)
-export fn udpReceive(socket: u64, maxBytes: u32): ([u8], [u8], u16) | null => await __provider_net_udp_receive(socket, maxBytes)
-export fn udpSendTo(socket: u64, host: [u8], port: u16, data: [u8]): bool => await __provider_net_udp_send_to(socket, host, port, data)
-export fn udpClose(socket: u64): bool => await __provider_net_udp_close(socket)
+export fn(async) tcpConnect(host: [u8], port: u16): TcpStream | null {
+    const id = await __provider_net_tcp_connect(host, port)
+    instanceof id {
+        u64 id {
+            return new(TcpStream) {
+                id: id,
+                finished: false,
+                cancelled: false,
+            }
+        },
+        null { return null },
+    }
+    return null
+}
+
+export fn(async) TcpStream::next(self): ReadStreamResult<[u8]> {
+    if self.cancelled {
+        return ReadStreamResult<[u8]>::End
+    }
+
+    const bytes = await __provider_net_tcp_read(self.id, 65536)
+    instanceof bytes {
+        [u8] bytes { return ReadStreamResult<[u8]>::Data(bytes) },
+        null { return ReadStreamResult<[u8]>::End },
+    }
+    return ReadStreamResult<[u8]>::End
+}
+
+export fn(async) TcpStream::write(self, bytes: [u8]): WriteStreamResult {
+    if self.cancelled || self.finished {
+        return WriteStreamResult::Error("TCP stream is closed")
+    }
+
+    if await __provider_net_tcp_write(self.id, bytes) {
+        return WriteStreamResult::Accepted
+    }
+    return WriteStreamResult::Error("TCP write failed")
+}
+
+export fn(async) TcpStream::finish(self): WriteStreamResult {
+    if self.cancelled {
+        return WriteStreamResult::Error("TCP stream is closed")
+    }
+    if self.finished {
+        return WriteStreamResult::Accepted
+    }
+
+    if await __provider_net_tcp_finish(self.id) {
+        self.finished = true
+        return WriteStreamResult::Accepted
+    }
+    return WriteStreamResult::Error("TCP half-close failed")
+}
+
+export fn(async) TcpStream::cancel(self): null {
+    if !self.cancelled {
+        self.cancelled = true
+        self.finished = true
+        await __provider_net_tcp_close(self.id)
+    }
+    return null
+}
+
+export struct UdpSocket {
+    id: u64,
+}
+
+export struct Datagram {
+    data: [u8],
+    host: [u8],
+    port: u16,
+}
+
+export fn(async) udpBind(host: [u8], port: u16): UdpSocket | null {
+    const id = await __provider_net_udp_bind(host, port)
+    instanceof id {
+        u64 id { return new(UdpSocket) { id: id } },
+        null { return null },
+    }
+    return null
+}
+
+export fn(async) UdpSocket::receive(self, maxBytes: u32): Datagram | null {
+    const received = await __provider_net_udp_receive(self.id, maxBytes)
+    instanceof received {
+        ([u8], [u8], u16) received {
+            const (data, host, port) = received
+            return new(Datagram) { data: data, host: host, port: port }
+        },
+        null { return null },
+    }
+    return null
+}
+
+export fn(async) UdpSocket::sendTo(self, host: [u8], port: u16, data: [u8]): bool {
+    return await __provider_net_udp_send_to(self.id, host, port, data)
+}
+
+export fn(async) UdpSocket::close(self): bool => await __provider_net_udp_close(self.id)

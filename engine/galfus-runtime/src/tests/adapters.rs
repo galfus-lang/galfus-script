@@ -158,16 +158,6 @@ impl galfus_contract::HostProvider for DeclaredProvider {
     fn descriptor(&self) -> galfus_contract::ProviderDescriptor {
         galfus_contract::std_io_provider_descriptor()
     }
-
-    fn dispatch(
-        &mut self,
-        _thread_id: galfus_core::ThreadId,
-        _request_lease: galfus_core::RequestLease,
-        _name: &str,
-        _args: &[BoundaryValue],
-        _injector: Arc<dyn MessageInjector>,
-    ) {
-    }
 }
 
 fn demo_adapter_descriptor() -> AdapterModuleDescriptor {

@@ -798,7 +798,10 @@ fn choice_payload_types(
 ) -> Option<Vec<ImportedType>> {
     let root = graph.syntax().root()?;
     let variant = find_parent_choice_variant(graph, root, declaration)?;
-    let payload = find_descendant_of_kind(graph, variant, SyntaxNodeKind::ChoicePayload)?;
+    let Some(payload) = find_descendant_of_kind(graph, variant, SyntaxNodeKind::ChoicePayload)
+    else {
+        return Some(Vec::new());
+    };
     let payload_node = graph.syntax().node(payload)?;
 
     let resolution = graph.resolution()?;

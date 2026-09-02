@@ -232,6 +232,9 @@ pub(crate) fn decode_surface_from_thread_heap(
         (SurfaceSchema::Bool, galfus_vm::VmValue::Bool(value), BytecodeType::Bool) => {
             Ok(SurfaceValue::Bool(value))
         }
+        (SurfaceSchema::U16, galfus_vm::VmValue::Uint16(value), BytecodeType::Uint16) => {
+            Ok(SurfaceValue::U16(value))
+        }
         (SurfaceSchema::I32, galfus_vm::VmValue::Int32(value), BytecodeType::Int32) => {
             Ok(SurfaceValue::I32(value))
         }
@@ -297,6 +300,29 @@ pub(crate) fn decode_surface_from_thread_heap(
                 .map(|value| decode_surface_from_thread_heap(heap, schema, value, *item, module))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(SurfaceValue::List(values))
+        }
+        (
+            SurfaceSchema::Tuple(schemas),
+            galfus_vm::VmValue::Object(reference),
+            BytecodeType::Tuple(item_types),
+        ) => {
+            let galfus_vm::HeapObject::Tuple { elements } = heap
+                .get_object(reference)
+                .map_err(|_| "surface tuple reference is invalid".to_string())?
+            else {
+                return Err(mismatch());
+            };
+            if schemas.len() != elements.len() || elements.len() != item_types.len() {
+                return Err(mismatch());
+            }
+            let values = schemas
+                .iter()
+                .zip(elements.iter().cloned().zip(item_types))
+                .map(|(schema, (value, item_type))| {
+                    decode_surface_from_thread_heap(heap, schema, value, *item_type, module)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(SurfaceValue::Tuple(values))
         }
         (
             SurfaceSchema::Struct { fields, .. },
@@ -653,6 +679,9 @@ fn encode_surface_into_thread_heap(
         (SurfaceSchema::Bool, SurfaceValue::Bool(value), BytecodeType::Bool) => {
             Ok(galfus_vm::VmValue::Bool(value))
         }
+        (SurfaceSchema::U16, SurfaceValue::U16(value), BytecodeType::Uint16) => {
+            Ok(galfus_vm::VmValue::Uint16(value))
+        }
         (SurfaceSchema::I32, SurfaceValue::I32(value), BytecodeType::Int32) => {
             Ok(galfus_vm::VmValue::Int32(value))
         }
@@ -718,6 +747,25 @@ fn encode_surface_into_thread_heap(
                     elements,
                 })
                 .map_err(|_| "surface list exceeds heap quota".to_string())?;
+            Ok(galfus_vm::VmValue::Object(reference))
+        }
+        (
+            SurfaceSchema::Tuple(schemas),
+            SurfaceValue::Tuple(values),
+            BytecodeType::Tuple(item_types),
+        ) if schemas.len() == values.len() && values.len() == item_types.len() => {
+            let elements = schemas
+                .iter()
+                .zip(values.into_iter().zip(item_types))
+                .map(|(schema, (value, item_type))| {
+                    encode_surface_into_thread_heap(
+                        heap, schema, value, *item_type, module_id, module,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Tuple { elements })
+                .map_err(|_| "surface tuple exceeds heap quota".to_string())?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
         (

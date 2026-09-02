@@ -316,20 +316,7 @@ pub trait HostProvider: Send {
         TaskAffinity::Main
     }
 
-    fn dispatch(
-        &mut self,
-        thread_id: galfus_core::ThreadId,
-        request_lease: galfus_core::RequestLease,
-        name: &str,
-        args: &[BoundaryValue],
-        injector: sync::Arc<dyn MessageInjector>,
-    );
-
     /// Dispatches arguments decoded from a declared `__provider_*` surface contract.
-    ///
-    /// Returning `false` keeps legacy providers explicit: the runtime completes the
-    /// request with a protocol error instead of silently converting structured data
-    /// back into a boundary tuple.
     fn dispatch_surface(
         &mut self,
         _thread_id: galfus_core::ThreadId,

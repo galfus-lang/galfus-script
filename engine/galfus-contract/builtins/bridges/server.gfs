@@ -1,7 +1,5 @@
 import { createThread } from "std/thread"
 
-type UrlInfo = ([u8], [u8], [u8], [u8], [u8], [u8], [u8], [u8])
-
 export struct URL {
     href: [u8],
     protocol: [u8],
@@ -72,13 +70,10 @@ export struct WsMessage {
     msg: [u8] | null
 }
 
-type RequestTuple = (u64, UrlInfo, [u8], [Header], [u8] | null)
-export type WsMessageTuple = (i32, [u8] | null)
-
 fn(async) __provider_server_bind(port: i32): u64
-fn(async) __provider_server_accept(server_id: u64): (u64, ([u8], [u8], [u8], [u8], [u8], [u8], [u8], [u8]), [u8], [([u8], [u8])], [u8] | null)
+fn(async) __provider_server_accept(server_id: u64): Request
 fn(async) __provider_server_respond(req_id: u64, status: i32, headers: [([u8], [u8])], body: [u8] | null, is_upgrade: bool): bool
-fn(async) __provider_server_ws_receive(ws_id: u64): (i32, [u8] | null) | null
+fn(async) __provider_server_ws_receive(ws_id: u64): WsMessage | null
 fn(async) __provider_server_ws_send(ws_id: u64, data: [u8]): bool
 fn(async) __provider_server_ws_close(ws_id: u64): bool
 
@@ -120,26 +115,7 @@ export fn createServer(port: i32, fetch: fn(Request): Response, websocket: WebSo
 export fn Server::start(server: Server): null {
     const server_id = await __provider_server_bind(server.port)
     loop {
-        const reqTuple = await __provider_server_accept(server_id)
-        const (reqId, reqUrl, reqMethod, reqHeaders, reqBody) = reqTuple
-        const (href, protocol, host, hostname, pathname, search, hash, origin) = reqUrl
-        const url = new(URL) {
-            href: href,
-            protocol: protocol,
-            host: host,
-            hostname: hostname,
-            pathname: pathname,
-            search: search,
-            hash: hash,
-            origin: origin
-        }
-        const req = new(Request) {
-            id: reqId,
-            url: url,
-            method: reqMethod,
-            headers: reqHeaders,
-            body: reqBody
-        }
+        const req = await __provider_server_accept(server_id)
         const req_id = req.id
         
         const fetchCb = (copy server).fetch
@@ -163,8 +139,9 @@ export fn Server::start(server: Server): null {
                 const payload = await __provider_server_ws_receive(copy req_id)
                 instanceof payload {
                     null { break },
-                    WsMessageTuple p {
-                        const (p_status, p_msg) = p
+                    WsMessage p {
+                        const p_status = p.status
+                        const p_msg = p.msg
                         if p_status < 0 {
                             instanceof p_msg {
                                 [u8] err {

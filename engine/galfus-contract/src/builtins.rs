@@ -3,6 +3,7 @@ use crate::{
     ProviderModuleDescriptor, SurfaceContract, SurfaceDirection, SurfaceField,
     SurfaceFunctionContract, SurfaceSchema, provider_schema_fingerprint,
 };
+use galfus_core::OpaqueTypeId;
 
 pub const ASYNC_SOURCE: &str = include_str!("../builtins/internals/async.gfs");
 pub const THREAD_SOURCE: &str = include_str!("../builtins/internals/thread.gfs");
@@ -461,6 +462,11 @@ pub fn std_net_provider_descriptor() -> ProviderDescriptor {
                     return_type: BoundaryType::Bool,
                 },
                 ProviderFunctionSignature {
+                    name: "net_tcp_finish".to_string(),
+                    parameter_types: vec![BoundaryType::U64],
+                    return_type: BoundaryType::Bool,
+                },
+                ProviderFunctionSignature {
                     name: "net_tcp_close".to_string(),
                     parameter_types: vec![BoundaryType::U64],
                     return_type: BoundaryType::Bool,
@@ -491,113 +497,268 @@ pub fn std_net_provider_descriptor() -> ProviderDescriptor {
                     return_type: BoundaryType::Bool,
                 },
             ],
-            surface_contracts: vec![],
+            surface_contracts: net_surface_contracts(),
         }],
     }
 }
 
+fn net_surface_contracts() -> Vec<SurfaceFunctionContract> {
+    let parameter = |operation: &str, name: &str, schema| {
+        SurfaceContract::new(
+            format!("std/net::__provider_{operation}:{name}"),
+            1,
+            SurfaceDirection::ToProvider,
+            schema,
+        )
+    };
+    let result = |operation: &str, schema| {
+        SurfaceContract::new(
+            format!("std/net::__provider_{operation}:return"),
+            1,
+            SurfaceDirection::FromProvider,
+            schema,
+        )
+    };
+    let optional_u64 = SurfaceSchema::Optional(Box::new(SurfaceSchema::U64));
+    let optional_bytes = SurfaceSchema::Optional(Box::new(SurfaceSchema::Bytes));
+    let datagram = SurfaceSchema::Optional(Box::new(SurfaceSchema::Tuple(vec![
+        SurfaceSchema::Bytes,
+        SurfaceSchema::Bytes,
+        SurfaceSchema::U16,
+    ])));
+    vec![
+        SurfaceFunctionContract {
+            provider_operation: "net_tcp_connect".to_string(),
+            bridge_symbol: "__provider_net_tcp_connect".to_string(),
+            parameters: vec![
+                parameter("net_tcp_connect", "host", SurfaceSchema::Bytes),
+                parameter("net_tcp_connect", "port", SurfaceSchema::U16),
+            ],
+            result: result("net_tcp_connect", optional_u64.clone()),
+        },
+        SurfaceFunctionContract {
+            provider_operation: "net_tcp_read".to_string(),
+            bridge_symbol: "__provider_net_tcp_read".to_string(),
+            parameters: vec![
+                parameter("net_tcp_read", "socket", SurfaceSchema::U64),
+                parameter("net_tcp_read", "max_bytes", SurfaceSchema::U32),
+            ],
+            result: result("net_tcp_read", optional_bytes.clone()),
+        },
+        SurfaceFunctionContract {
+            provider_operation: "net_tcp_write".to_string(),
+            bridge_symbol: "__provider_net_tcp_write".to_string(),
+            parameters: vec![
+                parameter("net_tcp_write", "socket", SurfaceSchema::U64),
+                parameter("net_tcp_write", "data", SurfaceSchema::Bytes),
+            ],
+            result: result("net_tcp_write", SurfaceSchema::Bool),
+        },
+        SurfaceFunctionContract {
+            provider_operation: "net_tcp_finish".to_string(),
+            bridge_symbol: "__provider_net_tcp_finish".to_string(),
+            parameters: vec![parameter("net_tcp_finish", "socket", SurfaceSchema::U64)],
+            result: result("net_tcp_finish", SurfaceSchema::Bool),
+        },
+        SurfaceFunctionContract {
+            provider_operation: "net_tcp_close".to_string(),
+            bridge_symbol: "__provider_net_tcp_close".to_string(),
+            parameters: vec![parameter("net_tcp_close", "socket", SurfaceSchema::U64)],
+            result: result("net_tcp_close", SurfaceSchema::Bool),
+        },
+        SurfaceFunctionContract {
+            provider_operation: "net_udp_bind".to_string(),
+            bridge_symbol: "__provider_net_udp_bind".to_string(),
+            parameters: vec![
+                parameter("net_udp_bind", "host", SurfaceSchema::Bytes),
+                parameter("net_udp_bind", "port", SurfaceSchema::U16),
+            ],
+            result: result("net_udp_bind", optional_u64),
+        },
+        SurfaceFunctionContract {
+            provider_operation: "net_udp_receive".to_string(),
+            bridge_symbol: "__provider_net_udp_receive".to_string(),
+            parameters: vec![
+                parameter("net_udp_receive", "socket", SurfaceSchema::U64),
+                parameter("net_udp_receive", "max_bytes", SurfaceSchema::U32),
+            ],
+            result: result("net_udp_receive", datagram),
+        },
+        SurfaceFunctionContract {
+            provider_operation: "net_udp_send_to".to_string(),
+            bridge_symbol: "__provider_net_udp_send_to".to_string(),
+            parameters: vec![
+                parameter("net_udp_send_to", "socket", SurfaceSchema::U64),
+                parameter("net_udp_send_to", "host", SurfaceSchema::Bytes),
+                parameter("net_udp_send_to", "port", SurfaceSchema::U16),
+                parameter("net_udp_send_to", "data", SurfaceSchema::Bytes),
+            ],
+            result: result("net_udp_send_to", SurfaceSchema::Bool),
+        },
+        SurfaceFunctionContract {
+            provider_operation: "net_udp_close".to_string(),
+            bridge_symbol: "__provider_net_udp_close".to_string(),
+            parameters: vec![parameter("net_udp_close", "socket", SurfaceSchema::U64)],
+            result: result("net_udp_close", SurfaceSchema::Bool),
+        },
+    ]
+}
+
 pub fn std_http_provider_descriptor() -> ProviderDescriptor {
     let bytes = BoundaryType::Array(Box::new(BoundaryType::U8));
-    let header = BoundaryType::Tuple(vec![bytes.clone(), bytes.clone()]);
-    let response = BoundaryType::Tuple(vec![
-        BoundaryType::I32,
-        BoundaryType::Array(Box::new(header)),
-        bytes.clone(),
-    ]);
+    let header = BoundaryType::Handle {
+        type_id: OpaqueTypeId::new("std/http.gfs", "Header")
+            .expect("builtin HTTP header has a valid opaque type ID"),
+    };
+    let response = BoundaryType::Handle {
+        type_id: OpaqueTypeId::new("std/http.gfs", "ProviderResponse")
+            .expect("builtin provider response has a valid opaque type ID"),
+    };
     ProviderDescriptor {
         modules: vec![ProviderModuleDescriptor {
             module_path: "std/http".to_string(),
             schema_fingerprint: provider_schema_fingerprint(STD_HTTP_SOURCE),
             boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
-            exports: vec![ProviderFunctionSignature {
-                name: "http_request".to_string(),
-                parameter_types: vec![
-                    bytes.clone(),
-                    bytes.clone(),
-                    BoundaryType::Array(Box::new(BoundaryType::Tuple(vec![
+            exports: vec![
+                ProviderFunctionSignature {
+                    name: "http_request".to_string(),
+                    parameter_types: vec![
                         bytes.clone(),
                         bytes.clone(),
-                    ]))),
-                    BoundaryType::Nullable(Box::new(bytes)),
-                ],
-                return_type: BoundaryType::Nullable(Box::new(response)),
-            }],
-            surface_contracts: vec![SurfaceFunctionContract {
-                provider_operation: "http_request".to_string(),
-                bridge_symbol: "__provider_http_request".to_string(),
-                parameters: vec![
-                    SurfaceContract::new(
-                        "std/http::__provider_http_request:method",
+                        BoundaryType::Array(Box::new(header)),
+                        BoundaryType::Nullable(Box::new(bytes.clone())),
+                    ],
+                    return_type: BoundaryType::Nullable(Box::new(response)),
+                },
+                ProviderFunctionSignature {
+                    name: "http_response_read".to_string(),
+                    parameter_types: vec![BoundaryType::U64, BoundaryType::U32],
+                    return_type: BoundaryType::Nullable(Box::new(bytes.clone())),
+                },
+                ProviderFunctionSignature {
+                    name: "http_response_close".to_string(),
+                    parameter_types: vec![BoundaryType::U64],
+                    return_type: BoundaryType::Bool,
+                },
+            ],
+            surface_contracts: vec![
+                SurfaceFunctionContract {
+                    provider_operation: "http_request".to_string(),
+                    bridge_symbol: "__provider_http_request".to_string(),
+                    parameters: vec![
+                        SurfaceContract::new(
+                            "std/http::__provider_http_request:method",
+                            1,
+                            SurfaceDirection::ToProvider,
+                            SurfaceSchema::Bytes,
+                        ),
+                        SurfaceContract::new(
+                            "std/http::__provider_http_request:url",
+                            1,
+                            SurfaceDirection::ToProvider,
+                            SurfaceSchema::Bytes,
+                        ),
+                        SurfaceContract::new(
+                            "std/http::__provider_http_request:headers",
+                            1,
+                            SurfaceDirection::ToProvider,
+                            SurfaceSchema::List(Box::new(SurfaceSchema::Struct {
+                                name: "Header".to_string(),
+                                fields: vec![
+                                    SurfaceField {
+                                        name: "name".to_string(),
+                                        schema: SurfaceSchema::Bytes,
+                                    },
+                                    SurfaceField {
+                                        name: "value".to_string(),
+                                        schema: SurfaceSchema::Bytes,
+                                    },
+                                ],
+                            })),
+                        ),
+                        SurfaceContract::new(
+                            "std/http::__provider_http_request:body",
+                            1,
+                            SurfaceDirection::ToProvider,
+                            SurfaceSchema::Optional(Box::new(SurfaceSchema::Bytes)),
+                        ),
+                    ],
+                    result: SurfaceContract::new(
+                        "std/http::__provider_http_request:return",
                         1,
-                        SurfaceDirection::ToProvider,
-                        SurfaceSchema::Bytes,
-                    ),
-                    SurfaceContract::new(
-                        "std/http::__provider_http_request:url",
-                        1,
-                        SurfaceDirection::ToProvider,
-                        SurfaceSchema::Bytes,
-                    ),
-                    SurfaceContract::new(
-                        "std/http::__provider_http_request:headers",
-                        1,
-                        SurfaceDirection::ToProvider,
-                        SurfaceSchema::List(Box::new(SurfaceSchema::Struct {
-                            name: "Header".to_string(),
+                        SurfaceDirection::FromProvider,
+                        SurfaceSchema::Optional(Box::new(SurfaceSchema::Struct {
+                            name: "ProviderResponse".to_string(),
                             fields: vec![
                                 SurfaceField {
-                                    name: "name".to_string(),
-                                    schema: SurfaceSchema::Bytes,
+                                    name: "status".to_string(),
+                                    schema: SurfaceSchema::I32,
                                 },
                                 SurfaceField {
-                                    name: "value".to_string(),
-                                    schema: SurfaceSchema::Bytes,
+                                    name: "headers".to_string(),
+                                    schema: SurfaceSchema::List(Box::new(SurfaceSchema::Struct {
+                                        name: "Header".to_string(),
+                                        fields: vec![
+                                            SurfaceField {
+                                                name: "name".to_string(),
+                                                schema: SurfaceSchema::Bytes,
+                                            },
+                                            SurfaceField {
+                                                name: "value".to_string(),
+                                                schema: SurfaceSchema::Bytes,
+                                            },
+                                        ],
+                                    })),
+                                },
+                                SurfaceField {
+                                    name: "body".to_string(),
+                                    schema: SurfaceSchema::U64,
                                 },
                             ],
                         })),
                     ),
-                    SurfaceContract::new(
-                        "std/http::__provider_http_request:body",
+                },
+                SurfaceFunctionContract {
+                    provider_operation: "http_response_read".to_string(),
+                    bridge_symbol: "__provider_http_response_read".to_string(),
+                    parameters: vec![
+                        SurfaceContract::new(
+                            "std/http::__provider_http_response_read:body",
+                            1,
+                            SurfaceDirection::ToProvider,
+                            SurfaceSchema::U64,
+                        ),
+                        SurfaceContract::new(
+                            "std/http::__provider_http_response_read:max_bytes",
+                            1,
+                            SurfaceDirection::ToProvider,
+                            SurfaceSchema::U32,
+                        ),
+                    ],
+                    result: SurfaceContract::new(
+                        "std/http::__provider_http_response_read:return",
                         1,
-                        SurfaceDirection::ToProvider,
+                        SurfaceDirection::FromProvider,
                         SurfaceSchema::Optional(Box::new(SurfaceSchema::Bytes)),
                     ),
-                ],
-                result: SurfaceContract::new(
-                    "std/http::__provider_http_request:return",
-                    1,
-                    SurfaceDirection::FromProvider,
-                    SurfaceSchema::Optional(Box::new(SurfaceSchema::Struct {
-                        name: "Response".to_string(),
-                        fields: vec![
-                            SurfaceField {
-                                name: "status".to_string(),
-                                schema: SurfaceSchema::I32,
-                            },
-                            SurfaceField {
-                                name: "headers".to_string(),
-                                schema: SurfaceSchema::List(Box::new(SurfaceSchema::Struct {
-                                    name: "Header".to_string(),
-                                    fields: vec![
-                                        SurfaceField {
-                                            name: "name".to_string(),
-                                            schema: SurfaceSchema::Bytes,
-                                        },
-                                        SurfaceField {
-                                            name: "value".to_string(),
-                                            schema: SurfaceSchema::Bytes,
-                                        },
-                                    ],
-                                })),
-                            },
-                            SurfaceField {
-                                name: "body".to_string(),
-                                schema: SurfaceSchema::Bytes,
-                            },
-                        ],
-                    })),
-                ),
-            }],
+                },
+                SurfaceFunctionContract {
+                    provider_operation: "http_response_close".to_string(),
+                    bridge_symbol: "__provider_http_response_close".to_string(),
+                    parameters: vec![SurfaceContract::new(
+                        "std/http::__provider_http_response_close:body",
+                        1,
+                        SurfaceDirection::ToProvider,
+                        SurfaceSchema::U64,
+                    )],
+                    result: SurfaceContract::new(
+                        "std/http::__provider_http_response_close:return",
+                        1,
+                        SurfaceDirection::FromProvider,
+                        SurfaceSchema::Bool,
+                    ),
+                },
+            ],
         }],
     }
 }
@@ -631,9 +792,86 @@ pub fn std_websocket_provider_descriptor() -> ProviderDescriptor {
                     return_type: BoundaryType::Bool,
                 },
             ],
-            surface_contracts: vec![],
+            surface_contracts: websocket_surface_contracts(),
         }],
     }
+}
+
+fn websocket_surface_contracts() -> Vec<SurfaceFunctionContract> {
+    vec![
+        SurfaceFunctionContract {
+            provider_operation: "websocket_connect".to_string(),
+            bridge_symbol: "__provider_websocket_connect".to_string(),
+            parameters: vec![SurfaceContract::new(
+                "std/websocket::__provider_websocket_connect:url",
+                1,
+                SurfaceDirection::ToProvider,
+                SurfaceSchema::Bytes,
+            )],
+            result: SurfaceContract::new(
+                "std/websocket::__provider_websocket_connect:return",
+                1,
+                SurfaceDirection::FromProvider,
+                SurfaceSchema::Optional(Box::new(SurfaceSchema::U64)),
+            ),
+        },
+        SurfaceFunctionContract {
+            provider_operation: "websocket_receive".to_string(),
+            bridge_symbol: "__provider_websocket_receive".to_string(),
+            parameters: vec![SurfaceContract::new(
+                "std/websocket::__provider_websocket_receive:socket",
+                1,
+                SurfaceDirection::ToProvider,
+                SurfaceSchema::U64,
+            )],
+            result: SurfaceContract::new(
+                "std/websocket::__provider_websocket_receive:return",
+                1,
+                SurfaceDirection::FromProvider,
+                SurfaceSchema::Optional(Box::new(SurfaceSchema::Bytes)),
+            ),
+        },
+        SurfaceFunctionContract {
+            provider_operation: "websocket_send".to_string(),
+            bridge_symbol: "__provider_websocket_send".to_string(),
+            parameters: vec![
+                SurfaceContract::new(
+                    "std/websocket::__provider_websocket_send:socket",
+                    1,
+                    SurfaceDirection::ToProvider,
+                    SurfaceSchema::U64,
+                ),
+                SurfaceContract::new(
+                    "std/websocket::__provider_websocket_send:data",
+                    1,
+                    SurfaceDirection::ToProvider,
+                    SurfaceSchema::Bytes,
+                ),
+            ],
+            result: SurfaceContract::new(
+                "std/websocket::__provider_websocket_send:return",
+                1,
+                SurfaceDirection::FromProvider,
+                SurfaceSchema::Bool,
+            ),
+        },
+        SurfaceFunctionContract {
+            provider_operation: "websocket_close".to_string(),
+            bridge_symbol: "__provider_websocket_close".to_string(),
+            parameters: vec![SurfaceContract::new(
+                "std/websocket::__provider_websocket_close:socket",
+                1,
+                SurfaceDirection::ToProvider,
+                SurfaceSchema::U64,
+            )],
+            result: SurfaceContract::new(
+                "std/websocket::__provider_websocket_close:return",
+                1,
+                SurfaceDirection::FromProvider,
+                SurfaceSchema::Bool,
+            ),
+        },
+    ]
 }
 
 /// Combined builtin modules for standard workspace lookup.
@@ -682,24 +920,14 @@ pub fn std_server_provider_descriptor() -> ProviderDescriptor {
     let bytes = BoundaryType::Array(Box::new(BoundaryType::U8));
     let header = BoundaryType::Tuple(vec![bytes.clone(), bytes.clone()]);
 
-    let url = BoundaryType::Tuple(vec![
-        bytes.clone(), // href
-        bytes.clone(), // protocol
-        bytes.clone(), // host
-        bytes.clone(), // hostname
-        bytes.clone(), // path
-        bytes.clone(), // search
-        bytes.clone(), // hash
-        bytes.clone(), // origin
-    ]);
-
-    let request = BoundaryType::Tuple(vec![
-        BoundaryType::U64, // id
-        url,
-        bytes.clone(),                                   // method
-        BoundaryType::Array(Box::new(header.clone())),   // headers
-        BoundaryType::Nullable(Box::new(bytes.clone())), // body
-    ]);
+    let request = BoundaryType::Handle {
+        type_id: OpaqueTypeId::new("std/server.gfs", "Request")
+            .expect("server request opaque type ID must be valid"),
+    };
+    let ws_message = BoundaryType::Handle {
+        type_id: OpaqueTypeId::new("std/server.gfs", "WsMessage")
+            .expect("server WebSocket message opaque type ID must be valid"),
+    };
 
     ProviderDescriptor {
         modules: vec![ProviderModuleDescriptor {
@@ -731,10 +959,7 @@ pub fn std_server_provider_descriptor() -> ProviderDescriptor {
                 ProviderFunctionSignature {
                     name: "server_ws_receive".to_string(),
                     parameter_types: vec![BoundaryType::U64],
-                    return_type: BoundaryType::Nullable(Box::new(BoundaryType::Tuple(vec![
-                        BoundaryType::I32,
-                        BoundaryType::Nullable(Box::new(bytes.clone())),
-                    ]))),
+                    return_type: BoundaryType::Nullable(Box::new(ws_message)),
                 },
                 ProviderFunctionSignature {
                     name: "server_ws_send".to_string(),
@@ -747,7 +972,219 @@ pub fn std_server_provider_descriptor() -> ProviderDescriptor {
                     return_type: BoundaryType::Bool,
                 },
             ],
-            surface_contracts: vec![],
+            surface_contracts: server_surface_contracts(),
         }],
     }
+}
+
+fn server_surface_contracts() -> Vec<SurfaceFunctionContract> {
+    let bytes = SurfaceSchema::Bytes;
+    let header = SurfaceSchema::Tuple(vec![bytes.clone(), bytes.clone()]);
+    let url = SurfaceSchema::Struct {
+        name: "URL".to_string(),
+        fields: vec![
+            SurfaceField {
+                name: "href".to_string(),
+                schema: bytes.clone(),
+            },
+            SurfaceField {
+                name: "protocol".to_string(),
+                schema: bytes.clone(),
+            },
+            SurfaceField {
+                name: "host".to_string(),
+                schema: bytes.clone(),
+            },
+            SurfaceField {
+                name: "hostname".to_string(),
+                schema: bytes.clone(),
+            },
+            SurfaceField {
+                name: "pathname".to_string(),
+                schema: bytes.clone(),
+            },
+            SurfaceField {
+                name: "search".to_string(),
+                schema: bytes.clone(),
+            },
+            SurfaceField {
+                name: "hash".to_string(),
+                schema: bytes.clone(),
+            },
+            SurfaceField {
+                name: "origin".to_string(),
+                schema: bytes.clone(),
+            },
+        ],
+    };
+    let request = SurfaceSchema::Struct {
+        name: "Request".to_string(),
+        fields: vec![
+            SurfaceField {
+                name: "id".to_string(),
+                schema: SurfaceSchema::U64,
+            },
+            SurfaceField {
+                name: "url".to_string(),
+                schema: url,
+            },
+            SurfaceField {
+                name: "method".to_string(),
+                schema: bytes.clone(),
+            },
+            SurfaceField {
+                name: "headers".to_string(),
+                schema: SurfaceSchema::List(Box::new(header.clone())),
+            },
+            SurfaceField {
+                name: "body".to_string(),
+                schema: SurfaceSchema::Optional(Box::new(bytes.clone())),
+            },
+        ],
+    };
+    let ws_message = SurfaceSchema::Struct {
+        name: "WsMessage".to_string(),
+        fields: vec![
+            SurfaceField {
+                name: "status".to_string(),
+                schema: SurfaceSchema::I32,
+            },
+            SurfaceField {
+                name: "msg".to_string(),
+                schema: SurfaceSchema::Optional(Box::new(bytes.clone())),
+            },
+        ],
+    };
+    vec![
+        SurfaceFunctionContract {
+            provider_operation: "server_bind".to_string(),
+            bridge_symbol: "__provider_server_bind".to_string(),
+            parameters: vec![SurfaceContract::new(
+                "std/server::__provider_server_bind:port",
+                1,
+                SurfaceDirection::ToProvider,
+                SurfaceSchema::I32,
+            )],
+            result: SurfaceContract::new(
+                "std/server::__provider_server_bind:return",
+                1,
+                SurfaceDirection::FromProvider,
+                SurfaceSchema::U64,
+            ),
+        },
+        SurfaceFunctionContract {
+            provider_operation: "server_accept".to_string(),
+            bridge_symbol: "__provider_server_accept".to_string(),
+            parameters: vec![SurfaceContract::new(
+                "std/server::__provider_server_accept:server_id",
+                1,
+                SurfaceDirection::ToProvider,
+                SurfaceSchema::U64,
+            )],
+            result: SurfaceContract::new(
+                "std/server::__provider_server_accept:return",
+                1,
+                SurfaceDirection::FromProvider,
+                request,
+            ),
+        },
+        SurfaceFunctionContract {
+            provider_operation: "server_respond".to_string(),
+            bridge_symbol: "__provider_server_respond".to_string(),
+            parameters: vec![
+                SurfaceContract::new(
+                    "std/server::__provider_server_respond:req_id",
+                    1,
+                    SurfaceDirection::ToProvider,
+                    SurfaceSchema::U64,
+                ),
+                SurfaceContract::new(
+                    "std/server::__provider_server_respond:status",
+                    1,
+                    SurfaceDirection::ToProvider,
+                    SurfaceSchema::I32,
+                ),
+                SurfaceContract::new(
+                    "std/server::__provider_server_respond:headers",
+                    1,
+                    SurfaceDirection::ToProvider,
+                    SurfaceSchema::List(Box::new(header)),
+                ),
+                SurfaceContract::new(
+                    "std/server::__provider_server_respond:body",
+                    1,
+                    SurfaceDirection::ToProvider,
+                    SurfaceSchema::Optional(Box::new(bytes.clone())),
+                ),
+                SurfaceContract::new(
+                    "std/server::__provider_server_respond:is_upgrade",
+                    1,
+                    SurfaceDirection::ToProvider,
+                    SurfaceSchema::Bool,
+                ),
+            ],
+            result: SurfaceContract::new(
+                "std/server::__provider_server_respond:return",
+                1,
+                SurfaceDirection::FromProvider,
+                SurfaceSchema::Bool,
+            ),
+        },
+        SurfaceFunctionContract {
+            provider_operation: "server_ws_receive".to_string(),
+            bridge_symbol: "__provider_server_ws_receive".to_string(),
+            parameters: vec![SurfaceContract::new(
+                "std/server::__provider_server_ws_receive:ws_id",
+                1,
+                SurfaceDirection::ToProvider,
+                SurfaceSchema::U64,
+            )],
+            result: SurfaceContract::new(
+                "std/server::__provider_server_ws_receive:return",
+                1,
+                SurfaceDirection::FromProvider,
+                SurfaceSchema::Optional(Box::new(ws_message)),
+            ),
+        },
+        SurfaceFunctionContract {
+            provider_operation: "server_ws_send".to_string(),
+            bridge_symbol: "__provider_server_ws_send".to_string(),
+            parameters: vec![
+                SurfaceContract::new(
+                    "std/server::__provider_server_ws_send:ws_id",
+                    1,
+                    SurfaceDirection::ToProvider,
+                    SurfaceSchema::U64,
+                ),
+                SurfaceContract::new(
+                    "std/server::__provider_server_ws_send:data",
+                    1,
+                    SurfaceDirection::ToProvider,
+                    bytes.clone(),
+                ),
+            ],
+            result: SurfaceContract::new(
+                "std/server::__provider_server_ws_send:return",
+                1,
+                SurfaceDirection::FromProvider,
+                SurfaceSchema::Bool,
+            ),
+        },
+        SurfaceFunctionContract {
+            provider_operation: "server_ws_close".to_string(),
+            bridge_symbol: "__provider_server_ws_close".to_string(),
+            parameters: vec![SurfaceContract::new(
+                "std/server::__provider_server_ws_close:ws_id",
+                1,
+                SurfaceDirection::ToProvider,
+                SurfaceSchema::U64,
+            )],
+            result: SurfaceContract::new(
+                "std/server::__provider_server_ws_close:return",
+                1,
+                SurfaceDirection::FromProvider,
+                SurfaceSchema::Bool,
+            ),
+        },
+    ]
 }

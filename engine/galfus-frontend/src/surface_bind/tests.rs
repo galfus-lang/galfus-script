@@ -172,3 +172,37 @@ fn module_surface_records_exported_function_signature() {
         &ImportedType::Primitive(PrimitiveType::Int32)
     );
 }
+
+#[test]
+fn module_surface_preserves_choice_variants_without_payloads() {
+    let source = source(
+        r#"
+        export choice ReadResult<T> {
+            Data(T),
+            End,
+            Error([u8]),
+        }
+        "#,
+    );
+
+    let parse_result = parse(&source);
+    assert!(!parse_result.has_errors());
+
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
+    assert!(!resolve_result.has_errors());
+
+    let graph = resolve_result.graph();
+    let type_result = check_declaration_types(&source, graph, &string_table, false);
+    assert!(!type_result.has_errors());
+
+    let surface = build_module_surface(&source, graph, &type_result, &string_table);
+    let choice = surface
+        .export("ReadResult")
+        .expect("choice must be exported")
+        .imported_choice_surface(None);
+
+    assert_eq!(choice.variants().len(), 3);
+    assert_eq!(choice.variants()[1].name(), "End");
+    assert!(choice.variants()[1].payload_types().is_empty());
+}

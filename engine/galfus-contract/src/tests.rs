@@ -102,32 +102,11 @@ impl HostProvider for DummyHost {
     fn descriptor(&self) -> ProviderDescriptor {
         ProviderDescriptor::default()
     }
-
-    fn dispatch(
-        &mut self,
-        _thread_id: galfus_core::ThreadId,
-        _request_lease: galfus_core::RequestLease,
-        _method: &str,
-        _args: &[BoundaryValue],
-        _injector: Arc<dyn MessageInjector>,
-    ) {
-        // dummy
-    }
 }
 
 impl HostProvider for IoHost {
     fn descriptor(&self) -> ProviderDescriptor {
         std_io_provider_descriptor()
-    }
-
-    fn dispatch(
-        &mut self,
-        _thread_id: galfus_core::ThreadId,
-        _request_lease: galfus_core::RequestLease,
-        _method: &str,
-        _args: &[BoundaryValue],
-        _injector: Arc<dyn MessageInjector>,
-    ) {
     }
 }
 
@@ -707,6 +686,24 @@ fn test_std_stream_source_checks() {
     assert!(STREAM_SOURCE.contains("collect"));
     assert!(STREAM_SOURCE.contains("ReadStream"));
     assert!(STREAM_SOURCE.contains("WriteStream"));
+}
+
+#[test]
+fn test_std_net_source_checks() {
+    assert_builtin_checks("std/net", STD_NET_SOURCE);
+    assert!(STD_NET_SOURCE.contains("TcpStream"));
+}
+
+#[test]
+fn test_std_websocket_source_checks() {
+    assert_builtin_checks("std/websocket", STD_WEBSOCKET_SOURCE);
+    assert!(STD_WEBSOCKET_SOURCE.contains("WebSocketMessage"));
+}
+
+#[test]
+fn test_std_http_source_checks() {
+    assert_builtin_checks("std/http", STD_HTTP_SOURCE);
+    assert!(STD_HTTP_SOURCE.contains("HttpBody"));
 }
 
 #[test]

@@ -1,0 +1,19 @@
+import { Datagram, TcpStream, UdpSocket } from "std/net"
+import { println } from "std/io"
+
+fn(async) exercise(stream: TcpStream, socket: UdpSocket): null {
+  const _next = await stream::next()
+  const _written = await stream::write("chunk")
+
+  await stream::finish()
+  await stream::cancel()
+
+  const _packet: Datagram | null = await socket::receive(1)
+  await socket::close()
+  return null
+}
+
+export fn main(_args: [[u8]]): i32 {
+  println("ok")
+  return 0
+}

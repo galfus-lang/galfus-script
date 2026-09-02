@@ -124,3 +124,20 @@ fn provider_result_uses_contract_to_encode_legacy_transport() {
         Ok(crate::BoundaryValue::I64(42))
     );
 }
+
+#[test]
+fn tuple_surface_preserves_order_in_legacy_transport() {
+    let schema = SurfaceSchema::Tuple(vec![SurfaceSchema::Bytes, SurfaceSchema::I32]);
+    let value = SurfaceValue::Tuple(vec![
+        SurfaceValue::Bytes(b"Content-Type".to_vec()),
+        SurfaceValue::I32(200),
+    ]);
+
+    assert_eq!(
+        schema.encode_legacy_value(value),
+        Ok(crate::BoundaryValue::Tuple(vec![
+            crate::BoundaryValue::Bytes(b"Content-Type".to_vec()),
+            crate::BoundaryValue::I32(200),
+        ]))
+    );
+}

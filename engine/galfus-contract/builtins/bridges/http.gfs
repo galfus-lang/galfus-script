@@ -1,3 +1,5 @@
+import { ReadStream, ReadStreamResult } from "std/stream"
+
 export struct Header {
     name: [u8],
     value: [u8],
@@ -6,11 +8,59 @@ export struct Header {
 export struct Response {
     status: i32,
     headers: [Header],
-    body: [u8],
+    body: HttpBody,
 }
 
-fn(async) __provider_http_request(method: [u8], url: [u8], headers: [Header], body: [u8] | null): Response | null
+struct ProviderResponse {
+    status: i32,
+    headers: [Header],
+    body: u64,
+}
 
-export fn request(method: [u8], url: [u8], headers: [Header] = [], body: [u8] | null = null): Response | null {
-  return await __provider_http_request(method, url, headers, body)
+export struct HttpBody satisfies ReadStream<[u8]> {
+    id: u64,
+    closed: bool,
+}
+
+fn(async) __provider_http_request(method: [u8], url: [u8], headers: [Header], body: [u8] | null): ProviderResponse | null
+fn(async) __provider_http_response_read(body: u64, max_bytes: u32): [u8] | null
+fn(async) __provider_http_response_close(body: u64): bool
+
+export fn(async) HttpBody::next(self): ReadStreamResult<[u8]> {
+    if self.closed {
+        return ReadStreamResult<[u8]>::End
+    }
+
+    const bytes = await __provider_http_response_read(self.id, 65536)
+    instanceof bytes {
+        [u8] bytes { return ReadStreamResult<[u8]>::Data(bytes) },
+        null {
+            self.closed = true
+            return ReadStreamResult<[u8]>::End
+        },
+    }
+    return ReadStreamResult<[u8]>::End
+}
+
+export fn(async) HttpBody::cancel(self): null {
+    if !self.closed {
+        self.closed = true
+        await __provider_http_response_close(self.id)
+    }
+    return null
+}
+
+export fn(async) request(method: [u8], url: [u8], headers: [Header] = [], body: [u8] | null = null): Response | null {
+    const raw = await __provider_http_request(method, url, headers, body)
+    instanceof raw {
+        ProviderResponse raw {
+            return new(Response) {
+                status: raw.status,
+                headers: raw.headers,
+                body: new(HttpBody) { id: raw.body, closed: false },
+            }
+        },
+        null { return null },
+    }
+    return null
 }

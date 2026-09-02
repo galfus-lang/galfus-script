@@ -1,8 +1,8 @@
 use futures_util::{SinkExt, StreamExt};
 use galfus_contract::builtins::std_server_provider_descriptor;
 use galfus_contract::{
-    BoundaryType, BoundaryValue, CancellationOutcome, ExecutionFailure, ExecutionFailureKind,
-    HostProvider, MessageInjector, ProviderDescriptor, TaskAffinity,
+    CancellationOutcome, ExecutionFailure, ExecutionFailureKind, HostProvider, MessageInjector,
+    ProviderDescriptor, SurfaceValue, TaskAffinity,
 };
 use http_body_util::Full;
 use hyper::body::Bytes;
@@ -22,15 +22,97 @@ pub struct NativeServerProvider {
 }
 
 struct AcceptWaiter {
+    completion: Completion,
+}
+
+struct WsReceiveWaiter {
+    completion: Completion,
+}
+
+struct Completion {
     injector: Arc<dyn MessageInjector>,
     thread_id: galfus_core::ThreadId,
     lease: galfus_core::RequestLease,
 }
 
-struct WsReceiveWaiter {
-    injector: Arc<dyn MessageInjector>,
-    thread_id: galfus_core::ThreadId,
-    lease: galfus_core::RequestLease,
+fn surface_u64(value: Option<&SurfaceValue>, name: &str) -> Result<u64, ExecutionFailure> {
+    match value {
+        Some(SurfaceValue::U64(value)) => Ok(*value),
+        _ => Err(ExecutionFailure::new(
+            ExecutionFailureKind::ProviderFailure,
+            format!("expected surface u64 for {name}"),
+        )),
+    }
+}
+
+fn surface_i32(value: Option<&SurfaceValue>, name: &str) -> Result<i32, ExecutionFailure> {
+    match value {
+        Some(SurfaceValue::I32(value)) => Ok(*value),
+        _ => Err(ExecutionFailure::new(
+            ExecutionFailureKind::ProviderFailure,
+            format!("expected surface i32 for {name}"),
+        )),
+    }
+}
+
+fn surface_bytes(value: Option<&SurfaceValue>, name: &str) -> Result<Vec<u8>, ExecutionFailure> {
+    match value {
+        Some(SurfaceValue::Bytes(value)) => Ok(value.clone()),
+        _ => Err(ExecutionFailure::new(
+            ExecutionFailureKind::ProviderFailure,
+            format!("expected surface bytes for {name}"),
+        )),
+    }
+}
+
+fn surface_headers(
+    value: Option<&SurfaceValue>,
+) -> Result<Vec<(String, String)>, ExecutionFailure> {
+    let Some(SurfaceValue::List(headers)) = value else {
+        return Err(ExecutionFailure::new(
+            ExecutionFailureKind::ProviderFailure,
+            "expected surface header list",
+        ));
+    };
+    headers
+        .iter()
+        .map(|header| {
+            let SurfaceValue::Tuple(pair) = header else {
+                return Err(ExecutionFailure::new(
+                    ExecutionFailureKind::ProviderFailure,
+                    "expected surface header tuple",
+                ));
+            };
+            let name = surface_bytes(pair.first(), "header name")?;
+            let value = surface_bytes(pair.get(1), "header value")?;
+            Ok((
+                String::from_utf8(name).map_err(|_| {
+                    ExecutionFailure::new(
+                        ExecutionFailureKind::ProviderFailure,
+                        "invalid header name",
+                    )
+                })?,
+                String::from_utf8(value).map_err(|_| {
+                    ExecutionFailure::new(
+                        ExecutionFailureKind::ProviderFailure,
+                        "invalid header value",
+                    )
+                })?,
+            ))
+        })
+        .collect()
+}
+
+impl Completion {
+    fn inject_surface(&self, result: Result<SurfaceValue, ExecutionFailure>) {
+        let _ = self
+            .injector
+            .inject_surface_response(self.thread_id, self.lease, result);
+    }
+
+    fn inject_bool(&self, value: bool) {
+        self.inject_surface(Ok(SurfaceValue::Bool(value)));
+    }
 }
 
 struct PendingRequest {
@@ -46,15 +128,11 @@ struct PendingRequest {
 enum ServerCommand {
     Bind {
         port: i32,
-        injector: Arc<dyn MessageInjector>,
-        thread_id: galfus_core::ThreadId,
-        lease: galfus_core::RequestLease,
+        completion: Completion,
     },
     Accept {
         _server_id: u64,
-        injector: Arc<dyn MessageInjector>,
-        thread_id: galfus_core::ThreadId,
-        lease: galfus_core::RequestLease,
+        completion: Completion,
     },
     Respond {
         request_id: u64,
@@ -62,28 +140,20 @@ enum ServerCommand {
         headers: Vec<(String, String)>,
         body: Option<Vec<u8>>,
         is_upgrade: bool,
-        injector: Arc<dyn MessageInjector>,
-        thread_id: galfus_core::ThreadId,
-        lease: galfus_core::RequestLease,
+        completion: Completion,
     },
     WsReceive {
         ws_id: u64,
-        injector: Arc<dyn MessageInjector>,
-        thread_id: galfus_core::ThreadId,
-        lease: galfus_core::RequestLease,
+        completion: Completion,
     },
     WsSend {
         ws_id: u64,
         data: Vec<u8>,
-        injector: Arc<dyn MessageInjector>,
-        thread_id: galfus_core::ThreadId,
-        lease: galfus_core::RequestLease,
+        completion: Completion,
     },
     WsClose {
         ws_id: u64,
-        injector: Arc<dyn MessageInjector>,
-        thread_id: galfus_core::ThreadId,
-        lease: galfus_core::RequestLease,
+        completion: Completion,
     },
     InternalRequestReceived {
         req: PendingRequest,
@@ -154,12 +224,7 @@ impl NativeServerProvider {
 
         while let Some(cmd) = async_rx.recv().await {
             match cmd {
-                ServerCommand::Bind {
-                    port,
-                    injector,
-                    thread_id,
-                    lease,
-                } => {
+                ServerCommand::Bind { port, completion } => {
                     let addr = SocketAddr::from(([0, 0, 0, 0], port as u16));
                     match TcpListener::bind(addr).await {
                         Ok(listener) => {
@@ -262,21 +327,13 @@ impl NativeServerProvider {
                                 }
                             });
 
-                            let _ = injector.inject_system_response(
-                                thread_id,
-                                lease,
-                                Ok(BoundaryValue::U64(server_id)),
-                            );
+                            completion.inject_surface(Ok(SurfaceValue::U64(server_id)));
                         }
                         Err(e) => {
-                            let _ = injector.inject_system_response(
-                                thread_id,
-                                lease,
-                                Err(ExecutionFailure::new(
-                                    ExecutionFailureKind::ProviderFailure,
-                                    e.to_string(),
-                                )),
-                            );
+                            completion.inject_surface(Err(ExecutionFailure::new(
+                                ExecutionFailureKind::ProviderFailure,
+                                e.to_string(),
+                            )));
                         }
                     }
                 }
@@ -297,27 +354,11 @@ impl NativeServerProvider {
                         pending_requests.push_back(req);
                     }
                 }
-                ServerCommand::Accept {
-                    injector,
-                    thread_id,
-                    lease,
-                    ..
-                } => {
+                ServerCommand::Accept { completion, .. } => {
                     if let Some(req) = pending_requests.pop_front() {
-                        Self::inject_request(
-                            AcceptWaiter {
-                                injector,
-                                thread_id,
-                                lease,
-                            },
-                            req,
-                        );
+                        Self::inject_request(AcceptWaiter { completion }, req);
                     } else {
-                        accept_waiters.push_back(AcceptWaiter {
-                            injector,
-                            thread_id,
-                            lease,
-                        });
+                        accept_waiters.push_back(AcceptWaiter { completion });
                     }
                 }
                 ServerCommand::Respond {
@@ -326,9 +367,7 @@ impl NativeServerProvider {
                     headers,
                     body,
                     is_upgrade,
-                    injector,
-                    thread_id,
-                    lease,
+                    completion,
                 } => {
                     if let Some((tx, upgrade, websocket_key)) =
                         response_channels.remove(&request_id)
@@ -340,11 +379,7 @@ impl NativeServerProvider {
 
                         if is_upgrade {
                             let Some(websocket_key) = websocket_key else {
-                                let _ = injector.inject_system_response(
-                                    thread_id,
-                                    lease,
-                                    Ok(BoundaryValue::Bool(false)),
-                                );
+                                completion.inject_bool(false);
                                 continue;
                             };
                             builder = builder
@@ -381,17 +416,9 @@ impl NativeServerProvider {
                                 }
                             });
                         }
-                        let _ = injector.inject_system_response(
-                            thread_id,
-                            lease,
-                            Ok(BoundaryValue::Bool(true)),
-                        );
+                        completion.inject_bool(true);
                     } else {
-                        let _ = injector.inject_system_response(
-                            thread_id,
-                            lease,
-                            Ok(BoundaryValue::Bool(false)),
-                        );
+                        completion.inject_bool(false);
                     }
                 }
                 ServerCommand::InternalWsUpgraded { ws_id, stream } => {
@@ -401,40 +428,22 @@ impl NativeServerProvider {
                         active_websockets.insert(ws_id, stream);
                     }
                 }
-                ServerCommand::WsReceive {
-                    ws_id,
-                    injector,
-                    thread_id,
-                    lease,
-                } => {
+                ServerCommand::WsReceive { ws_id, completion } => {
                     if let Some(stream) = active_websockets.remove(&ws_id) {
                         Self::receive_ws_message(
                             ws_id,
                             stream,
-                            WsReceiveWaiter {
-                                injector,
-                                thread_id,
-                                lease,
-                            },
+                            WsReceiveWaiter { completion },
                             internal_tx.clone(),
                         );
                     } else {
-                        ws_receive_waiters.insert(
-                            ws_id,
-                            WsReceiveWaiter {
-                                injector,
-                                thread_id,
-                                lease,
-                            },
-                        );
+                        ws_receive_waiters.insert(ws_id, WsReceiveWaiter { completion });
                     }
                 }
                 ServerCommand::WsSend {
                     ws_id,
                     data,
-                    injector,
-                    thread_id,
-                    lease,
+                    completion,
                 } => {
                     if let Some(mut stream) = active_websockets.remove(&ws_id) {
                         let itx = internal_tx.clone();
@@ -443,95 +452,70 @@ impl NativeServerProvider {
                                 .send(tokio_tungstenite::tungstenite::Message::Binary(data))
                                 .await
                                 .is_ok();
-                            let _ = injector.inject_system_response(
-                                thread_id,
-                                lease,
-                                Ok(BoundaryValue::Bool(success)),
-                            );
+                            completion.inject_bool(success);
                             let _ = itx.send(ServerCommand::InternalWsUpgraded { ws_id, stream });
                         });
                     } else {
-                        let _ = injector.inject_system_response(
-                            thread_id,
-                            lease,
-                            Ok(BoundaryValue::Bool(false)),
-                        );
+                        completion.inject_bool(false);
                     }
                 }
-                ServerCommand::WsClose {
-                    ws_id,
-                    injector,
-                    thread_id,
-                    lease,
-                } => {
+                ServerCommand::WsClose { ws_id, completion } => {
                     active_websockets.remove(&ws_id);
-                    let _ = injector.inject_system_response(
-                        thread_id,
-                        lease,
-                        Ok(BoundaryValue::Bool(true)),
-                    );
+                    completion.inject_bool(true);
                 }
             }
         }
     }
 
     fn inject_request(waiter: AcceptWaiter, req: PendingRequest) {
-        let href = req.url.as_str().to_string().into_bytes();
-        let protocol = req.url.scheme().to_string().into_bytes();
-        let host = req.url.host_str().unwrap_or("").to_string().into_bytes();
-        let hostname = req.url.domain().unwrap_or("").to_string().into_bytes();
-        let path = req.url.path().to_string().into_bytes();
-        let search = req.url.query().unwrap_or("").to_string().into_bytes();
-        let hash = req.url.fragment().unwrap_or("").to_string().into_bytes();
+        let href = req.url.as_str().as_bytes().to_vec();
+        let protocol = req.url.scheme().as_bytes().to_vec();
+        let host = req.url.host_str().unwrap_or("").as_bytes().to_vec();
+        let hostname = req.url.domain().unwrap_or("").as_bytes().to_vec();
+        let path = req.url.path().as_bytes().to_vec();
+        let search = req.url.query().unwrap_or("").as_bytes().to_vec();
+        let hash = req.url.fragment().unwrap_or("").as_bytes().to_vec();
         let origin = req.url.origin().ascii_serialization().into_bytes();
 
-        let url_tuple = BoundaryValue::Tuple(vec![
-            BoundaryValue::Bytes(href),
-            BoundaryValue::Bytes(protocol),
-            BoundaryValue::Bytes(host),
-            BoundaryValue::Bytes(hostname),
-            BoundaryValue::Bytes(path),
-            BoundaryValue::Bytes(search),
-            BoundaryValue::Bytes(hash),
-            BoundaryValue::Bytes(origin),
-        ]);
-
-        let method = BoundaryValue::Bytes(req.method.into_bytes());
-        let headers = BoundaryValue::Array {
-            element_type: BoundaryType::Tuple(vec![
-                BoundaryType::Array(Box::new(BoundaryType::U8)),
-                BoundaryType::Array(Box::new(BoundaryType::U8)),
-            ]),
-            values: req
-                .headers
-                .into_iter()
-                .map(|(k, v)| {
-                    BoundaryValue::Tuple(vec![
-                        BoundaryValue::Bytes(k.into_bytes()),
-                        BoundaryValue::Bytes(v.into_bytes()),
-                    ])
-                })
-                .collect(),
-        };
-
-        let body = req
-            .body
-            .map(BoundaryValue::Bytes)
-            .unwrap_or(BoundaryValue::Null);
-
-        let request_tuple = BoundaryValue::Tuple(vec![
-            BoundaryValue::U64(req.request_id),
-            url_tuple,
-            method,
-            headers,
-            body,
-        ]);
-
-        let _ = waiter.injector.inject_system_response(
-            waiter.thread_id,
-            waiter.lease,
-            Ok(request_tuple),
-        );
+        let headers = req
+            .headers
+            .into_iter()
+            .map(|(name, value)| {
+                SurfaceValue::Tuple(vec![
+                    SurfaceValue::Bytes(name.into_bytes()),
+                    SurfaceValue::Bytes(value.into_bytes()),
+                ])
+            })
+            .collect();
+        waiter
+            .completion
+            .inject_surface(Ok(SurfaceValue::Struct(vec![
+                ("id".to_string(), SurfaceValue::U64(req.request_id)),
+                (
+                    "url".to_string(),
+                    SurfaceValue::Struct(vec![
+                        ("href".to_string(), SurfaceValue::Bytes(href)),
+                        ("protocol".to_string(), SurfaceValue::Bytes(protocol)),
+                        ("host".to_string(), SurfaceValue::Bytes(host)),
+                        ("hostname".to_string(), SurfaceValue::Bytes(hostname)),
+                        ("pathname".to_string(), SurfaceValue::Bytes(path)),
+                        ("search".to_string(), SurfaceValue::Bytes(search)),
+                        ("hash".to_string(), SurfaceValue::Bytes(hash)),
+                        ("origin".to_string(), SurfaceValue::Bytes(origin)),
+                    ]),
+                ),
+                (
+                    "method".to_string(),
+                    SurfaceValue::Bytes(req.method.into_bytes()),
+                ),
+                ("headers".to_string(), SurfaceValue::List(headers)),
+                (
+                    "body".to_string(),
+                    req.body
+                        .map(SurfaceValue::Bytes)
+                        .unwrap_or(SurfaceValue::Null),
+                ),
+            ])));
     }
 
     fn receive_ws_message(
@@ -561,16 +545,15 @@ impl NativeServerProvider {
                             _ => continue,
                         };
 
-                        let values = BoundaryValue::Tuple(vec![
-                            BoundaryValue::I32(code),
-                            data.map(BoundaryValue::Bytes)
-                                .unwrap_or(BoundaryValue::Null),
-                        ]);
-                        let _ = waiter.injector.inject_system_response(
-                            waiter.thread_id,
-                            waiter.lease,
-                            Ok(values),
-                        );
+                        waiter
+                            .completion
+                            .inject_surface(Ok(SurfaceValue::Struct(vec![
+                                ("status".to_string(), SurfaceValue::I32(code)),
+                                (
+                                    "msg".to_string(),
+                                    data.map(SurfaceValue::Bytes).unwrap_or(SurfaceValue::Null),
+                                ),
+                            ])));
 
                         if should_resume {
                             let _ = internal_tx
@@ -579,29 +562,25 @@ impl NativeServerProvider {
                         return;
                     }
                     Some(Err(error)) => {
-                        let values = BoundaryValue::Tuple(vec![
-                            BoundaryValue::I32(-1),
-                            BoundaryValue::Bytes(error.to_string().into_bytes()),
-                        ]);
-                        let _ = waiter.injector.inject_system_response(
-                            waiter.thread_id,
-                            waiter.lease,
-                            Ok(values),
-                        );
+                        waiter
+                            .completion
+                            .inject_surface(Ok(SurfaceValue::Struct(vec![
+                                ("status".to_string(), SurfaceValue::I32(-1)),
+                                (
+                                    "msg".to_string(),
+                                    SurfaceValue::Bytes(error.to_string().into_bytes()),
+                                ),
+                            ])));
                         return;
                     }
                     None => {
-                        let values = BoundaryValue::Tuple(vec![
-                            BoundaryValue::I32(-1),
-                            BoundaryValue::Bytes(
-                                b"WebSocket stream ended without a close frame".to_vec(),
-                            ),
-                        ]);
-                        let _ = waiter.injector.inject_system_response(
-                            waiter.thread_id,
-                            waiter.lease,
-                            Ok(values),
-                        );
+                        let message = b"WebSocket stream ended without a close frame".to_vec();
+                        waiter
+                            .completion
+                            .inject_surface(Ok(SurfaceValue::Struct(vec![
+                                ("status".to_string(), SurfaceValue::I32(-1)),
+                                ("msg".to_string(), SurfaceValue::Bytes(message)),
+                            ])));
                         return;
                     }
                 }
@@ -619,142 +598,86 @@ impl HostProvider for NativeServerProvider {
         TaskAffinity::Main // Always fast offload to background
     }
 
-    fn dispatch(
+    fn dispatch_surface(
         &mut self,
         thread_id: galfus_core::ThreadId,
         request_lease: galfus_core::RequestLease,
         name: &str,
-        args: &[BoundaryValue],
+        args: &[SurfaceValue],
         injector: Arc<dyn MessageInjector>,
-    ) {
-        let cmd = match name {
-            "server_bind" => {
-                if let Some(BoundaryValue::I32(port)) = args.first() {
-                    ServerCommand::Bind {
-                        port: *port,
-                        injector,
-                        thread_id,
-                        lease: request_lease,
-                    }
-                } else {
-                    return;
-                }
-            }
-            "server_accept" => {
-                if let Some(BoundaryValue::U64(id)) = args.first() {
-                    ServerCommand::Accept {
-                        _server_id: *id,
-                        injector,
-                        thread_id,
-                        lease: request_lease,
-                    }
-                } else {
-                    return;
-                }
-            }
-            "server_respond" => {
-                let request_id = match args.first() {
-                    Some(BoundaryValue::U64(id)) => *id,
-                    _ => return,
-                };
-                let status = match args.get(1) {
-                    Some(BoundaryValue::I32(s)) => *s,
-                    _ => return,
-                };
-
-                let mut headers = vec![];
-                if let Some(BoundaryValue::Array { values, .. }) = args.get(2) {
-                    for v in values {
-                        #[allow(clippy::collapsible_if)]
-                        if let BoundaryValue::Tuple(pair) = v {
-                            if let (Some(BoundaryValue::Bytes(k)), Some(BoundaryValue::Bytes(v))) =
-                                (pair.first(), pair.get(1))
-                            {
-                                headers.push((
-                                    String::from_utf8_lossy(k).into_owned(),
-                                    String::from_utf8_lossy(v).into_owned(),
-                                ));
-                            }
-                        }
-                    }
-                }
-
-                let body = match args.get(3) {
-                    Some(BoundaryValue::Bytes(b)) => Some(b.clone()),
-                    _ => None,
-                };
-
-                let is_upgrade = match args.get(4) {
-                    Some(BoundaryValue::Bool(b)) => *b,
-                    _ => false,
-                };
-
-                ServerCommand::Respond {
-                    request_id,
-                    status,
-                    headers,
-                    body,
-                    is_upgrade,
-                    injector,
-                    thread_id,
-                    lease: request_lease,
-                }
-            }
-            "server_ws_receive" => {
-                if let Some(BoundaryValue::U64(id)) = args.first() {
-                    ServerCommand::WsReceive {
-                        ws_id: *id,
-                        injector,
-                        thread_id,
-                        lease: request_lease,
-                    }
-                } else {
-                    return;
-                }
-            }
-            "server_ws_send" => {
-                let ws_id = match args.first() {
-                    Some(BoundaryValue::U64(id)) => *id,
-                    _ => return,
-                };
-                let data = match args.get(1) {
-                    Some(BoundaryValue::Bytes(d)) => d.clone(),
-                    _ => return,
-                };
-                ServerCommand::WsSend {
-                    ws_id,
-                    data,
-                    injector,
-                    thread_id,
-                    lease: request_lease,
-                }
-            }
-            "server_ws_close" => {
-                if let Some(BoundaryValue::U64(id)) = args.first() {
-                    ServerCommand::WsClose {
-                        ws_id: *id,
-                        injector,
-                        thread_id,
-                        lease: request_lease,
-                    }
-                } else {
-                    return;
-                }
-            }
-            _ => {
-                let _ = injector.inject_system_response(
-                    thread_id,
-                    request_lease,
-                    Err(ExecutionFailure::new(
-                        ExecutionFailureKind::ProviderFailure,
-                        format!("function {name} is not implemented in NativeServerProvider"),
-                    )),
-                );
-                return;
-            }
+    ) -> bool {
+        let completion = Completion {
+            injector: injector.clone(),
+            thread_id,
+            lease: request_lease,
         };
-
-        let _ = self.command_tx.send(cmd);
+        let command = (|| -> Result<ServerCommand, ExecutionFailure> {
+            match name {
+                "server_bind" => Ok(ServerCommand::Bind {
+                    port: surface_i32(args.first(), "port")?,
+                    completion,
+                }),
+                "server_accept" => Ok(ServerCommand::Accept {
+                    _server_id: surface_u64(args.first(), "server ID")?,
+                    completion,
+                }),
+                "server_respond" => {
+                    let body = match args.get(3) {
+                        Some(SurfaceValue::Bytes(body)) => Some(body.clone()),
+                        Some(SurfaceValue::Null) => None,
+                        _ => {
+                            return Err(ExecutionFailure::new(
+                                ExecutionFailureKind::ProviderFailure,
+                                "expected nullable surface response body",
+                            ));
+                        }
+                    };
+                    let is_upgrade = match args.get(4) {
+                        Some(SurfaceValue::Bool(value)) => *value,
+                        _ => {
+                            return Err(ExecutionFailure::new(
+                                ExecutionFailureKind::ProviderFailure,
+                                "expected surface response upgrade flag",
+                            ));
+                        }
+                    };
+                    Ok(ServerCommand::Respond {
+                        request_id: surface_u64(args.first(), "request ID")?,
+                        status: surface_i32(args.get(1), "response status")?,
+                        headers: surface_headers(args.get(2))?,
+                        body,
+                        is_upgrade,
+                        completion,
+                    })
+                }
+                "server_ws_receive" => Ok(ServerCommand::WsReceive {
+                    ws_id: surface_u64(args.first(), "WebSocket ID")?,
+                    completion,
+                }),
+                "server_ws_send" => Ok(ServerCommand::WsSend {
+                    ws_id: surface_u64(args.first(), "WebSocket ID")?,
+                    data: surface_bytes(args.get(1), "WebSocket data")?,
+                    completion,
+                }),
+                "server_ws_close" => Ok(ServerCommand::WsClose {
+                    ws_id: surface_u64(args.first(), "WebSocket ID")?,
+                    completion,
+                }),
+                _ => Err(ExecutionFailure::new(
+                    ExecutionFailureKind::ProviderFailure,
+                    format!("function {name} is not implemented in NativeServerProvider"),
+                )),
+            }
+        })();
+        match command {
+            Ok(command) => {
+                let _ = self.command_tx.send(command);
+            }
+            Err(error) => {
+                let _ = injector.inject_surface_response(thread_id, request_lease, Err(error));
+            }
+        }
+        true
     }
 
     fn cancel(

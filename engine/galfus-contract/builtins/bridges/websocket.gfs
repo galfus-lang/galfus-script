@@ -3,7 +3,52 @@ fn(async) __provider_websocket_receive(socket: u64): [u8] | null
 fn(async) __provider_websocket_send(socket: u64, data: [u8]): bool
 fn(async) __provider_websocket_close(socket: u64): bool
 
-export fn connect(url: [u8]): u64 | null => await __provider_websocket_connect(url)
-export fn receive(socket: u64): [u8] | null => await __provider_websocket_receive(socket)
-export fn send(socket: u64, data: [u8]): bool => await __provider_websocket_send(socket, data)
-export fn close(socket: u64): bool => await __provider_websocket_close(socket)
+export struct WebSocket {
+    id: u64,
+    closed: bool,
+}
+
+export struct WebSocketMessage {
+    data: [u8],
+}
+
+export fn(async) connect(url: [u8]): WebSocket | null {
+    const id = await __provider_websocket_connect(url)
+    instanceof id {
+        u64 id { return new(WebSocket) { id: id, closed: false } },
+        null { return null },
+    }
+    return null
+}
+
+export fn(async) WebSocket::receive(self): WebSocketMessage | null {
+    if self.closed {
+        return null
+    }
+
+    const data = await __provider_websocket_receive(self.id)
+    instanceof data {
+        [u8] data { return new(WebSocketMessage) { data: data } },
+        null { return null },
+    }
+    return null
+}
+
+export fn(async) WebSocket::send(self, data: [u8]): bool {
+    if self.closed {
+        return false
+    }
+    return await __provider_websocket_send(self.id, data)
+}
+
+export fn(async) WebSocket::close(self): bool {
+    if self.closed {
+        return true
+    }
+
+    const closed = await __provider_websocket_close(self.id)
+    if closed {
+        self.closed = true
+    }
+    return closed
+}

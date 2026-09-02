@@ -476,23 +476,19 @@ impl Orchestrator {
                 .expect("compiled provider operations have a valid alias")
                 .to_string();
             let surface_contract = self.provider_surface_contract(&alias, name);
-            let args = if let Some(contract) = surface_contract {
-                if contract.parameters.len() != args_vm.len() {
-                    return Err(format!(
-                        "surface contract {} expects {} arguments, received {}",
-                        contract.bridge_symbol,
-                        contract.parameters.len(),
-                        args_vm.len(),
-                    ));
-                }
-                crate::orchestrator::future_registry::ProviderArguments::Surface(
-                    encoded_surface_args(&contract.parameters)?,
-                )
-            } else {
-                crate::orchestrator::future_registry::ProviderArguments::Boundary(
-                    encoded_args().map_err(|error| format!("{error:?}"))?,
-                )
-            };
+            let contract = surface_contract
+                .ok_or_else(|| format!("provider operation {name} has no surface contract"))?;
+            if contract.parameters.len() != args_vm.len() {
+                return Err(format!(
+                    "surface contract {} expects {} arguments, received {}",
+                    contract.bridge_symbol,
+                    contract.parameters.len(),
+                    args_vm.len(),
+                ));
+            }
+            let args = crate::orchestrator::future_registry::ProviderArguments::Surface(
+                encoded_surface_args(&contract.parameters)?,
+            );
             Ok(crate::orchestrator::future_registry::Activation::Provider {
                 alias,
                 name: name.to_string(),

@@ -6,7 +6,7 @@ use crate::orchestrator::pending::PendingOperation;
 use galfus_bytecode::instruction::{Reg, TypeIdx};
 use galfus_contract::{
     BoundaryValue, ExecutionFailure, ExecutionFailureKind, HostProvider, KernelTask,
-    MessageInjector, Providers, RunnableTask, TaskAffinity, ThreadResult,
+    MessageInjector, Providers, RunnableTask, SurfaceValue, TaskAffinity, ThreadResult,
 };
 use galfus_core::{CoordinatorId, FutureId, ModuleId, ThreadId};
 use std::sync::{
@@ -21,15 +21,16 @@ impl HostProvider for RecordingProvider {
         galfus_contract::ProviderDescriptor::default()
     }
 
-    fn dispatch(
+    fn dispatch_surface(
         &mut self,
         _thread_id: galfus_core::ThreadId,
         _request_lease: galfus_core::RequestLease,
         _name: &str,
-        _args: &[BoundaryValue],
+        _args: &[SurfaceValue],
         _injector: Arc<dyn MessageInjector>,
-    ) {
+    ) -> bool {
         self.0.store(true, Ordering::Release);
+        true
     }
 }
 
@@ -71,7 +72,7 @@ pub(super) fn provider_dispatch_task(called: Arc<AtomicBool>) -> ProviderDispatc
         request_lease: galfus_core::RequestLease::new(galfus_core::RequestId::new(1), 1),
         alias: "io".to_string(),
         name: "operation".to_string(),
-        args: ProviderArguments::Boundary(vec![]),
+        args: ProviderArguments::Surface(vec![]),
         injector: Arc::new(NoopInjector),
         active: Arc::new(AtomicBool::new(true)),
     }
@@ -114,7 +115,7 @@ pub(super) fn provider_dispatch_reports_a_poisoned_registry_without_panicking() 
         request_lease: galfus_core::RequestLease::new(galfus_core::RequestId::new(1), 1),
         alias: "io".to_string(),
         name: "operation".to_string(),
-        args: ProviderArguments::Boundary(vec![]),
+        args: ProviderArguments::Surface(vec![]),
         injector: Arc::new(FailureInjector(failures.clone())),
         active: Arc::new(AtomicBool::new(true)),
     };

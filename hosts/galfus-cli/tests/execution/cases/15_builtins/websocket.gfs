@@ -1,0 +1,14 @@
+import { WebSocket } from "std/websocket"
+import { println } from "std/io"
+
+fn(async) exercise(socket: WebSocket): null {
+  const _sent = await socket::send("message")
+  const _message = await socket::receive()
+  const _closed = await socket::close()
+  return null
+}
+
+export fn main(_args: [[u8]]): i32 {
+  println("ok")
+  return 0
+}

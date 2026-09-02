@@ -5,7 +5,7 @@ use super::pending::PendingContinuation;
 use crate::event::FutureResult;
 use crate::registry::ThreadId;
 use galfus_bytecode::instruction::{FuncIdx, TypeIdx};
-use galfus_contract::{BoundaryValue, ExecutionFailure};
+use galfus_contract::{BoundaryValue, ExecutionFailure, SurfaceValue};
 use galfus_core::ModuleId;
 use std::collections::HashMap;
 use std::sync::{
@@ -15,8 +15,7 @@ use std::sync::{
 
 #[derive(Debug, Clone)]
 pub enum ProviderArguments {
-    Boundary(Vec<BoundaryValue>),
-    Surface(Vec<galfus_contract::SurfaceValue>),
+    Surface(Vec<SurfaceValue>),
 }
 
 #[derive(Debug, Clone)]
@@ -64,7 +63,7 @@ impl Activation {
             Self::Provider { alias, name, .. } => Self::Provider {
                 alias: alias.clone(),
                 name: name.clone(),
-                args: ProviderArguments::Boundary(Vec::new()),
+                args: ProviderArguments::Surface(Vec::new()),
                 request_id: None,
             },
             Self::Adapter {

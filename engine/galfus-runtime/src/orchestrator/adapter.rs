@@ -153,34 +153,22 @@ impl RunnableTask for ProviderDispatchTask {
                 return ThreadResult::Discarded;
             }
         };
-        match self.args {
-            crate::orchestrator::future_registry::ProviderArguments::Boundary(args) => {
-                host.dispatch(
-                    self.thread_id,
-                    self.request_lease,
-                    &self.name,
-                    &args,
-                    self.injector.clone(),
-                );
-            }
-            crate::orchestrator::future_registry::ProviderArguments::Surface(args) => {
-                if !host.dispatch_surface(
-                    self.thread_id,
-                    self.request_lease,
-                    &self.name,
-                    &args,
-                    self.injector.clone(),
-                ) {
-                    let _ = self.injector.inject_system_response(
-                        self.thread_id,
-                        self.request_lease,
-                        Err(ExecutionFailure::new(
-                            ExecutionFailureKind::ProviderFailure,
-                            "provider does not implement the declared surface contract",
-                        )),
-                    );
-                }
-            }
+        let crate::orchestrator::future_registry::ProviderArguments::Surface(args) = self.args;
+        if !host.dispatch_surface(
+            self.thread_id,
+            self.request_lease,
+            &self.name,
+            &args,
+            self.injector.clone(),
+        ) {
+            let _ = self.injector.inject_system_response(
+                self.thread_id,
+                self.request_lease,
+                Err(ExecutionFailure::new(
+                    ExecutionFailureKind::ProviderFailure,
+                    "provider does not implement the declared surface contract",
+                )),
+            );
         }
         ThreadResult::Discarded
     }

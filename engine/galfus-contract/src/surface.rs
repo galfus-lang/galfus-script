@@ -18,6 +18,7 @@ pub enum SurfaceDirection {
 pub enum SurfaceSchema {
     Null,
     Bool,
+    U16,
     I32,
     I64,
     U32,
@@ -27,6 +28,7 @@ pub enum SurfaceSchema {
     Bytes,
     Optional(Box<Self>),
     List(Box<Self>),
+    Tuple(Vec<Self>),
     Struct {
         name: String,
         fields: Vec<SurfaceField>,
@@ -160,6 +162,7 @@ impl SurfaceSchema {
         match (self, value) {
             (Self::Null, SurfaceValue::Null) => Ok(BoundaryValue::Null),
             (Self::Bool, SurfaceValue::Bool(value)) => Ok(BoundaryValue::Bool(value)),
+            (Self::U16, SurfaceValue::U16(value)) => Ok(BoundaryValue::U16(value)),
             (Self::I32, SurfaceValue::I32(value)) => Ok(BoundaryValue::I32(value)),
             (Self::I64, SurfaceValue::I64(value)) => Ok(BoundaryValue::I64(value)),
             (Self::U32, SurfaceValue::U32(value)) => Ok(BoundaryValue::U32(value)),
@@ -176,6 +179,14 @@ impl SurfaceSchema {
                     .map(|value| inner.encode_legacy_value(value))
                     .collect::<Result<_, _>>()?,
             }),
+            (Self::Tuple(schemas), SurfaceValue::Tuple(values)) => Ok(BoundaryValue::Tuple(
+                schemas
+                    .iter()
+                    .cloned()
+                    .zip(values)
+                    .map(|(schema, value)| schema.encode_legacy_value(value))
+                    .collect::<Result<_, _>>()?,
+            )),
             (Self::Struct { fields, .. }, SurfaceValue::Struct(values)) => {
                 Ok(BoundaryValue::Tuple(
                     fields
@@ -224,6 +235,7 @@ impl SurfaceSchema {
         match self {
             Self::Null => Ok(BoundaryType::Null),
             Self::Bool => Ok(BoundaryType::Bool),
+            Self::U16 => Ok(BoundaryType::U16),
             Self::I32 => Ok(BoundaryType::I32),
             Self::I64 => Ok(BoundaryType::I64),
             Self::U32 => Ok(BoundaryType::U32),
@@ -233,6 +245,11 @@ impl SurfaceSchema {
             Self::Bytes => Ok(BoundaryType::Array(Box::new(BoundaryType::U8))),
             Self::Optional(inner) => Ok(BoundaryType::Nullable(Box::new(inner.boundary_type()?))),
             Self::List(inner) => Ok(BoundaryType::Array(Box::new(inner.boundary_type()?))),
+            Self::Tuple(items) => items
+                .iter()
+                .map(Self::boundary_type)
+                .collect::<Result<Vec<_>, _>>()
+                .map(BoundaryType::Tuple),
             Self::Struct { fields, .. } => Ok(BoundaryType::Tuple(
                 fields
                     .iter()
@@ -247,6 +264,7 @@ impl SurfaceSchema {
         match (self, value) {
             (Self::Null, SurfaceValue::Null)
             | (Self::Bool, SurfaceValue::Bool(_))
+            | (Self::U16, SurfaceValue::U16(_))
             | (Self::I32, SurfaceValue::I32(_))
             | (Self::I64, SurfaceValue::I64(_))
             | (Self::U32, SurfaceValue::U32(_))
@@ -259,6 +277,14 @@ impl SurfaceSchema {
             (Self::List(inner), SurfaceValue::List(values)) => {
                 for value in values {
                     inner.validate_value(value)?;
+                }
+                Ok(())
+            }
+            (Self::Tuple(schemas), SurfaceValue::Tuple(values))
+                if schemas.len() == values.len() =>
+            {
+                for (schema, value) in schemas.iter().zip(values) {
+                    schema.validate_value(value)?;
                 }
                 Ok(())
             }
@@ -318,6 +344,7 @@ impl SurfaceSchema {
         match self {
             Self::Null => hasher.update([0]),
             Self::Bool => hasher.update([1]),
+            Self::U16 => hasher.update([15]),
             Self::I32 => hasher.update([2]),
             Self::I64 => hasher.update([3]),
             Self::U32 => hasher.update([4]),
@@ -332,6 +359,13 @@ impl SurfaceSchema {
             Self::List(inner) => {
                 hasher.update([10]);
                 inner.write_fingerprint(hasher);
+            }
+            Self::Tuple(items) => {
+                hasher.update([14]);
+                hasher.update((items.len() as u64).to_le_bytes());
+                for item in items {
+                    item.write_fingerprint(hasher);
+                }
             }
             Self::Struct { name, fields } => {
                 hasher.update([11]);
@@ -370,6 +404,7 @@ impl SurfaceSchema {
 pub enum SurfaceValue {
     Null,
     Bool(bool),
+    U16(u16),
     I32(i32),
     I64(i64),
     U32(u32),
@@ -378,6 +413,7 @@ pub enum SurfaceValue {
     F64(f64),
     Bytes(Vec<u8>),
     List(Vec<Self>),
+    Tuple(Vec<Self>),
     Struct(Vec<(String, Self)>),
     Choice {
         variant: String,

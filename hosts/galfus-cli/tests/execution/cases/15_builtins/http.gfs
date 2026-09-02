@@ -1,0 +1,13 @@
+import { HttpBody } from "std/http"
+import { println } from "std/io"
+
+fn(async) exercise(body: HttpBody): null {
+  const _chunk = await body::next()
+  await body::cancel()
+  return null
+}
+
+export fn main(_args: [[u8]]): i32 {
+  println("ok")
+  return 0
+}

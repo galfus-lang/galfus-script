@@ -1,11 +1,11 @@
 use galfus_contract::builtins::std_net_provider_descriptor;
 use galfus_contract::{
-    BoundaryValue, CancellationOutcome, ExecutionFailure, ExecutionFailureKind, HostProvider,
-    MessageInjector, ProviderDescriptor, TaskAffinity,
+    CancellationOutcome, ExecutionFailure, ExecutionFailureKind, HostProvider, MessageInjector,
+    ProviderDescriptor, SurfaceValue, TaskAffinity,
 };
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::net::{TcpStream, UdpSocket};
+use std::net::{Shutdown, TcpStream, UdpSocket};
 use std::sync::Arc;
 
 pub struct NativeNetProvider {
@@ -35,9 +35,9 @@ impl NativeNetProvider {
         id
     }
 
-    fn text(args: &[BoundaryValue], index: usize, label: &str) -> Result<String, ExecutionFailure> {
+    fn text(args: &[SurfaceValue], index: usize, label: &str) -> Result<String, ExecutionFailure> {
         match args.get(index) {
-            Some(BoundaryValue::Bytes(value)) => String::from_utf8(value.clone()).map_err(|_| {
+            Some(SurfaceValue::Bytes(value)) => String::from_utf8(value.clone()).map_err(|_| {
                 ExecutionFailure::new(
                     ExecutionFailureKind::ProviderFailure,
                     format!("invalid UTF-8 {label}"),
@@ -50,9 +50,9 @@ impl NativeNetProvider {
         }
     }
 
-    fn u16(args: &[BoundaryValue], index: usize, label: &str) -> Result<u16, ExecutionFailure> {
+    fn u16(args: &[SurfaceValue], index: usize, label: &str) -> Result<u16, ExecutionFailure> {
         match args.get(index) {
-            Some(BoundaryValue::U16(value)) => Ok(*value),
+            Some(SurfaceValue::U16(value)) => Ok(*value),
             _ => Err(ExecutionFailure::new(
                 ExecutionFailureKind::ProviderFailure,
                 format!("expected u16 for {label}"),
@@ -60,9 +60,9 @@ impl NativeNetProvider {
         }
     }
 
-    fn u64(args: &[BoundaryValue], index: usize, label: &str) -> Result<u64, ExecutionFailure> {
+    fn u64(args: &[SurfaceValue], index: usize, label: &str) -> Result<u64, ExecutionFailure> {
         match args.get(index) {
-            Some(BoundaryValue::U64(value)) => Ok(*value),
+            Some(SurfaceValue::U64(value)) => Ok(*value),
             _ => Err(ExecutionFailure::new(
                 ExecutionFailureKind::ProviderFailure,
                 format!("expected u64 for {label}"),
@@ -70,12 +70,12 @@ impl NativeNetProvider {
         }
     }
 
-    fn max_bytes(args: &[BoundaryValue], index: usize) -> Result<usize, ExecutionFailure> {
+    fn max_bytes(args: &[SurfaceValue], index: usize) -> Result<usize, ExecutionFailure> {
         match args.get(index) {
-            Some(BoundaryValue::U32(value)) => Ok((*value).clamp(1, 1_048_576) as usize),
+            Some(SurfaceValue::U32(value)) => Ok((*value).clamp(1, 1_048_576) as usize),
             _ => Err(ExecutionFailure::new(
                 ExecutionFailureKind::ProviderFailure,
-                "expected u32 for max_bytes".to_string(),
+                "expected u32 for max_bytes",
             )),
         }
     }
@@ -84,9 +84,9 @@ impl NativeNetProvider {
         injector: Arc<dyn MessageInjector>,
         thread_id: galfus_core::ThreadId,
         request_lease: galfus_core::RequestLease,
-        value: Result<BoundaryValue, ExecutionFailure>,
+        value: Result<SurfaceValue, ExecutionFailure>,
     ) {
-        let _ = injector.inject_system_response(thread_id, request_lease, value);
+        let _ = injector.inject_surface_response(thread_id, request_lease, value);
     }
 }
 
@@ -99,14 +99,14 @@ impl HostProvider for NativeNetProvider {
         TaskAffinity::Any
     }
 
-    fn dispatch(
+    fn dispatch_surface(
         &mut self,
         thread_id: galfus_core::ThreadId,
         request_lease: galfus_core::RequestLease,
         name: &str,
-        args: &[BoundaryValue],
+        args: &[SurfaceValue],
         injector: Arc<dyn MessageInjector>,
-    ) {
+    ) -> bool {
         let value = match name {
             "net_tcp_connect" => {
                 let host = Self::text(args, 0, "host");
@@ -116,9 +116,9 @@ impl HostProvider for NativeNetProvider {
                         Ok(stream) => {
                             let id = self.next_id();
                             self.tcp.insert(id, stream);
-                            Ok(BoundaryValue::U64(id))
+                            Ok(SurfaceValue::U64(id))
                         }
-                        Err(_) => Ok(BoundaryValue::Null),
+                        Err(_) => Ok(SurfaceValue::Null),
                     },
                     Err(error) => Err(error),
                 }
@@ -133,17 +133,17 @@ impl HostProvider for NativeNetProvider {
                                 std::thread::spawn(move || {
                                     let mut buffer = vec![0; max];
                                     let result = match stream.read(&mut buffer) {
-                                        Ok(0) | Err(_) => Ok(BoundaryValue::Null),
+                                        Ok(0) | Err(_) => Ok(SurfaceValue::Null),
                                         Ok(size) => {
                                             buffer.truncate(size);
-                                            Ok(BoundaryValue::Bytes(buffer))
+                                            Ok(SurfaceValue::Bytes(buffer))
                                         }
                                     };
                                     Self::reply(injector, thread_id, request_lease, result);
                                 });
-                                return;
+                                return true;
                             }
-                            None => Ok(BoundaryValue::Null),
+                            None => Ok(SurfaceValue::Null),
                         }
                     }
                     Err(error) => Err(error),
@@ -152,14 +152,14 @@ impl HostProvider for NativeNetProvider {
             "net_tcp_write" => {
                 let id = Self::u64(args, 0, "socket");
                 let data = match args.get(1) {
-                    Some(BoundaryValue::Bytes(value)) => Ok(value),
+                    Some(SurfaceValue::Bytes(value)) => Ok(value),
                     _ => Err(ExecutionFailure::new(
                         ExecutionFailureKind::ProviderFailure,
-                        "expected bytes for data".to_string(),
+                        "expected bytes for data",
                     )),
                 };
                 match id.and_then(|id| data.map(|data| (id, data))) {
-                    Ok((id, data)) => Ok(BoundaryValue::Bool(
+                    Ok((id, data)) => Ok(SurfaceValue::Bool(
                         self.tcp
                             .get_mut(&id)
                             .is_some_and(|stream| stream.write_all(data).is_ok()),
@@ -167,8 +167,16 @@ impl HostProvider for NativeNetProvider {
                     Err(error) => Err(error),
                 }
             }
+            "net_tcp_finish" => match Self::u64(args, 0, "socket") {
+                Ok(id) => {
+                    Ok(SurfaceValue::Bool(self.tcp.get(&id).is_some_and(
+                        |stream| stream.shutdown(Shutdown::Write).is_ok(),
+                    )))
+                }
+                Err(error) => Err(error),
+            },
             "net_tcp_close" => match Self::u64(args, 0, "socket") {
-                Ok(id) => Ok(BoundaryValue::Bool(self.tcp.remove(&id).is_some())),
+                Ok(id) => Ok(SurfaceValue::Bool(self.tcp.remove(&id).is_some())),
                 Err(error) => Err(error),
             },
             "net_udp_bind" => {
@@ -179,9 +187,9 @@ impl HostProvider for NativeNetProvider {
                         Ok(socket) => {
                             let id = self.next_id();
                             self.udp.insert(id, socket);
-                            Ok(BoundaryValue::U64(id))
+                            Ok(SurfaceValue::U64(id))
                         }
-                        Err(_) => Ok(BoundaryValue::Null),
+                        Err(_) => Ok(SurfaceValue::Null),
                     },
                     Err(error) => Err(error),
                 }
@@ -198,21 +206,21 @@ impl HostProvider for NativeNetProvider {
                                     let result = match socket.recv_from(&mut buffer) {
                                         Ok((size, peer)) => {
                                             buffer.truncate(size);
-                                            Ok(BoundaryValue::Tuple(vec![
-                                                BoundaryValue::Bytes(buffer),
-                                                BoundaryValue::Bytes(
+                                            Ok(SurfaceValue::Tuple(vec![
+                                                SurfaceValue::Bytes(buffer),
+                                                SurfaceValue::Bytes(
                                                     peer.ip().to_string().into_bytes(),
                                                 ),
-                                                BoundaryValue::U16(peer.port()),
+                                                SurfaceValue::U16(peer.port()),
                                             ]))
                                         }
-                                        Err(_) => Ok(BoundaryValue::Null),
+                                        Err(_) => Ok(SurfaceValue::Null),
                                     };
                                     Self::reply(injector, thread_id, request_lease, result);
                                 });
-                                return;
+                                return true;
                             }
-                            None => Ok(BoundaryValue::Null),
+                            None => Ok(SurfaceValue::Null),
                         }
                     }
                     Err(error) => Err(error),
@@ -223,15 +231,15 @@ impl HostProvider for NativeNetProvider {
                 let host = Self::text(args, 1, "host");
                 let port = Self::u16(args, 2, "port");
                 let data = match args.get(3) {
-                    Some(BoundaryValue::Bytes(value)) => Ok(value),
+                    Some(SurfaceValue::Bytes(value)) => Ok(value),
                     _ => Err(ExecutionFailure::new(
                         ExecutionFailureKind::ProviderFailure,
-                        "expected bytes for data".to_string(),
+                        "expected bytes for data",
                     )),
                 };
                 match id.and_then(|id| Ok((id, host?, port?, data?))) {
                     Ok((id, host, port, data)) => {
-                        Ok(BoundaryValue::Bool(self.udp.get(&id).is_some_and(
+                        Ok(SurfaceValue::Bool(self.udp.get(&id).is_some_and(
                             |socket| socket.send_to(data, (host.as_str(), port)).is_ok(),
                         )))
                     }
@@ -239,7 +247,7 @@ impl HostProvider for NativeNetProvider {
                 }
             }
             "net_udp_close" => match Self::u64(args, 0, "socket") {
-                Ok(id) => Ok(BoundaryValue::Bool(self.udp.remove(&id).is_some())),
+                Ok(id) => Ok(SurfaceValue::Bool(self.udp.remove(&id).is_some())),
                 Err(error) => Err(error),
             },
             _ => Err(ExecutionFailure::new(
@@ -248,6 +256,7 @@ impl HostProvider for NativeNetProvider {
             )),
         };
         Self::reply(injector, thread_id, request_lease, value);
+        true
     }
 
     fn cancel(

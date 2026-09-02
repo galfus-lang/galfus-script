@@ -176,6 +176,27 @@ exit_code = 0
 stdout = "ok\n"
 
 [[case]]
+name = "net builtin exposes stream contracts"
+path = "cases/15_builtins/net.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "websocket builtin exposes nominal message API"
+path = "cases/15_builtins/websocket.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "http builtin exposes a response body stream"
+path = "cases/15_builtins/http.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
 name = "immutable bindings are rejected"
 path = "diagnostics/types/immutable_assignment.gfs"
 command = "check"

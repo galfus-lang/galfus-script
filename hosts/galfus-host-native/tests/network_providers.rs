@@ -19,6 +19,64 @@ impl MessageInjector for Injector {
         self.0.lock().unwrap().push(result.unwrap());
         Ok(())
     }
+
+    fn inject_surface_response(
+        &self,
+        _thread: galfus_core::ThreadId,
+        _lease: galfus_core::RequestLease,
+        result: Result<galfus_contract::SurfaceValue, galfus_contract::ExecutionFailure>,
+    ) -> Result<(), MessageInjectionError> {
+        self.0
+            .lock()
+            .unwrap()
+            .push(surface_to_boundary(result.unwrap()));
+        Ok(())
+    }
+}
+
+fn boundary_to_surface(value: BoundaryValue) -> galfus_contract::SurfaceValue {
+    match value {
+        BoundaryValue::Null => galfus_contract::SurfaceValue::Null,
+        BoundaryValue::Bool(value) => galfus_contract::SurfaceValue::Bool(value),
+        BoundaryValue::I32(value) => galfus_contract::SurfaceValue::I32(value),
+        BoundaryValue::U16(value) => galfus_contract::SurfaceValue::U16(value),
+        BoundaryValue::U32(value) => galfus_contract::SurfaceValue::U32(value),
+        BoundaryValue::U64(value) => galfus_contract::SurfaceValue::U64(value),
+        BoundaryValue::Bytes(value) => galfus_contract::SurfaceValue::Bytes(value),
+        BoundaryValue::Tuple(values) => galfus_contract::SurfaceValue::Tuple(
+            values.into_iter().map(boundary_to_surface).collect(),
+        ),
+        BoundaryValue::Array { values, .. } => galfus_contract::SurfaceValue::List(
+            values.into_iter().map(boundary_to_surface).collect(),
+        ),
+        value => panic!("unsupported test boundary value {value:?}"),
+    }
+}
+
+fn surface_to_boundary(value: galfus_contract::SurfaceValue) -> BoundaryValue {
+    match value {
+        galfus_contract::SurfaceValue::Null => BoundaryValue::Null,
+        galfus_contract::SurfaceValue::Bool(value) => BoundaryValue::Bool(value),
+        galfus_contract::SurfaceValue::I32(value) => BoundaryValue::I32(value),
+        galfus_contract::SurfaceValue::U16(value) => BoundaryValue::U16(value),
+        galfus_contract::SurfaceValue::U32(value) => BoundaryValue::U32(value),
+        galfus_contract::SurfaceValue::U64(value) => BoundaryValue::U64(value),
+        galfus_contract::SurfaceValue::Bytes(value) => BoundaryValue::Bytes(value),
+        galfus_contract::SurfaceValue::Tuple(values) => {
+            BoundaryValue::Tuple(values.into_iter().map(surface_to_boundary).collect())
+        }
+        galfus_contract::SurfaceValue::List(values) => BoundaryValue::Array {
+            element_type: galfus_contract::BoundaryType::Null,
+            values: values.into_iter().map(surface_to_boundary).collect(),
+        },
+        galfus_contract::SurfaceValue::Struct(values) => BoundaryValue::Tuple(
+            values
+                .into_iter()
+                .map(|(_, value)| surface_to_boundary(value))
+                .collect(),
+        ),
+        value => panic!("unsupported test surface value {value:?}"),
+    }
 }
 
 fn dispatch<P: HostProvider>(
@@ -27,13 +85,33 @@ fn dispatch<P: HostProvider>(
     args: Vec<BoundaryValue>,
 ) -> BoundaryValue {
     let injector = Arc::new(Injector(Mutex::new(Vec::new())));
-    provider.dispatch(
+    let mut args = args
+        .into_iter()
+        .map(boundary_to_surface)
+        .collect::<Vec<_>>();
+    if name == "http_request"
+        && let Some(galfus_contract::SurfaceValue::List(headers)) = args.get_mut(2)
+    {
+        for header in headers {
+            let galfus_contract::SurfaceValue::Tuple(pair) = header else {
+                continue;
+            };
+            if pair.len() != 2 {
+                continue;
+            }
+            *header = galfus_contract::SurfaceValue::Struct(vec![
+                ("name".to_string(), pair[0].clone()),
+                ("value".to_string(), pair[1].clone()),
+            ]);
+        }
+    }
+    assert!(provider.dispatch_surface(
         galfus_core::ThreadId::new(1),
         galfus_core::RequestLease::new(galfus_core::RequestId::new(1), 0),
         name,
         &args,
         injector.clone(),
-    );
+    ));
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         if let Some(value) = injector.0.lock().unwrap().pop() {
@@ -86,8 +164,37 @@ fn http_provider_returns_loopback_response() {
             BoundaryValue::Bytes(b"ping".to_vec()),
         ],
     );
-    assert!(matches!(response, BoundaryValue::Tuple(values)
-        if values[0] == BoundaryValue::I32(201) && values[2] == BoundaryValue::Bytes(b"pong".to_vec())));
+    let body = match response {
+        BoundaryValue::Tuple(values) if values[0] == BoundaryValue::I32(201) => match &values[2] {
+            BoundaryValue::U64(body) => *body,
+            value => panic!("unexpected HTTP body handle {value:?}"),
+        },
+        value => panic!("unexpected HTTP response {value:?}"),
+    };
+    assert_eq!(
+        dispatch(
+            &mut provider,
+            "http_response_read",
+            vec![BoundaryValue::U64(body), BoundaryValue::U32(2)],
+        ),
+        BoundaryValue::Bytes(b"po".to_vec())
+    );
+    assert_eq!(
+        dispatch(
+            &mut provider,
+            "http_response_read",
+            vec![BoundaryValue::U64(body), BoundaryValue::U32(2)],
+        ),
+        BoundaryValue::Bytes(b"ng".to_vec())
+    );
+    assert_eq!(
+        dispatch(
+            &mut provider,
+            "http_response_read",
+            vec![BoundaryValue::U64(body), BoundaryValue::U32(2)],
+        ),
+        BoundaryValue::Null
+    );
     server.join().unwrap();
 }
 
@@ -147,6 +254,8 @@ fn tcp_and_udp_providers_exchange_loopback_bytes() {
         stream.read_exact(&mut data).unwrap();
         assert_eq!(&data, b"ping");
         stream.write_all(b"pong").unwrap();
+        let mut eof = [0; 1];
+        assert_eq!(stream.read(&mut eof).unwrap(), 0);
     });
 
     let mut provider = NativeNetProvider::new();
@@ -179,6 +288,14 @@ fn tcp_and_udp_providers_exchange_loopback_bytes() {
             vec![BoundaryValue::U64(socket), BoundaryValue::U32(32)]
         ),
         BoundaryValue::Bytes(b"pong".to_vec())
+    );
+    assert_eq!(
+        dispatch(
+            &mut provider,
+            "net_tcp_finish",
+            vec![BoundaryValue::U64(socket)]
+        ),
+        BoundaryValue::Bool(true)
     );
 
     let peer = UdpSocket::bind("127.0.0.1:0").unwrap();
