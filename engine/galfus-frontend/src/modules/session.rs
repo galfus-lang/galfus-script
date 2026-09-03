@@ -682,9 +682,11 @@ impl FrontendSession {
                 imported_types.insert_symbol_constraint(import.local_symbol, imported_constraint);
             }
 
-            if let Some(imported_choice) = surfaces[target_index]
-                .imported_choice_for_export(imported_name, Some(import.local_symbol))
-            {
+            if let Some(imported_choice) = surfaces[target_index].imported_choice_for_export(
+                imported_name,
+                Some(import.local_symbol),
+                self.modules[target_index].path().as_str(),
+            ) {
                 imported_types.insert_symbol_choice(import.local_symbol, imported_choice);
             }
 
@@ -692,6 +694,7 @@ impl FrontendSession {
                 &surfaces[target_index],
                 import.local_symbol,
                 imported_name,
+                self.modules[target_index].path().as_str(),
             ));
         }
 

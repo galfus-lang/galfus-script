@@ -1,7 +1,12 @@
-import { Count, OptionalCount } from "./middle.gfs"
+import { Count, OptionalCount, reexportTransit } from "./middle.gfs"
 import { Measurable } from "./types.gfs"
+import { TransitResult } from "./types.gfs"
 
 export const DEFAULT: Count = 2
+
+export fn transitThroughApi(): TransitResult<[u8]> {
+  return reexportTransit()
+}
 
 export struct Counter {
   value: Count,

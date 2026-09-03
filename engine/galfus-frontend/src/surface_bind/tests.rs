@@ -200,7 +200,7 @@ fn module_surface_preserves_choice_variants_without_payloads() {
     let choice = surface
         .export("ReadResult")
         .expect("choice must be exported")
-        .imported_choice_surface(None);
+        .imported_choice_surface(None, "");
 
     assert_eq!(choice.variants().len(), 3);
     assert_eq!(choice.variants()[1].name(), "End");

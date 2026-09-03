@@ -1,5 +1,6 @@
 import api from "./api.gfs"
-import { Counter, DEFAULT, Direction, Label, Result, configure, createCounter, identity, measure, optional, sum } from "./api.gfs"
+import { Counter, DEFAULT, Direction, Label, Result, configure, createCounter, identity, measure, optional, sum, transitThroughApi } from "./api.gfs"
+import { TransitResult } from "./types.gfs"
 import { println } from "std/io"
 
 export fn start(_args: [[u8]]): i32 {
@@ -23,6 +24,10 @@ export fn start(_args: [[u8]]): i32 {
   match identity_result {
     Result::Ok(value) { if value != 42 { return 10 } },
     Result::Err(_) { return 10 },
+  }
+  match transitThroughApi() {
+    TransitResult::Data(value) { if value.length != 7 { return 12 } },
+    TransitResult::End { return 12 },
   }
   println("ok")
   return 0

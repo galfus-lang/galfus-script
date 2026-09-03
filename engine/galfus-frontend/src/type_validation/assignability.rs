@@ -22,6 +22,10 @@ impl<'a> DeclarationTypeChecker<'a> {
             return true;
         }
 
+        if self.imported_struct_satisfies(actual, expected) {
+            return true;
+        }
+
         match (expected_kind, actual_kind) {
             (Some(TypeKind::Union { members }), _) => members
                 .iter()
@@ -68,8 +72,58 @@ impl<'a> DeclarationTypeChecker<'a> {
                 Some(TypeKind::Function(actual_function)),
             ) => self.is_function_type_assignable(expected_function, actual_function),
 
+            (
+                Some(TypeKind::GenericInstance {
+                    base: expected_base,
+                    arguments: expected_arguments,
+                }),
+                Some(TypeKind::GenericInstance {
+                    base: actual_base,
+                    arguments: actual_arguments,
+                }),
+            ) => {
+                expected_arguments.len() == actual_arguments.len()
+                    && (self.is_assignable(*expected_base, *actual_base)
+                        || (self.is_future_type_base(*expected_base)
+                            && self.is_future_type_base(*actual_base)))
+                    && expected_arguments
+                        .iter()
+                        .zip(actual_arguments)
+                        .all(|(expected, actual)| self.is_assignable(*expected, *actual))
+            }
+
             _ => false,
         }
+    }
+
+    fn imported_struct_satisfies(&self, actual: TypeId, expected: TypeId) -> bool {
+        let actual = self.resolve_alias_type(actual);
+        let constraints = match self.layer.table().kind(actual) {
+            Some(TypeKind::Named { symbol }) => *symbol,
+            Some(TypeKind::GenericInstance { base, .. }) => {
+                let Some(TypeKind::Named { symbol }) = self.layer.table().kind(*base) else {
+                    return self.imported_path_struct_satisfies(actual, expected);
+                };
+                *symbol
+            }
+            _ => return self.imported_path_struct_satisfies(actual, expected),
+        };
+
+        self.imported_struct_constraints
+            .get(&constraints)
+            .is_some_and(|constraints| constraints.iter().any(|constraint| *constraint == expected))
+    }
+
+    fn imported_path_struct_satisfies(&self, actual: TypeId, expected: TypeId) -> bool {
+        let Some(TypeKind::Path { segments, .. }) = self.layer.table().kind(actual) else {
+            return false;
+        };
+        let Some(name) = segments.last() else {
+            return false;
+        };
+        self.imported_struct_constraints_by_name
+            .get(name)
+            .is_some_and(|constraints| constraints.iter().any(|constraint| *constraint == expected))
     }
 
     fn is_function_type_assignable(&self, expected: &FunctionType, actual: &FunctionType) -> bool {

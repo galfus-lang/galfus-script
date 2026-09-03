@@ -43,7 +43,8 @@ impl<'a> DeclarationTypeChecker<'a> {
             return;
         };
 
-        let actual = match self.graph.syntax().child(return_statement, 0) {
+        let expression = self.graph.syntax().child(return_statement, 0);
+        let actual = match expression {
             Some(expression) => {
                 match self.infer_expression_type_with_expected(expression, Some(expected)) {
                     Some(actual) => actual,
@@ -53,6 +54,13 @@ impl<'a> DeclarationTypeChecker<'a> {
 
             None => self.layer.table().primitive(PrimitiveType::Null),
         };
+
+        if let Some(expression) = expression
+            && self.is_unspecialized_choice_instance(expected, actual)
+        {
+            self.layer.bind_node_type(expression, expected);
+            return;
+        }
 
         if self.is_assignable(expected, actual) {
             return;
@@ -69,6 +77,32 @@ impl<'a> DeclarationTypeChecker<'a> {
             .unwrap_or(return_statement);
 
         self.report_type_mismatch(diagnostic_node, expected, actual);
+    }
+
+    fn is_unspecialized_choice_instance(&self, expected: TypeId, actual: TypeId) -> bool {
+        let Some(TypeKind::GenericInstance { base, .. }) = self.layer.table().kind(expected) else {
+            return false;
+        };
+        let Some(TypeKind::Named {
+            symbol: expected_symbol,
+        }) = self.layer.table().kind(*base)
+        else {
+            return false;
+        };
+        let Some(TypeKind::Named {
+            symbol: actual_symbol,
+        }) = self.layer.table().kind(actual)
+        else {
+            return false;
+        };
+
+        expected_symbol == actual_symbol
+            && (self.imported_symbol_choices.contains_key(actual_symbol)
+                || self
+                    .graph
+                    .resolution()
+                    .and_then(|resolution| resolution.symbol(*actual_symbol))
+                    .is_some_and(|symbol| symbol.kind() == SymbolKind::Choice))
     }
 
     fn value_satisfies_return_constraint(&mut self, expected: TypeId, actual: TypeId) -> bool {

@@ -238,6 +238,7 @@ impl ImportedChoiceVariant {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportedChoiceSurface {
     name: String,
+    module_path: String,
     variants: Vec<ImportedChoiceVariant>,
     generic_parameters: Vec<ImportedType>,
 }
@@ -245,11 +246,13 @@ pub struct ImportedChoiceSurface {
 impl ImportedChoiceSurface {
     pub fn new(
         name: String,
+        module_path: String,
         variants: Vec<ImportedChoiceVariant>,
         generic_parameters: Vec<ImportedType>,
     ) -> Self {
         Self {
             name,
+            module_path,
             variants,
             generic_parameters,
         }
@@ -257,6 +260,10 @@ impl ImportedChoiceSurface {
 
     pub fn name(&self) -> &str {
         self.name.as_str()
+    }
+
+    pub fn module_path(&self) -> &str {
+        self.module_path.as_str()
     }
 
     pub fn variants(&self) -> &[ImportedChoiceVariant] {
@@ -358,6 +365,8 @@ pub struct ImportedSurfaceTypes {
     path_types: HashMap<NodeId, ImportedType>,
     member_types: HashMap<ImportedMemberKey, ImportedType>,
     struct_fields: HashMap<SymbolId, Vec<ImportedStructFieldSurface>>,
+    struct_constraints: HashMap<SymbolId, Vec<ImportedType>>,
+    struct_constraints_by_name: HashMap<String, Vec<ImportedType>>,
     symbol_constraints: HashMap<SymbolId, ImportedConstraintSurface>,
     path_constraints: HashMap<NodeId, ImportedConstraintSurface>,
     symbol_choices: HashMap<SymbolId, ImportedChoiceSurface>,
@@ -384,6 +393,14 @@ impl ImportedSurfaceTypes {
 
     pub fn struct_fields(&self) -> &HashMap<SymbolId, Vec<ImportedStructFieldSurface>> {
         &self.struct_fields
+    }
+
+    pub fn struct_constraints(&self) -> &HashMap<SymbolId, Vec<ImportedType>> {
+        &self.struct_constraints
+    }
+
+    pub fn struct_constraints_by_name(&self) -> &HashMap<String, Vec<ImportedType>> {
+        &self.struct_constraints_by_name
     }
 
     pub fn symbol_constraints(&self) -> &HashMap<SymbolId, ImportedConstraintSurface> {
@@ -426,6 +443,18 @@ impl ImportedSurfaceTypes {
         self.struct_fields.insert(symbol, fields);
     }
 
+    pub fn insert_struct_constraints(&mut self, symbol: SymbolId, constraints: Vec<ImportedType>) {
+        self.struct_constraints.insert(symbol, constraints);
+    }
+
+    pub fn insert_struct_constraints_by_name(
+        &mut self,
+        name: String,
+        constraints: Vec<ImportedType>,
+    ) {
+        self.struct_constraints_by_name.insert(name, constraints);
+    }
+
     pub fn insert_symbol_constraint(
         &mut self,
         symbol: SymbolId,
@@ -455,6 +484,9 @@ impl ImportedSurfaceTypes {
         self.path_types.extend(other.path_types);
         self.member_types.extend(other.member_types);
         self.struct_fields.extend(other.struct_fields);
+        self.struct_constraints.extend(other.struct_constraints);
+        self.struct_constraints_by_name
+            .extend(other.struct_constraints_by_name);
         self.symbol_constraints.extend(other.symbol_constraints);
         self.path_constraints.extend(other.path_constraints);
         self.symbol_enum_values.extend(other.symbol_enum_values);
@@ -466,6 +498,7 @@ impl ImportedSurfaceTypes {
 #[derive(Debug, Clone)]
 pub struct LoweredImportedChoice {
     pub name: String,
+    pub module_path: String,
     pub variants: Vec<LoweredImportedChoiceVariant>,
     pub generic_parameters: Vec<SymbolId>,
 }

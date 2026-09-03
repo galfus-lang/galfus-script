@@ -17,9 +17,7 @@ impl<'a> DeclarationTypeChecker<'a> {
 
         if let Some(existing) = self.layer.node_type(node) {
             match syntax_node.kind() {
-                SyntaxNodeKind::PathExpression
-                    if expected.is_some() && self.is_choice_variant_call_target(node) =>
-                {
+                SyntaxNodeKind::PathExpression if expected.is_some() => {
                     return self.infer_path_variant_expression_type(node, expected);
                 }
                 SyntaxNodeKind::IntegerLiteral => {
@@ -535,6 +533,10 @@ impl<'a> DeclarationTypeChecker<'a> {
     }
 
     fn unwrap_future_type(&self, ty: TypeId) -> Option<TypeId> {
+        self.try_unwrap_future_type(ty)
+    }
+
+    fn try_unwrap_future_type(&self, ty: TypeId) -> Option<TypeId> {
         let resolved = self.resolve_alias_type(ty);
         match self.layer.table().kind(resolved).cloned() {
             Some(TypeKind::GenericInstance { base, arguments }) => {
@@ -547,7 +549,7 @@ impl<'a> DeclarationTypeChecker<'a> {
         }
     }
 
-    fn is_future_type_base(&self, base: TypeId) -> bool {
+    pub(super) fn is_future_type_base(&self, base: TypeId) -> bool {
         match self.layer.table().kind(base) {
             Some(TypeKind::Named { symbol }) => {
                 symbol.raw() == IMPLICIT_FUTURE_SYMBOL

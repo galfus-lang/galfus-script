@@ -219,6 +219,7 @@ impl ModuleSurface {
         &self,
         name: &str,
         namespace: Option<SymbolId>,
+        module_path: &str,
     ) -> Option<ImportedChoiceSurface> {
         let export = self.export(name)?;
 
@@ -226,7 +227,7 @@ impl ModuleSurface {
             return None;
         }
 
-        Some(export.imported_choice_surface(namespace))
+        Some(export.imported_choice_surface(namespace, module_path))
     }
 }
 
@@ -278,6 +279,12 @@ pub fn build_module_surface(
                 members,
                 generic_parameters,
             )
+            .with_satisfied_constraints(surface_satisfied_constraints(
+                graph,
+                type_result,
+                string_table,
+                export.symbol(),
+            ))
         })
         .collect();
 
@@ -317,6 +324,7 @@ pub fn imported_surface_types_for_named_export(
     surface: &ModuleSurface,
     local_symbol: SymbolId,
     name: &str,
+    module_path: &str,
 ) -> ImportedSurfaceTypes {
     let mut imported_types = ImportedSurfaceTypes::new();
     let Some(export) = surface.export(name) else {
@@ -333,7 +341,10 @@ pub fn imported_surface_types_for_named_export(
     }
 
     if export.kind() == SymbolKind::Choice {
-        imported_types.insert_symbol_choice(local_symbol, export.imported_choice_surface(None));
+        imported_types.insert_symbol_choice(
+            local_symbol,
+            export.imported_choice_surface(None, module_path),
+        );
     }
     if export.kind() == SymbolKind::Enum {
         imported_types.insert_symbol_enum_values(local_symbol, export.imported_enum_values());
@@ -367,6 +378,19 @@ pub fn imported_surface_types_for_named_export(
             })
             .collect();
         imported_types.insert_struct_fields(local_symbol, fields);
+        imported_types
+            .insert_struct_constraints(local_symbol, export.satisfied_constraints().to_vec());
+    }
+
+    for struct_export in surface
+        .exports()
+        .iter()
+        .filter(|candidate| candidate.kind() == SymbolKind::Struct)
+    {
+        imported_types.insert_struct_constraints_by_name(
+            struct_export.name().to_string(),
+            struct_export.satisfied_constraints().to_vec(),
+        );
     }
 
     if export.kind() == SymbolKind::Function
@@ -406,6 +430,42 @@ pub fn imported_surface_types_for_named_export(
     }
 
     imported_types
+}
+
+fn surface_satisfied_constraints(
+    graph: &ModuleAst,
+    type_result: &TypeCheckResult,
+    string_table: &StringTable,
+    symbol: SymbolId,
+) -> Vec<ImportedType> {
+    let Some(resolution) = graph.resolution() else {
+        return Vec::new();
+    };
+    let Some(member_scope) = resolution.member_scope(symbol) else {
+        return Vec::new();
+    };
+    let Some(scope) = resolution.scope(member_scope) else {
+        return Vec::new();
+    };
+    let Some(item) = scope.owner() else {
+        return Vec::new();
+    };
+    let Some(satisfies) = graph
+        .syntax()
+        .first_child_of_kind(item, SyntaxNodeKind::SatisfiesClause)
+    else {
+        return Vec::new();
+    };
+    let Some(satisfies) = graph.syntax().node(satisfies) else {
+        return Vec::new();
+    };
+
+    satisfies
+        .children()
+        .iter()
+        .filter_map(|constraint| type_result.layer().node_type(*constraint))
+        .filter_map(|constraint| transport_type(resolution, type_result, string_table, constraint))
+        .collect()
 }
 
 fn imported_function_return_struct_name(ty: Option<&ImportedType>) -> Option<&str> {

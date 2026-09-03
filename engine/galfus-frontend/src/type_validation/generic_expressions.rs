@@ -13,7 +13,11 @@ impl<'a> DeclarationTypeChecker<'a> {
         let target_type = self.infer_expression_type(target);
         let target_type = target_type?;
         let argument_types = self.generic_expression_argument_types(arguments)?;
-        let parameters = self.generic_expression_parameter_symbols(target, target_type);
+        let alias_target = self.generic_alias_target_type(target_type);
+        let parameters = alias_target
+            .map(|ty| self.generic_parameter_symbols_from_type(ty))
+            .filter(|parameters| !parameters.is_empty())
+            .unwrap_or_else(|| self.generic_expression_parameter_symbols(target, target_type));
 
         if parameters.len() != argument_types.len() {
             self.report_generic_argument_count_mismatch(
@@ -32,17 +36,40 @@ impl<'a> DeclarationTypeChecker<'a> {
 
         self.validate_generic_substitution_bounds(node, &substitution);
 
-        let resolved_target = self.resolve_alias_type(target_type);
-        let result_type = match self.layer.table().kind(resolved_target) {
-            Some(TypeKind::Named { .. }) => self
-                .layer
-                .table_mut()
-                .intern_generic_instance(target_type, argument_types),
-            _ => self.substitute_generic_expression_type(target_type, &substitution),
+        let result_type = if let Some(alias_target) = alias_target {
+            self.substitute_generic_expression_type(alias_target, &substitution)
+        } else {
+            let resolved_target = self.resolve_alias_type(target_type);
+            match self.layer.table().kind(resolved_target) {
+                Some(TypeKind::Named { .. }) => self
+                    .layer
+                    .table_mut()
+                    .intern_generic_instance(target_type, argument_types),
+                _ => self.substitute_generic_expression_type(target_type, &substitution),
+            }
         };
 
         self.layer.bind_node_type(node, result_type);
         Some(result_type)
+    }
+
+    fn generic_alias_target_type(&self, ty: TypeId) -> Option<TypeId> {
+        let TypeKind::Named { symbol } = self.layer.table().kind(ty)? else {
+            return None;
+        };
+        if self.imported_symbol_choices.contains_key(symbol) {
+            return None;
+        }
+        let symbol = self.graph.resolution()?.symbol(*symbol)?;
+        if !matches!(
+            symbol.kind(),
+            SymbolKind::TypeAlias | SymbolKind::ImportBinding
+        ) {
+            return None;
+        }
+
+        let target = self.layer.symbol_type(symbol.id())?;
+        (target != ty).then_some(target)
     }
 
     fn generic_expression_argument_types(&self, arguments: NodeId) -> Option<Vec<TypeId>> {

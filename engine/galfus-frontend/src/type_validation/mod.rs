@@ -49,6 +49,8 @@ struct DeclarationTypeChecker<'a> {
     ownership_metadata: OwnershipMetadata,
     imported_member_types: HashMap<ImportedMemberKey, TypeId>,
     imported_struct_fields: HashMap<SymbolId, Vec<ImportedStructField>>,
+    imported_struct_constraints: HashMap<SymbolId, Vec<TypeId>>,
+    imported_struct_constraints_by_name: HashMap<String, Vec<TypeId>>,
     imported_symbol_constraints: HashMap<SymbolId, LoweredImportedConstraint>,
     imported_path_constraints: HashMap<NodeId, LoweredImportedConstraint>,
     imported_symbol_choices: HashMap<SymbolId, LoweredImportedChoice>,
@@ -93,6 +95,8 @@ impl<'a> DeclarationTypeChecker<'a> {
             ownership_metadata: OwnershipMetadata::default(),
             imported_member_types: HashMap::new(),
             imported_struct_fields: HashMap::new(),
+            imported_struct_constraints: HashMap::new(),
+            imported_struct_constraints_by_name: HashMap::new(),
             imported_symbol_constraints: HashMap::new(),
             imported_path_constraints: HashMap::new(),
             imported_symbol_choices: HashMap::new(),
@@ -123,6 +127,8 @@ impl<'a> DeclarationTypeChecker<'a> {
             ownership_metadata: previous_result.ownership_metadata,
             imported_member_types: HashMap::new(),
             imported_struct_fields: previous_result.imported_struct_fields,
+            imported_struct_constraints: HashMap::new(),
+            imported_struct_constraints_by_name: HashMap::new(),
             imported_symbol_constraints: HashMap::new(),
             imported_path_constraints: HashMap::new(),
             imported_symbol_choices: previous_result.imported_symbol_choices,
@@ -278,6 +284,34 @@ impl<'a> DeclarationTypeChecker<'a> {
         }
     }
 
+    fn bind_imported_struct_constraints(
+        &mut self,
+        imported_constraints: &HashMap<SymbolId, Vec<ImportedType>>,
+    ) {
+        for (symbol, constraints) in imported_constraints {
+            let constraints = constraints
+                .iter()
+                .map(|constraint| self.lower_imported_type(constraint))
+                .collect();
+            self.imported_struct_constraints
+                .insert(*symbol, constraints);
+        }
+    }
+
+    fn bind_imported_struct_constraints_by_name(
+        &mut self,
+        imported_constraints: &HashMap<String, Vec<ImportedType>>,
+    ) {
+        for (name, constraints) in imported_constraints {
+            let constraints = constraints
+                .iter()
+                .map(|constraint| self.lower_imported_type(constraint))
+                .collect();
+            self.imported_struct_constraints_by_name
+                .insert(name.clone(), constraints);
+        }
+    }
+
     fn bind_imported_symbol_constraints(
         &mut self,
         imported_constraints: &HashMap<SymbolId, ImportedConstraintSurface>,
@@ -368,6 +402,7 @@ impl<'a> DeclarationTypeChecker<'a> {
 
         LoweredImportedChoice {
             name: imported_choice.name().to_string(),
+            module_path: imported_choice.module_path().to_string(),
             generic_parameters,
             variants: imported_choice
                 .variants()
@@ -590,6 +625,8 @@ pub fn check_definition_types_with_surfaces(
     checker.bind_imported_path_types(imported_types.path_types());
     checker.bind_imported_member_types(imported_types.member_types());
     checker.bind_imported_struct_fields(imported_types.struct_fields());
+    checker.bind_imported_struct_constraints(imported_types.struct_constraints());
+    checker.bind_imported_struct_constraints_by_name(imported_types.struct_constraints_by_name());
     checker.bind_imported_symbol_constraints(imported_types.symbol_constraints());
     checker.bind_imported_path_constraints(imported_types.path_constraints());
     checker.bind_imported_symbol_choices(imported_types.symbol_choices());

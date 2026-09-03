@@ -1,7 +1,9 @@
 use std::collections;
 
 use super::DeclarationTypeChecker;
-use crate::{FunctionType, PathReferenceKind, SymbolKind, SyntaxNodeKind, TypeKind};
+use crate::{
+    FunctionType, ImportedMemberKey, PathReferenceKind, SymbolKind, SyntaxNodeKind, TypeKind,
+};
 use galfus_core::{NodeId, SymbolId, TypeId};
 use std::collections::HashMap;
 
@@ -199,7 +201,12 @@ impl<'a> DeclarationTypeChecker<'a> {
             .resolution()
             .and_then(|resolution| resolution.reference_symbol(target))
             .and_then(|symbol| self.graph.resolution()?.symbol(symbol))
-            .is_some_and(|symbol| symbol.kind() == SymbolKind::Struct);
+            .is_some_and(|symbol| symbol.kind() == SymbolKind::Struct)
+            || self
+                .graph
+                .resolution()
+                .and_then(|resolution| resolution.reference_symbol(target))
+                .is_some_and(|symbol| self.imported_struct_fields.contains_key(&symbol));
         self.infer_expression_type(target)?;
 
         if is_struct_type_target {
@@ -244,11 +251,36 @@ impl<'a> DeclarationTypeChecker<'a> {
             member_type =
                 self.struct_function_type_for_value_anchor(target_type, member_name.as_str());
         }
+        if member_type.is_none() {
+            member_type =
+                self.imported_function_type_for_value_anchor(target_type, member_name.as_str());
+        }
         let member_type = member_type?;
         let member_type = self.bind_value_anchor_receiver(node, member_type)?;
 
         self.layer.bind_node_type(node, member_type);
         Some(member_type)
+    }
+
+    fn imported_function_type_for_value_anchor(
+        &self,
+        target_type: TypeId,
+        member_name: &str,
+    ) -> Option<TypeId> {
+        let target_type = self.resolve_alias_type(target_type);
+        let symbol = match self.layer.table().kind(target_type)? {
+            TypeKind::Named { symbol } => *symbol,
+            TypeKind::GenericInstance { base, .. } => {
+                let TypeKind::Named { symbol } = self.layer.table().kind(*base)? else {
+                    return None;
+                };
+                *symbol
+            }
+            _ => return None,
+        };
+
+        let key = ImportedMemberKey::new(symbol, "", member_name);
+        self.imported_member_types.get(&key).copied()
     }
 
     fn struct_function_type_for_value_anchor(
@@ -446,6 +478,7 @@ impl<'a> DeclarationTypeChecker<'a> {
             return;
         }
 
+        payload.owner_type = expected;
         self.apply_choice_variant_generic_arguments(target, arguments, payload);
     }
 
@@ -556,6 +589,22 @@ impl<'a> DeclarationTypeChecker<'a> {
         owner_symbol: SymbolId,
         variant_symbol: SymbolId,
     ) -> Vec<TypeId> {
+        if let Some(choice) = self.imported_symbol_choices.get(&owner_symbol) {
+            let variant_name = self
+                .graph
+                .resolution()
+                .and_then(|resolution| resolution.symbol(variant_symbol))
+                .and_then(|variant| self.string_table.resolve(variant.name()));
+            if let Some(variant_name) = variant_name
+                && let Some(variant) = choice
+                    .variants
+                    .iter()
+                    .find(|variant| variant.name == variant_name)
+            {
+                return variant.payload_types.clone();
+            }
+        }
+
         let Some(resolution) = self.graph.resolution() else {
             return Vec::new();
         };

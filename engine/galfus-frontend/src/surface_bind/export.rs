@@ -10,6 +10,7 @@ pub struct ModuleSurfaceExport {
     ty: Option<ImportedType>,
     members: Vec<ModuleSurfaceMember>,
     generic_parameters: Vec<ImportedType>,
+    satisfied_constraints: Vec<ImportedType>,
 }
 
 impl ModuleSurfaceExport {
@@ -30,6 +31,7 @@ impl ModuleSurfaceExport {
             ty,
             members,
             generic_parameters,
+            satisfied_constraints: Vec::new(),
         }
     }
 
@@ -55,6 +57,18 @@ impl ModuleSurfaceExport {
 
     pub fn generic_parameters(&self) -> &[ImportedType] {
         self.generic_parameters.as_slice()
+    }
+
+    pub fn satisfied_constraints(&self) -> &[ImportedType] {
+        self.satisfied_constraints.as_slice()
+    }
+
+    pub(crate) fn with_satisfied_constraints(
+        mut self,
+        satisfied_constraints: Vec<ImportedType>,
+    ) -> Self {
+        self.satisfied_constraints = satisfied_constraints;
+        self
     }
 
     pub(super) fn imported_constraint_surface(
@@ -119,6 +133,7 @@ impl ModuleSurfaceExport {
     pub(super) fn imported_choice_surface(
         &self,
         namespace: Option<galfus_core::SymbolId>,
+        module_path: &str,
     ) -> ImportedChoiceSurface {
         let variants = self
             .members
@@ -147,6 +162,7 @@ impl ModuleSurfaceExport {
 
         ImportedChoiceSurface::new(
             self.name.clone(),
+            module_path.to_string(),
             variants,
             self.generic_parameters
                 .iter()
