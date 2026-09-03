@@ -173,9 +173,19 @@ impl VirtualMachine {
                 }
             }
             (Value::Object(obj_ref), BytecodeType::Choice(expected_layout_idx)) => {
-                if let Ok(HeapObject::Choice { layout_idx, .. }) = thread.heap.get_object(*obj_ref)
+                if let Ok(HeapObject::Choice {
+                    module_id,
+                    layout_idx,
+                    ..
+                }) = thread.heap.get_object(*obj_ref)
                 {
-                    *layout_idx == *expected_layout_idx
+                    let expected_module_id = thread.call_stack.last().unwrap().module_id;
+                    self.choice_layout_matches(
+                        *module_id,
+                        *layout_idx,
+                        expected_module_id,
+                        *expected_layout_idx,
+                    )
                 } else {
                     false
                 }
@@ -217,7 +227,7 @@ impl VirtualMachine {
                         return false;
                     };
 
-                    actual_layout.name.split('#').next() == expected_layout.name.split('#').next()
+                    actual_layout.name == expected_layout.name
                         && actual_layout
                             .variants
                             .get(*variant_idx as usize)
@@ -322,7 +332,47 @@ impl VirtualMachine {
                         },
                     )
             }
+            (BytecodeType::Choice(actual_layout), BytecodeType::Choice(expected_layout)) => self
+                .choice_layout_matches(
+                    actual_module,
+                    *actual_layout,
+                    expected_module,
+                    *expected_layout,
+                ),
             _ => actual_ty == expected_ty,
         }
+    }
+
+    fn choice_layout_matches(
+        &self,
+        actual_module: ModuleId,
+        actual_layout: ChoiceLayoutIdx,
+        expected_module: ModuleId,
+        expected_layout: ChoiceLayoutIdx,
+    ) -> bool {
+        if actual_module == expected_module && actual_layout == expected_layout {
+            return true;
+        }
+
+        let Ok(actual_image) = self.get_module(actual_module) else {
+            return false;
+        };
+        let Ok(expected_image) = self.get_module(expected_module) else {
+            return false;
+        };
+        let Some(actual_layout) = actual_image
+            .choice_layouts
+            .get(actual_layout.raw() as usize)
+        else {
+            return false;
+        };
+        let Some(expected_layout) = expected_image
+            .choice_layouts
+            .get(expected_layout.raw() as usize)
+        else {
+            return false;
+        };
+
+        actual_layout.name == expected_layout.name
     }
 }

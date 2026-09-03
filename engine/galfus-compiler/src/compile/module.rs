@@ -400,6 +400,7 @@ fn compile_single_module(
         module.source().text(),
         &mir_mod.constant_pool,
         string_table,
+        module.path().as_str(),
         module.is_adapter_proxy(),
         proxy_name,
     );

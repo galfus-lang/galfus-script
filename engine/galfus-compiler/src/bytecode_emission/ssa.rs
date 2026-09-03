@@ -134,6 +134,17 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
                 RValue::Choice(_, _, Some(op)) => {
                     self.replace_operand(block, op);
                 }
+                RValue::CreateFuture { args, .. } => {
+                    for arg in args {
+                        self.replace_operand(block, arg);
+                    }
+                }
+                RValue::CreateIndirectFuture { func, args } => {
+                    self.replace_operand(block, func);
+                    for arg in args {
+                        self.replace_operand(block, arg);
+                    }
+                }
                 _ => {}
             }
         }

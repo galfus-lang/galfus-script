@@ -19,6 +19,7 @@ pub struct LowerCtx<'a> {
     pub type_result: &'a TypeCheckResult,
     pub graph: &'a ModuleGraph,
     pub source_text: &'a str,
+    pub module_path: &'a str,
     pub string_table: &'a galfus_frontend::StringTable,
     pub is_adapter_proxy: bool,
     pub proxy_name: Option<String>,
@@ -51,6 +52,7 @@ impl<'a> LowerCtx<'a> {
         source_text: &'a str,
         mir_constants: &'a [MirConstant],
         string_table: &'a galfus_frontend::StringTable,
+        module_path: &'a str,
         is_adapter_proxy: bool,
         proxy_name: Option<String>,
     ) -> Self {
@@ -58,6 +60,7 @@ impl<'a> LowerCtx<'a> {
             type_result,
             graph,
             source_text,
+            module_path,
             string_table,
             is_adapter_proxy,
             proxy_name,

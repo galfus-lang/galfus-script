@@ -292,16 +292,22 @@ fn imported_struct_symbol_for_path(ctx: &LowerCtx, segments: &[String]) -> Optio
     })
 }
 
-pub(super) fn lower_choice_variant_type(ctx: &mut LowerCtx, variant_symbol: SymbolId) -> TypeIdx {
-    let Some((choice_symbol, variant_index)) =
+pub(super) fn lower_choice_variant_type(
+    ctx: &mut LowerCtx,
+    instance_ty: TypeId,
+    variant_symbol: SymbolId,
+) -> TypeIdx {
+    let Some((_, variant_index)) =
         crate::bytecode_emission::helpers::find_choice_for_variant(ctx, variant_symbol)
     else {
-        {
-            return TypeIdx(0);
-        }
+        unreachable!("choice variant pattern must resolve to its owner choice");
     };
-    let layout_idx =
-        crate::bytecode_emission::types::get_or_create_choice_layout(ctx, choice_symbol);
+
+    let type_idx = crate::bytecode_emission::types::lower_type(ctx, instance_ty);
+    let layout_idx = match &ctx.types[type_idx.raw() as usize] {
+        BytecodeType::Choice(layout_idx) => *layout_idx,
+        _ => unreachable!("choice variant pattern operand must have a choice type"),
+    };
     let variant_index = variant_index as u16;
 
     if let Some(index) = ctx.types.iter().position(|ty| {
@@ -322,28 +328,23 @@ pub(super) fn lower_choice_variant_type(ctx: &mut LowerCtx, variant_symbol: Symb
 
 pub(super) fn lower_imported_choice_variant_type(
     ctx: &mut LowerCtx,
-    choice_name: &str,
+    instance_ty: TypeId,
+    _choice_name: &str,
     variant_name: &str,
 ) -> TypeIdx {
-    let Some(choice) = ctx
-        .type_result
-        .imported_symbol_choices
-        .values()
-        .chain(ctx.type_result.imported_path_choices.values())
-        .find(|choice| choice.name == choice_name)
-        .cloned()
-    else {
-        return TypeIdx(0);
+    let type_idx = crate::bytecode_emission::types::lower_type(ctx, instance_ty);
+    let layout_idx = match &ctx.types[type_idx.raw() as usize] {
+        BytecodeType::Choice(layout_idx) => *layout_idx,
+        _ => unreachable!("imported choice variant pattern operand must have a choice type"),
     };
-    let Some(variant_index) = choice
+
+    let Some(variant_index) = ctx.choice_layouts[layout_idx.raw() as usize]
         .variants
         .iter()
         .position(|variant| variant.name == variant_name)
     else {
-        return TypeIdx(0);
+        unreachable!("imported choice variant pattern must resolve to its variant");
     };
-
-    let layout_idx = get_or_create_imported_choice_layout(ctx, &choice);
     let variant_index = variant_index as u16;
     if let Some(index) = ctx.types.iter().position(|ty| {
         matches!(
@@ -466,10 +467,11 @@ pub fn get_or_create_choice_layout(ctx: &mut LowerCtx, choice_symbol: SymbolId) 
         .unwrap_or("")
         .to_string();
 
+    let canonical_name = format!("{}::{}", ctx.module_path, choice_name);
     if let Some(pos) = ctx
         .choice_layouts
         .iter()
-        .position(|layout| layout.name == choice_name)
+        .position(|layout| layout.name == canonical_name)
     {
         let idx = ChoiceLayoutIdx(pos as u16);
         ctx.choice_map.insert(choice_symbol, idx);
@@ -493,7 +495,7 @@ pub fn get_or_create_choice_layout(ctx: &mut LowerCtx, choice_symbol: SymbolId) 
         .collect();
 
     ctx.choice_layouts.push(ChoiceLayout {
-        name: choice_name,
+        name: canonical_name,
         variants,
     });
 
@@ -515,10 +517,23 @@ fn get_or_create_generic_choice_layout(
         .symbol(choice_symbol)
         .and_then(|symbol| ctx.string_table.resolve(symbol.name()))
         .unwrap_or("");
+    let full_choice_name = format!("{}::{}", ctx.module_path, choice_name);
+    let canonical_name = if arguments.is_empty() {
+        full_choice_name
+    } else {
+        let arg_names: Vec<_> = arguments
+            .iter()
+            .map(|&ty| {
+                let ty_idx = lower_type(ctx, ty);
+                canonical_bytecode_type_name(ctx, ty_idx)
+            })
+            .collect();
+        format!("{}<{}>", full_choice_name, arg_names.join(", "))
+    };
     let next_idx = ChoiceLayoutIdx(ctx.choice_layouts.len() as u16);
     ctx.generic_choice_map.insert(instance_ty, next_idx);
     ctx.choice_layouts.push(ChoiceLayout {
-        name: format!("{choice_name}#{:?}", instance_ty),
+        name: canonical_name,
         variants: Vec::new(),
     });
 
@@ -843,10 +858,15 @@ pub fn get_or_create_imported_choice_layout(
     ctx: &mut LowerCtx,
     choice: &galfus_frontend::LoweredImportedChoice,
 ) -> ChoiceLayoutIdx {
+    let canonical_name = if choice.module_path.is_empty() {
+        choice.name.clone()
+    } else {
+        format!("{}::{}", choice.module_path, choice.name)
+    };
     if let Some(pos) = ctx
         .choice_layouts
         .iter()
-        .position(|c| c.name == choice.name)
+        .position(|c| c.name == canonical_name)
     {
         return ChoiceLayoutIdx(pos as u16);
     }
@@ -854,7 +874,7 @@ pub fn get_or_create_imported_choice_layout(
     let next_idx = ChoiceLayoutIdx(ctx.choice_layouts.len() as u16);
 
     ctx.choice_layouts.push(ChoiceLayout {
-        name: choice.name.clone(),
+        name: canonical_name,
         variants: Vec::new(),
     });
 
@@ -896,10 +916,27 @@ pub fn get_or_create_generic_imported_choice_layout(
         return idx;
     }
 
+    let canonical_name = if choice.module_path.is_empty() {
+        choice.name.clone()
+    } else {
+        format!("{}::{}", choice.module_path, choice.name)
+    };
+    let canonical_name = if arguments.is_empty() {
+        canonical_name
+    } else {
+        let arg_names: Vec<_> = arguments
+            .iter()
+            .map(|&ty| {
+                let ty_idx = lower_type(ctx, ty);
+                canonical_bytecode_type_name(ctx, ty_idx)
+            })
+            .collect();
+        format!("{}<{}>", canonical_name, arg_names.join(", "))
+    };
     let next_idx = ChoiceLayoutIdx(ctx.choice_layouts.len() as u16);
     ctx.generic_choice_map.insert(instance_ty, next_idx);
     ctx.choice_layouts.push(ChoiceLayout {
-        name: format!("{}#{:?}", choice.name, instance_ty),
+        name: canonical_name,
         variants: Vec::new(),
     });
 
@@ -935,4 +972,50 @@ pub fn get_or_create_generic_imported_choice_layout(
     ctx.active_substitutions = previous_substitutions;
     ctx.choice_layouts[next_idx.raw() as usize].variants = variants;
     next_idx
+}
+
+pub fn canonical_bytecode_type_name(ctx: &LowerCtx, ty: TypeIdx) -> String {
+    match &ctx.types[ty.raw() as usize] {
+        BytecodeType::Null => "null".to_string(),
+        BytecodeType::Bool => "bool".to_string(),
+        BytecodeType::Int8 => "i8".to_string(),
+        BytecodeType::Int16 => "i16".to_string(),
+        BytecodeType::Int32 => "i32".to_string(),
+        BytecodeType::Int64 => "i64".to_string(),
+        BytecodeType::Uint8 => "u8".to_string(),
+        BytecodeType::Uint16 => "u16".to_string(),
+        BytecodeType::Uint32 => "u32".to_string(),
+        BytecodeType::Uint64 => "u64".to_string(),
+        BytecodeType::Float32 => "f32".to_string(),
+        BytecodeType::Float64 => "f64".to_string(),
+        BytecodeType::AdapterHandle(id) => format!("handle<{}>", id.name()),
+        BytecodeType::Struct(idx) => ctx.struct_layouts[idx.raw() as usize].name.clone(),
+        BytecodeType::Array(inner) => format!("[{}]", canonical_bytecode_type_name(ctx, *inner)),
+        BytecodeType::Nullable(inner) => format!("{}?", canonical_bytecode_type_name(ctx, *inner)),
+        BytecodeType::Tuple(elements) => {
+            let elems: Vec<_> = elements
+                .iter()
+                .map(|e| canonical_bytecode_type_name(ctx, *e))
+                .collect();
+            format!("({})", elems.join(", "))
+        }
+        BytecodeType::Choice(idx) => ctx.choice_layouts[idx.raw() as usize].name.clone(),
+        BytecodeType::Constraint(name) => name.clone(),
+        BytecodeType::Function { params, ret } => {
+            let p: Vec<_> = params
+                .iter()
+                .map(|e| canonical_bytecode_type_name(ctx, *e))
+                .collect();
+            format!(
+                "fn({}) -> {}",
+                p.join(", "),
+                canonical_bytecode_type_name(ctx, *ret)
+            )
+        }
+        BytecodeType::ChoiceVariant(idx, variant) => {
+            let choice_name = &ctx.choice_layouts[idx.raw() as usize].name;
+            format!("{}::{}", choice_name, variant)
+        }
+        BytecodeType::Any => "any".to_string(),
+    }
 }

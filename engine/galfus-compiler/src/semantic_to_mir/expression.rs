@@ -513,11 +513,17 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                         Some(Operand::Local(tuple_temp))
                     };
 
-                    let choice_temp = self.declare_local(None, owner_type);
+                    let expr_type = self
+                        .builder
+                        .type_result
+                        .layer()
+                        .node_type(expr_id)
+                        .unwrap_or(owner_type);
+                    let choice_temp = self.declare_local(None, expr_type);
                     self.current_instructions.push((
                         Instruction::Assign(
                             choice_temp,
-                            RValue::Choice(owner_type, variant_name, payload_op),
+                            RValue::Choice(expr_type, variant_name, payload_op),
                         ),
                         None,
                     ));
@@ -765,11 +771,17 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                             if let Some((variant_name, owner_type, _payload_types)) =
                                 self.get_choice_variant_payload(expr_id)
                             {
-                                let choice_temp = self.declare_local(None, owner_type);
+                                let expr_type = self
+                                    .builder
+                                    .type_result
+                                    .layer()
+                                    .node_type(expr_id)
+                                    .unwrap_or(owner_type);
+                                let choice_temp = self.declare_local(None, expr_type);
                                 self.current_instructions.push((
                                     Instruction::Assign(
                                         choice_temp,
-                                        RValue::Choice(owner_type, variant_name, None),
+                                        RValue::Choice(expr_type, variant_name, None),
                                     ),
                                     None,
                                 ));

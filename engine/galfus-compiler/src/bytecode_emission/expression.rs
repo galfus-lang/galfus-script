@@ -743,8 +743,10 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
             }
             RValue::ChoiceVariantIs(operand, variant) => {
                 let src = self.operand_reg(operand);
-                let type_idx =
-                    crate::bytecode_emission::types::lower_choice_variant_type(self.ctx, *variant);
+                let operand_ty = self.get_operand_type(operand);
+                let type_idx = crate::bytecode_emission::types::lower_choice_variant_type(
+                    self.ctx, operand_ty, *variant,
+                );
                 self.instructions.push(Instruction::Instanceof {
                     dest,
                     src,
@@ -754,8 +756,10 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
             }
             RValue::ImportedChoiceVariantIs(operand, choice_name, variant_name) => {
                 let src = self.operand_reg(operand);
+                let operand_ty = self.get_operand_type(operand);
                 let type_idx = crate::bytecode_emission::types::lower_imported_choice_variant_type(
                     self.ctx,
+                    operand_ty,
                     choice_name,
                     variant_name,
                 );

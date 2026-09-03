@@ -59,11 +59,8 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
     }
 
     pub(super) fn symbol_type(&self, symbol: SymbolId) -> Option<TypeId> {
-        self.builder
-            .type_result
-            .layer()
-            .symbol_type(symbol)
-            .map(|ty| self.substitute_type(ty))
+        let ty = self.builder.type_result.layer().symbol_type(symbol);
+        ty.map(|ty| self.substitute_type(ty))
     }
 
     pub(super) fn substitute_type(&self, ty: TypeId) -> TypeId {

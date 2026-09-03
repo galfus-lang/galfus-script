@@ -23,30 +23,36 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 .child(pattern, 0)
                 .and_then(|root| resolution.reference_symbol(root))
         });
-        if let Some(owner_symbol) = owner_symbol
-            && let Some(choice) = self
+        if let Some(owner_symbol) = owner_symbol {
+            let choice = self
                 .builder
                 .type_result
                 .imported_symbol_choices
-                .get(&owner_symbol)
-        {
-            let variant_name = self
-                .builder
-                .graph
-                .syntax()
-                .child(pattern, 1)
-                .map(|node| self.builder.node_text(node))?;
-            let variant = choice.variants.iter().find(|v| v.name == variant_name)?;
-            return Some((
-                choice.name.clone(),
-                variant.name.clone(),
-                variant.payload_types.clone(),
-            ));
+                .get(&owner_symbol);
+            if let Some(choice) = choice {
+                let variant_name = self
+                    .builder
+                    .graph
+                    .syntax()
+                    .child(pattern, 1)
+                    .map(|node| self.builder.node_text(node))?;
+                let variant = choice.variants.iter().find(|v| v.name == variant_name)?;
+                return Some((
+                    choice.name.clone(),
+                    variant.name.clone(),
+                    variant.payload_types.clone(),
+                ));
+            }
         }
 
         let variant_ty = self.builder.type_result.layer().node_type(pattern)?;
+        let mut base_ty = variant_ty;
         let table = self.builder.type_result.layer().table();
-        let (_root, segments) = match table.kind(variant_ty) {
+        if let Some(TypeKind::GenericInstance { base, .. }) = table.kind(base_ty) {
+            base_ty = *base;
+        }
+
+        let (_root, segments) = match table.kind(base_ty) {
             Some(TypeKind::Path { root, segments }) => (*root, segments),
             _ => return None,
         };

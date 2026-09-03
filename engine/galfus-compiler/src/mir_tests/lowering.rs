@@ -147,7 +147,8 @@ fn test_mir_lowering_basic() {
     );
 
     let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
-    let (module_image, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let (module_image, _) =
+        lower_module(&mir_module, &type_result, &graph, code, "", &string_table);
 
     // Verify bytecode module metadata
     assert!(!module_image.functions.is_empty());
@@ -202,7 +203,8 @@ fn test_mir_lowering_defaults_integer_constants_to_int32() {
     );
 
     let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
-    let (module_image, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let (module_image, _) =
+        lower_module(&mir_module, &type_result, &graph, code, "", &string_table);
 
     assert!(
         module_image
@@ -271,7 +273,8 @@ fn test_mir_lowering_advanced() {
     );
 
     let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
-    let (module_image, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let (module_image, _) =
+        lower_module(&mir_module, &type_result, &graph, code, "", &string_table);
 
     // Verify functions
     assert!(!module_image.functions.is_empty());
@@ -402,7 +405,7 @@ fn test_async_call_emits_typed_future_instruction() {
             .any(|(instruction, _)| matches!(instruction, Instruction::Drop(_))),
         "Future handles must be released when their scope ends"
     );
-    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, "", &string_table);
     let main = module
         .functions
         .iter()
@@ -462,7 +465,7 @@ fn test_direct_await_calls_local_async_function_without_a_future_boundary() {
     );
 
     let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
-    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, "", &string_table);
     let main = module
         .functions
         .iter()
@@ -522,7 +525,7 @@ fn test_indirect_async_call_emits_typed_future_instruction() {
     );
 
     let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
-    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, "", &string_table);
     let main = module
         .functions
         .iter()
@@ -582,7 +585,7 @@ fn test_typed_literals_do_not_emit_redundant_casts() {
     );
 
     let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
-    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, "", &string_table);
     let main = module
         .functions
         .iter()
@@ -630,7 +633,7 @@ fn typed_numeric_operations_emit_exact_width_immediates() {
     );
 
     let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
-    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, "", &string_table);
     let immediates = module
         .functions
         .iter()
@@ -704,7 +707,7 @@ fn direct_single_argument_calls_use_the_local_source_register() {
     );
 
     let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
-    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, "", &string_table);
     let caller = module
         .functions
         .iter()
@@ -756,7 +759,7 @@ fn test_conditional_without_branch_arguments_uses_direct_targets() {
     );
 
     let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
-    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, "", &string_table);
     let choose = module
         .functions
         .iter()
