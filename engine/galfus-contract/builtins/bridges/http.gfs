@@ -28,18 +28,18 @@ fn(async) __provider_http_response_close(body: u64): bool
 
 export fn(async) HttpBody::next(self): ReadStreamResult<[u8]> {
     if self.closed {
-        return ReadStreamResult<[u8]>::End
+        return ReadStreamResult::End
     }
 
     const bytes = await __provider_http_response_read(self.id, 65536)
     instanceof bytes {
-        [u8] bytes { return ReadStreamResult<[u8]>::Data(bytes) },
+        [u8] bytes { return ReadStreamResult::Data(bytes) },
         null {
             self.closed = true
-            return ReadStreamResult<[u8]>::End
+            return ReadStreamResult::End
         },
     }
-    return ReadStreamResult<[u8]>::End
+    return ReadStreamResult::End
 }
 
 export fn(async) HttpBody::cancel(self): null {

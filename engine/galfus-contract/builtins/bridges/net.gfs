@@ -34,15 +34,15 @@ export fn(async) tcpConnect(host: [u8], port: u16): TcpStream | null {
 
 export fn(async) TcpStream::next(self): ReadStreamResult<[u8]> {
     if self.cancelled {
-        return ReadStreamResult<[u8]>::End
+        return ReadStreamResult::End
     }
 
     const bytes = await __provider_net_tcp_read(self.id, 65536)
     instanceof bytes {
-        [u8] bytes { return ReadStreamResult<[u8]>::Data(bytes) },
-        null { return ReadStreamResult<[u8]>::End },
+        [u8] bytes { return ReadStreamResult::Data(bytes) },
+        null { return ReadStreamResult::End },
     }
-    return ReadStreamResult<[u8]>::End
+    return ReadStreamResult::End
 }
 
 export fn(async) TcpStream::write(self, bytes: [u8]): WriteStreamResult {

@@ -1,4 +1,4 @@
-import { ByteBuffer, CollectResult, fromBytes, ReadStreamResult } from "std/stream"
+import { ByteBuffer, CollectResult, fromBytes, ReadStreamResult, BytesStream } from "std/stream"
 import { println } from "std/io"
 import { equals } from "text"
 
@@ -23,7 +23,7 @@ export fn main(_args: [[u8]]): i32 {
     ReadStreamResult::Data(bytes) {
       if !equals(bytes, "stream") { return 3 }
     },
-    _ { return 4 }
+    _ { println("Failed match! got: "); return 4 }
   }
 
   const end = await source::next()
@@ -43,6 +43,26 @@ export fn main(_args: [[u8]]): i32 {
     CollectResult::LimitExceeded { return 9 },
     CollectResult::Error(_) { return 10 }
   }
+
+  const limited = await ByteBuffer::create()::collect(fromBytes("limit"), 4)
+  var limited_result = false
+  match limited {
+    CollectResult::Data(_) { return 11 },
+    CollectResult::Error(_) { return 11 },
+    CollectResult::LimitExceeded { limited_result = true }
+  }
+  if !limited_result { return 11 }
+
+  const cancelled = fromBytes("cancelled")
+  await cancelled::cancel()
+  const cancelled_result = await cancelled::next()
+  var cancelled_ended = false
+  match cancelled_result {
+    ReadStreamResult::Data(_) { return 12 },
+    ReadStreamResult::Error(_) { return 12 },
+    ReadStreamResult::End { cancelled_ended = true }
+  }
+  if !cancelled_ended { return 12 }
 
   println("ok")
   return 0

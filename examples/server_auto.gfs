@@ -1,11 +1,13 @@
 import { Server, Request, Response, URL, WebSocket, WebSocketConfig, upgradeToWs } from "std/server"
+import { Future } from "std/async"
+import { ByteBuffer, CollectResult } from "std/stream"
 import { log } from "log"
 import { equals } from "text"
 
 export fn main(_args: [[u8]]): i32 {
     const server = new(Server) {
         port: 8080,
-        fetch: fn(req: Request): Response {
+        fetch: fn(async) (req: Request): Response {
             if equals(req.url.pathname, "/api/data") {
                 return new(Response) {
                     headers: [("Content-Type", "application/json")],
@@ -26,15 +28,17 @@ export fn main(_args: [[u8]]): i32 {
 
             if equals(req.url.pathname, "/echo") {
                 if equals(req.method, "POST") {
-                    instanceof req.body {
-                        [u8] body {
+                    const collected = await ByteBuffer::create()::collect(req.body)
+                    match collected {
+                        CollectResult::Data(body) {
                             return new(Response) {
                                 status: 201,
                                 headers: [("Content-Type", "application/octet-stream"), ("X-Server-Test", "echo")],
                                 body: body
                             }
                         },
-                        null { return new(Response) { status: 400, body: "missing body" } }
+                        CollectResult::LimitExceeded { return new(Response) { status: 413, body: "request body too large" } },
+                        CollectResult::Error(_) { return new(Response) { status: 400, body: "invalid request body" } }
                     }
                 }
                 return new(Response) { status: 405, body: "method not allowed" }

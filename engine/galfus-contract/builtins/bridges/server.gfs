@@ -1,4 +1,6 @@
 import { createThread } from "std/thread"
+import { Future } from "std/async"
+import { ReadStream, ReadStreamResult } from "std/stream"
 
 export struct URL {
     href: [u8],
@@ -17,12 +19,25 @@ export type Header = ([u8], [u8])
 
 export fn header(name: [u8], value: [u8]): ([u8], [u8]) => (name, value)
 
+export struct RequestBody satisfies ReadStream<[u8]> {
+    id: u64,
+    closed: bool
+}
+
 export struct Request {
     id: u64,
     url: URL,
     method: [u8],
     headers: [Header],
-    body: [u8] | null
+    body: RequestBody
+}
+
+struct ProviderRequest {
+    id: u64,
+    url: URL,
+    method: [u8],
+    headers: [Header],
+    body: u64
 }
 
 export struct Response {
@@ -71,11 +86,37 @@ export struct WsMessage {
 }
 
 fn(async) __provider_server_bind(port: i32): u64
-fn(async) __provider_server_accept(server_id: u64): Request
+fn(async) __provider_server_accept(server_id: u64): ProviderRequest
 fn(async) __provider_server_respond(req_id: u64, status: i32, headers: [([u8], [u8])], body: [u8] | null, is_upgrade: bool): bool
+fn(async) __provider_server_request_read(request_id: u64, max_bytes: u32): [u8] | null
+fn(async) __provider_server_request_close(request_id: u64): bool
 fn(async) __provider_server_ws_receive(ws_id: u64): WsMessage | null
 fn(async) __provider_server_ws_send(ws_id: u64, data: [u8]): bool
 fn(async) __provider_server_ws_close(ws_id: u64): bool
+
+export fn(async) RequestBody::next(self): ReadStreamResult<[u8]> {
+    if self.closed {
+        return ReadStreamResult::End
+    }
+
+    const bytes = await __provider_server_request_read(self.id, 65536)
+    instanceof bytes {
+        [u8] chunk { return ReadStreamResult::Data(chunk) },
+        null {
+            self.closed = true
+            return ReadStreamResult::End
+        }
+    }
+    return ReadStreamResult::End
+}
+
+export fn(async) RequestBody::cancel(self): null {
+    if !self.closed {
+        self.closed = true
+        await __provider_server_request_close(self.id)
+    }
+    return null
+}
 
 export struct WebSocketConfig {
     onOpen: fn(WebSocket, i32): null,
@@ -100,11 +141,11 @@ export fn createWebSocketConfig(
 
 export struct Server {
     port: i32,
-    fetch: fn(Request): Response,
+    fetch: fn(Request): Future<Response>,
     websocket: WebSocketConfig
 }
 
-export fn createServer(port: i32, fetch: fn(Request): Response, websocket: WebSocketConfig): Server {
+export fn createServer(port: i32, fetch: fn(Request): Future<Response>, websocket: WebSocketConfig): Server {
     return new(Server) {
         port: port,
         fetch: fetch,
@@ -115,12 +156,19 @@ export fn createServer(port: i32, fetch: fn(Request): Response, websocket: WebSo
 export fn Server::start(server: Server): null {
     const server_id = await __provider_server_bind(server.port)
     loop {
-        const req = await __provider_server_accept(server_id)
+        const raw_req = await __provider_server_accept(server_id)
+        const req = new(Request) {
+            id: raw_req.id,
+            url: raw_req.url,
+            method: raw_req.method,
+            headers: raw_req.headers,
+            body: new(RequestBody) { id: raw_req.body, closed: false }
+        }
         const req_id = req.id
         
         const fetchCb = (copy server).fetch
         const fetch_req = copy req
-        const res = fetchCb(fetch_req)
+        const res = await fetchCb(fetch_req)
         
         const res_status = res.status
         const is_upgrade = res_status == 101

@@ -4,7 +4,7 @@ use galfus_contract::{
     CancellationOutcome, ExecutionFailure, ExecutionFailureKind, HostProvider, MessageInjector,
     ProviderDescriptor, SurfaceValue, TaskAffinity,
 };
-use http_body_util::Full;
+use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper::service::service_fn;
 use hyper::{Request, Response};
@@ -41,6 +41,16 @@ fn surface_u64(value: Option<&SurfaceValue>, name: &str) -> Result<u64, Executio
         _ => Err(ExecutionFailure::new(
             ExecutionFailureKind::ProviderFailure,
             format!("expected surface u64 for {name}"),
+        )),
+    }
+}
+
+fn surface_u32(value: Option<&SurfaceValue>, name: &str) -> Result<u32, ExecutionFailure> {
+    match value {
+        Some(SurfaceValue::U32(value)) => Ok(*value),
+        _ => Err(ExecutionFailure::new(
+            ExecutionFailureKind::ProviderFailure,
+            format!("expected surface u32 for {name}"),
         )),
     }
 }
@@ -120,9 +130,14 @@ struct PendingRequest {
     url: Url,
     method: String,
     headers: Vec<(String, String)>,
-    body: Option<Vec<u8>>,
+    body: Option<IncomingRequestBody>,
     upgrade: Option<hyper::upgrade::OnUpgrade>,
     websocket_key: Option<String>,
+}
+
+struct IncomingRequestBody {
+    body: hyper::body::Incoming,
+    pending: Vec<u8>,
 }
 
 enum ServerCommand {
@@ -142,6 +157,15 @@ enum ServerCommand {
         is_upgrade: bool,
         completion: Completion,
     },
+    RequestRead {
+        request_id: u64,
+        max_bytes: u32,
+        completion: Completion,
+    },
+    RequestClose {
+        request_id: u64,
+        completion: Completion,
+    },
     WsReceive {
         ws_id: u64,
         completion: Completion,
@@ -158,6 +182,12 @@ enum ServerCommand {
     InternalRequestReceived {
         req: PendingRequest,
         response_tx: oneshot::Sender<(Response<Full<Bytes>>, bool)>,
+    },
+    InternalRequestBodyRead {
+        request_id: u64,
+        body: IncomingRequestBody,
+        result: Result<Option<Vec<u8>>, String>,
+        completion: Completion,
     },
     InternalWsUpgraded {
         ws_id: u64,
@@ -198,6 +228,7 @@ impl NativeServerProvider {
 
         let mut accept_waiters: VecDeque<AcceptWaiter> = VecDeque::new();
         let mut pending_requests: VecDeque<PendingRequest> = VecDeque::new();
+        let mut request_bodies: HashMap<u64, IncomingRequestBody> = HashMap::new();
 
         let mut response_channels: HashMap<
             u64,
@@ -242,7 +273,6 @@ impl NativeServerProvider {
                                                 move |mut req: Request<hyper::body::Incoming>| {
                                                     let itx = itx.clone();
                                                     async move {
-                                                        use http_body_util::BodyExt;
                                                         let websocket_key = req
                                                             .headers()
                                                             .get(hyper::header::SEC_WEBSOCKET_KEY)
@@ -274,11 +304,7 @@ impl NativeServerProvider {
                                                         let method_str =
                                                             req.method().as_str().to_string();
 
-                                                        let body_bytes = req
-                                                            .collect()
-                                                            .await
-                                                            .map(|b| b.to_bytes().to_vec())
-                                                            .ok();
+                                                        let (_, body) = req.into_parts();
 
                                                         let (res_tx, res_rx) = oneshot::channel();
 
@@ -289,7 +315,10 @@ impl NativeServerProvider {
                                                             url: parsed_url,
                                                             method: method_str,
                                                             headers,
-                                                            body: body_bytes,
+                                                            body: Some(IncomingRequestBody {
+                                                                body,
+                                                                pending: Vec::new(),
+                                                            }),
                                                             upgrade,
                                                             websocket_key,
                                                         };
@@ -345,6 +374,12 @@ impl NativeServerProvider {
                     next_request_id += 1;
                     let upgrade = req.upgrade.take();
                     let websocket_key = req.websocket_key.take();
+
+                    let body = req
+                        .body
+                        .take()
+                        .expect("server request body must be present");
+                    request_bodies.insert(req.request_id, body);
 
                     response_channels.insert(req.request_id, (response_tx, upgrade, websocket_key));
 
@@ -421,6 +456,50 @@ impl NativeServerProvider {
                         completion.inject_bool(false);
                     }
                 }
+                ServerCommand::RequestRead {
+                    request_id,
+                    max_bytes,
+                    completion,
+                } => {
+                    let Some(body) = request_bodies.remove(&request_id) else {
+                        completion.inject_surface(Ok(SurfaceValue::Null));
+                        continue;
+                    };
+                    let itx = internal_tx.clone();
+                    tokio::spawn(async move {
+                        let (body, result) =
+                            Self::read_request_body(body, max_bytes as usize).await;
+                        let _ = itx.send(ServerCommand::InternalRequestBodyRead {
+                            request_id,
+                            body,
+                            result,
+                            completion,
+                        });
+                    });
+                }
+                ServerCommand::RequestClose {
+                    request_id,
+                    completion,
+                } => {
+                    request_bodies.remove(&request_id);
+                    completion.inject_bool(true);
+                }
+                ServerCommand::InternalRequestBodyRead {
+                    request_id,
+                    body,
+                    result,
+                    completion,
+                } => match result {
+                    Ok(Some(chunk)) => {
+                        request_bodies.insert(request_id, body);
+                        completion.inject_surface(Ok(SurfaceValue::Bytes(chunk)));
+                    }
+                    Ok(None) => completion.inject_surface(Ok(SurfaceValue::Null)),
+                    Err(error) => completion.inject_surface(Err(ExecutionFailure::new(
+                        ExecutionFailureKind::ProviderFailure,
+                        error,
+                    ))),
+                },
                 ServerCommand::InternalWsUpgraded { ws_id, stream } => {
                     if let Some(waiter) = ws_receive_waiters.remove(&ws_id) {
                         Self::receive_ws_message(ws_id, stream, waiter, internal_tx.clone());
@@ -509,13 +588,40 @@ impl NativeServerProvider {
                     SurfaceValue::Bytes(req.method.into_bytes()),
                 ),
                 ("headers".to_string(), SurfaceValue::List(headers)),
-                (
-                    "body".to_string(),
-                    req.body
-                        .map(SurfaceValue::Bytes)
-                        .unwrap_or(SurfaceValue::Null),
-                ),
+                ("body".to_string(), SurfaceValue::U64(req.request_id)),
             ])));
+    }
+
+    async fn read_request_body(
+        mut body: IncomingRequestBody,
+        max_bytes: usize,
+    ) -> (IncomingRequestBody, Result<Option<Vec<u8>>, String>) {
+        let max_bytes = max_bytes.max(1);
+        if !body.pending.is_empty() {
+            let split_at = body.pending.len().min(max_bytes);
+            let remainder = body.pending.split_off(split_at);
+            let chunk = std::mem::replace(&mut body.pending, remainder);
+            return (body, Ok(Some(chunk)));
+        }
+
+        loop {
+            match body.body.frame().await {
+                Some(Ok(frame)) => match frame.into_data() {
+                    Ok(data) if data.is_empty() => continue,
+                    Ok(data) => {
+                        let split_at = data.len().min(max_bytes);
+                        let chunk = data[..split_at].to_vec();
+                        if split_at < data.len() {
+                            body.pending.extend_from_slice(&data[split_at..]);
+                        }
+                        return (body, Ok(Some(chunk)));
+                    }
+                    Err(_) => continue,
+                },
+                Some(Err(error)) => return (body, Err(error.to_string())),
+                None => return (body, Ok(None)),
+            }
+        }
     }
 
     fn receive_ws_message(
@@ -650,6 +756,15 @@ impl HostProvider for NativeServerProvider {
                         completion,
                     })
                 }
+                "server_request_read" => Ok(ServerCommand::RequestRead {
+                    request_id: surface_u64(args.first(), "request ID")?,
+                    max_bytes: surface_u32(args.get(1), "maximum read size")?,
+                    completion,
+                }),
+                "server_request_close" => Ok(ServerCommand::RequestClose {
+                    request_id: surface_u64(args.first(), "request ID")?,
+                    completion,
+                }),
                 "server_ws_receive" => Ok(ServerCommand::WsReceive {
                     ws_id: surface_u64(args.first(), "WebSocket ID")?,
                     completion,
