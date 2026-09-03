@@ -5,7 +5,7 @@ use super::pending::PendingContinuation;
 use crate::event::FutureResult;
 use crate::registry::ThreadId;
 use galfus_bytecode::instruction::{FuncIdx, TypeIdx};
-use galfus_contract::{BoundaryValue, ExecutionFailure, SurfaceValue};
+use galfus_contract::{ExecutionFailure, SurfaceValue};
 use galfus_core::ModuleId;
 use std::collections::HashMap;
 use std::sync::{
@@ -39,7 +39,7 @@ pub enum Activation {
     Adapter {
         proxy_module: String,
         symbol: String,
-        args: Vec<BoundaryValue>,
+        args: Vec<galfus_contract::SurfaceValue>,
         request_id: Option<galfus_core::RequestId>,
     },
 }

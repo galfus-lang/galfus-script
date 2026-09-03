@@ -1,12 +1,11 @@
 use super::*;
 
-use crate::event::{FutureResult, FutureValue};
-use crate::orchestrator::adapter_handles::stamp_adapter_handles;
+use crate::event::FutureResult;
 use crate::orchestrator::pending::{
     LateCompletion, MAX_LATE_COMPLETIONS, PendingContinuation, PendingKey, PendingOperation,
 };
 use crate::task::{encode_future_value_into_thread_heap, with_execution_stack};
-use galfus_contract::{BoundaryValue, ExecutionFailure, ExecutionFailureKind};
+use galfus_contract::{ExecutionFailure, ExecutionFailureKind};
 
 impl Orchestrator {
     pub(super) fn record_late_completion(
@@ -30,7 +29,7 @@ impl Orchestrator {
         &mut self,
         thread_id: crate::registry::ThreadId,
         key: PendingKey,
-        result: Result<BoundaryValue, ExecutionFailure>,
+        result: crate::event::FutureResult,
     ) {
         let Some(pending) = self.pending_continuations.remove(&key) else {
             self.completion_metrics.unknown_request += 1;
@@ -43,7 +42,7 @@ impl Orchestrator {
             self.record_late_completion(thread_id, key);
             return;
         }
-        self.resume_pending(thread_id, pending, result.map(FutureValue::Boundary), key);
+        self.resume_pending(thread_id, pending, result, key);
         self.completion_metrics.accepted += 1;
         if let PendingKey::Request(request_id) = key {
             self.free_request_id(request_id);
@@ -169,16 +168,12 @@ impl Orchestrator {
             .adapter_proxy_module(thread_id, future_id);
         let request_id = self.future_registry.request_id(thread_id, future_id);
 
-        let binding_id = adapter_proxy_module.as_deref().and_then(|proxy_module| {
-            self.adapter_bindings
-                .as_ref()
-                .and_then(|bindings| bindings.lock().ok()?.binding_id(proxy_module))
-        });
         if result.as_mut().is_ok_and(|value| match value {
-            FutureValue::Boundary(value) => {
-                !stamp_adapter_handles(value, adapter_proxy_module.as_deref(), binding_id)
-            }
-            FutureValue::Surface { .. } | FutureValue::Aggregate(_) => false,
+            crate::event::FutureValue::Surface {
+                value: surface_value,
+                ..
+            } => !crate::orchestrator::adapter_handles::stamp_adapter_handles(surface_value),
+            _ => false,
         }) {
             result = Err(ExecutionFailure::new(
                 ExecutionFailureKind::BoundaryCodecFailure,
@@ -189,7 +184,7 @@ impl Orchestrator {
         let is_direct_await = self.future_registry.is_direct_await(thread_id, future_id);
 
         if !is_direct_await
-            && let (Some((payload_module_id, payload_type)), Ok(FutureValue::Boundary(value))) = (
+            && let (Some((payload_module_id, payload_type)), Ok(value)) = (
                 self.future_registry.payload_schema(thread_id, future_id),
                 &result,
             )
@@ -206,7 +201,7 @@ impl Orchestrator {
                 self.quota.lock().unwrap().limits().clone(),
             ));
             let mut payload_heap = galfus_vm::thread::PrivateHeap::new(thread_quota);
-            if let Err(error) = crate::task::encode_into_thread_heap(
+            if let Err(error) = crate::task::encode_future_value_into_thread_heap(
                 &mut payload_heap,
                 value.clone(),
                 payload_type,
@@ -241,9 +236,14 @@ impl Orchestrator {
                 return;
             }
         };
-        if let (Some(proxy_module), Ok(FutureValue::Boundary(value))) =
-            (adapter_proxy_module, &result)
-            && let Err(error) = self.register_adapter_handles(&proxy_module, value)
+        if let (
+            Some(proxy_module),
+            Ok(crate::event::FutureValue::Surface {
+                value: surface_value,
+                ..
+            }),
+        ) = (adapter_proxy_module, &result)
+            && let Err(error) = self.register_adapter_handles(&proxy_module, surface_value)
         {
             self.failure = Some(error.with_thread_id(thread_id).with_future_id(future_id));
             self.kernel.cancel(thread_id);

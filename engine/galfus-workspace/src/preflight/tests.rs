@@ -3,8 +3,8 @@ use galfus_bytecode::{BytecodeGraph, BytecodeModule, BytecodeNode, ConstantPool,
 use galfus_contract::{
     AdapterArtifact, AdapterConfigValue, AdapterLoadContext, AdapterLoadError,
     AdapterModuleBinding, AdapterModuleDescriptor, AdapterModuleLoader, AdapterModuleRequirement,
-    AdapterTarget, BoundaryValue, CancellationOutcome, ContentHash, MessageInjector,
-    SelectedAdapterTarget, VerifiedAdapterArtifact,
+    AdapterTarget, CancellationOutcome, ContentHash, MessageInjector, SelectedAdapterTarget,
+    SurfaceValue, VerifiedAdapterArtifact,
 };
 use galfus_contract::{CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget};
 use galfus_core::Version;
@@ -64,7 +64,7 @@ impl AdapterModuleBinding for MockBoundModule {
         _symbol: &str,
         _thread_id: galfus_core::ThreadId,
         _request_lease: galfus_core::RequestLease,
-        _args: &[BoundaryValue],
+        _args: &[SurfaceValue],
         _injector: std::sync::Arc<dyn MessageInjector>,
     ) {
     }

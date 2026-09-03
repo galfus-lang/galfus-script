@@ -2,14 +2,23 @@
 mod tests;
 
 use crate::registry::ThreadId;
-use galfus_contract::{BoundaryValue, ExecutionFailure, SurfaceContract, SurfaceValue};
+use galfus_contract::{ExecutionFailure, SurfaceContract, SurfaceValue};
 use galfus_vm::thread::VmThreadState;
 use galfus_vm::{Continuation, VmEffect};
 
 /// Heap-independent completion data retained until the owning continuation resumes.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FutureValue {
-    Boundary(BoundaryValue),
+    I32(i32),
+    I64(i64),
+    F64(f64),
+    Bool(bool),
+    Bytes(Vec<u8>),
+    Null,
+    Function {
+        module_id: u32,
+        func_idx: u32,
+    },
     Surface {
         contract: SurfaceContract,
         value: SurfaceValue,
@@ -18,12 +27,6 @@ pub enum FutureValue {
 }
 
 pub type FutureResult = Result<FutureValue, ExecutionFailure>;
-
-impl From<BoundaryValue> for FutureValue {
-    fn from(value: BoundaryValue) -> Self {
-        Self::Boundary(value)
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EventSequence(pub u64);
@@ -52,7 +55,7 @@ pub enum RuntimeEvent {
     Exited {
         thread_id: ThreadId,
         thread: VmThreadState,
-        result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
+        result: Result<i32, galfus_contract::ExecutionFailure>,
     },
     /// A module initializer completed and the startup sequence can advance.
     Initialized {
@@ -74,7 +77,8 @@ pub enum RuntimeEvent {
     EffectCompleted {
         thread_id: ThreadId,
         request_lease: galfus_core::RequestLease,
-        result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
+        contract: galfus_contract::SurfaceContract,
+        result: Result<galfus_contract::SurfaceValue, galfus_contract::ExecutionFailure>,
     },
     /// Completes a previously suspended future effect.
     FutureCompleted {
@@ -88,7 +92,7 @@ pub enum RuntimeEvent {
         owner_thread_id: ThreadId,
         future_lease: galfus_core::FutureLease,
         thread: VmThreadState,
-        result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
+        result: Result<i32, galfus_contract::ExecutionFailure>,
     },
     /// Advances the virtual clock for blocked threads.
     Tick {

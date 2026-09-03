@@ -1,12 +1,12 @@
 use super::*;
-use crate::event::{EventSequence, FutureValue};
+use crate::event::EventSequence;
 use crate::orchestrator::adapter::ProviderDispatchTask;
 use crate::orchestrator::future_registry::ProviderArguments;
 use crate::orchestrator::pending::PendingOperation;
 use galfus_bytecode::instruction::{Reg, TypeIdx};
 use galfus_contract::{
-    BoundaryValue, ExecutionFailure, ExecutionFailureKind, HostProvider, KernelTask,
-    MessageInjector, Providers, RunnableTask, SurfaceValue, TaskAffinity, ThreadResult,
+    ExecutionFailure, ExecutionFailureKind, HostProvider, KernelTask, MessageInjector, Providers,
+    RunnableTask, SurfaceValue, TaskAffinity, ThreadResult,
 };
 use galfus_core::{CoordinatorId, FutureId, ModuleId, ThreadId};
 use std::sync::{
@@ -41,7 +41,7 @@ impl MessageInjector for NoopInjector {
         &self,
         _thread_id: galfus_core::ThreadId,
         _request_lease: galfus_core::RequestLease,
-        _result: Result<BoundaryValue, galfus_contract::ExecutionFailure>,
+        _result: Result<SurfaceValue, galfus_contract::ExecutionFailure>,
     ) -> Result<(), galfus_contract::MessageInjectionError> {
         Ok(())
     }
@@ -54,7 +54,7 @@ impl MessageInjector for FailureInjector {
         &self,
         _thread_id: galfus_core::ThreadId,
         _request_lease: galfus_core::RequestLease,
-        result: Result<BoundaryValue, ExecutionFailure>,
+        result: Result<SurfaceValue, ExecutionFailure>,
     ) -> Result<(), galfus_contract::MessageInjectionError> {
         if let Err(failure) = result {
             self.0.lock().unwrap().push(failure);
@@ -181,22 +181,30 @@ pub(super) fn race_winner_uses_event_sequence_then_member_index() {
     );
 
     orchestrator.active_event_sequence = Some(EventSequence(3));
-    orchestrator.complete_aggregate_member(coordinator_id, 2, Ok(BoundaryValue::I32(3)));
+    orchestrator.complete_aggregate_member(
+        coordinator_id,
+        2,
+        Ok(crate::event::FutureValue::I32(3)),
+    );
     orchestrator.active_event_sequence = Some(EventSequence(1));
-    orchestrator.complete_aggregate_member(coordinator_id, 1, Ok(BoundaryValue::I32(2)));
+    orchestrator.complete_aggregate_member(
+        coordinator_id,
+        1,
+        Ok(crate::event::FutureValue::I32(2)),
+    );
     orchestrator.active_event_sequence = Some(EventSequence(1));
-    orchestrator.complete_aggregate_member(coordinator_id, 0, Ok(BoundaryValue::I32(1)));
+    orchestrator.complete_aggregate_member(
+        coordinator_id,
+        0,
+        Ok(crate::event::FutureValue::I32(1)),
+    );
 
     assert_eq!(
         orchestrator.aggregate_coordinators[&coordinator_id]
             .winner
             .as_ref()
             .map(|(sequence, index, result)| (*sequence, *index, result.clone())),
-        Some((
-            EventSequence(1),
-            0,
-            Ok(FutureValue::Boundary(BoundaryValue::I32(1))),
-        ))
+        Some((EventSequence(1), 0, Ok(crate::event::FutureValue::I32(1)),))
     );
 }
 
@@ -227,16 +235,28 @@ pub(super) fn all_results_preserve_member_order_when_completions_arrive_out_of_o
         },
     );
 
-    orchestrator.complete_aggregate_member(coordinator_id, 2, Ok(BoundaryValue::I32(3)));
-    orchestrator.complete_aggregate_member(coordinator_id, 0, Ok(BoundaryValue::I32(1)));
-    orchestrator.complete_aggregate_member(coordinator_id, 1, Ok(BoundaryValue::I32(2)));
+    orchestrator.complete_aggregate_member(
+        coordinator_id,
+        2,
+        Ok(crate::event::FutureValue::I32(3)),
+    );
+    orchestrator.complete_aggregate_member(
+        coordinator_id,
+        0,
+        Ok(crate::event::FutureValue::I32(1)),
+    );
+    orchestrator.complete_aggregate_member(
+        coordinator_id,
+        1,
+        Ok(crate::event::FutureValue::I32(2)),
+    );
 
     assert_eq!(
         orchestrator.aggregate_coordinators[&coordinator_id].results,
         Some(vec![
-            Some(Ok(FutureValue::Boundary(BoundaryValue::I32(1)))),
-            Some(Ok(FutureValue::Boundary(BoundaryValue::I32(2)))),
-            Some(Ok(FutureValue::Boundary(BoundaryValue::I32(3)))),
+            Some(Ok(crate::event::FutureValue::I32(1))),
+            Some(Ok(crate::event::FutureValue::I32(2))),
+            Some(Ok(crate::event::FutureValue::I32(3))),
         ])
     );
 }
@@ -292,7 +312,7 @@ pub(super) fn owner_exit_removes_all_of_its_future_records() {
     orchestrator.submit_event(RuntimeEvent::Exited {
         thread_id,
         thread,
-        result: Ok(BoundaryValue::Null),
+        result: Ok(0),
     });
 
     orchestrator.process_events();
@@ -338,6 +358,12 @@ pub(super) fn late_provider_completions_after_thread_cancellation_are_ignored() 
         orchestrator.submit_event(RuntimeEvent::EffectCompleted {
             thread_id,
             request_lease: galfus_core::RequestLease::new(galfus_core::RequestId::new(1), 0),
+            contract: galfus_contract::SurfaceContract::new(
+                "test::late",
+                1,
+                galfus_contract::SurfaceDirection::FromProvider,
+                galfus_contract::SurfaceSchema::Null,
+            ),
             result: Err(galfus_contract::ExecutionFailure::new(
                 galfus_contract::ExecutionFailureKind::ProviderFailure,
                 "late provider completion",
@@ -559,7 +585,13 @@ pub(super) fn generations_prevent_reuse_collisions() {
     orchestrator.submit_event(RuntimeEvent::EffectCompleted {
         thread_id,
         request_lease: lease1,
-        result: Ok(galfus_contract::BoundaryValue::Null),
+        contract: galfus_contract::SurfaceContract::new(
+            "test::stale",
+            1,
+            galfus_contract::SurfaceDirection::FromProvider,
+            galfus_contract::SurfaceSchema::Null,
+        ),
+        result: Ok(galfus_contract::SurfaceValue::Null),
     });
 
     orchestrator.process_events();

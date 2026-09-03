@@ -88,10 +88,6 @@ impl ExecutionHost {
             eprintln!("FUTURE_METRICS={:?}", report.futures);
         }
 
-        if let galfus_contract::BoundaryValue::I32(code) = result {
-            Ok(code)
-        } else {
-            Ok(0)
-        }
+        Ok(result)
     }
 }

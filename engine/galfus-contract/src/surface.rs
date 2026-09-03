@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests;
 
-use crate::{BoundaryType, BoundaryValue};
 use galfus_core::{HandleId, OpaqueTypeId};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -14,7 +13,7 @@ pub enum SurfaceDirection {
 }
 
 /// A closed schema used to exchange structured data with a provider.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub enum SurfaceSchema {
     Null,
     Bool,
@@ -42,13 +41,13 @@ pub enum SurfaceSchema {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct SurfaceField {
     pub name: String,
     pub schema: SurfaceSchema,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct SurfaceVariant {
     pub name: String,
     pub payload: Option<SurfaceSchema>,
@@ -87,16 +86,6 @@ impl SurfaceContract {
             == self
                 .schema
                 .fingerprint(&self.name, self.version, self.direction)
-    }
-
-    pub fn encode_legacy_result(
-        &self,
-        value: SurfaceValue,
-    ) -> Result<BoundaryValue, SurfaceCodecError> {
-        if self.direction != SurfaceDirection::FromProvider {
-            return Err(SurfaceCodecError::InvalidContract);
-        }
-        self.schema.encode_legacy_value(value)
     }
 }
 
@@ -154,112 +143,6 @@ impl SurfaceContractRegistry {
 }
 
 impl SurfaceSchema {
-    pub fn encode_legacy_value(
-        &self,
-        value: SurfaceValue,
-    ) -> Result<BoundaryValue, SurfaceCodecError> {
-        self.validate_value(&value)?;
-        match (self, value) {
-            (Self::Null, SurfaceValue::Null) => Ok(BoundaryValue::Null),
-            (Self::Bool, SurfaceValue::Bool(value)) => Ok(BoundaryValue::Bool(value)),
-            (Self::U16, SurfaceValue::U16(value)) => Ok(BoundaryValue::U16(value)),
-            (Self::I32, SurfaceValue::I32(value)) => Ok(BoundaryValue::I32(value)),
-            (Self::I64, SurfaceValue::I64(value)) => Ok(BoundaryValue::I64(value)),
-            (Self::U32, SurfaceValue::U32(value)) => Ok(BoundaryValue::U32(value)),
-            (Self::U64, SurfaceValue::U64(value)) => Ok(BoundaryValue::U64(value)),
-            (Self::F32, SurfaceValue::F32(value)) => Ok(BoundaryValue::F32(value)),
-            (Self::F64, SurfaceValue::F64(value)) => Ok(BoundaryValue::F64(value)),
-            (Self::Bytes, SurfaceValue::Bytes(value)) => Ok(BoundaryValue::Bytes(value)),
-            (Self::Optional(_), SurfaceValue::Null) => Ok(BoundaryValue::Null),
-            (Self::Optional(inner), value) => inner.encode_legacy_value(value),
-            (Self::List(inner), SurfaceValue::List(values)) => Ok(BoundaryValue::Array {
-                element_type: inner.boundary_type()?,
-                values: values
-                    .into_iter()
-                    .map(|value| inner.encode_legacy_value(value))
-                    .collect::<Result<_, _>>()?,
-            }),
-            (Self::Tuple(schemas), SurfaceValue::Tuple(values)) => Ok(BoundaryValue::Tuple(
-                schemas
-                    .iter()
-                    .cloned()
-                    .zip(values)
-                    .map(|(schema, value)| schema.encode_legacy_value(value))
-                    .collect::<Result<_, _>>()?,
-            )),
-            (Self::Struct { fields, .. }, SurfaceValue::Struct(values)) => {
-                Ok(BoundaryValue::Tuple(
-                    fields
-                        .iter()
-                        .map(|field| {
-                            let value = values
-                                .iter()
-                                .find_map(|(name, value)| (name == &field.name).then_some(value))
-                                .cloned()
-                                .ok_or_else(|| {
-                                    SurfaceCodecError::MissingField(field.name.clone())
-                                })?;
-                            field.schema.encode_legacy_value(value)
-                        })
-                        .collect::<Result<_, _>>()?,
-                ))
-            }
-            (Self::Choice { variants, .. }, SurfaceValue::Choice { variant, payload }) => {
-                let (index, expected) = variants
-                    .iter()
-                    .enumerate()
-                    .find(|(_, candidate)| candidate.name == variant)
-                    .ok_or(SurfaceCodecError::InvalidTag(variant))?;
-                let payload = match (expected.payload.as_ref(), payload) {
-                    (Some(schema), Some(value)) => {
-                        Some(Box::new(schema.encode_legacy_value(*value)?))
-                    }
-                    (None, None) => None,
-                    _ => return Err(SurfaceCodecError::InvalidContract),
-                };
-                Ok(BoundaryValue::Choice {
-                    variant: index as u32,
-                    payload,
-                })
-            }
-            (Self::Handle { .. }, SurfaceValue::Handle(handle)) => Ok(BoundaryValue::Handle {
-                type_id: handle.type_id,
-                binding_id: None,
-                id: handle.id,
-            }),
-            _ => Err(SurfaceCodecError::InvalidContract),
-        }
-    }
-
-    fn boundary_type(&self) -> Result<BoundaryType, SurfaceCodecError> {
-        match self {
-            Self::Null => Ok(BoundaryType::Null),
-            Self::Bool => Ok(BoundaryType::Bool),
-            Self::U16 => Ok(BoundaryType::U16),
-            Self::I32 => Ok(BoundaryType::I32),
-            Self::I64 => Ok(BoundaryType::I64),
-            Self::U32 => Ok(BoundaryType::U32),
-            Self::U64 => Ok(BoundaryType::U64),
-            Self::F32 => Ok(BoundaryType::F32),
-            Self::F64 => Ok(BoundaryType::F64),
-            Self::Bytes => Ok(BoundaryType::Array(Box::new(BoundaryType::U8))),
-            Self::Optional(inner) => Ok(BoundaryType::Nullable(Box::new(inner.boundary_type()?))),
-            Self::List(inner) => Ok(BoundaryType::Array(Box::new(inner.boundary_type()?))),
-            Self::Tuple(items) => items
-                .iter()
-                .map(Self::boundary_type)
-                .collect::<Result<Vec<_>, _>>()
-                .map(BoundaryType::Tuple),
-            Self::Struct { fields, .. } => Ok(BoundaryType::Tuple(
-                fields
-                    .iter()
-                    .map(|field| field.schema.boundary_type())
-                    .collect::<Result<_, _>>()?,
-            )),
-            Self::Choice { .. } | Self::Handle { .. } => Err(SurfaceCodecError::InvalidContract),
-        }
-    }
-
     pub fn validate_value(&self, value: &SurfaceValue) -> Result<(), SurfaceCodecError> {
         match (self, value) {
             (Self::Null, SurfaceValue::Null)

@@ -26,7 +26,7 @@ impl AdapterModuleBinding for DummyAdapter {
         _symbol: &str,
         _thread_id: galfus_core::ThreadId,
         _request_lease: galfus_core::RequestLease,
-        _args: &[BoundaryValue],
+        _args: &[SurfaceValue],
         _injector: Arc<dyn MessageInjector>,
     ) {
     }
@@ -51,7 +51,7 @@ impl AdapterModuleBinding for RetriableReleaseAdapter {
         _symbol: &str,
         _thread_id: galfus_core::ThreadId,
         _request_lease: galfus_core::RequestLease,
-        _args: &[BoundaryValue],
+        _args: &[SurfaceValue],
         _injector: Arc<dyn MessageInjector>,
     ) {
     }
@@ -83,7 +83,7 @@ impl AdapterModuleBinding for RecordingReleaseAdapter {
         _symbol: &str,
         _thread_id: galfus_core::ThreadId,
         _request_lease: galfus_core::RequestLease,
-        _args: &[BoundaryValue],
+        _args: &[SurfaceValue],
         _injector: Arc<dyn MessageInjector>,
     ) {
     }
@@ -540,7 +540,7 @@ impl AdapterModuleBinding for CancellationRecordingAdapter {
         _symbol: &str,
         _thread_id: galfus_core::ThreadId,
         _request_lease: galfus_core::RequestLease,
-        _args: &[BoundaryValue],
+        _args: &[SurfaceValue],
         _injector: std::sync::Arc<dyn MessageInjector>,
     ) {
     }
@@ -588,7 +588,7 @@ struct MainThreadOnlyTask(Rc<()>);
 impl RunnableTask for MainThreadOnlyTask {
     fn run(self: Box<Self>, _budget: usize) -> ThreadResult {
         assert_eq!(Rc::strong_count(&self.0), 1);
-        ThreadResult::Completed(Ok(BoundaryValue::I32(0)))
+        ThreadResult::Completed(Ok(0))
     }
 }
 
@@ -599,10 +599,7 @@ fn main_kernel_tasks_accept_non_send_state() {
     let KernelTask::Main(task) = task else {
         panic!("main task must preserve its affinity");
     };
-    assert!(matches!(
-        task.run(1),
-        ThreadResult::Completed(Ok(BoundaryValue::I32(0)))
-    ));
+    assert!(matches!(task.run(1), ThreadResult::Completed(Ok(0))));
 }
 
 fn assert_builtin_checks(name: &str, source: &str) {

@@ -1,5 +1,5 @@
 use galfus_contract::{
-    BoundaryValue, ExecutionFailure, ExecutionFailureKind, MessageInjector, RunnableTask,
+    ExecutionFailure, ExecutionFailureKind, MessageInjector, RunnableTask, SurfaceValue,
     ThreadResult,
 };
 #[cfg(test)]
@@ -46,7 +46,7 @@ pub(crate) struct AdapterDispatchTask {
     pub(crate) request_lease: galfus_core::RequestLease,
     pub(crate) module: String,
     pub(crate) symbol: String,
-    pub(crate) args: Vec<BoundaryValue>,
+    pub(crate) args: Vec<SurfaceValue>,
     pub(crate) injector: Arc<dyn MessageInjector>,
     pub(crate) active: Arc<AtomicBool>,
 }

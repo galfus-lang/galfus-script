@@ -84,9 +84,7 @@ impl Orchestrator {
             return match result {
                 Some(Ok(value)) => galfus_contract::ThreadResult::Completed(Ok(value)),
                 Some(Err(error)) => galfus_contract::ThreadResult::Completed(Err(error)),
-                None => galfus_contract::ThreadResult::Completed(Ok(
-                    galfus_contract::BoundaryValue::I32(0),
-                )),
+                None => galfus_contract::ThreadResult::Completed(Ok(0)),
             };
         }
 

@@ -22,77 +22,6 @@ pub use surface::*;
 pub use thread::*;
 pub use version::*;
 
-/// A typed value that crosses the execution boundary safely.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
-pub enum BoundaryType {
-    Null,
-    Bool,
-    I8,
-    I16,
-    I32,
-    I64,
-    U8,
-    U16,
-    U32,
-    U64,
-    F32,
-    F64,
-    Bytes,
-    Function,
-    Array(Box<BoundaryType>),
-    Nullable(Box<BoundaryType>),
-    Tuple(Vec<BoundaryType>),
-    Choice {
-        variant: u32,
-        payload: Option<Box<BoundaryType>>,
-    },
-    Handle {
-        type_id: OpaqueTypeId,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum BoundaryValue {
-    Null,
-    Bool(bool),
-    I8(i8),
-    I16(i16),
-    I32(i32),
-    I64(i64),
-    U8(u8),
-    U16(u16),
-    U32(u32),
-    U64(u64),
-    F32(f32),
-    F64(f64),
-    Bytes(Vec<u8>),
-    Function {
-        module_id: u32,
-        func_idx: u16,
-    },
-    Array {
-        element_type: BoundaryType,
-        values: Vec<BoundaryValue>,
-    },
-    Tuple(Vec<BoundaryValue>),
-    Choice {
-        variant: u32, // Simplified from ChoiceVariantId
-        payload: Option<Box<BoundaryValue>>,
-    },
-    Handle {
-        type_id: OpaqueTypeId,
-        binding_id: Option<BindingId>, // Set by Orchestrator upon future completion
-        id: HandleId,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BoundaryCodecError {
-    TypeMismatch { expected: String, found: String },
-    UnsupportedType,
-    HeapExhausted,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CancellationOutcome {
     Confirmed,
@@ -290,7 +219,7 @@ pub trait MessageInjector: Send + Sync {
         &self,
         thread_id: galfus_core::ThreadId,
         request_lease: galfus_core::RequestLease,
-        result: Result<BoundaryValue, ExecutionFailure>,
+        result: Result<SurfaceValue, ExecutionFailure>,
     ) -> Result<(), MessageInjectionError>;
 
     fn inject_surface_response(
@@ -368,7 +297,7 @@ pub trait AdapterModuleBinding: Send {
         symbol: &str,
         thread_id: galfus_core::ThreadId,
         request_lease: galfus_core::RequestLease,
-        args: &[BoundaryValue],
+        args: &[SurfaceValue],
         injector: sync::Arc<dyn MessageInjector>,
     );
 
@@ -472,6 +401,23 @@ struct AdapterBinding {
 }
 
 impl AdapterBindings {
+    pub fn function_signature(
+        &self,
+        proxy_module: &str,
+        symbol: &str,
+    ) -> Option<AdapterFunctionSignature> {
+        self.modules.get(proxy_module).and_then(|binding| {
+            binding
+                .module
+                .as_ref()
+                .unwrap()
+                .descriptor()
+                .exports
+                .into_iter()
+                .find(|export| export.name == symbol)
+        })
+    }
+
     pub fn register_module(
         &mut self,
         proxy_module: impl Into<String>,
@@ -1117,16 +1063,16 @@ impl ProviderDescriptor {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct ProviderFunctionSignature {
     pub name: String,
-    pub parameter_types: Vec<BoundaryType>,
-    pub return_type: BoundaryType,
+    pub parameter_types: Vec<SurfaceSchema>,
+    pub return_type: SurfaceSchema,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct AdapterFunctionSignature {
     pub name: String,
     pub is_async: bool,
-    pub parameter_types: Vec<BoundaryType>,
-    pub return_type: BoundaryType,
+    pub parameter_types: Vec<SurfaceSchema>,
+    pub return_type: SurfaceSchema,
 }
 
 #[derive(Debug, thiserror::Error)]

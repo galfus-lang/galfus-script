@@ -5,15 +5,15 @@ use crate::source_store::ModuleOrigin;
 use crate::state::*;
 use galfus_bytecode::PackageImage;
 use galfus_bytecode::{BytecodeGraph, ImportEdge, PackageMetadata};
-use galfus_contract::BoundaryType;
 use galfus_contract::{
     AdapterModuleRequirement, CURRENT_BOUNDARY_ABI_VERSION, ProviderFunctionSignature,
-    ProviderModuleRequirement,
+    ProviderModuleRequirement, SurfaceSchema,
 };
-use galfus_core::ModulePath;
-use galfus_core::{Diagnostic, DiagnosticBag, Span, TypeId};
+use galfus_core::{Diagnostic, DiagnosticBag, ModulePath, Span, TypeId};
 use galfus_frontend::modules::FrontendRoots;
-use galfus_frontend::{PrimitiveType, SymbolKind, TypeKind};
+use galfus_frontend::{
+    PrimitiveType, ResolutionLayer, StringTable, SymbolKind, TypeKind, TypeTable,
+};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -196,7 +196,7 @@ impl Workspace {
                     .parameters()
                     .iter()
                     .map(|parameter| {
-                        Self::boundary_type(
+                        Self::surface_schema(
                             type_result.layer().table(),
                             resolution,
                             self.frontend.string_table(),
@@ -205,7 +205,7 @@ impl Workspace {
                         )
                     })
                     .collect::<Result<Vec<_>, _>>();
-                let return_type = Self::boundary_type(
+                let return_type = Self::surface_schema(
                     type_result.layer().table(),
                     resolution,
                     self.frontend.string_table(),
@@ -236,55 +236,62 @@ impl Workspace {
         }
     }
 
-    pub(crate) fn boundary_type(
+    pub(crate) fn surface_schema(
         table: &TypeTable,
         resolution: &ResolutionLayer,
         string_table: &StringTable,
         proxy_name: &str,
         ty: TypeId,
-    ) -> Result<BoundaryType, String> {
+    ) -> Result<SurfaceSchema, String> {
         match table.kind(ty) {
             Some(TypeKind::Primitive(primitive)) => match primitive {
-                PrimitiveType::Null => Ok(BoundaryType::Null),
-                PrimitiveType::Bool => Ok(BoundaryType::Bool),
-                PrimitiveType::Int8 => Ok(BoundaryType::I8),
-                PrimitiveType::Int16 => Ok(BoundaryType::I16),
-                PrimitiveType::Int32 => Ok(BoundaryType::I32),
-                PrimitiveType::Int64 => Ok(BoundaryType::I64),
-                PrimitiveType::Uint8 => Ok(BoundaryType::U8),
-                PrimitiveType::Uint16 => Ok(BoundaryType::U16),
-                PrimitiveType::Uint32 => Ok(BoundaryType::U32),
-                PrimitiveType::Uint64 => Ok(BoundaryType::U64),
-                PrimitiveType::Float32 => Ok(BoundaryType::F32),
-                PrimitiveType::Float64 => Ok(BoundaryType::F64),
+                PrimitiveType::Null => Ok(SurfaceSchema::Null),
+                PrimitiveType::Bool => Ok(SurfaceSchema::Bool),
+                PrimitiveType::Int32 => Ok(SurfaceSchema::I32),
+                PrimitiveType::Int64 => Ok(SurfaceSchema::I64),
+                PrimitiveType::Uint16 => Ok(SurfaceSchema::U16),
+                PrimitiveType::Uint32 => Ok(SurfaceSchema::U32),
+                PrimitiveType::Uint64 => Ok(SurfaceSchema::U64),
+                PrimitiveType::Float32 => Ok(SurfaceSchema::F32),
+                PrimitiveType::Float64 => Ok(SurfaceSchema::F64),
+                _ => Err("primitive type is not supported by the surface contract".to_string()),
             },
             Some(TypeKind::Named { symbol }) => {
-                if let Some(symbol_data) = resolution.symbol(*symbol)
-                    && symbol_data.kind() == SymbolKind::Struct
-                {
-                    let name = string_table.resolve(symbol_data.name()).ok_or_else(|| {
-                        "struct name is missing from the string table".to_string()
-                    })?;
-                    return Ok(BoundaryType::Handle {
-                        type_id: OpaqueTypeId::new(proxy_name, name)
-                            .expect("adapter proxy types have a module path and name"),
-                    });
+                let Some(symbol_data) = resolution.symbol(*symbol) else {
+                    return Err(
+                        "named type symbol is missing from the resolution layer".to_string()
+                    );
+                };
+                if symbol_data.kind() != SymbolKind::Struct {
+                    return Err("named type is not supported by the surface contract".to_string());
                 }
-                Err("named type is not supported by the boundary ABI".to_string())
+                let name = string_table
+                    .resolve(symbol_data.name())
+                    .ok_or_else(|| "struct name is missing from the string table".to_string())?;
+                Ok(SurfaceSchema::Handle {
+                    resource: format!("{proxy_name}::{name}"),
+                })
             }
-            Some(TypeKind::Array { element }) => Ok(BoundaryType::Array(Box::new(
-                Self::boundary_type(table, resolution, string_table, proxy_name, *element)?,
+            Some(TypeKind::Array { element })
+                if matches!(
+                    table.kind(*element),
+                    Some(TypeKind::Primitive(PrimitiveType::Uint8))
+                ) =>
+            {
+                Ok(SurfaceSchema::Bytes)
+            }
+            Some(TypeKind::Array { element }) => Ok(SurfaceSchema::List(Box::new(
+                Self::surface_schema(table, resolution, string_table, proxy_name, *element)?,
             ))),
             Some(TypeKind::Tuple { elements }) => elements
                 .iter()
                 .map(|element| {
-                    Self::boundary_type(table, resolution, string_table, proxy_name, *element)
+                    Self::surface_schema(table, resolution, string_table, proxy_name, *element)
                 })
                 .collect::<Result<Vec<_>, _>>()
-                .map(BoundaryType::Tuple),
-            Some(TypeKind::Function(_)) => Ok(BoundaryType::Function),
+                .map(SurfaceSchema::Tuple),
             Some(TypeKind::GenericInstance { arguments, .. }) if arguments.len() == 1 => {
-                Self::boundary_type(table, resolution, string_table, proxy_name, arguments[0])
+                Self::surface_schema(table, resolution, string_table, proxy_name, arguments[0])
             }
             Some(TypeKind::Union { members }) => {
                 let non_null = members
@@ -298,7 +305,7 @@ impl Workspace {
                     .copied()
                     .collect::<Vec<_>>();
                 if non_null.len() == 1 && non_null.len() + 1 == members.len() {
-                    Ok(BoundaryType::Nullable(Box::new(Self::boundary_type(
+                    Ok(SurfaceSchema::Optional(Box::new(Self::surface_schema(
                         table,
                         resolution,
                         string_table,
@@ -306,10 +313,10 @@ impl Workspace {
                         non_null[0],
                     )?)))
                 } else {
-                    Err("only nullable unions are supported by the boundary ABI".to_string())
+                    Err("only nullable unions are supported by the surface contract".to_string())
                 }
             }
-            _ => Err("type is not supported by the boundary ABI".to_string()),
+            _ => Err("type is not supported by the surface contract".to_string()),
         }
     }
 
@@ -685,7 +692,7 @@ impl Workspace {
                     .parameters()
                     .iter()
                     .map(|parameter| {
-                        Self::boundary_type(
+                        Self::surface_schema(
                             table,
                             resolution,
                             self.frontend.string_table(),
@@ -696,7 +703,7 @@ impl Workspace {
                     .collect::<Result<Vec<_>, _>>()
                     .ok()?;
 
-                let return_type = Self::boundary_type(
+                let return_type = Self::surface_schema(
                     table,
                     resolution,
                     self.frontend.string_table(),

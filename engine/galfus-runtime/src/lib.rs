@@ -27,8 +27,7 @@ use std::sync;
 
 use crate::driver::ExecutionDriver;
 use galfus_contract::{
-    AdapterBindings, BoundaryType, BoundaryValue, Providers, RuntimeCapabilities,
-    validate_numeric_semantics,
+    AdapterBindings, Providers, RuntimeCapabilities, validate_numeric_semantics,
 };
 use galfus_vm::{VirtualMachine, VmPanic, VmValue};
 
@@ -327,18 +326,14 @@ fn build_entry_args(
         .map(|(index, _)| galfus_bytecode::instruction::TypeIdx(index as u16))
         .ok_or(RuntimeError::MissingArgumentType("[[u8]]"))?;
 
-    let value = BoundaryValue::Array {
-        element_type: BoundaryType::Array(Box::new(BoundaryType::U8)),
-        values: args
-            .iter()
-            .map(|arg| BoundaryValue::Array {
-                element_type: BoundaryType::U8,
-                values: arg.iter().copied().map(BoundaryValue::U8).collect(),
-            })
+    let value = galfus_contract::SurfaceValue::List(
+        args.iter()
+            .map(|arg| galfus_contract::SurfaceValue::Bytes(arg.clone()))
             .collect(),
-    };
-    crate::task::encode_into_thread_heap(
+    );
+    crate::task::encode_surface_into_thread_heap(
         &mut thread.heap,
+        &galfus_contract::SurfaceSchema::List(Box::new(galfus_contract::SurfaceSchema::Bytes)),
         value,
         args_array_ty,
         module_id,

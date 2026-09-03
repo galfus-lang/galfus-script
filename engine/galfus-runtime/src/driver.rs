@@ -230,11 +230,7 @@ impl KernelDriver for CooperativeDriver {
                     };
                 }
                 ThreadResult::Completed(res) => {
-                    let outcome = match res {
-                        Ok(galfus_contract::BoundaryValue::I32(code)) => Ok(code),
-                        Ok(_) => Ok(0),
-                        Err(e) => Err(e),
-                    };
+                    let outcome = res;
                     *self.exit_result.lock().unwrap() = Some(outcome);
                 }
             }
@@ -275,11 +271,7 @@ impl KernelDriver for CooperativeDriver {
                 }
             }
             ThreadResult::Completed(res) => {
-                let outcome = match res {
-                    Ok(galfus_contract::BoundaryValue::I32(c)) => Ok(c),
-                    Ok(_) => Ok(0),
-                    Err(e) => Err(e),
-                };
+                let outcome = res;
                 let code = match &outcome {
                     Ok(c) => *c,
                     Err(_) => 0,

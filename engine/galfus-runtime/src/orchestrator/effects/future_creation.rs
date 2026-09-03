@@ -2,7 +2,7 @@ use super::*;
 
 use crate::task::{decode_surface_from_thread_heap, execution_stack};
 use galfus_bytecode::instruction::{FuncIdx, TypeIdx};
-use galfus_contract::{BoundaryValue, ExecutionFailure, ExecutionFailureKind};
+use galfus_contract::{ExecutionFailure, ExecutionFailureKind};
 use galfus_core::ModuleId;
 
 impl Orchestrator {
@@ -122,42 +122,21 @@ impl Orchestrator {
             target_module_id,
             func_idx,
             args.clone(),
-            || {
-                let mut encoded_args = Vec::with_capacity(args.len());
-                for (arg, ty) in args.clone().into_iter().zip(arg_types.iter()) {
-                    match crate::task::decode_from_thread_heap(&thread.heap, arg, *ty, module) {
-                        Ok(value) => encoded_args.push(value),
-                        Err(_) if matches!(arg, galfus_vm::VmValue::Function { .. }) => {
-                            let galfus_vm::VmValue::Function {
-                                module_id,
-                                func_idx,
-                            } = arg
-                            else {
-                                unreachable!();
-                            };
-                            encoded_args.push(BoundaryValue::Function {
-                                module_id: module_id.raw(),
-                                func_idx: func_idx.raw(),
-                            });
-                            continue;
-                        }
-                        Err(error) => return Err(error),
-                    };
-                }
-                Ok(encoded_args)
-            },
-            |contracts| {
+            |schemas| {
                 args.iter()
                     .cloned()
-                    .zip(arg_types.iter().zip(contracts.iter()))
-                    .map(|(arg, (ty, contract))| {
-                        decode_surface_from_thread_heap(
-                            &thread.heap,
-                            &contract.schema,
-                            arg,
-                            *ty,
-                            module,
-                        )
+                    .zip(arg_types.iter().zip(schemas.iter()))
+                    .map(|(arg, (ty, schema))| {
+                        decode_surface_from_thread_heap(&thread.heap, schema, arg, *ty, module)
+                    })
+                    .collect()
+            },
+            |schemas| {
+                args.iter()
+                    .cloned()
+                    .zip(arg_types.iter().zip(schemas.iter()))
+                    .map(|(arg, (ty, schema))| {
+                        decode_surface_from_thread_heap(&thread.heap, schema, arg, *ty, module)
                     })
                     .collect()
             },
@@ -237,12 +216,12 @@ impl Orchestrator {
             self.kernel.cancel(thread_id);
             return;
         };
-        let target_module = &self
+        let source_module = &self
             .vm
             .as_ref()
             .unwrap()
             .graph
-            .get(target_module_id)
+            .get(module_id)
             .unwrap()
             .module;
         let activation_result = self.future_activation(
@@ -250,32 +229,32 @@ impl Orchestrator {
             target_module_id,
             func_idx,
             args.clone(),
-            || {
-                let mut encoded_args = Vec::with_capacity(args.len());
-                for (arg, ty) in args.clone().into_iter().zip(arg_types.iter()) {
-                    match crate::task::decode_from_thread_heap(
-                        &thread.heap,
-                        arg,
-                        *ty,
-                        target_module,
-                    ) {
-                        Ok(value) => encoded_args.push(value),
-                        Err(error) => return Err(error),
-                    }
-                }
-                Ok(encoded_args)
-            },
-            |contracts| {
+            |schemas| {
                 args.iter()
                     .cloned()
-                    .zip(arg_types.iter().zip(contracts.iter()))
-                    .map(|(arg, (ty, contract))| {
-                        decode_surface_from_thread_heap(
+                    .zip(arg_types.iter().zip(schemas.iter()))
+                    .map(|(arg, (ty, schema))| {
+                        crate::task::decode_surface_from_thread_heap(
                             &thread.heap,
-                            &contract.schema,
+                            schema,
                             arg,
                             *ty,
-                            target_module,
+                            source_module,
+                        )
+                    })
+                    .collect()
+            },
+            |schemas| {
+                args.iter()
+                    .cloned()
+                    .zip(arg_types.iter().zip(schemas.iter()))
+                    .map(|(arg, (ty, schema))| {
+                        decode_surface_from_thread_heap(
+                            &thread.heap,
+                            schema,
+                            arg,
+                            *ty,
+                            source_module,
                         )
                     })
                     .collect()
@@ -400,9 +379,11 @@ impl Orchestrator {
         target_module_id: ModuleId,
         func_idx: FuncIdx,
         args_vm: Vec<galfus_vm::VmValue>,
-        encoded_args: impl FnOnce() -> Result<Vec<BoundaryValue>, galfus_contract::BoundaryCodecError>,
+        encoded_adapter_args: impl FnOnce(
+            &[galfus_contract::SurfaceSchema],
+        ) -> Result<Vec<galfus_contract::SurfaceValue>, String>,
         encoded_surface_args: impl FnOnce(
-            &[galfus_contract::SurfaceContract],
+            &[galfus_contract::SurfaceSchema],
         ) -> Result<Vec<galfus_contract::SurfaceValue>, String>,
     ) -> Result<crate::orchestrator::future_registry::Activation, String> {
         let target = &self
@@ -435,7 +416,13 @@ impl Orchestrator {
                 ));
             }
             let args = crate::orchestrator::future_registry::ProviderArguments::Surface(
-                encoded_surface_args(&contract.parameters)?,
+                encoded_surface_args(
+                    &contract
+                        .parameters
+                        .iter()
+                        .map(|contract| contract.schema.clone())
+                        .collect::<Vec<_>>(),
+                )?,
             );
             Ok(crate::orchestrator::future_registry::Activation::Provider {
                 alias,
@@ -450,10 +437,27 @@ impl Orchestrator {
                 args: args_vm,
             })
         } else if let Some((proxy_module, symbol)) = adapter_identity {
+            let parameter_types = if let Some(bindings) = self.adapter_bindings.as_ref() {
+                bindings
+                    .lock()
+                    .unwrap()
+                    .function_signature(&proxy_module, &symbol)
+                    .map(|sig| sig.parameter_types.clone())
+                    .unwrap_or_default()
+            } else {
+                vec![]
+            };
+            if parameter_types.len() != args_vm.len() {
+                return Err(format!(
+                    "adapter proxy expects {} arguments, received {}",
+                    parameter_types.len(),
+                    args_vm.len()
+                ));
+            }
             Ok(crate::orchestrator::future_registry::Activation::Adapter {
                 proxy_module,
                 symbol,
-                args: encoded_args().map_err(|error| format!("{error:?}"))?,
+                args: encoded_adapter_args(&parameter_types)?,
                 request_id: None,
             })
         } else {

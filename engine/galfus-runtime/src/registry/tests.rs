@@ -61,13 +61,8 @@ fn registry_tracks_state_after_the_thread_body_is_taken() {
     assert!(registry.mark_running(id));
     let _running_thread = registry.take(id).expect("thread is available to run");
 
-    assert!(registry.mark_exited(id, Ok(galfus_contract::BoundaryValue::I32(7))));
-    assert_eq!(
-        registry.state(id),
-        Some(ThreadState::Exited(Ok(
-            galfus_contract::BoundaryValue::I32(7)
-        )))
-    );
+    assert!(registry.mark_exited(id, Ok(7)));
+    assert_eq!(registry.state(id), Some(ThreadState::Exited(Ok(7))));
 }
 
 #[test]
@@ -82,7 +77,7 @@ fn registry_reports_an_exited_spawned_thread_on_its_first_observation() {
     assert!(registry.mark_running(id));
     let _thread = registry.take(id).expect("thread is available to run");
 
-    assert!(registry.mark_exited(id, Ok(galfus_contract::BoundaryValue::I32(7))));
+    assert!(registry.mark_exited(id, Ok(7)));
     assert!(!registry.is_running(id));
     assert!(registry.is_exited(id));
     assert!(registry.is_exited(id));
@@ -96,7 +91,7 @@ fn exited_threads_keep_only_terminal_metadata() {
     registry
         .register(id, VmThreadState::test_new(), None)
         .unwrap();
-    assert!(registry.mark_exited(id, Ok(galfus_contract::BoundaryValue::Null)));
+    assert!(registry.mark_exited(id, Ok(0)));
 
     assert!(registry.take(id).is_none());
     assert!(registry.get_mailbox(id).is_none());
@@ -111,7 +106,7 @@ fn exited_tombstones_have_bounded_retention() {
         registry
             .register(id, VmThreadState::test_new(), None)
             .unwrap();
-        assert!(registry.mark_exited(id, Ok(galfus_contract::BoundaryValue::Null)));
+        assert!(registry.mark_exited(id, Ok(0)));
     }
 
     assert!(!registry.contains(galfus_core::ThreadId::new(1)));

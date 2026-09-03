@@ -1,5 +1,4 @@
 use super::*;
-use crate::event::FutureValue;
 use std::sync::{Arc, atomic::AtomicBool};
 
 fn owner() -> ThreadId {
@@ -52,14 +51,14 @@ fn resolved_future_keeps_its_cached_result_for_later_awaits() {
         .complete(
             owner(),
             galfus_core::FutureId::new(7),
-            Ok(BoundaryValue::I32(42)),
+            Ok(crate::event::FutureValue::I32(42)),
         )
         .unwrap();
 
     assert!(matches!(
         registry.add_waiter(owner(), galfus_core::FutureId::new(7), waiter()),
         Ok(WaitDisposition::Resolved {
-            result: Ok(FutureValue::Boundary(BoundaryValue::I32(42))),
+            result: Ok(crate::event::FutureValue::I32(42)),
             ..
         })
     ));
@@ -67,8 +66,8 @@ fn resolved_future_keeps_its_cached_result_for_later_awaits() {
         registry
             .get(owner(), galfus_core::FutureId::new(7))
             .map(|record| &record.state),
-        Some(FutureState::Resolved(Ok(FutureValue::Boundary(
-            BoundaryValue::I32(42)
+        Some(FutureState::Resolved(Ok(crate::event::FutureValue::I32(
+            42
         ))))
     ));
 }
@@ -143,7 +142,7 @@ fn duplicate_completion_is_rejected_without_replacing_the_cache() {
         .complete(
             owner(),
             galfus_core::FutureId::new(7),
-            Ok(BoundaryValue::I32(1)),
+            Ok(crate::event::FutureValue::I32(1)),
         )
         .unwrap();
 
@@ -152,7 +151,7 @@ fn duplicate_completion_is_rejected_without_replacing_the_cache() {
             .complete(
                 owner(),
                 galfus_core::FutureId::new(7),
-                Ok(BoundaryValue::I32(2))
+                Ok(crate::event::FutureValue::I32(2))
             )
             .is_err()
     );
@@ -160,9 +159,7 @@ fn duplicate_completion_is_rejected_without_replacing_the_cache() {
         registry
             .get(owner(), galfus_core::FutureId::new(7))
             .map(|record| &record.state),
-        Some(FutureState::Resolved(Ok(FutureValue::Boundary(
-            BoundaryValue::I32(1)
-        ))))
+        Some(FutureState::Resolved(Ok(crate::event::FutureValue::I32(1))))
     ));
 }
 
@@ -187,7 +184,7 @@ fn discarded_future_cannot_be_completed_later() {
             .complete(
                 owner(),
                 galfus_core::FutureId::new(7),
-                Ok(BoundaryValue::I32(42))
+                Ok(crate::event::FutureValue::I32(42))
             )
             .is_err()
     );
@@ -223,14 +220,14 @@ fn completion_drains_all_registered_waiters_once() {
         .complete(
             owner(),
             galfus_core::FutureId::new(7),
-            Ok(BoundaryValue::I32(42)),
+            Ok(crate::event::FutureValue::I32(42)),
         )
         .unwrap();
     assert_eq!(waiters.len(), 2);
     assert!(matches!(
         registry.add_waiter(owner(), galfus_core::FutureId::new(7), waiter()),
         Ok(WaitDisposition::Resolved {
-            result: Ok(FutureValue::Boundary(BoundaryValue::I32(42))),
+            result: Ok(crate::event::FutureValue::I32(42)),
             ..
         })
     ));
@@ -288,7 +285,7 @@ fn dropping_its_final_handle_removes_its_registry_record() {
         .complete(
             owner(),
             galfus_core::FutureId::new(7),
-            Ok(BoundaryValue::I32(42)),
+            Ok(crate::event::FutureValue::I32(42)),
         )
         .unwrap();
 
@@ -316,7 +313,7 @@ fn owner_shutdown_releases_all_future_payloads_and_keeps_tombstones() {
         .complete(
             owner(),
             galfus_core::FutureId::new(7),
-            Ok(BoundaryValue::I32(42)),
+            Ok(crate::event::FutureValue::I32(42)),
         )
         .unwrap();
     registry
@@ -337,7 +334,8 @@ fn owner_shutdown_releases_all_future_payloads_and_keeps_tombstones() {
             .is_none()
     );
     for future_id in [galfus_core::FutureId::new(7), galfus_core::FutureId::new(8)] {
-        let error = match registry.complete(owner(), future_id, Ok(BoundaryValue::Null)) {
+        let error = match registry.complete(owner(), future_id, Ok(crate::event::FutureValue::Null))
+        {
             Err(error) => error,
             Ok(_) => panic!("shutdown future must reject a late completion"),
         };
@@ -367,7 +365,7 @@ fn late_completion_after_discard_is_ignored_and_recorded_deterministically() {
     let err = match registry.complete(
         owner(),
         galfus_core::FutureId::new(7),
-        Ok(BoundaryValue::I32(42)),
+        Ok(crate::event::FutureValue::I32(42)),
     ) {
         Err(e) => e,
         Ok(_) => panic!("Expected error"),
@@ -401,7 +399,7 @@ fn completion_and_terminal_actions_have_one_deterministic_outcome_in_every_order
         let future_id = galfus_core::FutureId::new(7);
         match action {
             Action::Complete => registry
-                .complete(owner(), future_id, Ok(BoundaryValue::Null))
+                .complete(owner(), future_id, Ok(crate::event::FutureValue::Null))
                 .map(|_| (true, 0))
                 .unwrap_or((false, 0)),
             Action::Cancel => registry
@@ -462,7 +460,7 @@ fn completion_and_terminal_actions_have_one_deterministic_outcome_in_every_order
             );
             assert!(
                 registry
-                    .complete(owner(), future_id, Ok(BoundaryValue::Null))
+                    .complete(owner(), future_id, Ok(crate::event::FutureValue::Null))
                     .is_err(),
                 "every action order must leave the request in one terminal state"
             );

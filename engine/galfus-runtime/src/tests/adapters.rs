@@ -6,11 +6,12 @@ use galfus_bytecode::{
     PackageLoader,
 };
 use galfus_contract::{
-    AdapterArtifact, AdapterBindings, AdapterLoadContext, AdapterLoadError, AdapterModuleBinding,
-    AdapterModuleDescriptor, AdapterModuleLoader, AdapterModuleRequirement, AdapterTarget,
-    BoundaryValue, CURRENT_BOUNDARY_ABI_VERSION, CancellationOutcome, ContentHash, ExecutionTarget,
-    MessageInjector, ProviderModuleRequirement, Providers, RuntimeCapabilities,
-    SelectedAdapterTarget, VerifiedAdapterArtifact,
+    AdapterArtifact, AdapterBindings, AdapterFunctionSignature, AdapterLoadContext,
+    AdapterLoadError, AdapterModuleBinding, AdapterModuleDescriptor, AdapterModuleLoader,
+    AdapterModuleRequirement, AdapterTarget, CURRENT_BOUNDARY_ABI_VERSION, CancellationOutcome,
+    ContentHash, ExecutionTarget, MessageInjector, ProviderModuleRequirement, Providers,
+    RuntimeCapabilities, SelectedAdapterTarget, SurfaceHandle, SurfaceSchema, SurfaceValue,
+    VerifiedAdapterArtifact,
 };
 use galfus_core::{HandleId, ModuleId, ModulePath, OpaqueTypeId, SemanticRevision, Version};
 use std::rc::Rc;
@@ -48,7 +49,7 @@ impl AdapterModuleBinding for DemoAdapter {
         symbol: &str,
         thread_id: galfus_core::ThreadId,
         request_lease: galfus_core::RequestLease,
-        _args: &[BoundaryValue],
+        _args: &[SurfaceValue],
         injector: Arc<dyn MessageInjector>,
     ) {
         self.state
@@ -64,14 +65,13 @@ impl AdapterModuleBinding for DemoAdapter {
                     .unwrap()
                     .completion_threads
                     .push(std::thread::current().id());
-                let _ = injector.inject_system_response(
+                let _ = injector.inject_surface_response(
                     thread_id,
                     request_lease,
-                    Ok(BoundaryValue::Handle {
+                    Ok(SurfaceValue::Handle(SurfaceHandle {
                         type_id: OpaqueTypeId::new("graphics", "Texture").unwrap(),
-                        binding_id: None,
                         id: HandleId::new(1),
-                    }),
+                    })),
                 );
             })
             .join()
@@ -178,7 +178,14 @@ fn demo_adapter_descriptor() -> AdapterModuleDescriptor {
                 content_version: Version::new(1, 0, 0),
             },
         }],
-        exports: Vec::new(),
+        exports: vec![AdapterFunctionSignature {
+            name: "acquire".to_string(),
+            is_async: true,
+            parameter_types: Vec::new(),
+            return_type: SurfaceSchema::Handle {
+                resource: "graphics::Texture".to_string(),
+            },
+        }],
     }
 }
 
@@ -437,10 +444,7 @@ fn execution_host_bootstraps_a_compiled_package_with_provider_and_adapter() {
     let mut execution = host
         .start(package, &[], driver)
         .expect("compiled package bootstraps through the host");
-    assert_eq!(
-        execution.run_sync_to_completion(),
-        Ok(BoundaryValue::I32(0))
-    );
+    assert_eq!(execution.run_sync_to_completion(), Ok(0));
     assert_eq!(
         state.lock().unwrap().releases,
         vec![("Texture".to_string(), 1)]
@@ -452,10 +456,7 @@ fn demo_adapter_completes_from_a_worker_and_releases_its_handle_once() {
     let main_thread = std::thread::current().id();
     let (mut execution, state) = execution_with_demo_adapter(true);
 
-    assert_eq!(
-        execution.run_sync_to_completion(),
-        Ok(BoundaryValue::I32(0))
-    );
+    assert_eq!(execution.run_sync_to_completion(), Ok(0));
     let state = state.lock().unwrap();
     assert_eq!(state.dispatch_threads, vec![main_thread]);
     assert_eq!(state.completion_threads.len(), 1);
@@ -469,10 +470,7 @@ fn repeated_async_adapter_executions_return_to_the_resource_baseline() {
 
     for _ in 0..CYCLES {
         let (mut execution, state) = execution_with_demo_adapter(true);
-        assert_eq!(
-            execution.run_sync_to_completion(),
-            Ok(BoundaryValue::I32(0))
-        );
+        assert_eq!(execution.run_sync_to_completion(), Ok(0));
         let state = state.lock().unwrap();
         assert_eq!(state.releases, vec![("Texture".to_string(), 1)]);
         assert_eq!(state.drops, 1);

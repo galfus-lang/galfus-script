@@ -3,7 +3,7 @@ use super::*;
 use crate::event::FutureValue;
 use crate::task::execution_stack;
 use galfus_bytecode::instruction::TypeIdx;
-use galfus_contract::{BoundaryValue, ExecutionFailure, ExecutionFailureKind};
+use galfus_contract::{ExecutionFailure, ExecutionFailureKind};
 use galfus_core::ModuleId;
 
 fn internal_thread_arg(
@@ -78,10 +78,7 @@ impl Orchestrator {
                     Some(state) => Some(Ok(state
                         .exit_reason()
                         .and_then(Result::ok)
-                        .and_then(|val| match val {
-                            BoundaryValue::I32(code) => Some(galfus_vm::VmValue::Int32(code)),
-                            _ => None,
-                        })
+                        .map(galfus_vm::VmValue::Int32)
                         .unwrap_or(galfus_vm::VmValue::Null))),
                     None => Some(Ok(galfus_vm::VmValue::Null)),
                 }
@@ -107,9 +104,9 @@ impl Orchestrator {
                             quota.release_mailbox_messages(1);
                             quota.release_mailbox_bytes(message.data.len());
                         }
-                        crate::task::encode_into_thread_heap(
+                        crate::task::encode_future_value_into_thread_heap(
                             thread_heap,
-                            BoundaryValue::Bytes(message.data),
+                            FutureValue::Bytes(message.data),
                             return_type,
                             module_id,
                             &self
@@ -203,10 +200,8 @@ impl Orchestrator {
             "__internal_thread_exit_reason" => Ok(internal_thread_arg(&args, 0)
                 .and_then(|id| self.kernel.state(id))
                 .and_then(|state| state.exit_reason())
-                .and_then(|result| match result {
-                    Ok(BoundaryValue::I32(code)) => Some(galfus_vm::VmValue::Int32(code)),
-                    _ => None,
-                })
+                .and_then(Result::ok)
+                .map(galfus_vm::VmValue::Int32)
                 .unwrap_or(galfus_vm::VmValue::Null)),
             "__internal_thread_has_messages" => Ok(galfus_vm::VmValue::Bool(
                 self.kernel
@@ -236,9 +231,9 @@ impl Orchestrator {
                             quota.release_mailbox_messages(1);
                             quota.release_mailbox_bytes(message.data.len());
                         }
-                        crate::task::encode_into_thread_heap(
+                        crate::task::encode_future_value_into_thread_heap(
                             &mut thread.heap,
-                            BoundaryValue::Bytes(message.data),
+                            FutureValue::Bytes(message.data),
                             return_type,
                             module_id,
                             &self
@@ -315,30 +310,28 @@ impl Orchestrator {
                     .and_then(|key| self.kernel.lookup_key(&key))
                     .map(|id| id.raw() as i64)
                     .unwrap_or(-1);
-                Some(Ok(BoundaryValue::I64(id)))
+                Some(Ok(FutureValue::I64(id)))
             }
-            "__internal_thread_is_running" => Some(Ok(BoundaryValue::Bool(
+            "__internal_thread_is_running" => Some(Ok(FutureValue::Bool(
                 internal_thread_arg(&args, 0).is_some_and(|id| self.kernel.is_running(id)),
             ))),
-            "__internal_thread_is_exited" => Some(Ok(BoundaryValue::Bool(
+            "__internal_thread_is_exited" => Some(Ok(FutureValue::Bool(
                 internal_thread_arg(&args, 0).is_some_and(|id| self.kernel.is_exited(id)),
             ))),
             "__internal_thread_exit_reason" => Some(Ok(internal_thread_arg(&args, 0)
                 .and_then(|id| self.kernel.state(id))
                 .and_then(|state| state.exit_reason())
-                .and_then(|result| match result {
-                    Ok(BoundaryValue::I32(code)) => Some(BoundaryValue::I32(code)),
-                    _ => None,
-                })
-                .unwrap_or(BoundaryValue::Null))),
+                .and_then(Result::ok)
+                .map(FutureValue::I32)
+                .unwrap_or(FutureValue::Null))),
             "__internal_thread_send" => {
-                Some(Ok(BoundaryValue::Bool(self.send_internal_thread_message(
+                Some(Ok(FutureValue::Bool(self.send_internal_thread_message(
                     thread_id,
                     internal_thread_arg(&args, 0),
                     internal_bytes_arg(&thread.heap, args.get(1)),
                 ))))
             }
-            "__internal_thread_has_messages" => Some(Ok(BoundaryValue::Bool(
+            "__internal_thread_has_messages" => Some(Ok(FutureValue::Bool(
                 self.kernel
                     .get_mailbox(thread_id)
                     .is_some_and(|mailbox| !mailbox.lock().unwrap().is_empty()),
@@ -353,9 +346,9 @@ impl Orchestrator {
                         tq.release_mailbox_messages(1);
                         tq.release_mailbox_bytes(message.data.len());
                     }
-                    BoundaryValue::Bytes(message.data)
+                    FutureValue::Bytes(message.data)
                 })
-                .unwrap_or(BoundaryValue::Null))),
+                .unwrap_or(FutureValue::Null))),
             "__internal_thread_wait" => {
                 match internal_thread_arg(&args, 0).and_then(|id| self.kernel.state(id)) {
                     Some(state) if !state.is_exited() => {
@@ -367,8 +360,9 @@ impl Orchestrator {
                     Some(state) => Some(Ok(state
                         .exit_reason()
                         .and_then(Result::ok)
-                        .unwrap_or(BoundaryValue::Null))),
-                    None => Some(Ok(BoundaryValue::Null)),
+                        .map(FutureValue::I32)
+                        .unwrap_or(FutureValue::Null))),
+                    None => Some(Ok(FutureValue::Null)),
                 }
             }
             "__internal_thread_receive" => {
@@ -395,7 +389,7 @@ impl Orchestrator {
                     msg
                 });
                 match message {
-                    Some(message) => Some(Ok(BoundaryValue::Bytes(message.data))),
+                    Some(message) => Some(Ok(FutureValue::Bytes(message.data))),
                     None => {
                         self.register_mailbox_future_wait(
                             thread_id, thread_id, future_id, sender_id, timeout_ms,
@@ -406,52 +400,48 @@ impl Orchestrator {
             }
             "__internal_math_is_nan" => {
                 let f = internal_float_arg(&args, 0).unwrap_or(0.0);
-                Some(Ok(BoundaryValue::Bool(f.is_nan())))
+                Some(Ok(FutureValue::Bool(f.is_nan())))
             }
             "__internal_math_is_finite" => {
                 let f = internal_float_arg(&args, 0).unwrap_or(0.0);
-                Some(Ok(BoundaryValue::Bool(f.is_finite())))
+                Some(Ok(FutureValue::Bool(f.is_finite())))
             }
             "__internal_math_is_infinite" => {
                 let f = internal_float_arg(&args, 0).unwrap_or(0.0);
-                Some(Ok(BoundaryValue::Bool(f.is_infinite())))
+                Some(Ok(FutureValue::Bool(f.is_infinite())))
             }
             "__internal_math_sqrt" => {
                 let f = internal_float_arg(&args, 0).unwrap_or(0.0);
-                Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(f.sqrt()))))
+                Some(Ok(FutureValue::F64(galfus_core::normalize_f64(f.sqrt()))))
             }
             "__internal_math_hypot" => {
                 let x = internal_float_arg(&args, 0).unwrap_or(0.0);
                 let y = internal_float_arg(&args, 1).unwrap_or(0.0);
-                Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(
-                    x.hypot(y),
-                ))))
+                Some(Ok(FutureValue::F64(galfus_core::normalize_f64(x.hypot(y)))))
             }
             "__internal_math_sin" => {
                 let f = internal_float_arg(&args, 0).unwrap_or(0.0);
-                Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(f.sin()))))
+                Some(Ok(FutureValue::F64(galfus_core::normalize_f64(f.sin()))))
             }
             "__internal_math_cos" => {
                 let f = internal_float_arg(&args, 0).unwrap_or(0.0);
-                Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(f.cos()))))
+                Some(Ok(FutureValue::F64(galfus_core::normalize_f64(f.cos()))))
             }
             "__internal_math_tan" => {
                 let f = internal_float_arg(&args, 0).unwrap_or(0.0);
-                Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(f.tan()))))
+                Some(Ok(FutureValue::F64(galfus_core::normalize_f64(f.tan()))))
             }
             "__internal_math_log" => {
                 let f = internal_float_arg(&args, 0).unwrap_or(0.0);
-                Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(f.ln()))))
+                Some(Ok(FutureValue::F64(galfus_core::normalize_f64(f.ln()))))
             }
             "__internal_math_log2" => {
                 let f = internal_float_arg(&args, 0).unwrap_or(0.0);
-                Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(f.log2()))))
+                Some(Ok(FutureValue::F64(galfus_core::normalize_f64(f.log2()))))
             }
             "__internal_math_log10" => {
                 let f = internal_float_arg(&args, 0).unwrap_or(0.0);
-                Some(Ok(BoundaryValue::F64(galfus_core::normalize_f64(
-                    f.log10(),
-                ))))
+                Some(Ok(FutureValue::F64(galfus_core::normalize_f64(f.log10()))))
             }
             "__internal_thread_create" => {
                 let key = internal_bytes_arg(&thread.heap, args.get(1))
@@ -489,7 +479,7 @@ impl Orchestrator {
                     }
                     _ => -1,
                 };
-                Some(Ok(BoundaryValue::I64(id)))
+                Some(Ok(FutureValue::I64(id)))
             }
             "__internal_thread_sleep" => {
                 let ms = internal_timeout_arg(&args, 0).unwrap_or(0);
@@ -626,7 +616,7 @@ impl Orchestrator {
                         false
                     }
                 });
-                Some(Ok(BoundaryValue::Bool(success)))
+                Some(Ok(FutureValue::Bool(success)))
             }
             _ => {
                 self.failure = Some(
@@ -657,7 +647,7 @@ impl Orchestrator {
             if aggregate_registration.is_none() && !self.block_or_fail(thread_id, thread) {
                 return None;
             }
-            self.complete_future(thread_id, future_id, result.map(FutureValue::Boundary));
+            self.complete_future(thread_id, future_id, result);
             return None;
         }
         #[cfg(feature = "metrics")]

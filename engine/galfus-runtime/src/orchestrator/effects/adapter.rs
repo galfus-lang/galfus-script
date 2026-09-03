@@ -24,7 +24,7 @@ impl Orchestrator {
             );
             self.kernel.cancel(thread_id);
             return;
-        }
+        };
         self.resume_or_fail_front(thread_id, thread, continuation, galfus_vm::VmValue::Null);
     }
 
@@ -35,7 +35,7 @@ impl Orchestrator {
         future_id: galfus_core::FutureId,
         proxy_module: String,
         symbol: String,
-        args: Vec<galfus_contract::BoundaryValue>,
+        args: Vec<galfus_contract::SurfaceValue>,
     ) -> Option<galfus_vm::thread::VmThreadState> {
         let Some(bindings) = self.adapter_bindings.clone() else {
             self.failure = Some(
@@ -50,8 +50,17 @@ impl Orchestrator {
             self.kernel.cancel(thread_id);
             return None;
         };
-        let has_module = match bindings.lock() {
-            Ok(bindings) => bindings.has_module(&proxy_module),
+        let surface_result = match bindings.lock() {
+            Ok(bindings) => bindings
+                .function_signature(&proxy_module, &symbol)
+                .map(|signature| {
+                    galfus_contract::SurfaceContract::new(
+                        format!("{proxy_module}::{symbol}:return"),
+                        1,
+                        galfus_contract::SurfaceDirection::FromProvider,
+                        signature.return_type,
+                    )
+                }),
             Err(_) => {
                 self.failure = Some(
                     ExecutionFailure::new(
@@ -66,7 +75,7 @@ impl Orchestrator {
                 return None;
             }
         };
-        if !has_module {
+        let Some(surface_result) = surface_result else {
             self.failure = Some(
                 ExecutionFailure::new(
                     ExecutionFailureKind::MissingAdapter,
@@ -78,7 +87,7 @@ impl Orchestrator {
             );
             self.kernel.cancel(thread_id);
             return None;
-        }
+        };
         let request_lease = self.allocate_request_lease(thread_id, future_id, &thread)?;
         if let Err(error) =
             self.future_registry
@@ -109,7 +118,7 @@ impl Orchestrator {
                         .copied()
                         .unwrap_or(0),
                 ),
-                None,
+                Some(surface_result),
             )),
             active: self
                 .future_registry

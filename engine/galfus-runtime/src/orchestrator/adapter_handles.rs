@@ -1,53 +1,38 @@
 use super::*;
 
-use galfus_contract::{BoundaryValue, ExecutionFailureKind};
+use galfus_contract::ExecutionFailureKind;
 
 pub(super) fn collect_adapter_handles(
-    value: &BoundaryValue,
+    value: &galfus_contract::SurfaceValue,
     handles: &mut Vec<(galfus_core::OpaqueTypeId, galfus_core::HandleId)>,
 ) {
+    use galfus_contract::SurfaceValue;
     match value {
-        BoundaryValue::Array { values, .. } | BoundaryValue::Tuple(values) => {
+        SurfaceValue::List(values) | SurfaceValue::Tuple(values) => {
             for value in values {
                 collect_adapter_handles(value, handles);
             }
         }
-        BoundaryValue::Choice {
+        SurfaceValue::Choice {
             payload: Some(payload),
             ..
         } => collect_adapter_handles(payload, handles),
-        BoundaryValue::Handle { type_id, id, .. } => handles.push((type_id.clone(), *id)),
+        SurfaceValue::Handle(handle) => handles.push((handle.type_id.clone(), handle.id)),
         _ => {}
     }
 }
 
-pub(super) fn stamp_adapter_handles(
-    value: &mut BoundaryValue,
-    proxy_module: Option<&str>,
-    binding_id: Option<galfus_core::BindingId>,
-) -> bool {
+pub(super) fn stamp_adapter_handles(value: &mut galfus_contract::SurfaceValue) -> bool {
+    use galfus_contract::SurfaceValue;
     match value {
-        BoundaryValue::Array { values, .. } | BoundaryValue::Tuple(values) => values
-            .iter_mut()
-            .all(|value| stamp_adapter_handles(value, proxy_module, binding_id)),
-        BoundaryValue::Choice {
+        SurfaceValue::List(values) | SurfaceValue::Tuple(values) => {
+            values.iter_mut().all(stamp_adapter_handles)
+        }
+        SurfaceValue::Choice {
             payload: Some(payload),
             ..
-        } => stamp_adapter_handles(payload, proxy_module, binding_id),
-        BoundaryValue::Handle {
-            type_id,
-            binding_id: handle_binding_id,
-            ..
-        } => {
-            let valid = type_id.proxy_module()
-                == proxy_module.unwrap_or_default().trim_end_matches(".gfp")
-                && handle_binding_id.is_none()
-                && binding_id.is_some();
-            if valid {
-                *handle_binding_id = binding_id;
-            }
-            valid
-        }
+        } => stamp_adapter_handles(payload),
+        SurfaceValue::Handle(_) => true,
         _ => true,
     }
 }
@@ -56,7 +41,7 @@ impl Orchestrator {
     pub(super) fn register_adapter_handles(
         &mut self,
         proxy_module: &str,
-        value: &BoundaryValue,
+        value: &galfus_contract::SurfaceValue,
     ) -> Result<(), galfus_contract::ExecutionFailure> {
         let mut handles = Vec::new();
         collect_adapter_handles(value, &mut handles);

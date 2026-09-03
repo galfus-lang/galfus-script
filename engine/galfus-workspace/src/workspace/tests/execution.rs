@@ -47,7 +47,7 @@ fn run_passes_read_terminator_to_the_io_provider() {
     let code = workspace
         .run(&[], Some(providers), executor)
         .expect("entry executes");
-    assert_eq!(code, galfus_contract::BoundaryValue::I32(0));
+    assert_eq!(code, 0);
     assert_eq!(*terminator.lock().expect("terminator state"), b"!");
 }
 
@@ -97,7 +97,7 @@ fn run_specializes_nested_generic_types_across_modules() {
     workspace.compile().expect("workspace compiles");
     let executor = std::rc::Rc::new(CooperativeDriver::new());
     let code = workspace.run(&[], None, executor).expect("entry executes");
-    assert_eq!(code, galfus_contract::BoundaryValue::I32(42));
+    assert_eq!(code, 42);
 }
 
 #[test]
@@ -148,7 +148,7 @@ fn run_specializes_explicit_imported_generic_typeof_parameter() {
     workspace.compile().expect("workspace compiles");
     let executor = std::rc::Rc::new(CooperativeDriver::new());
     let code = workspace.run(&[], None, executor).expect("entry executes");
-    assert_eq!(code, galfus_contract::BoundaryValue::I32(42));
+    assert_eq!(code, 42);
 }
 
 #[test]
@@ -188,7 +188,7 @@ fn run_specializes_generic_anchored_range_iterator_methods() {
     workspace.compile().expect("workspace compiles");
     let executor = std::rc::Rc::new(CooperativeDriver::new());
     let code = workspace.run(&[], None, executor).expect("entry executes");
-    assert_eq!(code, galfus_contract::BoundaryValue::I32(20));
+    assert_eq!(code, 20);
 }
 
 #[test]
@@ -231,7 +231,7 @@ fn run_synchronizes_the_runtime_module_graph() {
         .expect("helper image");
     let executor = std::rc::Rc::new(CooperativeDriver::new());
     let code = workspace.run(&[], None, executor).expect("entry executes");
-    assert_eq!(code, galfus_contract::BoundaryValue::I32(1));
+    assert_eq!(code, 1);
 
     assert!(matches!(
         workspace.remove_module("helper.gfs"),
@@ -247,7 +247,7 @@ fn run_synchronizes_the_runtime_module_graph() {
     workspace.compile().expect("workspace recompiles");
     let executor2 = std::rc::Rc::new(CooperativeDriver::new());
     let code2 = workspace.run(&[], None, executor2).expect("entry executes");
-    assert_eq!(code2, galfus_contract::BoundaryValue::I32(0));
+    assert_eq!(code2, 0);
 }
 
 #[test]

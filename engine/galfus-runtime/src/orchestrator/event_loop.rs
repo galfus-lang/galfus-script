@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::event::{FutureValue, RuntimeEvent};
+use crate::event::RuntimeEvent;
 use crate::task::RuntimeTask;
 use galfus_contract::{ExecutionFailure, ExecutionFailureKind, KernelTask};
 
@@ -167,7 +167,7 @@ impl Orchestrator {
                         self.process_event(RuntimeEvent::FutureCompleted {
                             thread_id: owner_thread_id,
                             future_lease,
-                            result: result.clone().map(FutureValue::Boundary),
+                            result: result.clone().map(crate::event::FutureValue::I32),
                         });
                     }
                 }
@@ -198,6 +198,7 @@ impl Orchestrator {
             RuntimeEvent::EffectCompleted {
                 thread_id,
                 request_lease,
+                contract,
                 result,
             } => {
                 #[cfg(feature = "metrics")]
@@ -211,7 +212,11 @@ impl Orchestrator {
                         .copied()
                         .unwrap_or(0)
                 {
-                    self.complete_pending(thread_id, PendingKey::Request(request_lease.id), result)
+                    self.complete_pending(
+                        thread_id,
+                        PendingKey::Request(request_lease.id),
+                        result.map(|value| crate::event::FutureValue::Surface { contract, value }),
+                    )
                 } else {
                     self.completion_metrics.late_after_cancel += 1;
                 }
@@ -262,7 +267,7 @@ impl Orchestrator {
                     self.complete_future(
                         owner_thread_id,
                         future_lease.id,
-                        result.map(FutureValue::Boundary),
+                        result.map(crate::event::FutureValue::I32),
                     );
                 }
             }

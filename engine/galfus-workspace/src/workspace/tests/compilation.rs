@@ -278,10 +278,10 @@ export fn(async) add(left: i32, right: i32): i32
             name: "add".to_string(),
             is_async: true,
             parameter_types: vec![
-                galfus_contract::BoundaryType::I32,
-                galfus_contract::BoundaryType::I32,
+                galfus_contract::SurfaceSchema::I32,
+                galfus_contract::SurfaceSchema::I32,
             ],
-            return_type: galfus_contract::BoundaryType::I32,
+            return_type: galfus_contract::SurfaceSchema::I32,
         }]
     );
     let report = workspace.compile().expect("proxy compilation succeeds");
@@ -1019,13 +1019,13 @@ export fn(async) add(left: i32 | null, right: i32): i32 | null
             name: "add".to_string(),
             is_async: true,
             parameter_types: vec![
-                galfus_contract::BoundaryType::Nullable(Box::new(
-                    galfus_contract::BoundaryType::I32
+                galfus_contract::SurfaceSchema::Optional(Box::new(
+                    galfus_contract::SurfaceSchema::I32
                 )),
-                galfus_contract::BoundaryType::I32,
+                galfus_contract::SurfaceSchema::I32,
             ],
-            return_type: galfus_contract::BoundaryType::Nullable(Box::new(
-                galfus_contract::BoundaryType::I32
+            return_type: galfus_contract::SurfaceSchema::Optional(Box::new(
+                galfus_contract::SurfaceSchema::I32
             )),
         }]
     );
@@ -1113,14 +1113,14 @@ export fn(async) close(window: Window): null
         &workspace.adapter_descriptors[&ModulePath::new("beta.gfp").unwrap()].exports;
     assert_eq!(
         alpha_exports[0].return_type,
-        galfus_contract::BoundaryType::Handle {
-            type_id: galfus_core::OpaqueTypeId::new("alpha", "Window").unwrap(),
+        galfus_contract::SurfaceSchema::Handle {
+            resource: "alpha::Window".to_string(),
         }
     );
     assert_eq!(
         beta_exports[1].parameter_types,
-        vec![galfus_contract::BoundaryType::Handle {
-            type_id: galfus_core::OpaqueTypeId::new("beta", "Window").unwrap(),
+        vec![galfus_contract::SurfaceSchema::Handle {
+            resource: "beta::Window".to_string(),
         }]
     );
     let report = workspace.compile().expect("workspace compiles");

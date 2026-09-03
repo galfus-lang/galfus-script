@@ -461,19 +461,13 @@ fn pending_initializer_delays_entry_until_its_completion() {
         .inject_system_response(
             thread_id,
             request_lease,
-            Ok(galfus_contract::BoundaryValue::Null),
+            Ok(galfus_contract::SurfaceValue::Null),
         )
         .expect("matching completion is accepted");
 
-    assert_eq!(
-        execution.run_sync_to_completion(),
-        Ok(galfus_contract::BoundaryValue::I32(42))
-    );
+    assert_eq!(execution.run_sync_to_completion(), Ok(42));
     assert_eq!(execution.status(), ExecutionState::Closed);
-    assert_eq!(
-        execution.result(),
-        Some(&Ok(galfus_contract::BoundaryValue::I32(42)))
-    );
+    assert_eq!(execution.result(), Some(&Ok(42)));
     assert_eq!(
         *calls.lock().unwrap(),
         vec!["main_initialize", "main_entry"]
@@ -650,13 +644,8 @@ fn run_initializes_dependencies_before_the_entry_module() {
                 galfus_contract::ThreadResult::Discarded => {
                     galfus_contract::ExecutorStepResult::Running
                 }
-                galfus_contract::ThreadResult::Completed(res) => {
-                    let code = if let Ok(galfus_contract::BoundaryValue::I32(c)) = res {
-                        c
-                    } else {
-                        0
-                    };
-                    galfus_contract::ExecutorStepResult::Completed(code)
+                galfus_contract::ThreadResult::Completed(result) => {
+                    galfus_contract::ExecutorStepResult::Completed(result.unwrap_or(0))
                 }
                 galfus_contract::ThreadResult::Blocked { timeout } => {
                     galfus_contract::ExecutorStepResult::Blocked { timeout }
@@ -712,9 +701,8 @@ fn run_initializes_dependencies_before_the_entry_module() {
     .start(&[], executor.clone())
     .expect("entry execution succeeds");
 
-    let exit_code = match task.run_sync_to_completion() {
-        Ok(galfus_contract::BoundaryValue::I32(code)) => code,
-        _ => panic!("Expected i32 exit code"),
-    };
+    let exit_code = task
+        .run_sync_to_completion()
+        .expect("entry execution returns an i32 exit code");
     assert_eq!(exit_code, 42);
 }

@@ -4,8 +4,8 @@ mod tests;
 use crate::driver::{ExecutionDriver, RuntimeEventSink};
 use crate::event::{FutureValue, RuntimeEvent};
 use galfus_contract::{
-    AdapterBindingsCloseReport, BoundaryValue, ExecutionFailure, ExecutionFailureKind,
-    ExecutorStepResult, SurfaceContract, SurfaceValue, ThreadResult,
+    AdapterBindingsCloseReport, ExecutionFailure, ExecutionFailureKind, ExecutorStepResult,
+    SurfaceContract, SurfaceValue, ThreadResult,
 };
 use std::marker::PhantomData;
 use std::rc::Rc;
@@ -23,7 +23,7 @@ pub struct Execution {
     orchestrator: Option<crate::orchestrator::Orchestrator>,
     driver: Rc<dyn ExecutionDriver>,
     event_sink: std::sync::Arc<dyn RuntimeEventSink>,
-    result: Option<Result<BoundaryValue, ExecutionFailure>>,
+    result: Option<Result<i32, ExecutionFailure>>,
     shutdown_report: Option<ShutdownReport>,
     state: ExecutionState,
     initialization_complete: Arc<AtomicBool>,
@@ -44,7 +44,7 @@ pub enum ExecutionState {
 /// The immutable outcome produced after all execution-owned resources are released.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShutdownReport {
-    pub result: Result<BoundaryValue, ExecutionFailure>,
+    pub result: Result<i32, ExecutionFailure>,
     pub adapter_close: AdapterBindingsCloseReport,
     pub cancellations: CancellationReport,
     pub completions: CompletionMetrics,
@@ -159,7 +159,7 @@ impl Execution {
         self.state
     }
 
-    pub fn result(&self) -> Option<&Result<BoundaryValue, ExecutionFailure>> {
+    pub fn result(&self) -> Option<&Result<i32, ExecutionFailure>> {
         self.result.as_ref()
     }
 
@@ -221,7 +221,7 @@ impl Execution {
         }
     }
 
-    pub fn run_sync_to_completion(&mut self) -> Result<BoundaryValue, ExecutionFailure> {
+    pub fn run_sync_to_completion(&mut self) -> Result<i32, ExecutionFailure> {
         loop {
             match self.poll(100)? {
                 ExecutorStepResult::Completed(_) => {
@@ -286,7 +286,7 @@ impl Execution {
         report
     }
 
-    fn close_with(&mut self, result: Result<BoundaryValue, ExecutionFailure>) {
+    fn close_with(&mut self, result: Result<i32, ExecutionFailure>) {
         if self.shutdown_report.is_some() {
             return;
         }
@@ -349,20 +349,18 @@ impl Execution {
             .clone();
         self.notify_exit(&result);
         match &result {
-            Ok(BoundaryValue::I32(code)) => Ok(ExecutorStepResult::Completed(*code)),
-            Ok(_) => Ok(ExecutorStepResult::Completed(0)),
+            Ok(code) => Ok(ExecutorStepResult::Completed(*code)),
             Err(error) => Err(error.clone()),
         }
     }
 
-    fn notify_exit(&mut self, result: &Result<BoundaryValue, ExecutionFailure>) {
+    fn notify_exit(&mut self, result: &Result<i32, ExecutionFailure>) {
         if self.exit_notified {
             return;
         }
         self.exit_notified = true;
         self.driver.complete(match result {
-            Ok(BoundaryValue::I32(code)) => Ok(*code),
-            Ok(_) => Ok(0),
+            Ok(code) => Ok(*code),
             Err(error) => Err(error.clone()),
         });
     }
@@ -398,12 +396,14 @@ impl ExecutionHandle {
         &self,
         thread_id: galfus_core::ThreadId,
         request_lease: galfus_core::RequestLease,
-        result: Result<BoundaryValue, ExecutionFailure>,
+        contract: SurfaceContract,
+        result: Result<SurfaceValue, ExecutionFailure>,
     ) -> Result<(), galfus_contract::MessageInjectionError> {
         self.sink
             .submit(RuntimeEvent::EffectCompleted {
                 thread_id,
                 request_lease,
+                contract,
                 result,
             })
             .map_err(|_| galfus_contract::MessageInjectionError::ExecutionClosed)
@@ -413,13 +413,13 @@ impl ExecutionHandle {
         &self,
         thread_id: galfus_core::ThreadId,
         future_lease: galfus_core::FutureLease,
-        result: Result<BoundaryValue, ExecutionFailure>,
+        result: crate::event::FutureResult,
     ) -> Result<(), galfus_contract::MessageInjectionError> {
         self.sink
             .submit(RuntimeEvent::FutureCompleted {
                 thread_id,
                 future_lease,
-                result: result.map(FutureValue::Boundary),
+                result,
             })
             .map_err(|_| galfus_contract::MessageInjectionError::ExecutionClosed)
     }
@@ -430,9 +430,15 @@ impl galfus_contract::MessageInjector for ExecutionHandle {
         &self,
         thread_id: galfus_core::ThreadId,
         request_lease: galfus_core::RequestLease,
-        result: Result<BoundaryValue, ExecutionFailure>,
+        result: Result<SurfaceValue, ExecutionFailure>,
     ) -> Result<(), galfus_contract::MessageInjectionError> {
-        self.resolve_request(thread_id, request_lease, result)
+        let contract = SurfaceContract::new(
+            "runtime::system-response",
+            1,
+            galfus_contract::SurfaceDirection::FromProvider,
+            galfus_contract::SurfaceSchema::Null,
+        );
+        self.resolve_request(thread_id, request_lease, contract, result)
     }
 }
 
@@ -467,16 +473,19 @@ impl galfus_contract::MessageInjector for FutureCompletionInjector {
         &self,
         thread_id: galfus_core::ThreadId,
         request_lease: galfus_core::RequestLease,
-        result: Result<BoundaryValue, ExecutionFailure>,
+        result: Result<SurfaceValue, ExecutionFailure>,
     ) -> Result<(), galfus_contract::MessageInjectionError> {
         if thread_id != self.owner_thread_id || request_lease != self.request_lease {
             return Err(galfus_contract::MessageInjectionError::HostProtocolViolation);
         }
+        let Some(contract) = self.surface_result.clone() else {
+            return Err(galfus_contract::MessageInjectionError::UnsupportedSurfaceContract);
+        };
         self.sink
             .submit(RuntimeEvent::FutureCompleted {
                 thread_id: self.owner_thread_id,
                 future_lease: self.future_lease,
-                result: result.map(FutureValue::Boundary),
+                result: result.map(|value| FutureValue::Surface { contract, value }),
             })
             .map_err(|_| galfus_contract::MessageInjectionError::ExecutionClosed)
     }

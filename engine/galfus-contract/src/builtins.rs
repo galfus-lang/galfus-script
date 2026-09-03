@@ -1,9 +1,8 @@
 use crate::{
-    BoundaryType, CURRENT_BOUNDARY_ABI_VERSION, ProviderDescriptor, ProviderFunctionSignature,
+    CURRENT_BOUNDARY_ABI_VERSION, ProviderDescriptor, ProviderFunctionSignature,
     ProviderModuleDescriptor, SurfaceContract, SurfaceDirection, SurfaceField,
     SurfaceFunctionContract, SurfaceSchema, provider_schema_fingerprint,
 };
-use galfus_core::OpaqueTypeId;
 
 pub const ASYNC_SOURCE: &str = include_str!("../builtins/internals/async.gfs");
 pub const THREAD_SOURCE: &str = include_str!("../builtins/internals/thread.gfs");
@@ -69,13 +68,13 @@ pub fn std_io_provider_descriptor() -> ProviderDescriptor {
             exports: vec![
                 ProviderFunctionSignature {
                     name: "io_read".to_string(),
-                    parameter_types: vec![BoundaryType::Array(Box::new(BoundaryType::U8))],
-                    return_type: BoundaryType::Array(Box::new(BoundaryType::U8)),
+                    parameter_types: vec![SurfaceSchema::Bytes],
+                    return_type: SurfaceSchema::Bytes,
                 },
                 ProviderFunctionSignature {
                     name: "io_write".to_string(),
-                    parameter_types: vec![BoundaryType::Array(Box::new(BoundaryType::U8))],
-                    return_type: BoundaryType::Null,
+                    parameter_types: vec![SurfaceSchema::Bytes],
+                    return_type: SurfaceSchema::Null,
                 },
             ],
             surface_contracts: vec![
@@ -125,7 +124,7 @@ pub fn std_time_provider_descriptor() -> ProviderDescriptor {
             exports: vec![ProviderFunctionSignature {
                 name: "time_now".to_string(),
                 parameter_types: vec![],
-                return_type: BoundaryType::I64,
+                return_type: SurfaceSchema::I64,
             }],
             surface_contracts: vec![SurfaceFunctionContract {
                 provider_operation: "time_now".to_string(),
@@ -151,15 +150,15 @@ pub fn std_env_provider_descriptor() -> ProviderDescriptor {
             exports: vec![
                 ProviderFunctionSignature {
                     name: "env_get".to_string(),
-                    parameter_types: vec![BoundaryType::Array(Box::new(BoundaryType::U8))],
-                    return_type: BoundaryType::Nullable(Box::new(BoundaryType::Array(Box::new(
-                        BoundaryType::U8,
+                    parameter_types: vec![SurfaceSchema::Bytes],
+                    return_type: SurfaceSchema::Optional(Box::new(SurfaceSchema::List(Box::new(
+                        SurfaceSchema::U32,
                     )))),
                 },
                 ProviderFunctionSignature {
                     name: "env_has".to_string(),
-                    parameter_types: vec![BoundaryType::Array(Box::new(BoundaryType::U8))],
-                    return_type: BoundaryType::Bool,
+                    parameter_types: vec![SurfaceSchema::Bytes],
+                    return_type: SurfaceSchema::Bool,
                 },
             ],
             surface_contracts: vec![
@@ -201,8 +200,8 @@ pub fn std_env_provider_descriptor() -> ProviderDescriptor {
 }
 
 pub fn std_fs_provider_descriptor() -> ProviderDescriptor {
-    let byte_array = BoundaryType::Array(Box::new(BoundaryType::U8));
-    let byte_array_array = BoundaryType::Array(Box::new(byte_array.clone()));
+    let byte_array = SurfaceSchema::Bytes;
+    let byte_array_array = SurfaceSchema::List(Box::new(byte_array.clone()));
 
     ProviderDescriptor {
         modules: vec![ProviderModuleDescriptor {
@@ -213,47 +212,47 @@ pub fn std_fs_provider_descriptor() -> ProviderDescriptor {
                 ProviderFunctionSignature {
                     name: "fs_read".to_string(),
                     parameter_types: vec![byte_array.clone()],
-                    return_type: BoundaryType::Nullable(Box::new(byte_array.clone())),
+                    return_type: SurfaceSchema::Optional(Box::new(byte_array.clone())),
                 },
                 ProviderFunctionSignature {
                     name: "fs_write".to_string(),
                     parameter_types: vec![byte_array.clone(), byte_array.clone()],
-                    return_type: BoundaryType::Bool,
+                    return_type: SurfaceSchema::Bool,
                 },
                 ProviderFunctionSignature {
                     name: "fs_exists".to_string(),
                     parameter_types: vec![byte_array.clone()],
-                    return_type: BoundaryType::Bool,
+                    return_type: SurfaceSchema::Bool,
                 },
                 ProviderFunctionSignature {
                     name: "fs_delete".to_string(),
                     parameter_types: vec![byte_array.clone()],
-                    return_type: BoundaryType::Bool,
+                    return_type: SurfaceSchema::Bool,
                 },
                 ProviderFunctionSignature {
                     name: "fs_is_directory".to_string(),
                     parameter_types: vec![byte_array.clone()],
-                    return_type: BoundaryType::Bool,
+                    return_type: SurfaceSchema::Bool,
                 },
                 ProviderFunctionSignature {
                     name: "fs_is_file".to_string(),
                     parameter_types: vec![byte_array.clone()],
-                    return_type: BoundaryType::Bool,
+                    return_type: SurfaceSchema::Bool,
                 },
                 ProviderFunctionSignature {
                     name: "fs_size".to_string(),
                     parameter_types: vec![byte_array.clone()],
-                    return_type: BoundaryType::I64,
+                    return_type: SurfaceSchema::I64,
                 },
                 ProviderFunctionSignature {
                     name: "fs_list".to_string(),
                     parameter_types: vec![byte_array.clone()],
-                    return_type: BoundaryType::Nullable(Box::new(byte_array_array)),
+                    return_type: SurfaceSchema::Optional(Box::new(byte_array_array)),
                 },
                 ProviderFunctionSignature {
                     name: "fs_mkdir".to_string(),
                     parameter_types: vec![byte_array.clone()],
-                    return_type: BoundaryType::Bool,
+                    return_type: SurfaceSchema::Bool,
                 },
                 ProviderFunctionSignature {
                     name: "fs_normalize_path".to_string(),
@@ -438,8 +437,8 @@ pub fn std_fs_provider_descriptor() -> ProviderDescriptor {
 }
 
 pub fn std_net_provider_descriptor() -> ProviderDescriptor {
-    let bytes = BoundaryType::Array(Box::new(BoundaryType::U8));
-    let datagram = BoundaryType::Tuple(vec![bytes.clone(), bytes.clone(), BoundaryType::U16]);
+    let bytes = SurfaceSchema::Bytes;
+    let datagram = SurfaceSchema::Tuple(vec![bytes.clone(), bytes.clone(), SurfaceSchema::U16]);
     ProviderDescriptor {
         modules: vec![ProviderModuleDescriptor {
             module_path: "std/net".to_string(),
@@ -448,53 +447,53 @@ pub fn std_net_provider_descriptor() -> ProviderDescriptor {
             exports: vec![
                 ProviderFunctionSignature {
                     name: "net_tcp_connect".to_string(),
-                    parameter_types: vec![bytes.clone(), BoundaryType::U16],
-                    return_type: BoundaryType::Nullable(Box::new(BoundaryType::U64)),
+                    parameter_types: vec![bytes.clone(), SurfaceSchema::U16],
+                    return_type: SurfaceSchema::Optional(Box::new(SurfaceSchema::U64)),
                 },
                 ProviderFunctionSignature {
                     name: "net_tcp_read".to_string(),
-                    parameter_types: vec![BoundaryType::U64, BoundaryType::U32],
-                    return_type: BoundaryType::Nullable(Box::new(bytes.clone())),
+                    parameter_types: vec![SurfaceSchema::U64, SurfaceSchema::U32],
+                    return_type: SurfaceSchema::Optional(Box::new(bytes.clone())),
                 },
                 ProviderFunctionSignature {
                     name: "net_tcp_write".to_string(),
-                    parameter_types: vec![BoundaryType::U64, bytes.clone()],
-                    return_type: BoundaryType::Bool,
+                    parameter_types: vec![SurfaceSchema::U64, bytes.clone()],
+                    return_type: SurfaceSchema::Bool,
                 },
                 ProviderFunctionSignature {
                     name: "net_tcp_finish".to_string(),
-                    parameter_types: vec![BoundaryType::U64],
-                    return_type: BoundaryType::Bool,
+                    parameter_types: vec![SurfaceSchema::U64],
+                    return_type: SurfaceSchema::Bool,
                 },
                 ProviderFunctionSignature {
                     name: "net_tcp_close".to_string(),
-                    parameter_types: vec![BoundaryType::U64],
-                    return_type: BoundaryType::Bool,
+                    parameter_types: vec![SurfaceSchema::U64],
+                    return_type: SurfaceSchema::Bool,
                 },
                 ProviderFunctionSignature {
                     name: "net_udp_bind".to_string(),
-                    parameter_types: vec![bytes.clone(), BoundaryType::U16],
-                    return_type: BoundaryType::Nullable(Box::new(BoundaryType::U64)),
+                    parameter_types: vec![bytes.clone(), SurfaceSchema::U16],
+                    return_type: SurfaceSchema::Optional(Box::new(SurfaceSchema::U64)),
                 },
                 ProviderFunctionSignature {
                     name: "net_udp_receive".to_string(),
-                    parameter_types: vec![BoundaryType::U64, BoundaryType::U32],
-                    return_type: BoundaryType::Nullable(Box::new(datagram)),
+                    parameter_types: vec![SurfaceSchema::U64, SurfaceSchema::U32],
+                    return_type: SurfaceSchema::Optional(Box::new(datagram)),
                 },
                 ProviderFunctionSignature {
                     name: "net_udp_send_to".to_string(),
                     parameter_types: vec![
-                        BoundaryType::U64,
+                        SurfaceSchema::U64,
                         bytes.clone(),
-                        BoundaryType::U16,
+                        SurfaceSchema::U16,
                         bytes,
                     ],
-                    return_type: BoundaryType::Bool,
+                    return_type: SurfaceSchema::Bool,
                 },
                 ProviderFunctionSignature {
                     name: "net_udp_close".to_string(),
-                    parameter_types: vec![BoundaryType::U64],
-                    return_type: BoundaryType::Bool,
+                    parameter_types: vec![SurfaceSchema::U64],
+                    return_type: SurfaceSchema::Bool,
                 },
             ],
             surface_contracts: net_surface_contracts(),
@@ -605,14 +604,12 @@ fn net_surface_contracts() -> Vec<SurfaceFunctionContract> {
 }
 
 pub fn std_http_provider_descriptor() -> ProviderDescriptor {
-    let bytes = BoundaryType::Array(Box::new(BoundaryType::U8));
-    let header = BoundaryType::Handle {
-        type_id: OpaqueTypeId::new("std/http.gfs", "Header")
-            .expect("builtin HTTP header has a valid opaque type ID"),
+    let bytes = SurfaceSchema::Bytes;
+    let header = SurfaceSchema::Handle {
+        resource: "std/http.gfs.Header".to_string(),
     };
-    let response = BoundaryType::Handle {
-        type_id: OpaqueTypeId::new("std/http.gfs", "ProviderResponse")
-            .expect("builtin provider response has a valid opaque type ID"),
+    let response = SurfaceSchema::Handle {
+        resource: "std/http.gfs.ProviderResponse".to_string(),
     };
     ProviderDescriptor {
         modules: vec![ProviderModuleDescriptor {
@@ -625,20 +622,20 @@ pub fn std_http_provider_descriptor() -> ProviderDescriptor {
                     parameter_types: vec![
                         bytes.clone(),
                         bytes.clone(),
-                        BoundaryType::Array(Box::new(header)),
-                        BoundaryType::Nullable(Box::new(bytes.clone())),
+                        SurfaceSchema::List(Box::new(header.clone())),
+                        SurfaceSchema::Optional(Box::new(bytes.clone())),
                     ],
-                    return_type: BoundaryType::Nullable(Box::new(response)),
+                    return_type: SurfaceSchema::Optional(Box::new(response.clone())),
                 },
                 ProviderFunctionSignature {
                     name: "http_response_read".to_string(),
-                    parameter_types: vec![BoundaryType::U64, BoundaryType::U32],
-                    return_type: BoundaryType::Nullable(Box::new(bytes.clone())),
+                    parameter_types: vec![SurfaceSchema::U64, SurfaceSchema::U32],
+                    return_type: SurfaceSchema::Optional(Box::new(bytes.clone())),
                 },
                 ProviderFunctionSignature {
                     name: "http_response_close".to_string(),
-                    parameter_types: vec![BoundaryType::U64],
-                    return_type: BoundaryType::Bool,
+                    parameter_types: vec![SurfaceSchema::U64],
+                    return_type: SurfaceSchema::Bool,
                 },
             ],
             surface_contracts: vec![
@@ -764,7 +761,7 @@ pub fn std_http_provider_descriptor() -> ProviderDescriptor {
 }
 
 pub fn std_websocket_provider_descriptor() -> ProviderDescriptor {
-    let bytes = BoundaryType::Array(Box::new(BoundaryType::U8));
+    let bytes = SurfaceSchema::Bytes;
     ProviderDescriptor {
         modules: vec![ProviderModuleDescriptor {
             module_path: "std/websocket".to_string(),
@@ -774,22 +771,22 @@ pub fn std_websocket_provider_descriptor() -> ProviderDescriptor {
                 ProviderFunctionSignature {
                     name: "websocket_connect".to_string(),
                     parameter_types: vec![bytes.clone()],
-                    return_type: BoundaryType::Nullable(Box::new(BoundaryType::U64)),
+                    return_type: SurfaceSchema::Optional(Box::new(SurfaceSchema::U64)),
                 },
                 ProviderFunctionSignature {
                     name: "websocket_receive".to_string(),
-                    parameter_types: vec![BoundaryType::U64],
-                    return_type: BoundaryType::Nullable(Box::new(bytes.clone())),
+                    parameter_types: vec![SurfaceSchema::U64],
+                    return_type: SurfaceSchema::Optional(Box::new(bytes.clone())),
                 },
                 ProviderFunctionSignature {
                     name: "websocket_send".to_string(),
-                    parameter_types: vec![BoundaryType::U64, bytes],
-                    return_type: BoundaryType::Bool,
+                    parameter_types: vec![SurfaceSchema::U64, bytes],
+                    return_type: SurfaceSchema::Bool,
                 },
                 ProviderFunctionSignature {
                     name: "websocket_close".to_string(),
-                    parameter_types: vec![BoundaryType::U64],
-                    return_type: BoundaryType::Bool,
+                    parameter_types: vec![SurfaceSchema::U64],
+                    return_type: SurfaceSchema::Bool,
                 },
             ],
             surface_contracts: websocket_surface_contracts(),
@@ -917,16 +914,14 @@ impl BridgeModule {
     }
 }
 pub fn std_server_provider_descriptor() -> ProviderDescriptor {
-    let bytes = BoundaryType::Array(Box::new(BoundaryType::U8));
-    let header = BoundaryType::Tuple(vec![bytes.clone(), bytes.clone()]);
+    let bytes = SurfaceSchema::Bytes;
+    let header = SurfaceSchema::Tuple(vec![bytes.clone(), bytes.clone()]);
 
-    let request = BoundaryType::Handle {
-        type_id: OpaqueTypeId::new("std/server.gfs", "Request")
-            .expect("server request opaque type ID must be valid"),
+    let request = SurfaceSchema::Handle {
+        resource: "std/server.gfs.Request".to_string(),
     };
-    let ws_message = BoundaryType::Handle {
-        type_id: OpaqueTypeId::new("std/server.gfs", "WsMessage")
-            .expect("server WebSocket message opaque type ID must be valid"),
+    let ws_message = SurfaceSchema::Handle {
+        resource: "std/server.gfs.WsMessage".to_string(),
     };
 
     ProviderDescriptor {
@@ -937,39 +932,39 @@ pub fn std_server_provider_descriptor() -> ProviderDescriptor {
             exports: vec![
                 ProviderFunctionSignature {
                     name: "server_bind".to_string(),
-                    parameter_types: vec![BoundaryType::I32],
-                    return_type: BoundaryType::U64,
+                    parameter_types: vec![SurfaceSchema::I32],
+                    return_type: SurfaceSchema::U64,
                 },
                 ProviderFunctionSignature {
                     name: "server_accept".to_string(),
-                    parameter_types: vec![BoundaryType::U64],
+                    parameter_types: vec![SurfaceSchema::U64],
                     return_type: request,
                 },
                 ProviderFunctionSignature {
                     name: "server_respond".to_string(),
                     parameter_types: vec![
-                        BoundaryType::U64,
-                        BoundaryType::I32,
-                        BoundaryType::Array(Box::new(header)),
-                        BoundaryType::Nullable(Box::new(bytes.clone())),
-                        BoundaryType::Bool,
+                        SurfaceSchema::U64,
+                        SurfaceSchema::I32,
+                        SurfaceSchema::List(Box::new(header)),
+                        SurfaceSchema::Optional(Box::new(bytes.clone())),
+                        SurfaceSchema::Bool,
                     ],
-                    return_type: BoundaryType::Bool,
+                    return_type: SurfaceSchema::Bool,
                 },
                 ProviderFunctionSignature {
                     name: "server_ws_receive".to_string(),
-                    parameter_types: vec![BoundaryType::U64],
-                    return_type: BoundaryType::Nullable(Box::new(ws_message)),
+                    parameter_types: vec![SurfaceSchema::U64],
+                    return_type: SurfaceSchema::Optional(Box::new(ws_message)),
                 },
                 ProviderFunctionSignature {
                     name: "server_ws_send".to_string(),
-                    parameter_types: vec![BoundaryType::U64, bytes.clone()],
-                    return_type: BoundaryType::Bool,
+                    parameter_types: vec![SurfaceSchema::U64, bytes.clone()],
+                    return_type: SurfaceSchema::Bool,
                 },
                 ProviderFunctionSignature {
                     name: "server_ws_close".to_string(),
-                    parameter_types: vec![BoundaryType::U64],
-                    return_type: BoundaryType::Bool,
+                    parameter_types: vec![SurfaceSchema::U64],
+                    return_type: SurfaceSchema::Bool,
                 },
             ],
             surface_contracts: server_surface_contracts(),
