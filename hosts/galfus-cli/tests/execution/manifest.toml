@@ -244,3 +244,10 @@ path = "cases/07_functions/default_parameters.gfs"
 command = "run"
 exit_code = 0
 stdout = "ok\n"
+
+[[case]]
+name = "imported choices support empty payload variants"
+path = "cases/17_imported_empty_variants"
+command = "run"
+exit_code = 0
+stdout = "ok\n"

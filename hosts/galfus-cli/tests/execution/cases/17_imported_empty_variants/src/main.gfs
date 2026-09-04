@@ -1,0 +1,24 @@
+import { ReadStreamResult } from "./stream.gfs"
+import { produce_data, produce_end } from "./provider.gfs"
+import { println } from "std/io"
+
+export fn main(_args: [[u8]]): i32 {
+    const data = produce_data()
+    const data_ok = match data {
+        ReadStreamResult::Data(_) => 1,
+        ReadStreamResult::End => 0,
+    }
+
+    const end = produce_end()
+    const end_ok = match end {
+        ReadStreamResult::Data(_) => 0,
+        ReadStreamResult::End => 1,
+    }
+
+    if data_ok == 1 && end_ok == 1 {
+        println("ok")
+        return 0
+    }
+    
+    return 1
+}

@@ -756,40 +756,33 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 Operand::Local(temp_id)
             }
             SyntaxNodeKind::PathExpression => {
-                let kind = resolution.and_then(|res| res.path_reference_kind(expr_id));
-                if let Some(kind) = kind {
-                    match kind {
-                        PathReferenceKind::EnumVariant => {
-                            if let Some(variant_symbol) =
-                                resolution.and_then(|res| res.path_reference_symbol(expr_id))
-                            {
-                                let val = self.get_enum_variant_value(variant_symbol);
-                                return Operand::Constant(Constant::Int32(val as i32));
-                            }
-                        }
-                        PathReferenceKind::ChoiceVariant => {
-                            if let Some((variant_name, owner_type, _payload_types)) =
-                                self.get_choice_variant_payload(expr_id)
-                            {
-                                let expr_type = self
-                                    .builder
-                                    .type_result
-                                    .layer()
-                                    .node_type(expr_id)
-                                    .unwrap_or(owner_type);
-                                let choice_temp = self.declare_local(None, expr_type);
-                                self.current_instructions.push((
-                                    Instruction::Assign(
-                                        choice_temp,
-                                        RValue::Choice(expr_type, variant_name, None),
-                                    ),
-                                    None,
-                                ));
-                                return Operand::Local(choice_temp);
-                            }
-                        }
-                        _ => {}
-                    }
+                if let Some((variant_name, owner_type, _payload_types)) =
+                    self.get_choice_variant_payload(expr_id)
+                {
+                    let expr_type = self
+                        .builder
+                        .type_result
+                        .layer()
+                        .node_type(expr_id)
+                        .unwrap_or(owner_type);
+                    let choice_temp = self.declare_local(None, expr_type);
+                    self.current_instructions.push((
+                        Instruction::Assign(
+                            choice_temp,
+                            RValue::Choice(expr_type, variant_name, None),
+                        ),
+                        None,
+                    ));
+                    return Operand::Local(choice_temp);
+                }
+
+                if let Some(PathReferenceKind::EnumVariant) =
+                    resolution.and_then(|res| res.path_reference_kind(expr_id))
+                    && let Some(variant_symbol) =
+                        resolution.and_then(|res| res.path_reference_symbol(expr_id))
+                {
+                    let val = self.get_enum_variant_value(variant_symbol);
+                    return Operand::Constant(Constant::Int32(val as i32));
                 }
                 if let Some(variant_symbol) =
                     resolution.and_then(|resolution| resolution.path_reference_symbol(expr_id))

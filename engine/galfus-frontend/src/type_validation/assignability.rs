@@ -111,7 +111,7 @@ impl<'a> DeclarationTypeChecker<'a> {
 
         self.imported_struct_constraints
             .get(&constraints)
-            .is_some_and(|constraints| constraints.iter().any(|constraint| *constraint == expected))
+            .is_some_and(|constraints| constraints.contains(&expected))
     }
 
     fn imported_path_struct_satisfies(&self, actual: TypeId, expected: TypeId) -> bool {
@@ -123,7 +123,7 @@ impl<'a> DeclarationTypeChecker<'a> {
         };
         self.imported_struct_constraints_by_name
             .get(name)
-            .is_some_and(|constraints| constraints.iter().any(|constraint| *constraint == expected))
+            .is_some_and(|constraints| constraints.contains(&expected))
     }
 
     fn is_function_type_assignable(&self, expected: &FunctionType, actual: &FunctionType) -> bool {

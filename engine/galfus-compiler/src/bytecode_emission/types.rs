@@ -256,21 +256,31 @@ fn imported_choice_for_type(
     ctx: &LowerCtx,
     ty: TypeId,
 ) -> Option<galfus_frontend::LoweredImportedChoice> {
-    match ctx.type_result.layer().table().kind(ty)? {
-        TypeKind::Named { symbol } => ctx.type_result.imported_symbol_choices.get(symbol).cloned(),
-        TypeKind::Path { root, segments } => ctx
-            .type_result
-            .imported_symbol_choices
-            .get(root)
-            .cloned()
-            .or_else(|| {
-                ctx.type_result
-                    .imported_path_choices
-                    .values()
-                    .find(|choice| segments.iter().any(|segment| segment == &choice.name))
+    let mut current = resolve_alias_type(ctx, ty);
+    loop {
+        match ctx.type_result.layer().table().kind(current)? {
+            TypeKind::Named { symbol } => {
+                return ctx.type_result.imported_symbol_choices.get(symbol).cloned();
+            }
+            TypeKind::Path { root, segments } => {
+                return ctx
+                    .type_result
+                    .imported_symbol_choices
+                    .get(root)
                     .cloned()
-            }),
-        _ => None,
+                    .or_else(|| {
+                        ctx.type_result
+                            .imported_path_choices
+                            .values()
+                            .find(|choice| segments.iter().any(|segment| segment == &choice.name))
+                            .cloned()
+                    });
+            }
+            TypeKind::GenericInstance { base, .. } => {
+                current = *base;
+            }
+            _ => return None,
+        }
     }
 }
 

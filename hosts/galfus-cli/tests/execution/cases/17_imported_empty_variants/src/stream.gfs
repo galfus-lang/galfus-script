@@ -1,0 +1,4 @@
+export choice ReadStreamResult<T> {
+    Data(T),
+    End
+}
