@@ -1,0 +1,26 @@
+import { ReadStreamResult, BytesStream, fromBytes } from "std/stream"
+
+export fn main(_args: [[u8]]): i32 {
+  const source = fromBytes("stream")
+  const data = await source::next()
+  
+  match data {
+    ReadStreamResult::Data(d) {
+      // should match
+    },
+    ReadStreamResult::End { return 1 },
+    ReadStreamResult::Error(_) { return 2 }
+  }
+
+  // Next one should be End
+  const end = await source::next()
+  var ended = false
+  match end {
+    ReadStreamResult::Data(_) { return 3 },
+    ReadStreamResult::Error(_) { return 4 },
+    ReadStreamResult::End { ended = true }
+  }
+
+  if !ended { return 5 }
+  return 0
+}
