@@ -4,7 +4,7 @@ use galfus_contract::{
     CancellationOutcome, ExecutionFailure, ExecutionFailureKind, HostProvider, MessageInjector,
     ProviderDescriptor, SurfaceValue, TaskAffinity,
 };
-use http_body_util::{BodyExt, Full};
+use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::body::Bytes;
 use hyper::service::service_fn;
 use hyper::{Request, Response};
@@ -16,6 +16,24 @@ use tokio::net::TcpListener;
 
 use tokio::sync::{mpsc, oneshot};
 use url::Url;
+
+type BoxedServerBody = BoxBody<hyper::body::Bytes, String>;
+
+struct ChannelBody {
+    rx: tokio::sync::mpsc::Receiver<Result<hyper::body::Frame<hyper::body::Bytes>, String>>,
+}
+
+impl hyper::body::Body for ChannelBody {
+    type Data = hyper::body::Bytes;
+    type Error = String;
+
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<hyper::body::Frame<Self::Data>, Self::Error>>> {
+        self.rx.poll_recv(cx)
+    }
+}
 
 pub struct NativeServerProvider {
     command_tx: std::sync::mpsc::Sender<ServerCommand>,
@@ -149,12 +167,24 @@ enum ServerCommand {
         _server_id: u64,
         completion: Completion,
     },
-    Respond {
+    ResponseStart {
         request_id: u64,
         status: i32,
         headers: Vec<(String, String)>,
-        body: Option<Vec<u8>>,
         is_upgrade: bool,
+        completion: Completion,
+    },
+    ResponseWrite {
+        request_id: u64,
+        chunk: Vec<u8>,
+        completion: Completion,
+    },
+    ResponseFinish {
+        request_id: u64,
+        completion: Completion,
+    },
+    ResponseAbort {
+        request_id: u64,
         completion: Completion,
     },
     RequestRead {
@@ -181,7 +211,7 @@ enum ServerCommand {
     },
     InternalRequestReceived {
         req: PendingRequest,
-        response_tx: oneshot::Sender<(Response<Full<Bytes>>, bool)>,
+        response_tx: oneshot::Sender<(Response<BoxedServerBody>, bool)>,
     },
     InternalRequestBodyRead {
         request_id: u64,
@@ -229,15 +259,19 @@ impl NativeServerProvider {
         let mut accept_waiters: VecDeque<AcceptWaiter> = VecDeque::new();
         let mut pending_requests: VecDeque<PendingRequest> = VecDeque::new();
         let mut request_bodies: HashMap<u64, IncomingRequestBody> = HashMap::new();
+        let mut pending_request_reads: std::collections::HashSet<u64> =
+            std::collections::HashSet::new();
 
         let mut response_channels: HashMap<
             u64,
             (
-                oneshot::Sender<(Response<Full<Bytes>>, bool)>,
+                oneshot::Sender<(Response<BoxedServerBody>, bool)>,
                 Option<hyper::upgrade::OnUpgrade>,
                 Option<String>,
             ),
         > = HashMap::new();
+
+        let mut active_response_bodies: HashMap<u64, mpsc::Sender<Result<hyper::body::Frame<Bytes>, String>>> = HashMap::new();
 
         type WsStream = tokio_tungstenite::WebSocketStream<TokioIo<hyper::upgrade::Upgraded>>;
         let mut active_websockets: HashMap<u64, WsStream> = HashMap::new();
@@ -339,7 +373,7 @@ impl NativeServerProvider {
                                                         } else {
                                                             Ok(Response::builder()
                                                                 .status(500)
-                                                                .body(Full::new(Bytes::new()))
+                                                                .body(BoxBody::new(Full::new(Bytes::new()).map_err(|e| match e {})))
                                                                 .unwrap())
                                                         }
                                                     }
@@ -396,14 +430,16 @@ impl NativeServerProvider {
                         accept_waiters.push_back(AcceptWaiter { completion });
                     }
                 }
-                ServerCommand::Respond {
+                ServerCommand::ResponseStart {
                     request_id,
                     status,
                     headers,
-                    body,
                     is_upgrade,
                     completion,
                 } => {
+                    request_bodies.remove(&request_id);
+                    pending_request_reads.remove(&request_id);
+
                     if let Some((tx, upgrade, websocket_key)) =
                         response_channels.remove(&request_id)
                     {
@@ -429,8 +465,11 @@ impl NativeServerProvider {
                                 );
                         }
 
-                        let bytes = body.unwrap_or_default();
-                        let response = builder.body(Full::new(Bytes::from(bytes))).unwrap();
+                        let (body_tx, body_rx) = mpsc::channel(16);
+                        active_response_bodies.insert(request_id, body_tx);
+                        
+                        let channel_body = ChannelBody { rx: body_rx };
+                        let response = builder.body(BoxBody::new(channel_body)).unwrap();
 
                         let _ = tx.send((response, is_upgrade));
                         if is_upgrade && let Some(upgrade) = upgrade {
@@ -456,15 +495,46 @@ impl NativeServerProvider {
                         completion.inject_bool(false);
                     }
                 }
+                ServerCommand::ResponseWrite { request_id, chunk, completion } => {
+                    if let Some(tx) = active_response_bodies.get(&request_id) {
+                        let ok = tx.try_send(Ok(hyper::body::Frame::data(Bytes::from(chunk)))).is_ok();
+                        completion.inject_bool(ok);
+                    } else {
+                        completion.inject_bool(false);
+                    }
+                }
+                ServerCommand::ResponseFinish { request_id, completion } => {
+                    active_response_bodies.remove(&request_id);
+                    completion.inject_bool(true);
+                }
+                ServerCommand::ResponseAbort { request_id, completion } => {
+                    if let Some(tx) = active_response_bodies.remove(&request_id) {
+                        let _ = tx.try_send(Err("aborted".to_string()));
+                    }
+                    completion.inject_bool(true);
+                }
                 ServerCommand::RequestRead {
                     request_id,
                     max_bytes,
                     completion,
                 } => {
                     let Some(body) = request_bodies.remove(&request_id) else {
-                        completion.inject_surface(Ok(SurfaceValue::Null));
+                        if pending_request_reads.contains(&request_id) {
+                            completion.inject_surface(Ok(SurfaceValue::Choice {
+                                variant: "Error".to_string(),
+                                payload: Some(Box::new(SurfaceValue::Bytes(
+                                    b"concurrent read not allowed".to_vec(),
+                                ))),
+                            }));
+                        } else {
+                            completion.inject_surface(Ok(SurfaceValue::Choice {
+                                variant: "End".to_string(),
+                                payload: None,
+                            }));
+                        }
                         continue;
                     };
+                    pending_request_reads.insert(request_id);
                     let itx = internal_tx.clone();
                     tokio::spawn(async move {
                         let (body, result) =
@@ -482,6 +552,7 @@ impl NativeServerProvider {
                     completion,
                 } => {
                     request_bodies.remove(&request_id);
+                    pending_request_reads.remove(&request_id);
                     completion.inject_bool(true);
                 }
                 ServerCommand::InternalRequestBodyRead {
@@ -489,17 +560,28 @@ impl NativeServerProvider {
                     body,
                     result,
                     completion,
-                } => match result {
-                    Ok(Some(chunk)) => {
-                        request_bodies.insert(request_id, body);
-                        completion.inject_surface(Ok(SurfaceValue::Bytes(chunk)));
+                } => {
+                    let was_pending = pending_request_reads.remove(&request_id);
+                    match result {
+                        Ok(Some(chunk)) => {
+                            if was_pending {
+                                request_bodies.insert(request_id, body);
+                            }
+                            completion.inject_surface(Ok(SurfaceValue::Choice {
+                                variant: "Data".to_string(),
+                                payload: Some(Box::new(SurfaceValue::Bytes(chunk))),
+                            }));
+                        }
+                        Ok(None) => completion.inject_surface(Ok(SurfaceValue::Choice {
+                            variant: "End".to_string(),
+                            payload: None,
+                        })),
+                        Err(error) => completion.inject_surface(Ok(SurfaceValue::Choice {
+                            variant: "Error".to_string(),
+                            payload: Some(Box::new(SurfaceValue::Bytes(error.as_bytes().to_vec()))),
+                        })),
                     }
-                    Ok(None) => completion.inject_surface(Ok(SurfaceValue::Null)),
-                    Err(error) => completion.inject_surface(Err(ExecutionFailure::new(
-                        ExecutionFailureKind::ProviderFailure,
-                        error,
-                    ))),
-                },
+                }
                 ServerCommand::InternalWsUpgraded { ws_id, stream } => {
                     if let Some(waiter) = ws_receive_waiters.remove(&ws_id) {
                         Self::receive_ws_message(ws_id, stream, waiter, internal_tx.clone());
@@ -727,18 +809,8 @@ impl HostProvider for NativeServerProvider {
                     _server_id: surface_u64(args.first(), "server ID")?,
                     completion,
                 }),
-                "server_respond" => {
-                    let body = match args.get(3) {
-                        Some(SurfaceValue::Bytes(body)) => Some(body.clone()),
-                        Some(SurfaceValue::Null) => None,
-                        _ => {
-                            return Err(ExecutionFailure::new(
-                                ExecutionFailureKind::ProviderFailure,
-                                "expected nullable surface response body",
-                            ));
-                        }
-                    };
-                    let is_upgrade = match args.get(4) {
+                "server_response_start" => {
+                    let is_upgrade = match args.get(3) {
                         Some(SurfaceValue::Bool(value)) => *value,
                         _ => {
                             return Err(ExecutionFailure::new(
@@ -747,15 +819,27 @@ impl HostProvider for NativeServerProvider {
                             ));
                         }
                     };
-                    Ok(ServerCommand::Respond {
+                    Ok(ServerCommand::ResponseStart {
                         request_id: surface_u64(args.first(), "request ID")?,
                         status: surface_i32(args.get(1), "response status")?,
                         headers: surface_headers(args.get(2))?,
-                        body,
                         is_upgrade,
                         completion,
                     })
                 }
+                "server_response_write" => Ok(ServerCommand::ResponseWrite {
+                    request_id: surface_u64(args.first(), "request ID")?,
+                    chunk: surface_bytes(args.get(1), "response chunk")?,
+                    completion,
+                }),
+                "server_response_finish" => Ok(ServerCommand::ResponseFinish {
+                    request_id: surface_u64(args.first(), "request ID")?,
+                    completion,
+                }),
+                "server_response_abort" => Ok(ServerCommand::ResponseAbort {
+                    request_id: surface_u64(args.first(), "request ID")?,
+                    completion,
+                }),
                 "server_request_read" => Ok(ServerCommand::RequestRead {
                     request_id: surface_u64(args.first(), "request ID")?,
                     max_bytes: surface_u32(args.get(1), "maximum read size")?,

@@ -1,4 +1,4 @@
-import { Server, Request, Response, URL, WebSocket, WebSocketConfig, upgradeToWs } from "std/server"
+import { Server, Request, Response, URL, WebSocket, WebSocketConfig, upgradeToWs, fromBytes } from "std/server"
 import { Future } from "std/async"
 import { ByteBuffer, CollectResult } from "std/stream"
 import { log } from "log"
@@ -9,10 +9,9 @@ export fn main(_args: [[u8]]): i32 {
         port: 8080,
         fetch: fn(async) (req: Request): Response {
             if equals(req.url.pathname, "/api/data") {
-                return new(Response) {
-                    headers: [("Content-Type", "application/json")],
-                    body: '{"status": "ok"}'
-                }
+                var res = fromBytes('{"status": "ok"}')
+                res.headers = [("Content-Type", "application/json")]
+                return res
             }
 
             if equals(req.url.pathname, "/ws") {
@@ -21,27 +20,25 @@ export fn main(_args: [[u8]]): i32 {
 
             if equals(req.url.pathname, "/url") {
                 if equals(req.url.search, "check=1") {
-                    return new(Response) { body: "url-ok" }
+                    return fromBytes("url-ok")
                 }
-                return new(Response) { status: 400, body: "invalid query" }
+                var err_res = fromBytes("invalid query")
+                err_res.status = 400
+                return err_res
             }
 
             if equals(req.url.pathname, "/echo") {
                 if equals(req.method, "POST") {
                     const collected = await ByteBuffer::create()::collect(req.body)
-                    match collected {
-                        CollectResult::Data(body) {
-                            return new(Response) {
-                                status: 201,
-                                headers: [("Content-Type", "application/octet-stream"), ("X-Server-Test", "echo")],
-                                body: body
-                            }
-                        },
-                        CollectResult::LimitExceeded { return new(Response) { status: 413, body: "request body too large" } },
-                        CollectResult::Error(_) { return new(Response) { status: 400, body: "invalid request body" } }
+                    return new(Response) {
+                        status: 201,
+                        headers: [("Content-Type", "application/octet-stream"), ("X-Server-Test", "echo")],
+                        body: req.body
                     }
                 }
-                return new(Response) { status: 405, body: "method not allowed" }
+                var method_err = fromBytes("method not allowed")
+                method_err.status = 405
+                return method_err
             }
 
             if equals(req.url.pathname, "/request-header") {
@@ -49,11 +46,13 @@ export fn main(_args: [[u8]]): i32 {
                     const (name, value) = item
                     if equals(name, "x-request-test") {
                         if equals(value, "present") {
-                            return new(Response) { body: "header-ok" }
+                            return fromBytes("header-ok")
                         }
                     }
                 }
-                return new(Response) { status: 400, body: "missing header" }
+                var hdr_err = fromBytes("missing header")
+                hdr_err.status = 400
+                return hdr_err
             }
 
             return new(Response) { status: 404 }

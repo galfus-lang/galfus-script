@@ -151,9 +151,7 @@ pub fn std_env_provider_descriptor() -> ProviderDescriptor {
                 ProviderFunctionSignature {
                     name: "env_get".to_string(),
                     parameter_types: vec![SurfaceSchema::Bytes],
-                    return_type: SurfaceSchema::Optional(Box::new(SurfaceSchema::List(Box::new(
-                        SurfaceSchema::U32,
-                    )))),
+                    return_type: SurfaceSchema::Optional(Box::new(SurfaceSchema::Bytes)),
                 },
                 ProviderFunctionSignature {
                     name: "env_has".to_string(),
@@ -940,20 +938,50 @@ pub fn std_server_provider_descriptor() -> ProviderDescriptor {
                     return_type: request,
                 },
                 ProviderFunctionSignature {
-                    name: "server_respond".to_string(),
+                    name: "server_response_start".to_string(),
                     parameter_types: vec![
                         SurfaceSchema::U64,
                         SurfaceSchema::I32,
-                        SurfaceSchema::List(Box::new(header)),
-                        SurfaceSchema::Optional(Box::new(bytes.clone())),
+                        SurfaceSchema::List(Box::new(header.clone())),
                         SurfaceSchema::Bool,
                     ],
                     return_type: SurfaceSchema::Bool,
                 },
                 ProviderFunctionSignature {
+                    name: "server_response_write".to_string(),
+                    parameter_types: vec![SurfaceSchema::U64, bytes.clone()],
+                    return_type: SurfaceSchema::Bool,
+                },
+                ProviderFunctionSignature {
+                    name: "server_response_finish".to_string(),
+                    parameter_types: vec![SurfaceSchema::U64],
+                    return_type: SurfaceSchema::Bool,
+                },
+                ProviderFunctionSignature {
+                    name: "server_response_abort".to_string(),
+                    parameter_types: vec![SurfaceSchema::U64],
+                    return_type: SurfaceSchema::Bool,
+                },
+                ProviderFunctionSignature {
                     name: "server_request_read".to_string(),
                     parameter_types: vec![SurfaceSchema::U64, SurfaceSchema::U32],
-                    return_type: SurfaceSchema::Optional(Box::new(bytes.clone())),
+                    return_type: SurfaceSchema::Choice {
+                        name: "ProviderReadResult".to_string(),
+                        variants: vec![
+                            crate::surface::SurfaceVariant {
+                                name: "Data".to_string(),
+                                payload: Some(bytes.clone()),
+                            },
+                            crate::surface::SurfaceVariant {
+                                name: "End".to_string(),
+                                payload: None,
+                            },
+                            crate::surface::SurfaceVariant {
+                                name: "Error".to_string(),
+                                payload: Some(bytes.clone()),
+                            },
+                        ],
+                    },
                 },
                 ProviderFunctionSignature {
                     name: "server_request_close".to_string(),
@@ -1093,42 +1121,96 @@ fn server_surface_contracts() -> Vec<SurfaceFunctionContract> {
             ),
         },
         SurfaceFunctionContract {
-            provider_operation: "server_respond".to_string(),
-            bridge_symbol: "__provider_server_respond".to_string(),
+            provider_operation: "server_response_start".to_string(),
+            bridge_symbol: "__provider_server_response_start".to_string(),
             parameters: vec![
                 SurfaceContract::new(
-                    "std/server::__provider_server_respond:req_id",
+                    "std/server::__provider_server_response_start:req_id",
                     1,
                     SurfaceDirection::ToProvider,
                     SurfaceSchema::U64,
                 ),
                 SurfaceContract::new(
-                    "std/server::__provider_server_respond:status",
+                    "std/server::__provider_server_response_start:status",
                     1,
                     SurfaceDirection::ToProvider,
                     SurfaceSchema::I32,
                 ),
                 SurfaceContract::new(
-                    "std/server::__provider_server_respond:headers",
+                    "std/server::__provider_server_response_start:headers",
                     1,
                     SurfaceDirection::ToProvider,
                     SurfaceSchema::List(Box::new(header)),
                 ),
                 SurfaceContract::new(
-                    "std/server::__provider_server_respond:body",
-                    1,
-                    SurfaceDirection::ToProvider,
-                    SurfaceSchema::Optional(Box::new(bytes.clone())),
-                ),
-                SurfaceContract::new(
-                    "std/server::__provider_server_respond:is_upgrade",
+                    "std/server::__provider_server_response_start:is_upgrade",
                     1,
                     SurfaceDirection::ToProvider,
                     SurfaceSchema::Bool,
                 ),
             ],
             result: SurfaceContract::new(
-                "std/server::__provider_server_respond:return",
+                "std/server::__provider_server_response_start:return",
+                1,
+                SurfaceDirection::FromProvider,
+                SurfaceSchema::Bool,
+            ),
+        },
+        SurfaceFunctionContract {
+            provider_operation: "server_response_write".to_string(),
+            bridge_symbol: "__provider_server_response_write".to_string(),
+            parameters: vec![
+                SurfaceContract::new(
+                    "std/server::__provider_server_response_write:req_id",
+                    1,
+                    SurfaceDirection::ToProvider,
+                    SurfaceSchema::U64,
+                ),
+                SurfaceContract::new(
+                    "std/server::__provider_server_response_write:chunk",
+                    1,
+                    SurfaceDirection::ToProvider,
+                    bytes.clone(),
+                ),
+            ],
+            result: SurfaceContract::new(
+                "std/server::__provider_server_response_write:return",
+                1,
+                SurfaceDirection::FromProvider,
+                SurfaceSchema::Bool,
+            ),
+        },
+        SurfaceFunctionContract {
+            provider_operation: "server_response_finish".to_string(),
+            bridge_symbol: "__provider_server_response_finish".to_string(),
+            parameters: vec![
+                SurfaceContract::new(
+                    "std/server::__provider_server_response_finish:req_id",
+                    1,
+                    SurfaceDirection::ToProvider,
+                    SurfaceSchema::U64,
+                ),
+            ],
+            result: SurfaceContract::new(
+                "std/server::__provider_server_response_finish:return",
+                1,
+                SurfaceDirection::FromProvider,
+                SurfaceSchema::Bool,
+            ),
+        },
+        SurfaceFunctionContract {
+            provider_operation: "server_response_abort".to_string(),
+            bridge_symbol: "__provider_server_response_abort".to_string(),
+            parameters: vec![
+                SurfaceContract::new(
+                    "std/server::__provider_server_response_abort:req_id",
+                    1,
+                    SurfaceDirection::ToProvider,
+                    SurfaceSchema::U64,
+                ),
+            ],
+            result: SurfaceContract::new(
+                "std/server::__provider_server_response_abort:return",
                 1,
                 SurfaceDirection::FromProvider,
                 SurfaceSchema::Bool,
@@ -1155,7 +1237,23 @@ fn server_surface_contracts() -> Vec<SurfaceFunctionContract> {
                 "std/server::__provider_server_request_read:return",
                 1,
                 SurfaceDirection::FromProvider,
-                SurfaceSchema::Optional(Box::new(bytes.clone())),
+                SurfaceSchema::Choice {
+                    name: "ProviderReadResult".to_string(),
+                    variants: vec![
+                        crate::surface::SurfaceVariant {
+                            name: "Data".to_string(),
+                            payload: Some(bytes.clone()),
+                        },
+                        crate::surface::SurfaceVariant {
+                            name: "End".to_string(),
+                            payload: None,
+                        },
+                        crate::surface::SurfaceVariant {
+                            name: "Error".to_string(),
+                            payload: Some(bytes.clone()),
+                        },
+                    ],
+                },
             ),
         },
         SurfaceFunctionContract {
