@@ -90,10 +90,10 @@ fn websocket_lifecycle_is_validated() {
 
     let mut request_id = 0;
     for (k, v) in request {
-        if k == "id" {
-            if let SurfaceValue::U64(id) = v {
-                request_id = id;
-            }
+        if k == "id"
+            && let SurfaceValue::U64(id) = v
+        {
+            request_id = id;
         }
     }
     assert!(request_id > 0);
@@ -137,10 +137,10 @@ fn websocket_lifecycle_is_validated() {
                     if let SurfaceValue::I32(s) = v {
                         status = s;
                     }
-                } else if k == "msg" {
-                    if let SurfaceValue::Bytes(b) = v {
-                        msg_bytes = Some(b);
-                    }
+                } else if k == "msg"
+                    && let SurfaceValue::Bytes(b) = v
+                {
+                    msg_bytes = Some(b);
                 }
             }
             (status, msg_bytes.unwrap())
@@ -178,10 +178,10 @@ fn websocket_lifecycle_is_validated() {
                     if let SurfaceValue::I32(s) = v {
                         status = s;
                     }
-                } else if k == "msg" {
-                    if let SurfaceValue::Bytes(b) = v {
-                        msg_bytes = Some(b);
-                    }
+                } else if k == "msg"
+                    && let SurfaceValue::Bytes(b) = v
+                {
+                    msg_bytes = Some(b);
                 }
             }
             (status, msg_bytes.unwrap())
@@ -220,10 +220,8 @@ fn websocket_lifecycle_is_validated() {
                     if let SurfaceValue::I32(s) = v {
                         status = s;
                     }
-                } else if k == "msg" {
-                    if matches!(v, SurfaceValue::Null) {
-                        is_null = true;
-                    }
+                } else if k == "msg" && matches!(v, SurfaceValue::Null) {
+                    is_null = true;
                 }
             }
             (status, is_null)
@@ -282,10 +280,10 @@ fn websocket_transport_error_is_validated() {
 
     let mut request_id = 0;
     for (k, v) in request {
-        if k == "id" {
-            if let SurfaceValue::U64(id) = v {
-                request_id = id;
-            }
+        if k == "id"
+            && let SurfaceValue::U64(id) = v
+        {
+            request_id = id;
         }
     }
 
@@ -315,10 +313,10 @@ fn websocket_transport_error_is_validated() {
         SurfaceValue::Struct(fields) => {
             let mut status = 0;
             for (k, v) in fields {
-                if k == "status" {
-                    if let SurfaceValue::I32(s) = v {
-                        status = s;
-                    }
+                if k == "status"
+                    && let SurfaceValue::I32(s) = v
+                {
+                    status = s;
                 }
             }
             status
