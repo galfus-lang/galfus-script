@@ -1,7 +1,7 @@
 mod ownership_model;
 
 use crate::{PrimitiveType, TypeLayer};
-use galfus_core::{DiagnosticBag, NodeId, SymbolId, TypeId};
+use galfus_core::{DefId, DiagnosticBag, NodeId, SymbolId, TypeId};
 pub use ownership_model::*;
 use std::collections::HashMap;
 
@@ -171,6 +171,7 @@ impl ImportedConstraintMember {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportedConstraintSurface {
     name: String,
+    def_id: DefId,
     generic_parameters: Vec<ImportedType>,
     fields: Vec<ImportedConstraintMember>,
     functions: Vec<ImportedConstraintMember>,
@@ -179,12 +180,14 @@ pub struct ImportedConstraintSurface {
 impl ImportedConstraintSurface {
     pub fn new(
         name: String,
+        def_id: DefId,
         generic_parameters: Vec<ImportedType>,
         fields: Vec<ImportedConstraintMember>,
         functions: Vec<ImportedConstraintMember>,
     ) -> Self {
         Self {
             name,
+            def_id,
             generic_parameters,
             fields,
             functions,
@@ -193,6 +196,10 @@ impl ImportedConstraintSurface {
 
     pub fn name(&self) -> &str {
         self.name.as_str()
+    }
+
+    pub fn def_id(&self) -> DefId {
+        self.def_id
     }
 
     pub fn generic_parameter_count(&self) -> usize {
@@ -238,7 +245,7 @@ impl ImportedChoiceVariant {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportedChoiceSurface {
     name: String,
-    module_path: String,
+    pub def_id: DefId,
     variants: Vec<ImportedChoiceVariant>,
     generic_parameters: Vec<ImportedType>,
 }
@@ -246,13 +253,13 @@ pub struct ImportedChoiceSurface {
 impl ImportedChoiceSurface {
     pub fn new(
         name: String,
-        module_path: String,
+        def_id: DefId,
         variants: Vec<ImportedChoiceVariant>,
         generic_parameters: Vec<ImportedType>,
     ) -> Self {
         Self {
             name,
-            module_path,
+            def_id,
             variants,
             generic_parameters,
         }
@@ -262,8 +269,8 @@ impl ImportedChoiceSurface {
         self.name.as_str()
     }
 
-    pub fn module_path(&self) -> &str {
-        self.module_path.as_str()
+    pub fn def_id(&self) -> DefId {
+        self.def_id
     }
 
     pub fn variants(&self) -> &[ImportedChoiceVariant] {
@@ -292,6 +299,7 @@ pub enum ImportedStructFieldDefault {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportedStructFieldSurface {
     name: String,
+    def_id: DefId,
     ty: ImportedType,
     has_default: bool,
     default_value: Option<ImportedStructFieldDefault>,
@@ -300,12 +308,14 @@ pub struct ImportedStructFieldSurface {
 impl ImportedStructFieldSurface {
     pub fn new(
         name: String,
+        def_id: DefId,
         ty: ImportedType,
         has_default: bool,
         default_value: Option<ImportedStructFieldDefault>,
     ) -> Self {
         Self {
             name,
+            def_id,
             ty,
             has_default,
             default_value,
@@ -314,6 +324,10 @@ impl ImportedStructFieldSurface {
 
     pub fn name(&self) -> &str {
         self.name.as_str()
+    }
+
+    pub fn def_id(&self) -> DefId {
+        self.def_id
     }
 
     pub fn ty(&self) -> &ImportedType {
@@ -371,6 +385,7 @@ pub struct ImportedSurfaceTypes {
     path_constraints: HashMap<NodeId, ImportedConstraintSurface>,
     symbol_choices: HashMap<SymbolId, ImportedChoiceSurface>,
     path_choices: HashMap<NodeId, ImportedChoiceSurface>,
+    namespace_choices: HashMap<(SymbolId, String), ImportedChoiceSurface>,
     symbol_enum_values: HashMap<SymbolId, Vec<(String, i64)>>,
 }
 
@@ -417,6 +432,10 @@ impl ImportedSurfaceTypes {
 
     pub fn path_choices(&self) -> &HashMap<NodeId, ImportedChoiceSurface> {
         &self.path_choices
+    }
+
+    pub fn namespace_choices(&self) -> &HashMap<(SymbolId, String), ImportedChoiceSurface> {
+        &self.namespace_choices
     }
 
     pub fn symbol_enum_values(&self) -> &HashMap<SymbolId, Vec<(String, i64)>> {
@@ -475,6 +494,15 @@ impl ImportedSurfaceTypes {
         self.path_choices.insert(node, choice);
     }
 
+    pub fn insert_namespace_choice(
+        &mut self,
+        namespace: SymbolId,
+        name: String,
+        choice: ImportedChoiceSurface,
+    ) {
+        self.namespace_choices.insert((namespace, name), choice);
+    }
+
     pub fn insert_symbol_enum_values(&mut self, symbol: SymbolId, values: Vec<(String, i64)>) {
         self.symbol_enum_values.insert(symbol, values);
     }
@@ -492,13 +520,14 @@ impl ImportedSurfaceTypes {
         self.symbol_enum_values.extend(other.symbol_enum_values);
         self.symbol_choices.extend(other.symbol_choices);
         self.path_choices.extend(other.path_choices);
+        self.namespace_choices.extend(other.namespace_choices);
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct LoweredImportedChoice {
     pub name: String,
-    pub module_path: String,
+    pub def_id: DefId,
     pub variants: Vec<LoweredImportedChoiceVariant>,
     pub generic_parameters: Vec<SymbolId>,
 }
@@ -516,6 +545,7 @@ pub struct TypeCheckResult {
     pub(super) ownership_metadata: OwnershipMetadata,
     pub imported_symbol_choices: HashMap<SymbolId, LoweredImportedChoice>,
     pub imported_path_choices: HashMap<NodeId, LoweredImportedChoice>,
+    pub imported_namespace_choices: HashMap<(SymbolId, String), LoweredImportedChoice>,
     pub imported_struct_fields: HashMap<SymbolId, Vec<ImportedStructField>>,
     pub imported_symbol_enum_values: HashMap<SymbolId, Vec<(String, i64)>>,
     pub(super) range_desugars: HashMap<NodeId, RangeDesugarTarget>,
@@ -531,6 +561,7 @@ pub enum RangeDesugarTarget {
 pub(super) struct TypeCheckSupplementalData {
     pub(super) imported_symbol_choices: HashMap<SymbolId, LoweredImportedChoice>,
     pub(super) imported_path_choices: HashMap<NodeId, LoweredImportedChoice>,
+    pub(super) imported_namespace_choices: HashMap<(SymbolId, String), LoweredImportedChoice>,
     pub(super) imported_struct_fields: HashMap<SymbolId, Vec<ImportedStructField>>,
     pub(super) imported_symbol_enum_values: HashMap<SymbolId, Vec<(String, i64)>>,
     pub(super) range_desugars: HashMap<NodeId, RangeDesugarTarget>,
@@ -558,6 +589,7 @@ impl TypeCheckResult {
             ownership_metadata,
             imported_symbol_choices: supplemental.imported_symbol_choices,
             imported_path_choices: supplemental.imported_path_choices,
+            imported_namespace_choices: supplemental.imported_namespace_choices,
             imported_struct_fields: supplemental.imported_struct_fields,
             imported_symbol_enum_values: supplemental.imported_symbol_enum_values,
             range_desugars: supplemental.range_desugars,

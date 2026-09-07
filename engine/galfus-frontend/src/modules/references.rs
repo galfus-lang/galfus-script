@@ -141,11 +141,9 @@ impl FrontendSession {
                 imported_types.insert_path_constraint(path.node, imported_constraint);
             }
 
-            if let Some(imported_choice) = surfaces[target_index].imported_choice_for_export(
-                exported_name.as_str(),
-                Some(import.local_symbol),
-                self.modules[target_index].path().as_str(),
-            ) {
+            if let Some(imported_choice) = surfaces[target_index]
+                .imported_choice_for_export(exported_name.as_str(), Some(import.local_symbol))
+            {
                 imported_types.insert_path_choice(path.node, imported_choice);
             }
         }

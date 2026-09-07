@@ -1,7 +1,7 @@
 use super::*;
 use crate::modules::{SemanticImportKind, SemanticRoot, SemanticRootKind};
 use galfus_contract::CapabilityCatalog;
-use galfus_core::SourceId;
+use galfus_core::{DefId, SourceId};
 use std::sync::Arc;
 
 fn io_catalog() -> Arc<CapabilityCatalog> {
@@ -137,6 +137,105 @@ fn check_uses_the_module_ids_provided_by_the_host() {
             edge.from() == ModuleId::new(41) && edge.to() == Some(ModuleId::new(7))
         })
     );
+}
+
+#[test]
+fn check_preserves_choice_def_id_across_a_reexport() {
+    let stream = SourceFile::new(
+        SourceId::new(1),
+        "src/stream.gfs".to_string(),
+        "export choice ReadResult<T> { Data(T), End }".to_string(),
+    );
+    let mock = SourceFile::new(
+        SourceId::new(2),
+        "src/mock.gfs".to_string(),
+        "export import { ReadResult } from './stream'".to_string(),
+    );
+    let consumer = SourceFile::new(
+        SourceId::new(3),
+        "src/main.gfs".to_string(),
+        r#"
+            import { ReadResult } from './mock'
+
+            fn main(value: ReadResult<i32>): i32 {
+                return match value {
+                    ReadResult::Data(item) => item,
+                    ReadResult::End => 0,
+                }
+            }
+        "#
+        .to_string(),
+    );
+    let sources = [
+        FrontendSource {
+            module_id: ModuleId::new(41),
+            path: path("src/main.gfs"),
+            source: &consumer,
+            kind: FrontendModuleKind::Standard,
+        },
+        FrontendSource {
+            module_id: ModuleId::new(13),
+            path: path("src/mock.gfs"),
+            source: &mock,
+            kind: FrontendModuleKind::Standard,
+        },
+        FrontendSource {
+            module_id: ModuleId::new(7),
+            path: path("src/stream.gfs"),
+            source: &stream,
+            kind: FrontendModuleKind::Standard,
+        },
+    ];
+    let mut session = FrontendSession::new();
+
+    let report = session.check(FrontendUpdate {
+        catalog: io_catalog(),
+        source_revision: Revision::new(1),
+        sources: &sources,
+        removed_modules: &[],
+        roots: &FrontendRoots::default(),
+    });
+
+    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+
+    let stream_module = session
+        .modules()
+        .iter()
+        .find(|module| module.id() == ModuleId::new(7))
+        .expect("stream module must be available");
+    let stream_symbol = stream_module
+        .graph()
+        .resolution()
+        .expect("stream module must resolve")
+        .exports()
+        .iter()
+        .find(|export| export.name() == "ReadResult")
+        .expect("ReadResult must be exported")
+        .symbol();
+
+    let consumer_module = session
+        .modules()
+        .iter()
+        .find(|module| module.id() == ModuleId::new(41))
+        .expect("consumer module must be available");
+    let consumer_resolution = consumer_module
+        .graph()
+        .resolution()
+        .expect("consumer module must resolve");
+    let imported_symbol = consumer_resolution
+        .imports()
+        .iter()
+        .find(|import| import.local_name() == "ReadResult")
+        .expect("ReadResult must be imported")
+        .local_symbol();
+    let choice = consumer_module
+        .type_result()
+        .and_then(|result| result.imported_symbol_choices.get(&imported_symbol))
+        .expect("consumer import must retain choice metadata");
+
+    assert_eq!(choice.def_id, DefId::new(ModuleId::new(7), stream_symbol));
+    assert_eq!(choice.variants.len(), 2);
+    assert_eq!(choice.generic_parameters.len(), 1);
 }
 
 #[test]

@@ -574,7 +574,13 @@ impl FrontendSession {
             .iter()
             .zip(baseline_results.iter())
             .map(|(module, result)| {
-                build_module_surface(module.source(), module.graph(), result, &self.string_table)
+                build_module_surface(
+                    module.id(),
+                    module.source(),
+                    module.graph(),
+                    result,
+                    &self.string_table,
+                )
             })
             .collect::<Vec<_>>();
 
@@ -614,6 +620,7 @@ impl FrontendSession {
                 .zip(results.iter())
                 .map(|(module, result)| {
                     build_module_surface(
+                        module.id(),
                         module.source(),
                         module.graph(),
                         result,
@@ -682,11 +689,9 @@ impl FrontendSession {
                 imported_types.insert_symbol_constraint(import.local_symbol, imported_constraint);
             }
 
-            if let Some(imported_choice) = surfaces[target_index].imported_choice_for_export(
-                imported_name,
-                Some(import.local_symbol),
-                self.modules[target_index].path().as_str(),
-            ) {
+            if let Some(imported_choice) = surfaces[target_index]
+                .imported_choice_for_export(imported_name, Some(import.local_symbol))
+            {
                 imported_types.insert_symbol_choice(import.local_symbol, imported_choice);
             }
 
@@ -694,7 +699,6 @@ impl FrontendSession {
                 &surfaces[target_index],
                 import.local_symbol,
                 imported_name,
-                self.modules[target_index].path().as_str(),
             ));
         }
 

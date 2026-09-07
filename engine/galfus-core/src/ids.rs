@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
 )]
@@ -19,6 +22,28 @@ impl crate::id_manager::RawId for ModuleId {
     }
     fn raw(&self) -> u32 {
         self.0
+    }
+}
+
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct DefId {
+    pub module: ModuleId,
+    pub local: SymbolId,
+}
+
+impl DefId {
+    pub const fn new(module: ModuleId, local: SymbolId) -> Self {
+        Self { module, local }
+    }
+
+    /// Creates an identity for a definition whose owning module is not known yet.
+    ///
+    /// The frontend must promote this value to the canonical module identity before
+    /// it crosses a module boundary.
+    pub const fn local(local: SymbolId) -> Self {
+        Self::new(ModuleId::new(0), local)
     }
 }
 
@@ -290,7 +315,9 @@ impl NodeId {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct SymbolId(u32);
 
 impl SymbolId {

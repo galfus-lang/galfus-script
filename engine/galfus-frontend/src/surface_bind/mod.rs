@@ -219,19 +219,19 @@ impl ModuleSurface {
         &self,
         name: &str,
         namespace: Option<SymbolId>,
-        module_path: &str,
     ) -> Option<ImportedChoiceSurface> {
         let export = self.export(name)?;
 
-        if export.kind() != SymbolKind::Choice {
+        if !export.has_choice_surface() {
             return None;
         }
 
-        Some(export.imported_choice_surface(namespace, module_path))
+        Some(export.imported_choice_surface(namespace))
     }
 }
 
 pub fn build_module_surface(
+    module_id: galfus_core::ModuleId,
     source: &galfus_core::SourceFile,
     graph: &ModuleAst,
     type_result: &TypeCheckResult,
@@ -256,14 +256,15 @@ pub fn build_module_surface(
                     .and_then(|ty| transport_type(resolution, type_result, string_table, ty))
             };
 
-            let members = surface_members_for_export(
+            let mut members = surface_members_for_export(
                 source,
                 graph,
                 type_result,
                 string_table,
                 export.symbol(),
             );
-            let generic_parameters = surface_generic_parameters(
+
+            let mut generic_parameters = surface_generic_parameters(
                 graph,
                 export.symbol(),
                 export.kind(),
@@ -272,8 +273,41 @@ pub fn build_module_surface(
                 string_table,
             );
 
-            ModuleSurfaceExport::with_members(
+            let mut choice_def_id = None;
+            let def_id = if export.kind() == SymbolKind::ImportBinding {
+                if let Some(choice) = type_result.imported_symbol_choices.get(&export.symbol()) {
+                    generic_parameters = choice
+                        .generic_parameters
+                        .iter()
+                        .copied()
+                        .map(|symbol| ImportedType::GenericParameter { symbol })
+                        .collect();
+                    for variant in &choice.variants {
+                        let payload_types = variant
+                            .payload_types
+                            .iter()
+                            .filter_map(|ty| {
+                                transport_type(resolution, type_result, string_table, *ty)
+                            })
+                            .collect();
+                        members.push(ModuleSurfaceMember::with_payload(
+                            variant.name.clone(),
+                            SymbolKind::ChoiceVariant,
+                            payload_types,
+                        ));
+                    }
+                    choice_def_id = Some(choice.def_id);
+                    choice.def_id
+                } else {
+                    galfus_core::DefId::new(module_id, export.symbol())
+                }
+            } else {
+                galfus_core::DefId::new(module_id, export.symbol())
+            };
+
+            let export = ModuleSurfaceExport::with_members(
                 export.name().to_string(),
+                def_id,
                 export.kind(),
                 ty,
                 members,
@@ -284,7 +318,13 @@ pub fn build_module_surface(
                 type_result,
                 string_table,
                 export.symbol(),
-            ))
+            ));
+
+            if let Some(def_id) = choice_def_id {
+                export.with_choice_def_id(def_id)
+            } else {
+                export
+            }
         })
         .collect();
 
@@ -298,6 +338,14 @@ pub fn imported_surface_types_for_namespace(
     let mut imported_types = ImportedSurfaceTypes::new();
 
     for export in surface.exports() {
+        if export.has_choice_surface() {
+            imported_types.insert_namespace_choice(
+                namespace,
+                export.name().to_string(),
+                export.imported_choice_surface(Some(namespace)),
+            );
+        }
+
         if let Some(ty) = surface.imported_path_type_for_export(namespace, export.name()) {
             imported_types
                 .insert_member_type(ImportedMemberKey::new(namespace, "", export.name()), ty);
@@ -324,7 +372,6 @@ pub fn imported_surface_types_for_named_export(
     surface: &ModuleSurface,
     local_symbol: SymbolId,
     name: &str,
-    module_path: &str,
 ) -> ImportedSurfaceTypes {
     let mut imported_types = ImportedSurfaceTypes::new();
     let Some(export) = surface.export(name) else {
@@ -340,11 +387,9 @@ pub fn imported_surface_types_for_named_export(
             .insert_symbol_constraint(local_symbol, export.imported_constraint_surface(None));
     }
 
-    if export.kind() == SymbolKind::Choice {
-        imported_types.insert_symbol_choice(
-            local_symbol,
-            export.imported_choice_surface(None, module_path),
-        );
+    if export.has_choice_surface() {
+        let choice = export.imported_choice_surface(None);
+        imported_types.insert_symbol_choice(local_symbol, choice);
     }
     if export.kind() == SymbolKind::Enum {
         imported_types.insert_symbol_enum_values(local_symbol, export.imported_enum_values());
@@ -370,6 +415,7 @@ pub fn imported_surface_types_for_named_export(
                 member.ty().cloned().map(|ty| {
                     ImportedStructFieldSurface::new(
                         member.name().to_string(),
+                        export.def_id,
                         ty,
                         member.has_default(),
                         member.default_value(),
@@ -419,6 +465,7 @@ pub fn imported_surface_types_for_named_export(
                 member.ty().cloned().map(|ty| {
                     ImportedStructFieldSurface::new(
                         member.name().to_string(),
+                        struct_export.def_id,
                         ty,
                         member.has_default(),
                         member.default_value(),

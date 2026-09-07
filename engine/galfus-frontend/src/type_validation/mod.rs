@@ -55,6 +55,7 @@ struct DeclarationTypeChecker<'a> {
     imported_path_constraints: HashMap<NodeId, LoweredImportedConstraint>,
     imported_symbol_choices: HashMap<SymbolId, LoweredImportedChoice>,
     imported_path_choices: HashMap<NodeId, LoweredImportedChoice>,
+    imported_namespace_choices: HashMap<(SymbolId, String), LoweredImportedChoice>,
     imported_symbol_enum_values: HashMap<SymbolId, Vec<(String, i64)>>,
     active_type_substitutions: Vec<HashMap<SymbolId, TypeId>>,
     imported_generic_params: HashMap<SymbolId, SymbolId>,
@@ -101,6 +102,7 @@ impl<'a> DeclarationTypeChecker<'a> {
             imported_path_constraints: HashMap::new(),
             imported_symbol_choices: HashMap::new(),
             imported_path_choices: HashMap::new(),
+            imported_namespace_choices: HashMap::new(),
             imported_symbol_enum_values: HashMap::new(),
             active_type_substitutions: Vec::new(),
             imported_generic_params: HashMap::new(),
@@ -133,6 +135,7 @@ impl<'a> DeclarationTypeChecker<'a> {
             imported_path_constraints: HashMap::new(),
             imported_symbol_choices: previous_result.imported_symbol_choices,
             imported_path_choices: previous_result.imported_path_choices,
+            imported_namespace_choices: previous_result.imported_namespace_choices,
             imported_symbol_enum_values: previous_result.imported_symbol_enum_values,
             active_type_substitutions: Vec::new(),
             imported_generic_params: HashMap::new(),
@@ -152,6 +155,7 @@ impl<'a> DeclarationTypeChecker<'a> {
             TypeCheckSupplementalData {
                 imported_symbol_choices: self.imported_symbol_choices,
                 imported_path_choices: self.imported_path_choices,
+                imported_namespace_choices: self.imported_namespace_choices,
                 imported_struct_fields: self.imported_struct_fields,
                 imported_symbol_enum_values: self.imported_symbol_enum_values,
                 range_desugars: self.range_desugars,
@@ -382,6 +386,17 @@ impl<'a> DeclarationTypeChecker<'a> {
         }
     }
 
+    fn bind_imported_namespace_choices(
+        &mut self,
+        imported_choices: &HashMap<(SymbolId, String), ImportedChoiceSurface>,
+    ) {
+        for ((namespace, name), imported_choice) in imported_choices {
+            let choice = self.lower_imported_choice(imported_choice);
+            self.imported_namespace_choices
+                .insert((*namespace, name.clone()), choice);
+        }
+    }
+
     fn bind_imported_symbol_enum_values(
         &mut self,
         imported_values: &HashMap<SymbolId, Vec<(String, i64)>>,
@@ -402,7 +417,7 @@ impl<'a> DeclarationTypeChecker<'a> {
 
         LoweredImportedChoice {
             name: imported_choice.name().to_string(),
-            module_path: imported_choice.module_path().to_string(),
+            def_id: imported_choice.def_id(),
             generic_parameters,
             variants: imported_choice
                 .variants()
@@ -631,6 +646,7 @@ pub fn check_definition_types_with_surfaces(
     checker.bind_imported_path_constraints(imported_types.path_constraints());
     checker.bind_imported_symbol_choices(imported_types.symbol_choices());
     checker.bind_imported_path_choices(imported_types.path_choices());
+    checker.bind_imported_namespace_choices(imported_types.namespace_choices());
     checker.bind_imported_symbol_enum_values(imported_types.symbol_enum_values());
     checker.check_definitions();
     checker.into_result()

@@ -2,24 +2,28 @@ use crate::{
     ImportedChoiceSurface, ImportedChoiceVariant, ImportedConstraintMember,
     ImportedConstraintSurface, ImportedStructFieldDefault, ImportedType, SymbolKind,
 };
+use galfus_core::DefId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModuleSurfaceExport {
     name: String,
+    pub def_id: DefId,
     kind: SymbolKind,
     ty: Option<ImportedType>,
     members: Vec<ModuleSurfaceMember>,
     generic_parameters: Vec<ImportedType>,
     satisfied_constraints: Vec<ImportedType>,
+    choice_def_id: Option<DefId>,
 }
 
 impl ModuleSurfaceExport {
-    pub fn new(name: String, kind: SymbolKind, ty: Option<ImportedType>) -> Self {
-        Self::with_members(name, kind, ty, Vec::new(), Vec::new())
+    pub fn new(name: String, def_id: DefId, kind: SymbolKind, ty: Option<ImportedType>) -> Self {
+        Self::with_members(name, def_id, kind, ty, Vec::new(), Vec::new())
     }
 
     pub fn with_members(
         name: String,
+        def_id: DefId,
         kind: SymbolKind,
         ty: Option<ImportedType>,
         members: Vec<ModuleSurfaceMember>,
@@ -27,11 +31,13 @@ impl ModuleSurfaceExport {
     ) -> Self {
         Self {
             name,
+            def_id,
             kind,
             ty,
             members,
             generic_parameters,
             satisfied_constraints: Vec::new(),
+            choice_def_id: None,
         }
     }
 
@@ -69,6 +75,15 @@ impl ModuleSurfaceExport {
     ) -> Self {
         self.satisfied_constraints = satisfied_constraints;
         self
+    }
+
+    pub(crate) fn with_choice_def_id(mut self, def_id: DefId) -> Self {
+        self.choice_def_id = Some(def_id);
+        self
+    }
+
+    pub(crate) fn has_choice_surface(&self) -> bool {
+        self.kind == SymbolKind::Choice || self.choice_def_id.is_some()
     }
 
     pub(super) fn imported_constraint_surface(
@@ -115,6 +130,7 @@ impl ModuleSurfaceExport {
 
         ImportedConstraintSurface::new(
             self.name.clone(),
+            self.def_id,
             self.generic_parameters
                 .iter()
                 .map(|p| {
@@ -133,7 +149,6 @@ impl ModuleSurfaceExport {
     pub(super) fn imported_choice_surface(
         &self,
         namespace: Option<galfus_core::SymbolId>,
-        module_path: &str,
     ) -> ImportedChoiceSurface {
         let variants = self
             .members
@@ -162,7 +177,7 @@ impl ModuleSurfaceExport {
 
         ImportedChoiceSurface::new(
             self.name.clone(),
-            module_path.to_string(),
+            self.choice_def_id.unwrap_or(self.def_id),
             variants,
             self.generic_parameters
                 .iter()

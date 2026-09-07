@@ -94,6 +94,13 @@ impl<'a> Resolver<'a> {
             return;
         };
 
+        if node.kind() == SyntaxNodeKind::ExportItem {
+            if let Some(inner) = node.first_child() {
+                self.declare_import_item(inner, scope);
+            }
+            return;
+        }
+
         if node.kind() != SyntaxNodeKind::ImportItem {
             return;
         }

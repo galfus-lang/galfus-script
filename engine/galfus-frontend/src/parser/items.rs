@@ -100,6 +100,8 @@ impl Parser {
             self.parse_constraint_item()?
         } else if self.at(&TokenKind::Type) {
             self.parse_type_alias_item()?
+        } else if self.at(&TokenKind::Import) {
+            self.parse_import_item()?
         } else {
             let found = self.bump();
 
