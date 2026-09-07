@@ -1,7 +1,7 @@
 use crate::{
     CURRENT_BOUNDARY_ABI_VERSION, ProviderDescriptor, ProviderFunctionSignature,
-    ProviderModuleDescriptor, SurfaceContract, SurfaceDirection, SurfaceField,
-    SurfaceFunctionContract, SurfaceSchema, provider_schema_fingerprint,
+    ProviderModuleDescriptor, SurfaceContract, SurfaceDirection, SurfaceFunctionContract,
+    SurfaceSchema, provider_schema_fingerprint,
 };
 
 pub const ASYNC_SOURCE: &str = include_str!("../builtins/internals/async.gfs");
@@ -616,14 +616,28 @@ pub fn std_http_provider_descriptor() -> ProviderDescriptor {
             boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
             exports: vec![
                 ProviderFunctionSignature {
-                    name: "http_request".to_string(),
+                    name: "http_request_open".to_string(),
                     parameter_types: vec![
                         bytes.clone(),
                         bytes.clone(),
                         SurfaceSchema::List(Box::new(header.clone())),
-                        SurfaceSchema::Optional(Box::new(bytes.clone())),
                     ],
+                    return_type: SurfaceSchema::U64,
+                },
+                ProviderFunctionSignature {
+                    name: "http_request_write".to_string(),
+                    parameter_types: vec![SurfaceSchema::U64, bytes.clone()],
+                    return_type: SurfaceSchema::Bool,
+                },
+                ProviderFunctionSignature {
+                    name: "http_request_finish".to_string(),
+                    parameter_types: vec![SurfaceSchema::U64],
                     return_type: SurfaceSchema::Optional(Box::new(response.clone())),
+                },
+                ProviderFunctionSignature {
+                    name: "http_request_abort".to_string(),
+                    parameter_types: vec![SurfaceSchema::U64],
+                    return_type: SurfaceSchema::Bool,
                 },
                 ProviderFunctionSignature {
                     name: "http_response_read".to_string(),
@@ -638,79 +652,89 @@ pub fn std_http_provider_descriptor() -> ProviderDescriptor {
             ],
             surface_contracts: vec![
                 SurfaceFunctionContract {
-                    provider_operation: "http_request".to_string(),
-                    bridge_symbol: "__provider_http_request".to_string(),
+                    provider_operation: "http_request_open".to_string(),
+                    bridge_symbol: "__provider_http_request_open".to_string(),
                     parameters: vec![
                         SurfaceContract::new(
-                            "std/http::__provider_http_request:method",
+                            "std/http::__provider_http_request_open:method",
                             1,
                             SurfaceDirection::ToProvider,
                             SurfaceSchema::Bytes,
                         ),
                         SurfaceContract::new(
-                            "std/http::__provider_http_request:url",
+                            "std/http::__provider_http_request_open:url",
                             1,
                             SurfaceDirection::ToProvider,
                             SurfaceSchema::Bytes,
                         ),
                         SurfaceContract::new(
-                            "std/http::__provider_http_request:headers",
+                            "std/http::__provider_http_request_open:headers",
                             1,
                             SurfaceDirection::ToProvider,
-                            SurfaceSchema::List(Box::new(SurfaceSchema::Struct {
-                                name: "Header".to_string(),
-                                fields: vec![
-                                    SurfaceField {
-                                        name: "name".to_string(),
-                                        schema: SurfaceSchema::Bytes,
-                                    },
-                                    SurfaceField {
-                                        name: "value".to_string(),
-                                        schema: SurfaceSchema::Bytes,
-                                    },
-                                ],
-                            })),
-                        ),
-                        SurfaceContract::new(
-                            "std/http::__provider_http_request:body",
-                            1,
-                            SurfaceDirection::ToProvider,
-                            SurfaceSchema::Optional(Box::new(SurfaceSchema::Bytes)),
+                            SurfaceSchema::List(Box::new(header.clone())),
                         ),
                     ],
                     result: SurfaceContract::new(
-                        "std/http::__provider_http_request:return",
+                        "std/http::__provider_http_request_open:return",
                         1,
                         SurfaceDirection::FromProvider,
-                        SurfaceSchema::Optional(Box::new(SurfaceSchema::Struct {
-                            name: "ProviderResponse".to_string(),
-                            fields: vec![
-                                SurfaceField {
-                                    name: "status".to_string(),
-                                    schema: SurfaceSchema::I32,
-                                },
-                                SurfaceField {
-                                    name: "headers".to_string(),
-                                    schema: SurfaceSchema::List(Box::new(SurfaceSchema::Struct {
-                                        name: "Header".to_string(),
-                                        fields: vec![
-                                            SurfaceField {
-                                                name: "name".to_string(),
-                                                schema: SurfaceSchema::Bytes,
-                                            },
-                                            SurfaceField {
-                                                name: "value".to_string(),
-                                                schema: SurfaceSchema::Bytes,
-                                            },
-                                        ],
-                                    })),
-                                },
-                                SurfaceField {
-                                    name: "body".to_string(),
-                                    schema: SurfaceSchema::U64,
-                                },
-                            ],
-                        })),
+                        SurfaceSchema::U64,
+                    ),
+                },
+                SurfaceFunctionContract {
+                    provider_operation: "http_request_write".to_string(),
+                    bridge_symbol: "__provider_http_request_write".to_string(),
+                    parameters: vec![
+                        SurfaceContract::new(
+                            "std/http::__provider_http_request_write:req_id",
+                            1,
+                            SurfaceDirection::ToProvider,
+                            SurfaceSchema::U64,
+                        ),
+                        SurfaceContract::new(
+                            "std/http::__provider_http_request_write:chunk",
+                            1,
+                            SurfaceDirection::ToProvider,
+                            SurfaceSchema::Bytes,
+                        ),
+                    ],
+                    result: SurfaceContract::new(
+                        "std/http::__provider_http_request_write:return",
+                        1,
+                        SurfaceDirection::FromProvider,
+                        SurfaceSchema::Bool,
+                    ),
+                },
+                SurfaceFunctionContract {
+                    provider_operation: "http_request_finish".to_string(),
+                    bridge_symbol: "__provider_http_request_finish".to_string(),
+                    parameters: vec![SurfaceContract::new(
+                        "std/http::__provider_http_request_finish:req_id",
+                        1,
+                        SurfaceDirection::ToProvider,
+                        SurfaceSchema::U64,
+                    )],
+                    result: SurfaceContract::new(
+                        "std/http::__provider_http_request_finish:return",
+                        1,
+                        SurfaceDirection::FromProvider,
+                        SurfaceSchema::Optional(Box::new(response.clone())),
+                    ),
+                },
+                SurfaceFunctionContract {
+                    provider_operation: "http_request_abort".to_string(),
+                    bridge_symbol: "__provider_http_request_abort".to_string(),
+                    parameters: vec![SurfaceContract::new(
+                        "std/http::__provider_http_request_abort:req_id",
+                        1,
+                        SurfaceDirection::ToProvider,
+                        SurfaceSchema::U64,
+                    )],
+                    result: SurfaceContract::new(
+                        "std/http::__provider_http_request_abort:return",
+                        1,
+                        SurfaceDirection::FromProvider,
+                        SurfaceSchema::Bool,
                     ),
                 },
                 SurfaceFunctionContract {
@@ -1012,80 +1036,11 @@ pub fn std_server_provider_descriptor() -> ProviderDescriptor {
 fn server_surface_contracts() -> Vec<SurfaceFunctionContract> {
     let bytes = SurfaceSchema::Bytes;
     let header = SurfaceSchema::Tuple(vec![bytes.clone(), bytes.clone()]);
-    let url = SurfaceSchema::Struct {
-        name: "URL".to_string(),
-        fields: vec![
-            SurfaceField {
-                name: "href".to_string(),
-                schema: bytes.clone(),
-            },
-            SurfaceField {
-                name: "protocol".to_string(),
-                schema: bytes.clone(),
-            },
-            SurfaceField {
-                name: "host".to_string(),
-                schema: bytes.clone(),
-            },
-            SurfaceField {
-                name: "hostname".to_string(),
-                schema: bytes.clone(),
-            },
-            SurfaceField {
-                name: "pathname".to_string(),
-                schema: bytes.clone(),
-            },
-            SurfaceField {
-                name: "search".to_string(),
-                schema: bytes.clone(),
-            },
-            SurfaceField {
-                name: "hash".to_string(),
-                schema: bytes.clone(),
-            },
-            SurfaceField {
-                name: "origin".to_string(),
-                schema: bytes.clone(),
-            },
-        ],
+    let request = SurfaceSchema::Handle {
+        resource: "std/server.gfs::ProviderRequest".to_string(),
     };
-    let request = SurfaceSchema::Struct {
-        name: "ProviderRequest".to_string(),
-        fields: vec![
-            SurfaceField {
-                name: "id".to_string(),
-                schema: SurfaceSchema::U64,
-            },
-            SurfaceField {
-                name: "url".to_string(),
-                schema: url,
-            },
-            SurfaceField {
-                name: "method".to_string(),
-                schema: bytes.clone(),
-            },
-            SurfaceField {
-                name: "headers".to_string(),
-                schema: SurfaceSchema::List(Box::new(header.clone())),
-            },
-            SurfaceField {
-                name: "body".to_string(),
-                schema: SurfaceSchema::U64,
-            },
-        ],
-    };
-    let ws_message = SurfaceSchema::Struct {
-        name: "WsMessage".to_string(),
-        fields: vec![
-            SurfaceField {
-                name: "status".to_string(),
-                schema: SurfaceSchema::I32,
-            },
-            SurfaceField {
-                name: "msg".to_string(),
-                schema: SurfaceSchema::Optional(Box::new(bytes.clone())),
-            },
-        ],
+    let ws_message = SurfaceSchema::Handle {
+        resource: "std/server.gfs::WsMessage".to_string(),
     };
     vec![
         SurfaceFunctionContract {
@@ -1183,14 +1138,12 @@ fn server_surface_contracts() -> Vec<SurfaceFunctionContract> {
         SurfaceFunctionContract {
             provider_operation: "server_response_finish".to_string(),
             bridge_symbol: "__provider_server_response_finish".to_string(),
-            parameters: vec![
-                SurfaceContract::new(
-                    "std/server::__provider_server_response_finish:req_id",
-                    1,
-                    SurfaceDirection::ToProvider,
-                    SurfaceSchema::U64,
-                ),
-            ],
+            parameters: vec![SurfaceContract::new(
+                "std/server::__provider_server_response_finish:req_id",
+                1,
+                SurfaceDirection::ToProvider,
+                SurfaceSchema::U64,
+            )],
             result: SurfaceContract::new(
                 "std/server::__provider_server_response_finish:return",
                 1,
@@ -1201,14 +1154,12 @@ fn server_surface_contracts() -> Vec<SurfaceFunctionContract> {
         SurfaceFunctionContract {
             provider_operation: "server_response_abort".to_string(),
             bridge_symbol: "__provider_server_response_abort".to_string(),
-            parameters: vec![
-                SurfaceContract::new(
-                    "std/server::__provider_server_response_abort:req_id",
-                    1,
-                    SurfaceDirection::ToProvider,
-                    SurfaceSchema::U64,
-                ),
-            ],
+            parameters: vec![SurfaceContract::new(
+                "std/server::__provider_server_response_abort:req_id",
+                1,
+                SurfaceDirection::ToProvider,
+                SurfaceSchema::U64,
+            )],
             result: SurfaceContract::new(
                 "std/server::__provider_server_response_abort:return",
                 1,

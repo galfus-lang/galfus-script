@@ -29,7 +29,6 @@ export fn main(_args: [[u8]]): i32 {
 
             if equals(req.url.pathname, "/echo") {
                 if equals(req.method, "POST") {
-                    const collected = await ByteBuffer::create()::collect(req.body)
                     return new(Response) {
                         status: 201,
                         headers: [("Content-Type", "application/octet-stream"), ("X-Server-Test", "echo")],

@@ -22,6 +22,7 @@ features = [
     "Worker",
     "MessageEvent",
     "console",
+    "TransformStream",
     "ReadableStream",
     "ReadableStreamDefaultReader",
     "WritableStream",

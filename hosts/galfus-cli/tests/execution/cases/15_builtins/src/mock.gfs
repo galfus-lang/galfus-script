@@ -1,0 +1,33 @@
+import { ReadStreamResult, ReadStream } from "std/stream"
+
+export struct ScriptedStream satisfies ReadStream<[u8]> {
+  chunks: [ReadStreamResult<[u8]>],
+  index: i32,
+  cancelled: bool
+}
+
+export fn ScriptedStream::create(chunks: [ReadStreamResult<[u8]>]): ScriptedStream {
+  return new(ScriptedStream) {
+    chunks: chunks,
+    index: 0,
+    cancelled: false
+  }
+}
+
+export fn(async) ScriptedStream::next(self): ReadStreamResult<[u8]> {
+  if self.cancelled { return ReadStreamResult::End }
+  if self.index >= self.chunks.length { return ReadStreamResult::End }
+  const chunk = self.chunks[self.index]
+  self.index += 1
+  instanceof chunk {
+    ReadStreamResult<[u8]> c { return c },
+    null { return ReadStreamResult::End }
+  }
+  return ReadStreamResult::End
+}
+
+export fn(async) ScriptedStream::cancel(self): null {
+  self.cancelled = true
+  return null
+}
+

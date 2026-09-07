@@ -1,4 +1,11 @@
-import { ReadStream, ReadStreamResult } from "std/stream"
+import { ReadStream, ReadStreamResult , WriteStream, WriteStreamResult } from "std/stream"
+
+fn(async) __provider_http_request_open(method: [u8], url: [u8], headers: [Header]): u64
+fn(async) __provider_http_request_write(req_id: u64, chunk: [u8]): bool
+fn(async) __provider_http_request_finish(req_id: u64): ProviderResponse | null
+fn(async) __provider_http_request_abort(req_id: u64): bool
+fn(async) __provider_http_response_read(body: u64, max_bytes: u32): [u8] | null
+fn(async) __provider_http_response_close(body: u64): bool
 
 export struct Header {
     name: [u8],
@@ -22,9 +29,6 @@ export struct HttpBody satisfies ReadStream<[u8]> {
     closed: bool,
 }
 
-fn(async) __provider_http_request(method: [u8], url: [u8], headers: [Header], body: [u8] | null): ProviderResponse | null
-fn(async) __provider_http_response_read(body: u64, max_bytes: u32): [u8] | null
-fn(async) __provider_http_response_close(body: u64): bool
 
 export fn(async) HttpBody::next(self): ReadStreamResult<[u8]> {
     if self.closed {
@@ -51,16 +55,86 @@ export fn(async) HttpBody::cancel(self): null {
 }
 
 export fn(async) request(method: [u8], url: [u8], headers: [Header] = [], body: [u8] | null = null): Response | null {
-    const raw = await __provider_http_request(method, url, headers, body)
+    const req_id = await __provider_http_request_open(method, url, headers)
+    instanceof body {
+        null {},
+        [u8] b {
+            const ok = await __provider_http_request_write(req_id, b)
+            if !ok {
+                await __provider_http_request_abort(req_id)
+                return null
+            }
+        }
+    }
+    
+    const raw = await __provider_http_request_finish(req_id)
     instanceof raw {
         ProviderResponse raw {
             return new(Response) {
                 status: raw.status,
                 headers: raw.headers,
-                body: new(HttpBody) { id: raw.body, closed: false },
+                body: new(HttpBody) { id: raw.body, closed: false }
             }
         },
-        null { return null },
+        null { return null }
+    }
+    return null
+}
+
+export fn(async) requestUpload(method: [u8], url: [u8], headers: [Header] = []): HttpUpload {
+    const req_id = await __provider_http_request_open(method, url, headers)
+    return new(HttpUpload) {
+        id: req_id,
+        closed: false
+    }
+}
+
+
+export struct HttpUpload satisfies WriteStream<[u8]> {
+    id: u64,
+    closed: bool
+}
+
+export fn(async) HttpUpload::write(self, item: [u8]): WriteStreamResult {
+    if self.closed {
+        return WriteStreamResult::Error("Stream closed")
+    }
+    const ok = await __provider_http_request_write(self.id, item)
+    if ok {
+        return WriteStreamResult::Accepted
+    } else {
+        self.closed = true
+        return WriteStreamResult::Error("Write failed")
+    }
+}
+
+export fn(async) HttpUpload::finish(self): WriteStreamResult {
+    if self.closed {
+        return WriteStreamResult::Error("Stream closed")
+    }
+    self.closed = true
+    return WriteStreamResult::Accepted
+}
+
+export fn(async) HttpUpload::cancel(self): null {
+    if !self.closed {
+        self.closed = true
+        await __provider_http_request_abort(self.id)
+    }
+    return null
+}
+
+export fn(async) HttpUpload::response(self): Response | null {
+    const raw = await __provider_http_request_finish(self.id)
+    instanceof raw {
+        ProviderResponse raw {
+            return new(Response) {
+                status: raw.status,
+                headers: raw.headers,
+                body: new(HttpBody) { id: raw.body, closed: false }
+            }
+        },
+        null { return null }
     }
     return null
 }

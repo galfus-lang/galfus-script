@@ -4,7 +4,7 @@ use galfus_contract::{
     CancellationOutcome, ExecutionFailure, ExecutionFailureKind, HostProvider, MessageInjector,
     ProviderDescriptor, SurfaceValue, TaskAffinity,
 };
-use http_body_util::{combinators::BoxBody, BodyExt, Full};
+use http_body_util::{BodyExt, Full, combinators::BoxBody};
 use hyper::body::Bytes;
 use hyper::service::service_fn;
 use hyper::{Request, Response};
@@ -209,6 +209,9 @@ enum ServerCommand {
         ws_id: u64,
         completion: Completion,
     },
+    Cancel {
+        lease: galfus_core::RequestLease,
+    },
     InternalRequestReceived {
         req: PendingRequest,
         response_tx: oneshot::Sender<(Response<BoxedServerBody>, bool)>,
@@ -271,7 +274,10 @@ impl NativeServerProvider {
             ),
         > = HashMap::new();
 
-        let mut active_response_bodies: HashMap<u64, mpsc::Sender<Result<hyper::body::Frame<Bytes>, String>>> = HashMap::new();
+        let mut active_response_bodies: HashMap<
+            u64,
+            mpsc::Sender<Result<hyper::body::Frame<Bytes>, String>>,
+        > = HashMap::new();
 
         type WsStream = tokio_tungstenite::WebSocketStream<TokioIo<hyper::upgrade::Upgraded>>;
         let mut active_websockets: HashMap<u64, WsStream> = HashMap::new();
@@ -373,7 +379,10 @@ impl NativeServerProvider {
                                                         } else {
                                                             Ok(Response::builder()
                                                                 .status(500)
-                                                                .body(BoxBody::new(Full::new(Bytes::new()).map_err(|e| match e {})))
+                                                                .body(BoxBody::new(
+                                                                    Full::new(Bytes::new())
+                                                                        .map_err(|e| match e {}),
+                                                                ))
                                                                 .unwrap())
                                                         }
                                                     }
@@ -467,7 +476,7 @@ impl NativeServerProvider {
 
                         let (body_tx, body_rx) = mpsc::channel(16);
                         active_response_bodies.insert(request_id, body_tx);
-                        
+
                         let channel_body = ChannelBody { rx: body_rx };
                         let response = builder.body(BoxBody::new(channel_body)).unwrap();
 
@@ -495,19 +504,31 @@ impl NativeServerProvider {
                         completion.inject_bool(false);
                     }
                 }
-                ServerCommand::ResponseWrite { request_id, chunk, completion } => {
+                ServerCommand::ResponseWrite {
+                    request_id,
+                    chunk,
+                    completion,
+                } => {
                     if let Some(tx) = active_response_bodies.get(&request_id) {
-                        let ok = tx.try_send(Ok(hyper::body::Frame::data(Bytes::from(chunk)))).is_ok();
+                        let ok = tx
+                            .try_send(Ok(hyper::body::Frame::data(Bytes::from(chunk))))
+                            .is_ok();
                         completion.inject_bool(ok);
                     } else {
                         completion.inject_bool(false);
                     }
                 }
-                ServerCommand::ResponseFinish { request_id, completion } => {
+                ServerCommand::ResponseFinish {
+                    request_id,
+                    completion,
+                } => {
                     active_response_bodies.remove(&request_id);
                     completion.inject_bool(true);
                 }
-                ServerCommand::ResponseAbort { request_id, completion } => {
+                ServerCommand::ResponseAbort {
+                    request_id,
+                    completion,
+                } => {
                     if let Some(tx) = active_response_bodies.remove(&request_id) {
                         let _ = tx.try_send(Err("aborted".to_string()));
                     }
@@ -623,6 +644,17 @@ impl NativeServerProvider {
                 ServerCommand::WsClose { ws_id, completion } => {
                     active_websockets.remove(&ws_id);
                     completion.inject_bool(true);
+                }
+                ServerCommand::Cancel { lease } => {
+                    // Remove any accept waiter tied to this lease
+                    if let Some(pos) = accept_waiters
+                        .iter()
+                        .position(|w| w.completion.lease == lease)
+                    {
+                        accept_waiters.remove(pos);
+                    }
+                    // Remove any ws receive waiter tied to this lease
+                    ws_receive_waiters.retain(|_, w| w.completion.lease != lease);
                 }
             }
         }
@@ -882,8 +914,11 @@ impl HostProvider for NativeServerProvider {
     fn cancel(
         &mut self,
         _thread_id: galfus_core::ThreadId,
-        _request_lease: galfus_core::RequestLease,
+        request_lease: galfus_core::RequestLease,
     ) -> CancellationOutcome {
+        let _ = self.command_tx.send(ServerCommand::Cancel {
+            lease: request_lease,
+        });
         CancellationOutcome::BestEffort
     }
 }

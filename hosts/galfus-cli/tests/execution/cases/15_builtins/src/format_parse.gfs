@@ -1,0 +1,17 @@
+import { println } from "std/io"
+import { parse, ParseResult } from "format"
+
+export fn main(_args: [[u8]]): i32 {
+  if match parse<i32>("123") { ParseResult<i32>::Ok(v) => v != 123, _ => true } { return 1 }
+  if match parse<u32>("0xFF") { ParseResult<u32>::Ok(v) => v != 255, _ => true } { return 2 }
+  if match parse<i64>("0b1010") { ParseResult<i64>::Ok(v) => v != 10, _ => true } { return 3 }
+  if match parse<u16>("0o77") { ParseResult<u16>::Ok(v) => v != 63, _ => true } { return 4 }
+  if match parse<u64>("1_00_000_01") { ParseResult<u64>::Ok(v) => v != 10000001, _ => true } { return 5 }
+  if match parse<i32>(" \n 42 \t ") { ParseResult<i32>::Ok(v) => v != 42, _ => true } { return 6 }
+  if match parse<f64>(" \t -1_000.50 ") { ParseResult<f64>::Ok(v) => v != -1000.5, _ => true } { return 7 }
+  if match parse<bool>("   true  ") { ParseResult<bool>::Ok(v) => v != true, _ => true } { return 8 }
+  if match parse<null>("\nnull\n") { ParseResult<null>::Ok(_) => false, _ => true } { return 9 }
+
+  println("ok")
+  return 0
+}
