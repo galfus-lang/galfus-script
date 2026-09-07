@@ -6,6 +6,7 @@ use galfus_ir::mir::MirModule;
 use std::collections::HashSet;
 
 pub fn lower_module(
+    module_id: galfus_core::ModuleId,
     mir_module: &MirModule,
     type_result: &TypeCheckResult,
     module_graph: &ModuleGraph,
@@ -13,7 +14,9 @@ pub fn lower_module(
     module_path: &str,
     string_table: &galfus_frontend::StringTable,
 ) -> (BytecodeModule, galfus_bytecode::graph::ExecutionMetadata) {
+    let mut generic_choice_layouts = crate::bytecode_emission::GenericChoiceLayoutCache::default();
     let mut ctx = LowerCtx::new(
+        module_id,
         type_result,
         module_graph,
         source_text,
@@ -22,6 +25,7 @@ pub fn lower_module(
         module_path,
         false,
         None,
+        &mut generic_choice_layouts,
     );
 
     let imported_structs = ctx

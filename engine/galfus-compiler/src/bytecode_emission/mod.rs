@@ -6,19 +6,69 @@ mod module;
 pub mod ssa;
 pub mod types;
 
+#[cfg(test)]
+mod tests;
+
 use crate::bytecode_emission::constants::HashableConstant;
 use galfus_bytecode::instruction::{ConstIdx, FuncIdx, TypeIdx};
 use galfus_bytecode::*;
-use galfus_core::{FunctionId, SymbolId, TypeId};
+use galfus_core::{DefId, FunctionId, SymbolId, TypeId};
 use galfus_frontend::{ModuleGraph, TypeCheckResult};
 use galfus_ir::mir::Constant as MirConstant;
 pub use module::*;
 use std::collections::HashMap;
 
+/// Stable identity assigned to a generic layout for the lifetime of a compiler
+/// session. `ChoiceLayoutIdx` cannot serve this purpose because it is an index
+/// into a single `BytecodeModule`'s layout vector.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct GlobalChoiceLayoutId(u32);
+
+impl GlobalChoiceLayoutId {
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+}
+
+/// Canonical key for a concrete choice instantiation.
+///
+/// Type ids are owned by individual type tables, so arguments are represented
+/// by their bytecode-level canonical form before crossing module boundaries.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct GenericChoiceLayoutKey {
+    pub def_id: DefId,
+    pub arguments: Vec<String>,
+}
+
+pub type GlobalChoiceLayouts = HashMap<GenericChoiceLayoutKey, GlobalChoiceLayoutId>;
+
+#[derive(Debug, Default, Clone)]
+pub struct GenericChoiceLayoutCache {
+    layouts: GlobalChoiceLayouts,
+}
+
+impl GenericChoiceLayoutCache {
+    pub fn intern(&mut self, key: GenericChoiceLayoutKey) -> GlobalChoiceLayoutId {
+        let next_id = GlobalChoiceLayoutId(self.layouts.len() as u32);
+        *self.layouts.entry(key).or_insert(next_id)
+    }
+
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.layouts.len()
+    }
+
+    #[cfg(test)]
+    pub fn is_empty(&self) -> bool {
+        self.layouts.is_empty()
+    }
+}
+
 pub struct LowerCtx<'a> {
     pub type_result: &'a TypeCheckResult,
     pub graph: &'a ModuleGraph,
     pub source_text: &'a str,
+    pub module_id: galfus_core::ModuleId,
     pub module_path: &'a str,
     pub string_table: &'a galfus_frontend::StringTable,
     pub is_adapter_proxy: bool,
@@ -29,9 +79,10 @@ pub struct LowerCtx<'a> {
     pub type_map: HashMap<TypeId, TypeIdx>,
     pub struct_map: HashMap<SymbolId, StructLayoutIdx>,
     pub choice_map: HashMap<SymbolId, ChoiceLayoutIdx>,
-    /// Layouts for concrete `choice<T>` instantiations. A choice symbol alone
-    /// is insufficient because every payload can depend on its arguments.
-    pub generic_choice_map: HashMap<TypeId, ChoiceLayoutIdx>,
+    /// Project-wide interning of concrete choice identities. The materialized
+    /// `ChoiceLayoutIdx` remains local because bytecode modules own their
+    /// layout vectors.
+    pub generic_choice_layouts: &'a mut GenericChoiceLayoutCache,
     pub constant_pool: ConstantPool,
     pub constants_map: HashMap<HashableConstant, ConstIdx>,
     pub function_map: HashMap<FunctionId, FuncIdx>,
@@ -47,6 +98,7 @@ pub struct LowerCtx<'a> {
 
 impl<'a> LowerCtx<'a> {
     pub fn new(
+        module_id: galfus_core::ModuleId,
         type_result: &'a TypeCheckResult,
         graph: &'a ModuleGraph,
         source_text: &'a str,
@@ -55,11 +107,13 @@ impl<'a> LowerCtx<'a> {
         module_path: &'a str,
         is_adapter_proxy: bool,
         proxy_name: Option<String>,
+        generic_choice_layouts: &'a mut GenericChoiceLayoutCache,
     ) -> Self {
         Self {
             type_result,
             graph,
             source_text,
+            module_id,
             module_path,
             string_table,
             is_adapter_proxy,
@@ -70,7 +124,7 @@ impl<'a> LowerCtx<'a> {
             type_map: HashMap::new(),
             struct_map: HashMap::new(),
             choice_map: HashMap::new(),
-            generic_choice_map: HashMap::new(),
+            generic_choice_layouts,
             constant_pool: ConstantPool {
                 constants: Vec::new(),
             },

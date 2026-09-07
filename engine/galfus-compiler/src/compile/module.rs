@@ -137,6 +137,7 @@ pub fn compile_changed_modules(
             &specialized_targets,
             mod_idx,
             string_table,
+            &mut state.generic_choice_layouts,
         )?;
         if let Err(errors) = galfus_bytecode::validation::validate_bytecode_module(&image) {
             return Err(anyhow::anyhow!(
@@ -187,6 +188,7 @@ fn compile_single_module(
     >,
     mod_idx: usize,
     string_table: &galfus_frontend::StringTable,
+    generic_choice_layouts: &mut crate::bytecode_emission::GenericChoiceLayoutCache,
 ) -> Result<(BytecodeModule, galfus_bytecode::graph::ExecutionMetadata)> {
     use crate::compile::resolve::{
         collect_call_targets, resolve_import_target, resolve_local_call_target,
@@ -395,6 +397,7 @@ fn compile_single_module(
     };
 
     let mut ctx = crate::bytecode_emission::LowerCtx::new(
+        module.id(),
         type_res,
         module.graph(),
         module.source().text(),
@@ -403,6 +406,7 @@ fn compile_single_module(
         module.path().as_str(),
         module.is_adapter_proxy(),
         proxy_name,
+        generic_choice_layouts,
     );
 
     let imported_structs = ctx
@@ -448,7 +452,7 @@ fn compile_single_module(
                         &mut ctx,
                         modules[target_mod_idx].graph(),
                         target_types,
-                        string_table,
+                        target_mod_id,
                         target_func.return_type,
                     )
                 {
@@ -551,17 +555,21 @@ fn lower_imported_async_return_type(
     ctx: &mut crate::bytecode_emission::LowerCtx,
     target_graph: &ModuleAst,
     target_types: &TypeCheckResult,
-    string_table: &galfus_frontend::StringTable,
+    target_module_id: galfus_core::ModuleId,
     return_type: TypeId,
 ) -> Option<TypeIdx> {
-    let (choice_name, target_arguments) =
-        imported_choice_name_and_arguments(target_graph, target_types, string_table, return_type)?;
+    let (choice_def_id, target_arguments) = imported_choice_def_id_and_arguments(
+        target_graph,
+        target_types,
+        target_module_id,
+        return_type,
+    )?;
     let choice = ctx
         .type_result
         .imported_symbol_choices
         .values()
-        .chain(ctx.type_result.imported_path_choices.values())
-        .find(|choice| choice.name == choice_name)?
+        .chain(ctx.type_result.imported_namespace_choices.values())
+        .find(|choice| choice.def_id == choice_def_id)?
         .clone();
     let layout = if target_arguments.is_empty() {
         crate::bytecode_emission::types::get_or_create_imported_choice_layout(ctx, &choice)
@@ -583,24 +591,42 @@ fn lower_imported_async_return_type(
     Some(type_idx)
 }
 
-fn imported_choice_name_and_arguments(
+fn imported_choice_def_id_and_arguments(
     graph: &ModuleAst,
     types: &TypeCheckResult,
-    string_table: &galfus_frontend::StringTable,
+    module_id: galfus_core::ModuleId,
     ty: TypeId,
-) -> Option<(String, Vec<TypeId>)> {
+) -> Option<(galfus_core::DefId, Vec<TypeId>)> {
     let table = types.layer().table();
     let (ty, arguments) = match table.kind(ty)? {
         TypeKind::GenericInstance { base, arguments } => (*base, arguments.clone()),
         _ => (ty, Vec::new()),
     };
     match table.kind(ty)? {
-        TypeKind::Named { symbol } => graph
-            .resolution()?
-            .symbol(*symbol)
-            .and_then(|symbol| string_table.resolve(symbol.name()))
-            .map(|name| (name.to_owned(), arguments)),
-        TypeKind::Path { segments, .. } => segments.last().cloned().map(|name| (name, arguments)),
+        TypeKind::Named { symbol } => types
+            .imported_symbol_choices
+            .get(symbol)
+            .map(|choice| (choice.def_id, arguments.clone()))
+            .or_else(|| {
+                graph
+                    .resolution()?
+                    .symbol(*symbol)
+                    .filter(|symbol| symbol.kind() == SymbolKind::Choice)
+                    .map(|_| (galfus_core::DefId::new(module_id, *symbol), arguments))
+            }),
+        TypeKind::Path { root, segments } => {
+            let (choice_name, _) = segments.split_first()?;
+            types
+                .imported_symbol_choices
+                .get(root)
+                .map(|choice| (choice.def_id, arguments.clone()))
+                .or_else(|| {
+                    types
+                        .imported_namespace_choices
+                        .get(&(*root, choice_name.clone()))
+                        .map(|choice| (choice.def_id, arguments))
+                })
+        }
         _ => None,
     }
 }
@@ -662,6 +688,6 @@ fn find_imported_choice_instance(
             };
             candidate_arguments == arguments
                 && crate::bytecode_emission::types::find_imported_choice_for_type(ctx, *base)
-                    .is_some_and(|candidate| candidate.name == choice.name)
+                    .is_some_and(|candidate| candidate.def_id == choice.def_id)
         })
 }

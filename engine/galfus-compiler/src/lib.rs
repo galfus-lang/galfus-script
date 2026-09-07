@@ -24,6 +24,9 @@ pub struct CompilerState {
     pub specialised_functions: HashMap<ModuleId, Vec<MirFunction>>,
     pub specialised_id_to_target: HashMap<FunctionId, (ModuleId, FunctionId)>,
     pub next_specialised_id: u32,
+    /// Interns concrete generic choice identities across every module emitted
+    /// by this compiler session.
+    pub generic_choice_layouts: bytecode_emission::GenericChoiceLayoutCache,
 }
 
 impl Default for CompilerState {
@@ -33,6 +36,7 @@ impl Default for CompilerState {
             specialised_functions: HashMap::new(),
             specialised_id_to_target: HashMap::new(),
             next_specialised_id: 0x4000_0000,
+            generic_choice_layouts: bytecode_emission::GenericChoiceLayoutCache::default(),
         }
     }
 }

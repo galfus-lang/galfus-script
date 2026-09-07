@@ -52,22 +52,11 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
             base_ty = *base;
         }
 
-        let (_root, segments) = match table.kind(base_ty) {
-            Some(TypeKind::Path { root, segments }) => (*root, segments),
-            _ => return None,
-        };
-        if segments.len() != 2 {
+        let TypeKind::Path { segments, .. } = table.kind(base_ty)? else {
             return None;
-        }
-        let choice_name = &segments[0];
-        let variant_name = &segments[1];
-
-        let choice = self
-            .builder
-            .type_result
-            .imported_path_choices
-            .values()
-            .find(|c| c.name == *choice_name)?;
+        };
+        let variant_name = segments.last()?;
+        let choice = self.imported_choice_for_type(base_ty)?;
         let variant = choice.variants.iter().find(|v| v.name == *variant_name)?;
 
         Some((

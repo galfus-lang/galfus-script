@@ -5,3 +5,6 @@ pub mod module;
 pub mod passes;
 mod resolve;
 pub mod tco;
+
+#[cfg(test)]
+mod tests;

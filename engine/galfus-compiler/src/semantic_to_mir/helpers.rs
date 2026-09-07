@@ -1,10 +1,37 @@
 use super::function::FunctionBuilder;
 use super::function_helpers::parse_int;
 use galfus_core::{NodeId, SymbolId, TypeId};
-use galfus_frontend::{PathReferenceKind, SymbolKind, SyntaxNodeKind};
+use galfus_frontend::{
+    LoweredImportedChoice, PathReferenceKind, SymbolKind, SyntaxNodeKind, TypeKind,
+};
 use galfus_ir::mir::*;
 
 impl<'b, 'a> FunctionBuilder<'b, 'a> {
+    pub(super) fn imported_choice_for_type(&self, ty: TypeId) -> Option<&LoweredImportedChoice> {
+        let table = self.builder.type_result.layer().table();
+        let mut base = self.builder.resolve_alias_type(ty);
+        while let Some(TypeKind::GenericInstance { base: instance, .. }) = table.kind(base) {
+            base = *instance;
+        }
+
+        match table.kind(base)? {
+            TypeKind::Named { symbol } => {
+                self.builder.type_result.imported_symbol_choices.get(symbol)
+            }
+            TypeKind::Path { root, segments } => {
+                if let Some(choice) = self.builder.type_result.imported_symbol_choices.get(root) {
+                    return Some(choice);
+                }
+                let (choice_name, _) = segments.split_first()?;
+                self.builder
+                    .type_result
+                    .imported_namespace_choices
+                    .get(&(*root, choice_name.clone()))
+            }
+            _ => None,
+        }
+    }
+
     pub(super) fn is_choice_variant_call_target(&self, target: NodeId) -> bool {
         let Some(resolution) = self.builder.graph.resolution() else {
             return false;
@@ -49,22 +76,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 .symbol(owner_symbol)
                 .is_some_and(|symbol| symbol.kind() == SymbolKind::ImportBinding)
             {
-                let choice = self
-                    .builder
-                    .type_result
-                    .imported_symbol_choices
-                    .get(&owner_symbol)
-                    .or_else(|| {
-                        let owner_name = self
-                            .builder
-                            .string_table
-                            .resolve(resolution.symbol(owner_symbol)?.name())?;
-                        self.builder
-                            .type_result
-                            .imported_path_choices
-                            .values()
-                            .find(|choice| choice.name == owner_name)
-                    })?;
+                let choice = self.imported_choice_for_type(owner_type)?;
                 let variant = choice
                     .variants
                     .iter()
@@ -85,21 +97,13 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 .child(target, 0)
                 .and_then(|root| resolution.reference_symbol(root))
         })?;
-        let choice_name = syntax
-            .child(target, 0)
-            .map(|root| self.builder.node_text(root).to_string())?;
-        let choice = self
+        let owner_type = self
             .builder
             .type_result
-            .imported_symbol_choices
-            .get(&owner_symbol)
-            .or_else(|| {
-                self.builder
-                    .type_result
-                    .imported_path_choices
-                    .values()
-                    .find(|choice| choice.name == choice_name)
-            })?;
+            .layer()
+            .symbol_type(owner_symbol)
+            .or_else(|| self.builder.type_result.layer().node_type(target))?;
+        let choice = self.imported_choice_for_type(owner_type)?;
         let variant_name = self
             .builder
             .graph
@@ -110,13 +114,6 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
             .variants
             .iter()
             .find(|variant| variant.name == variant_name)?;
-        let owner_type = self
-            .builder
-            .type_result
-            .layer()
-            .symbol_type(owner_symbol)
-            .unwrap_or_else(|| TypeId::new(0));
-
         Some((
             variant.name.clone(),
             owner_type,
