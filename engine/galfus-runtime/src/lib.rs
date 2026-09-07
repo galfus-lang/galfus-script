@@ -338,6 +338,7 @@ fn build_entry_args(
         args_array_ty,
         module_id,
         &vm.graph.get(module_id).unwrap().module,
+        None,
     )
     .map_err(|error| {
         RuntimeError::VmPanic(VmPanic {

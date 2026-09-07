@@ -22,6 +22,7 @@ pub enum FutureValue {
     Surface {
         contract: SurfaceContract,
         value: SurfaceValue,
+        adapter_binding_id: Option<galfus_core::BindingId>,
     },
     Aggregate(Vec<Self>),
 }

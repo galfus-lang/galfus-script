@@ -485,7 +485,11 @@ impl galfus_contract::MessageInjector for FutureCompletionInjector {
             .submit(RuntimeEvent::FutureCompleted {
                 thread_id: self.owner_thread_id,
                 future_lease: self.future_lease,
-                result: result.map(|value| FutureValue::Surface { contract, value }),
+                result: result.map(|value| FutureValue::Surface {
+                    contract,
+                    value,
+                    adapter_binding_id: None,
+                }),
             })
             .map_err(|_| galfus_contract::MessageInjectionError::ExecutionClosed)
     }
@@ -505,6 +509,7 @@ impl galfus_contract::MessageInjector for FutureCompletionInjector {
         let result = result.map(|value| FutureValue::Surface {
             contract: contract.clone(),
             value,
+            adapter_binding_id: None,
         });
         self.sink
             .submit(RuntimeEvent::FutureCompleted {

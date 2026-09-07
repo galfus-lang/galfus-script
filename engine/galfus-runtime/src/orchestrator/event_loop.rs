@@ -215,7 +215,11 @@ impl Orchestrator {
                     self.complete_pending(
                         thread_id,
                         PendingKey::Request(request_lease.id),
-                        result.map(|value| crate::event::FutureValue::Surface { contract, value }),
+                        result.map(|value| crate::event::FutureValue::Surface {
+                            contract,
+                            value,
+                            adapter_binding_id: None,
+                        }),
                     )
                 } else {
                     self.completion_metrics.late_after_cancel += 1;

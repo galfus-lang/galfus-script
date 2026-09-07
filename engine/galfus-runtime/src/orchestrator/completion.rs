@@ -168,12 +168,28 @@ impl Orchestrator {
             .adapter_proxy_module(thread_id, future_id);
         let request_id = self.future_registry.request_id(thread_id, future_id);
 
-        if result.as_mut().is_ok_and(|value| match value {
-            crate::event::FutureValue::Surface {
+        let adapter_binding_id = adapter_proxy_module.as_deref().and_then(|proxy_module| {
+            self.adapter_bindings
+                .as_ref()
+                .and_then(|bindings| bindings.lock().ok()?.binding_id(proxy_module))
+        });
+
+        if result.as_mut().is_ok_and(|value| {
+            let crate::event::FutureValue::Surface {
                 value: surface_value,
+                adapter_binding_id: result_binding_id,
                 ..
-            } => !crate::orchestrator::adapter_handles::stamp_adapter_handles(surface_value),
-            _ => false,
+            } = value
+            else {
+                return false;
+            };
+            *result_binding_id = adapter_binding_id;
+            adapter_proxy_module.as_deref().is_some_and(|proxy_module| {
+                !crate::orchestrator::adapter_handles::validate_adapter_handles(
+                    surface_value,
+                    proxy_module,
+                )
+            })
         }) {
             result = Err(ExecutionFailure::new(
                 ExecutionFailureKind::BoundaryCodecFailure,

@@ -22,17 +22,22 @@ pub(super) fn collect_adapter_handles(
     }
 }
 
-pub(super) fn stamp_adapter_handles(value: &mut galfus_contract::SurfaceValue) -> bool {
+pub(super) fn validate_adapter_handles(
+    value: &galfus_contract::SurfaceValue,
+    proxy_module: &str,
+) -> bool {
     use galfus_contract::SurfaceValue;
     match value {
-        SurfaceValue::List(values) | SurfaceValue::Tuple(values) => {
-            values.iter_mut().all(stamp_adapter_handles)
-        }
+        SurfaceValue::List(values) | SurfaceValue::Tuple(values) => values
+            .iter()
+            .all(|value| validate_adapter_handles(value, proxy_module)),
         SurfaceValue::Choice {
             payload: Some(payload),
             ..
-        } => stamp_adapter_handles(payload),
-        SurfaceValue::Handle(_) => true,
+        } => validate_adapter_handles(payload, proxy_module),
+        SurfaceValue::Handle(handle) => {
+            handle.type_id.proxy_module() == proxy_module.trim_end_matches(".gfp")
+        }
         _ => true,
     }
 }

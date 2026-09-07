@@ -5,7 +5,9 @@ use super::{
 use crate::event::FutureValue;
 use galfus_bytecode::instruction::{FuncIdx, TypeIdx};
 use galfus_bytecode::{BytecodeModule, BytecodeType, ConstantPool};
-use galfus_contract::{SurfaceContract, SurfaceDirection, SurfaceSchema, SurfaceValue};
+use galfus_contract::{
+    SurfaceContract, SurfaceDirection, SurfaceHandle, SurfaceSchema, SurfaceValue,
+};
 use galfus_vm::{HeapObject, VmValue};
 
 #[test]
@@ -107,6 +109,7 @@ fn surface_future_value_materializes_directly_in_the_waiting_heap() {
         FutureValue::Surface {
             contract,
             value: SurfaceValue::I64(42),
+            adapter_binding_id: None,
         },
         TypeIdx(0),
         galfus_core::ModuleId::new(1),
@@ -115,6 +118,51 @@ fn surface_future_value_materializes_directly_in_the_waiting_heap() {
     .expect("surface value materializes without a legacy boundary conversion");
 
     assert_eq!(value, VmValue::Int64(42));
+}
+
+#[test]
+fn adapter_handle_surface_value_keeps_its_adapter_binding_in_the_waiting_heap() {
+    let type_id = galfus_core::OpaqueTypeId::new("graphics", "Texture").unwrap();
+    let module = module(vec![BytecodeType::AdapterHandle(type_id.clone())]);
+    let mut heap = galfus_vm::thread::PrivateHeap::test_new();
+    let contract = SurfaceContract::new(
+        "graphics.gfp::acquire:return",
+        1,
+        SurfaceDirection::FromProvider,
+        SurfaceSchema::Handle {
+            resource: "graphics::Texture".to_string(),
+        },
+    );
+
+    let value = encode_future_value_into_thread_heap(
+        &mut heap,
+        FutureValue::Surface {
+            contract,
+            value: SurfaceValue::Handle(SurfaceHandle {
+                type_id: type_id.clone(),
+                id: galfus_core::HandleId::new(7),
+            }),
+            adapter_binding_id: Some(galfus_core::BindingId::new(3)),
+        },
+        TypeIdx(0),
+        galfus_core::ModuleId::new(1),
+        &module,
+    )
+    .expect("adapter handle surface value materializes in the waiting heap");
+
+    let VmValue::Object(reference) = value else {
+        panic!("adapter handle must be represented by a heap object");
+    };
+    assert!(matches!(
+        heap.get_object(reference),
+        Ok(HeapObject::AdapterHandle {
+            binding_id,
+            type_id: actual_type_id,
+            id,
+        }) if *binding_id == galfus_core::BindingId::new(3)
+            && actual_type_id == &type_id
+            && *id == galfus_core::HandleId::new(7)
+    ));
 }
 
 #[test]

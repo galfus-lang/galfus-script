@@ -260,7 +260,11 @@ pub(crate) fn encode_future_value_into_thread_heap(
                 .map_err(|_| "bytes exceed heap quota".to_string())?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
-        crate::event::FutureValue::Surface { contract, value } => {
+        crate::event::FutureValue::Surface {
+            contract,
+            value,
+            adapter_binding_id,
+        } => {
             if !contract.validates() {
                 return Err("surface contract fingerprint is invalid".to_string());
             }
@@ -271,6 +275,7 @@ pub(crate) fn encode_future_value_into_thread_heap(
                 expected,
                 module_id,
                 module,
+                adapter_binding_id,
             )
         }
         crate::event::FutureValue::Aggregate(values) => {
@@ -286,6 +291,7 @@ pub(crate) fn encode_surface_into_thread_heap(
     expected: galfus_bytecode::instruction::TypeIdx,
     module_id: galfus_core::ModuleId,
     module: &galfus_bytecode::BytecodeModule,
+    adapter_binding_id: Option<galfus_core::BindingId>,
 ) -> Result<galfus_vm::VmValue, String> {
     use galfus_bytecode::BytecodeType;
     use galfus_contract::{SurfaceCodecError, SurfaceSchema, SurfaceValue};
@@ -346,7 +352,15 @@ pub(crate) fn encode_surface_into_thread_heap(
             Ok(galfus_vm::VmValue::Null)
         }
         (SurfaceSchema::Optional(inner), value, BytecodeType::Nullable(inner_type)) => {
-            encode_surface_into_thread_heap(heap, inner, value, *inner_type, module_id, module)
+            encode_surface_into_thread_heap(
+                heap,
+                inner,
+                value,
+                *inner_type,
+                module_id,
+                module,
+                adapter_binding_id,
+            )
         }
         (
             SurfaceSchema::List(item_schema),
@@ -363,6 +377,7 @@ pub(crate) fn encode_surface_into_thread_heap(
                         *item_type,
                         module_id,
                         module,
+                        adapter_binding_id,
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -385,7 +400,13 @@ pub(crate) fn encode_surface_into_thread_heap(
                 .zip(values.into_iter().zip(item_types))
                 .map(|(schema, (value, item_type))| {
                     encode_surface_into_thread_heap(
-                        heap, schema, value, *item_type, module_id, module,
+                        heap,
+                        schema,
+                        value,
+                        *item_type,
+                        module_id,
+                        module,
+                        adapter_binding_id,
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -424,6 +445,7 @@ pub(crate) fn encode_surface_into_thread_heap(
                         field_layout.ty,
                         module_id,
                         module,
+                        adapter_binding_id,
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -467,6 +489,7 @@ pub(crate) fn encode_surface_into_thread_heap(
                     payload_type,
                     module_id,
                     module,
+                    adapter_binding_id,
                 )?,
                 _ => return Err(mismatch()),
             };
@@ -480,8 +503,21 @@ pub(crate) fn encode_surface_into_thread_heap(
                 .map_err(|_| "surface choice exceeds heap quota".to_string())?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
-        (SurfaceSchema::Handle { .. }, SurfaceValue::Handle(_), _) => {
-            Err("surface handles require a provider handle runtime representation".to_string())
+        (
+            SurfaceSchema::Handle { .. },
+            SurfaceValue::Handle(handle),
+            BytecodeType::AdapterHandle(type_id),
+        ) if handle.type_id == *type_id => {
+            let binding_id = adapter_binding_id
+                .ok_or_else(|| "surface handle is missing its adapter binding".to_string())?;
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::AdapterHandle {
+                    binding_id,
+                    type_id: handle.type_id,
+                    id: handle.id,
+                })
+                .map_err(|_| "surface handle exceeds heap quota".to_string())?;
+            Ok(galfus_vm::VmValue::Object(reference))
         }
         _ => Err(mismatch()),
     }
