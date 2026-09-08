@@ -1,3 +1,4 @@
+use crate::for_each_rvalue_operand;
 use crate::mir;
 
 use crate::LocalId;
@@ -470,62 +471,9 @@ fn validate_rvalue_operands(
     initialized: &HashSet<LocalId>,
     errors: &mut Vec<ValidationError>,
 ) {
-    match rvalue {
-        RValue::Use(operand)
-        | RValue::UnaryOp(_, operand)
-        | RValue::Len(operand)
-        | RValue::Copy(operand)
-        | RValue::MemberAccess(operand, _)
-        | RValue::ChoiceVariantIs(operand, _)
-        | RValue::ImportedChoiceVariantIs(operand, _, _)
-        | RValue::Instanceof(operand, _)
-        | RValue::Cast(operand, _) => {
-            validate_operand(operand, func, initialized, errors);
-        }
-        RValue::BinaryOp(_, lhs, rhs) | RValue::ArrayIndex(lhs, rhs) => {
-            validate_operand(lhs, func, initialized, errors);
-            validate_operand(rhs, func, initialized, errors);
-        }
-        RValue::Choice(_, _, op) => {
-            if let Some(op) = op {
-                validate_operand(op, func, initialized, errors);
-            }
-        }
-        RValue::NewStruct { fields, .. }
-        | RValue::NewArray(_, fields)
-        | RValue::NewTuple(_, fields) => {
-            for op in fields {
-                validate_operand(op, func, initialized, errors);
-            }
-        }
-        RValue::NewArrayDynamic(_, elements) => {
-            for elem in elements {
-                match elem {
-                    ArrayLiteralElement::Single(op) | ArrayLiteralElement::Spread(op) => {
-                        validate_operand(op, func, initialized, errors);
-                    }
-                }
-            }
-        }
-        RValue::NewArrayZeroed { .. } | RValue::LoadGlobal(_) => {}
-        RValue::NewArrayZeroedDynamic { length, .. } => {
-            validate_operand(length, func, initialized, errors);
-        }
-        RValue::CreateFuture { args, .. } => {
-            for arg in args {
-                validate_operand(arg, func, initialized, errors);
-            }
-        }
-        RValue::CreateIndirectFuture {
-            func: func_op,
-            args,
-        } => {
-            validate_operand(func_op, func, initialized, errors);
-            for arg in args {
-                validate_operand(arg, func, initialized, errors);
-            }
-        }
-    }
+    for_each_rvalue_operand(rvalue, |operand| {
+        validate_operand(operand, func, initialized, errors);
+    });
 }
 
 fn validate_operand(

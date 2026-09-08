@@ -2,6 +2,7 @@ use std::collections;
 
 use galfus_ir::mir;
 
+use galfus_ir::for_each_rvalue_operand_mut;
 use galfus_ir::mir::*;
 use std::collections::HashMap;
 
@@ -109,62 +110,6 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
             }
         }
 
-        fn replace_rvalue(&mut self, block: BlockId, rvalue: &mut RValue) {
-            match rvalue {
-                RValue::Use(op)
-                | RValue::UnaryOp(_, op)
-                | RValue::Cast(op, _)
-                | RValue::Copy(op)
-                | RValue::ChoiceVariantIs(op, _)
-                | RValue::ImportedChoiceVariantIs(op, _, _)
-                | RValue::Instanceof(op, _)
-                | RValue::Len(op) => {
-                    self.replace_operand(block, op);
-                }
-                RValue::BinaryOp(_, op1, op2) | RValue::ArrayIndex(op1, op2) => {
-                    self.replace_operand(block, op1);
-                    self.replace_operand(block, op2);
-                }
-                RValue::NewStruct { fields, .. }
-                | RValue::NewArray(_, fields)
-                | RValue::NewTuple(_, fields) => {
-                    for op in fields {
-                        self.replace_operand(block, op);
-                    }
-                }
-                RValue::NewArrayDynamic(_, elems) => {
-                    for elem in elems {
-                        match elem {
-                            ArrayLiteralElement::Single(op) | ArrayLiteralElement::Spread(op) => {
-                                self.replace_operand(block, op);
-                            }
-                        }
-                    }
-                }
-                RValue::NewArrayZeroedDynamic { length, .. } => {
-                    self.replace_operand(block, length);
-                }
-                RValue::MemberAccess(op, _) => {
-                    self.replace_operand(block, op);
-                }
-                RValue::Choice(_, _, Some(op)) => {
-                    self.replace_operand(block, op);
-                }
-                RValue::CreateFuture { args, .. } => {
-                    for arg in args {
-                        self.replace_operand(block, arg);
-                    }
-                }
-                RValue::CreateIndirectFuture { func, args } => {
-                    self.replace_operand(block, func);
-                    for arg in args {
-                        self.replace_operand(block, arg);
-                    }
-                }
-                _ => {}
-            }
-        }
-
         fn replace_instruction(
             &mut self,
             block: BlockId,
@@ -172,7 +117,9 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
         ) {
             match &mut inst.0 {
                 Instruction::Assign(target, rvalue) => {
-                    self.replace_rvalue(block, rvalue);
+                    for_each_rvalue_operand_mut(rvalue, |operand| {
+                        self.replace_operand(block, operand);
+                    });
                     self.define_destination(block, target);
                 }
                 Instruction::Drop(id) => {

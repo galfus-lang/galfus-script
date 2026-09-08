@@ -8,6 +8,10 @@ use galfus_ir::mir::{
     BlockId, Constant, Instruction, LocalId, MirBinaryOp, MirFunction, MirModule, Operand, RValue,
     Terminator,
 };
+use galfus_ir::{
+    for_each_instruction_operand, for_each_instruction_operand_mut, for_each_terminator_operand,
+    for_each_terminator_operand_mut,
+};
 
 use super::{inline::inline_functions, tco::optimize_tail_calls};
 
@@ -216,7 +220,6 @@ fn propagate_ssa_copies(module: &mut MirModule) -> usize {
         .iter_mut()
         .map(|function| {
             // Work on one candidate and publish it only after validation. This
-            // replaces the former two function clones plus cloned module-wide
             // globals and constant pool for every changed function.
             let mut candidate = function.clone();
             let replaced = propagate_function_copies(&mut candidate);
@@ -444,96 +447,25 @@ fn replace_instruction_copies(
     dominators: &Dominators,
     replaced: &mut usize,
 ) {
-    let mut replace = |operand: &mut Operand| {
+    if let Instruction::Drop(local) = instruction {
+        let mut operand = Operand::Local(*local);
+        replace_operand_copy(
+            &mut operand,
+            block,
+            use_index,
+            definitions,
+            dominators,
+            replaced,
+        );
+        if let Operand::Local(replacement) = operand {
+            *local = replacement;
+        }
+        return;
+    }
+    let replace = |operand: &mut Operand| {
         replace_operand_copy(operand, block, use_index, definitions, dominators, replaced);
     };
-    match instruction {
-        Instruction::Assign(_, rvalue) => replace_rvalue_operands(rvalue, &mut replace),
-        Instruction::Drop(local) => {
-            let mut operand = Operand::Local(*local);
-            replace(&mut operand);
-            if let Operand::Local(replacement) = operand {
-                *local = replacement;
-            }
-        }
-        Instruction::StoreGlobal(_, operand) => replace(operand),
-        Instruction::StoreIndex { arr, idx, val } => {
-            replace(arr);
-            replace(idx);
-            replace(val);
-        }
-        Instruction::StoreField { obj, val, .. } => {
-            replace(obj);
-            replace(val);
-        }
-        Instruction::Call { args, .. }
-        | Instruction::AwaitAll { futures: args, .. }
-        | Instruction::AwaitRace { futures: args, .. } => {
-            for argument in args {
-                replace(argument);
-            }
-        }
-        Instruction::IndirectCall { func, args, .. } => {
-            replace(func);
-            for argument in args {
-                replace(argument);
-            }
-        }
-        Instruction::ConstraintCall { obj, args, .. } => {
-            replace(obj);
-            for argument in args {
-                replace(argument);
-            }
-        }
-        Instruction::Await { future, .. } => replace(future),
-    }
-}
-
-fn replace_rvalue_operands(rvalue: &mut RValue, replace: &mut impl FnMut(&mut Operand)) {
-    match rvalue {
-        RValue::Use(operand)
-        | RValue::UnaryOp(_, operand)
-        | RValue::Cast(operand, _)
-        | RValue::Copy(operand)
-        | RValue::MemberAccess(operand, _)
-        | RValue::ChoiceVariantIs(operand, _)
-        | RValue::ImportedChoiceVariantIs(operand, _, _)
-        | RValue::Instanceof(operand, _)
-        | RValue::Len(operand) => replace(operand),
-        RValue::BinaryOp(_, lhs, rhs) | RValue::ArrayIndex(lhs, rhs) => {
-            replace(lhs);
-            replace(rhs);
-        }
-        RValue::NewStruct { fields, .. }
-        | RValue::NewArray(_, fields)
-        | RValue::NewTuple(_, fields) => {
-            for operand in fields {
-                replace(operand);
-            }
-        }
-        RValue::NewArrayDynamic(_, elements) => {
-            for element in elements {
-                match element {
-                    galfus_ir::mir::ArrayLiteralElement::Single(operand)
-                    | galfus_ir::mir::ArrayLiteralElement::Spread(operand) => replace(operand),
-                }
-            }
-        }
-        RValue::NewArrayZeroedDynamic { length, .. } => replace(length),
-        RValue::Choice(_, _, Some(operand)) => replace(operand),
-        RValue::CreateFuture { args, .. } => {
-            for operand in args {
-                replace(operand);
-            }
-        }
-        RValue::CreateIndirectFuture { func, args } => {
-            replace(func);
-            for operand in args {
-                replace(operand);
-            }
-        }
-        RValue::NewArrayZeroed { .. } | RValue::LoadGlobal(_) | RValue::Choice(_, _, None) => {}
-    }
+    for_each_instruction_operand_mut(instruction, replace);
 }
 
 fn replace_terminator_copies(
@@ -544,29 +476,10 @@ fn replace_terminator_copies(
     dominators: &Dominators,
     replaced: &mut usize,
 ) {
-    let mut replace = |operand: &mut Operand| {
+    let replace = |operand: &mut Operand| {
         replace_operand_copy(operand, block, use_index, definitions, dominators, replaced);
     };
-    match terminator {
-        Terminator::Return(Some(operand)) => replace(operand),
-        Terminator::Jump { args, .. } | Terminator::TailCall { args, .. } => {
-            for operand in args {
-                replace(operand);
-            }
-        }
-        Terminator::Branch {
-            cond,
-            true_args,
-            false_args,
-            ..
-        } => {
-            replace(cond);
-            for operand in true_args.iter_mut().chain(false_args) {
-                replace(operand);
-            }
-        }
-        Terminator::Return(None) | Terminator::Panic(_) => {}
-    }
+    for_each_terminator_operand_mut(terminator, replace);
 }
 
 fn remove_dead_constant_definitions(module: &mut MirModule) -> usize {
@@ -635,125 +548,14 @@ fn collect_instruction_uses(
     instruction: &Instruction,
     used: &mut HashSet<galfus_ir::mir::LocalId>,
 ) {
-    match instruction {
-        Instruction::Assign(_, rvalue) => collect_rvalue_uses(rvalue, used),
-        Instruction::Drop(local) => {
-            used.insert(*local);
-        }
-        Instruction::StoreGlobal(_, operand) => collect_operand(operand, used),
-        Instruction::StoreIndex { arr, idx, val } => {
-            collect_operand(arr, used);
-            collect_operand(idx, used);
-            collect_operand(val, used);
-        }
-        Instruction::StoreField { obj, val, .. } => {
-            collect_operand(obj, used);
-            collect_operand(val, used);
-        }
-        Instruction::Call { args, .. } => {
-            for operand in args {
-                collect_operand(operand, used);
-            }
-        }
-        Instruction::IndirectCall { func, args, .. } => {
-            collect_operand(func, used);
-            for operand in args {
-                collect_operand(operand, used);
-            }
-        }
-        Instruction::ConstraintCall { obj, args, .. } => {
-            collect_operand(obj, used);
-            for operand in args {
-                collect_operand(operand, used);
-            }
-        }
-        Instruction::Await { future, .. } => collect_operand(future, used),
-        Instruction::AwaitAll { futures, .. } | Instruction::AwaitRace { futures, .. } => {
-            for operand in futures {
-                collect_operand(operand, used);
-            }
-        }
+    if let Instruction::Drop(local) = instruction {
+        used.insert(*local);
+        return;
     }
-}
-
-fn collect_rvalue_uses(rvalue: &RValue, used: &mut HashSet<galfus_ir::mir::LocalId>) {
-    match rvalue {
-        RValue::Use(operand)
-        | RValue::UnaryOp(_, operand)
-        | RValue::Cast(operand, _)
-        | RValue::Copy(operand)
-        | RValue::MemberAccess(operand, _)
-        | RValue::ChoiceVariantIs(operand, _)
-        | RValue::ImportedChoiceVariantIs(operand, _, _)
-        | RValue::Instanceof(operand, _)
-        | RValue::Len(operand) => collect_operand(operand, used),
-        RValue::BinaryOp(_, lhs, rhs) | RValue::ArrayIndex(lhs, rhs) => {
-            collect_operand(lhs, used);
-            collect_operand(rhs, used);
-        }
-        RValue::NewStruct { fields, .. }
-        | RValue::NewArray(_, fields)
-        | RValue::NewTuple(_, fields) => {
-            for operand in fields {
-                collect_operand(operand, used);
-            }
-        }
-        RValue::NewArrayDynamic(_, elements) => {
-            for element in elements {
-                match element {
-                    galfus_ir::mir::ArrayLiteralElement::Single(operand)
-                    | galfus_ir::mir::ArrayLiteralElement::Spread(operand) => {
-                        collect_operand(operand, used)
-                    }
-                }
-            }
-        }
-        RValue::NewArrayZeroedDynamic { length, .. } => collect_operand(length, used),
-        RValue::Choice(_, _, payload) => {
-            if let Some(operand) = payload {
-                collect_operand(operand, used);
-            }
-        }
-        RValue::CreateFuture { args, .. } => {
-            for operand in args {
-                collect_operand(operand, used);
-            }
-        }
-        RValue::CreateIndirectFuture { func, args } => {
-            collect_operand(func, used);
-            for operand in args {
-                collect_operand(operand, used);
-            }
-        }
-        RValue::NewArrayZeroed { .. } | RValue::LoadGlobal(_) => {}
-    }
+    for_each_instruction_operand(instruction, |operand| collect_operand(operand, used));
 }
 fn collect_terminator_uses(terminator: &Terminator, used: &mut HashSet<galfus_ir::mir::LocalId>) {
-    match terminator {
-        Terminator::Return(Some(operand)) => collect_operand(operand, used),
-        Terminator::Jump { args, .. } => {
-            for operand in args {
-                collect_operand(operand, used);
-            }
-        }
-        Terminator::Branch {
-            cond,
-            true_args,
-            false_args,
-            ..
-        } => {
-            collect_operand(cond, used);
-            for operand in true_args.iter().chain(false_args) {
-                collect_operand(operand, used);
-            }
-        }
-        Terminator::TailCall { args, .. } => {
-            for operand in args {
-                collect_operand(operand, used);
-            }
-        }
-        _ => {}
-    }
+    for_each_terminator_operand(terminator, |operand| collect_operand(operand, used));
 }
 
 fn validate(module: &MirModule, stage: &str) -> Result<()> {
