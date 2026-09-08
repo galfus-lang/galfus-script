@@ -1,5 +1,6 @@
 use super::function::FunctionBuilder;
 use galfus_core::{FunctionId, NodeId, SymbolId, TypeId};
+use galfus_frontend::{SyntaxNodeKind, TypeKind};
 use std::collections::HashMap;
 
 impl<'b, 'a> FunctionBuilder<'b, 'a> {
@@ -111,6 +112,116 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 .into()
         } else {
             None
+        }
+    }
+
+    fn concrete_generic_arguments(
+        &self,
+        target_node: NodeId,
+        generic_params: &[SymbolId],
+        arg_types: &[TypeId],
+    ) -> Option<Vec<TypeId>> {
+        let syntax = self.builder.graph.syntax();
+
+        if syntax
+            .node(target_node)
+            .is_some_and(|node| node.kind() == SyntaxNodeKind::GenericExpression)
+            && let Some(argument_list) = syntax.child(target_node, 1)
+            && let Some(argument_node) = syntax.node(argument_list)
+        {
+            let explicit = argument_node
+                .children()
+                .iter()
+                .filter_map(|argument| {
+                    self.node_type(*argument).or_else(|| {
+                        self.first_type_child(*argument)
+                            .and_then(|type_node| self.node_type(type_node))
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            if !explicit.is_empty() {
+                return Some(explicit);
+            }
+        }
+
+        self.infer_generic_arguments_from_call(target_node, generic_params, arg_types)
+    }
+
+    fn infer_generic_arguments_from_call(
+        &self,
+        target_node: NodeId,
+        generic_params: &[SymbolId],
+        arg_types: &[TypeId],
+    ) -> Option<Vec<TypeId>> {
+        let target_ty = self
+            .builder
+            .resolve_alias_type(self.node_type(target_node)?);
+        let TypeKind::Function(function) =
+            self.builder.type_result.layer().table().kind(target_ty)?
+        else {
+            return None;
+        };
+
+        let mut substitutions = HashMap::new();
+        for (parameter, &arg_ty) in function.parameters().iter().zip(arg_types) {
+            self.infer_generic_argument_from_types(
+                generic_params,
+                parameter.ty(),
+                arg_ty,
+                &mut substitutions,
+            );
+        }
+
+        generic_params
+            .iter()
+            .map(|parameter| substitutions.get(parameter).copied())
+            .collect()
+    }
+
+    fn infer_generic_argument_from_types(
+        &self,
+        generic_params: &[SymbolId],
+        parameter_ty: TypeId,
+        argument_ty: TypeId,
+        substitutions: &mut HashMap<SymbolId, TypeId>,
+    ) {
+        let parameter_ty = self.builder.resolve_alias_type(parameter_ty);
+        let argument_ty = self.builder.resolve_alias_type(argument_ty);
+
+        match self.builder.type_result.layer().table().kind(parameter_ty) {
+            Some(TypeKind::GenericParameter { symbol }) if generic_params.contains(symbol) => {
+                substitutions.entry(*symbol).or_insert(argument_ty);
+            }
+            Some(TypeKind::Array { element }) => {
+                if let Some(TypeKind::Array {
+                    element: argument_element,
+                }) = self.builder.type_result.layer().table().kind(argument_ty)
+                {
+                    self.infer_generic_argument_from_types(
+                        generic_params,
+                        *element,
+                        *argument_element,
+                        substitutions,
+                    );
+                }
+            }
+            Some(TypeKind::Tuple { elements }) => {
+                if let Some(TypeKind::Tuple {
+                    elements: argument_elements,
+                }) = self.builder.type_result.layer().table().kind(argument_ty)
+                {
+                    for (element, argument_element) in elements.iter().zip(argument_elements) {
+                        self.infer_generic_argument_from_types(
+                            generic_params,
+                            *element,
+                            *argument_element,
+                            substitutions,
+                        );
+                    }
+                }
+            }
+            _ => {}
         }
     }
 }

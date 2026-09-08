@@ -1,12 +1,11 @@
 use super::call_resolution::path_call_function_id;
 use super::function::{FunctionBuilder, NarrowingReturnTarget};
 use super::function_helpers::parse_int;
-use galfus_core::{FunctionId, NodeId, SymbolId, TypeId};
+use galfus_core::{FunctionId, NodeId, TypeId};
 use galfus_frontend::{
     PathReferenceKind, RangeDesugarTarget, SymbolKind, SyntaxNodeKind, TypeKind,
 };
 use galfus_ir::mir::*;
-use std::collections::HashMap;
 
 impl<'b, 'a> FunctionBuilder<'b, 'a> {
     pub(super) fn lower_expression(&mut self, expr_id: NodeId) -> Operand {
@@ -1144,116 +1143,6 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
         };
         self.narrowing_return_targets.pop();
         operand
-    }
-
-    pub(super) fn concrete_generic_arguments(
-        &self,
-        target_node: NodeId,
-        generic_params: &[SymbolId],
-        arg_types: &[TypeId],
-    ) -> Option<Vec<TypeId>> {
-        let syntax = self.builder.graph.syntax();
-
-        if syntax
-            .node(target_node)
-            .is_some_and(|node| node.kind() == SyntaxNodeKind::GenericExpression)
-            && let Some(argument_list) = syntax.child(target_node, 1)
-            && let Some(argument_node) = syntax.node(argument_list)
-        {
-            let explicit = argument_node
-                .children()
-                .iter()
-                .filter_map(|argument| {
-                    self.node_type(*argument).or_else(|| {
-                        self.first_type_child(*argument)
-                            .and_then(|type_node| self.node_type(type_node))
-                    })
-                })
-                .collect::<Vec<_>>();
-
-            if !explicit.is_empty() {
-                return Some(explicit);
-            }
-        }
-
-        self.infer_generic_arguments_from_call(target_node, generic_params, arg_types)
-    }
-
-    fn infer_generic_arguments_from_call(
-        &self,
-        target_node: NodeId,
-        generic_params: &[SymbolId],
-        arg_types: &[TypeId],
-    ) -> Option<Vec<TypeId>> {
-        let target_ty = self.node_type(target_node)?;
-        let target_ty = self.builder.resolve_alias_type(target_ty);
-        let TypeKind::Function(function) =
-            self.builder.type_result.layer().table().kind(target_ty)?
-        else {
-            return None;
-        };
-
-        let mut substitutions = HashMap::new();
-
-        for (parameter, &arg_ty) in function.parameters().iter().zip(arg_types.iter()) {
-            self.infer_generic_argument_from_types(
-                generic_params,
-                parameter.ty(),
-                arg_ty,
-                &mut substitutions,
-            );
-        }
-
-        generic_params
-            .iter()
-            .map(|param| substitutions.get(param).copied())
-            .collect()
-    }
-
-    fn infer_generic_argument_from_types(
-        &self,
-        generic_params: &[SymbolId],
-        parameter_ty: TypeId,
-        argument_ty: TypeId,
-        substitutions: &mut HashMap<SymbolId, TypeId>,
-    ) {
-        let parameter_ty = self.builder.resolve_alias_type(parameter_ty);
-        let argument_ty = self.builder.resolve_alias_type(argument_ty);
-
-        match self.builder.type_result.layer().table().kind(parameter_ty) {
-            Some(TypeKind::GenericParameter { symbol }) if generic_params.contains(symbol) => {
-                substitutions.entry(*symbol).or_insert(argument_ty);
-            }
-            Some(TypeKind::Array { element }) => {
-                if let Some(TypeKind::Array {
-                    element: arg_element,
-                }) = self.builder.type_result.layer().table().kind(argument_ty)
-                {
-                    self.infer_generic_argument_from_types(
-                        generic_params,
-                        *element,
-                        *arg_element,
-                        substitutions,
-                    );
-                }
-            }
-            Some(TypeKind::Tuple { elements }) => {
-                if let Some(TypeKind::Tuple {
-                    elements: arg_elements,
-                }) = self.builder.type_result.layer().table().kind(argument_ty)
-                {
-                    for (element, arg_element) in elements.iter().zip(arg_elements.iter()) {
-                        self.infer_generic_argument_from_types(
-                            generic_params,
-                            *element,
-                            *arg_element,
-                            substitutions,
-                        );
-                    }
-                }
-            }
-            _ => {}
-        }
     }
 
     fn lower_await_futures_list(&mut self, target_id: NodeId) -> Vec<Operand> {
