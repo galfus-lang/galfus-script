@@ -1,0 +1,18 @@
+import { Request, Response, Server, WebSocket, WebSocketConfig, fromBytes } from "std/server"
+
+export fn main(_args: [[u8]]): i32 {
+  const server = new(Server) {
+    port: 18981,
+    fetch: fn(async) (_request: Request): Response {
+      return fromBytes("response body")
+    },
+    websocket: new(WebSocketConfig) {
+      onOpen: fn(_socket: WebSocket, _status: i32): null => null,
+      onMessage: fn(_socket: WebSocket, _status: i32, _message: [u8]): null => null,
+      onClose: fn(_socket: WebSocket, _status: i32): null => null,
+      onError: fn(_socket: WebSocket, _status: i32, _error: [u8]): null => null
+    }
+  }
+  server::start()
+  return 0
+}

@@ -11,6 +11,7 @@ fn(async) increment(counter: Counter): null {
 }
 
 export fn main(_args: [[u8]]): i32 {
+  var status = 0
   const counter = new(Counter) { value: 0 }
   await increment(counter)
   if counter.value != 1 { return 1 }
@@ -21,36 +22,40 @@ export fn main(_args: [[u8]]): i32 {
   const result = await source::next()
   match result {
     ReadStreamResult::Data(bytes) {
-      if !equals(bytes, "stream") { return 3 }
+      if !equals(bytes, "stream") { status = 3 }
     },
-    _ { println("Failed match! got: "); return 4 }
+    _ { println("Failed match! got: "); status = 4 }
   }
+  if status != 0 { return status }
 
   const end = await source::next()
   var ended = false
   match end {
-    ReadStreamResult::Data(_) { return 5 },
-    ReadStreamResult::Error(_) { return 6 },
+    ReadStreamResult::Data(_) { status = 5 },
+    ReadStreamResult::Error(_) { status = 6 },
     ReadStreamResult::End { ended = true }
   }
+  if status != 0 { return status }
   if !ended { return 7 }
 
   const collected = await buffer::collect(fromBytes("collected"))
   match collected {
     CollectResult::Data(bytes) {
-      if !equals(bytes, "collected") { return 8 }
+      if !equals(bytes, "collected") { status = 8 }
     },
-    CollectResult::LimitExceeded { return 9 },
-    CollectResult::Error(_) { return 10 }
+    CollectResult::LimitExceeded { status = 9 },
+    CollectResult::Error(_) { status = 10 }
   }
+  if status != 0 { return status }
 
   const limited = await ByteBuffer::create()::collect(fromBytes("limit"), 4)
   var limited_result = false
   match limited {
-    CollectResult::Data(_) { return 11 },
-    CollectResult::Error(_) { return 11 },
+    CollectResult::Data(_) { status = 11 },
+    CollectResult::Error(_) { status = 11 },
     CollectResult::LimitExceeded { limited_result = true }
   }
+  if status != 0 { return status }
   if !limited_result { return 11 }
 
   const cancelled = fromBytes("cancelled")
@@ -58,10 +63,11 @@ export fn main(_args: [[u8]]): i32 {
   const cancelled_result = await cancelled::next()
   var cancelled_ended = false
   match cancelled_result {
-    ReadStreamResult::Data(_) { return 12 },
-    ReadStreamResult::Error(_) { return 12 },
+    ReadStreamResult::Data(_) { status = 12 },
+    ReadStreamResult::Error(_) { status = 12 },
     ReadStreamResult::End { cancelled_ended = true }
   }
+  if status != 0 { return status }
   if !cancelled_ended { return 12 }
 
   println("ok")

@@ -8,6 +8,7 @@ fn toEnd(): ReadStreamResult<[u8]> { return ReadStreamResult::End }
 fn toError(msg: [u8]): ReadStreamResult<[u8]> { return ReadStreamResult::Error(msg) }
 
 export fn main(_args: [[u8]]): i32 {
+  var status = 0
   // Test 1: Multiple chunks followed by End
   const multi_chunks: [ReadStreamResult<[u8]>] = [
     toData("chunk1"),
@@ -18,10 +19,11 @@ export fn main(_args: [[u8]]): i32 {
   const buf1 = await ByteBuffer::create()::collect(stream1)
   match buf1 {
     CollectResult::Data(bytes) {
-      if !equals(bytes, "chunk1chunk2") { return 101 }
+      if !equals(bytes, "chunk1chunk2") { status = 101 }
     },
-    _ { return 102 }
+    _ { status = 102 }
   }
+  if status != 0 { return status }
 
   // Test 2: Error propagation
   const error_chunks: [ReadStreamResult<[u8]>] = [
@@ -32,10 +34,11 @@ export fn main(_args: [[u8]]): i32 {
   const buf2 = await ByteBuffer::create()::collect(stream2)
   match buf2 {
     CollectResult::Error(msg) {
-      if !equals(msg, "stream error") { return 201 }
+      if !equals(msg, "stream error") { status = 201 }
     },
-    _ { return 202 }
+    _ { status = 202 }
   }
+  if status != 0 { return status }
 
   // Test 3: Exact maxBytes boundary
   const exact_chunks: [ReadStreamResult<[u8]>] = [
@@ -47,10 +50,11 @@ export fn main(_args: [[u8]]): i32 {
   const buf3 = await ByteBuffer::create()::collect(stream3, 8)
   match buf3 {
     CollectResult::Data(bytes) {
-      if !equals(bytes, "12345678") { return 301 }
+      if !equals(bytes, "12345678") { status = 301 }
     },
-    _ { return 302 }
+    _ { status = 302 }
   }
+  if status != 0 { return status }
 
   // Test 4: One-byte overflow
   const overflow_chunks: [ReadStreamResult<[u8]>] = [
@@ -63,14 +67,15 @@ export fn main(_args: [[u8]]): i32 {
   match buf4 {
     CollectResult::LimitExceeded { 
       // Verify ByteBuffer DOES NOT retain the overflowing chunk
-      if bb4.length != 4 { return 401 }
-      if !equals(bb4::toBytes(), "1234") { return 402 }
+      if bb4.length != 4 { status = 401 }
+      if !equals(bb4::toBytes(), "1234") { status = 402 }
       
       // Verify collect automatically invoked stream::cancel()
-      if !stream4.cancelled { return 403 }
+      if !stream4.cancelled { status = 403 }
     },
-    _ { return 404 }
+    _ { status = 404 }
   }
+  if status != 0 { return status }
 
   // Test 5: Zero-length chunks
   const zero_chunks: [ReadStreamResult<[u8]>] = [
@@ -83,10 +88,11 @@ export fn main(_args: [[u8]]): i32 {
   const buf5 = await ByteBuffer::create()::collect(stream5)
   match buf5 {
     CollectResult::Data(bytes) {
-      if !equals(bytes, "1234") { return 501 }
+      if !equals(bytes, "1234") { status = 501 }
     },
-    _ { return 502 }
+    _ { status = 502 }
   }
+  if status != 0 { return status }
 
   // Test 6: Cancel before first read
   const never_chunks: [ReadStreamResult<[u8]>] = [
@@ -110,10 +116,11 @@ export fn main(_args: [[u8]]): i32 {
   const mid1 = await stream7::next()
   match mid1 {
     ReadStreamResult::Data(d) {
-      if !equals(d, "first") { return 701 }
+      if !equals(d, "first") { status = 701 }
     },
-    _ { return 702 }
+    _ { status = 702 }
   }
+  if status != 0 { return status }
   await stream7::cancel()
   const mid2 = await stream7::next()
   var mid_end = false

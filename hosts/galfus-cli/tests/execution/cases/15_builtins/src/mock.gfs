@@ -19,15 +19,13 @@ export fn(async) ScriptedStream::next(self): ReadStreamResult<[u8]> {
   if self.index >= self.chunks.length { return ReadStreamResult::End }
   const chunk = self.chunks[self.index]
   self.index += 1
-  instanceof chunk {
+  return instanceof chunk {
     ReadStreamResult<[u8]> c { return c },
     null { return ReadStreamResult::End }
   }
-  return ReadStreamResult::End
 }
 
 export fn(async) ScriptedStream::cancel(self): null {
   self.cancelled = true
   return null
 }
-

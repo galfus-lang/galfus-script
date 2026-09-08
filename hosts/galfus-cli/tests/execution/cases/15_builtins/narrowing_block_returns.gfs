@@ -1,0 +1,41 @@
+import { println } from "std/io"
+
+choice Result {
+  Value(i32),
+  Empty,
+}
+
+fn fromMatch(value: Result): i32 {
+  const selected = match value {
+    Result::Value(number) { return number },
+    Result::Empty { return 0 },
+  }
+  return selected + 10
+}
+
+fn fromInstanceof(value: i32 | null): i32 {
+  const selected = instanceof value {
+    i32 number { return number },
+    null { return 0 },
+  }
+  return selected + 10
+}
+
+fn fromTypeof<T: i32 | bool>(): i32 {
+  const selected = typeof T {
+    i32 { return 3 },
+    bool { return 4 },
+  }
+  return selected + 10
+}
+
+export fn main(_args: [[u8]]): i32 {
+  if fromMatch(Result::Value(2)) != 12 { return 1 }
+  if fromMatch(Result::Empty) != 10 { return 2 }
+  if fromInstanceof(5) != 15 { return 3 }
+  if fromInstanceof(null) != 10 { return 4 }
+  if fromTypeof<i32>() != 13 { return 5 }
+  if fromTypeof<bool>() != 14 { return 6 }
+  println("ok")
+  return 0
+}

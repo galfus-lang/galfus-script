@@ -1,0 +1,10 @@
+import { ReadStream } from "std/stream"
+
+fn invalid(stream: ReadStream<[u8]>): null {
+  stream::missing()
+  return null
+}
+
+export fn main(_args: [[u8]]): i32 {
+  return 0
+}

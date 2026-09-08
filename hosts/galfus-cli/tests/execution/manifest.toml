@@ -197,6 +197,37 @@ exit_code = 0
 stdout = "ok\n"
 
 [[case]]
+name = "thread keys reach worker lookups as byte arrays"
+path = "cases/15_builtins/thread_key_lookup.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "server provider accepts requests using its declared surface contract"
+path = "cases/15_builtins/server_provider.gfs"
+command = "run"
+
+[case.http_request]
+address = "127.0.0.1:18981"
+path = "/"
+expected_status = 200
+
+[[case]]
+name = "narrowing block returns produce the enclosing expression value"
+path = "cases/15_builtins/narrowing_block_returns.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "unknown imported constraint members report diagnostics"
+path = "diagnostics/types/imported_constraint_unknown_member.gfs"
+command = "check"
+exit_code = 1
+diagnostic = "T0006"
+
+[[case]]
 name = "immutable bindings are rejected"
 path = "diagnostics/types/immutable_assignment.gfs"
 command = "check"
