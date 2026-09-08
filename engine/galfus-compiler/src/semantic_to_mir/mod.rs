@@ -1,3 +1,4 @@
+mod call_resolution;
 pub mod complex_literals;
 pub mod expression;
 pub mod function;
