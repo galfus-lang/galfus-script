@@ -106,7 +106,9 @@ impl Orchestrator {
                         }
                         crate::task::encode_future_value_into_thread_heap(
                             thread_heap,
-                            FutureValue::Bytes(message.data),
+                            FutureValue::Array(
+                                message.data.into_iter().map(FutureValue::Uint8).collect(),
+                            ),
                             return_type,
                             module_id,
                             &self
@@ -233,7 +235,9 @@ impl Orchestrator {
                         }
                         crate::task::encode_future_value_into_thread_heap(
                             &mut thread.heap,
-                            FutureValue::Bytes(message.data),
+                            FutureValue::Array(
+                                message.data.into_iter().map(FutureValue::Uint8).collect(),
+                            ),
                             return_type,
                             module_id,
                             &self
@@ -346,7 +350,7 @@ impl Orchestrator {
                         tq.release_mailbox_messages(1);
                         tq.release_mailbox_bytes(message.data.len());
                     }
-                    FutureValue::Bytes(message.data)
+                    FutureValue::Array(message.data.into_iter().map(FutureValue::Uint8).collect())
                 })
                 .unwrap_or(FutureValue::Null))),
             "__internal_thread_wait" => {
@@ -389,7 +393,9 @@ impl Orchestrator {
                     msg
                 });
                 match message {
-                    Some(message) => Some(Ok(FutureValue::Bytes(message.data))),
+                    Some(message) => Some(Ok(FutureValue::Array(
+                        message.data.into_iter().map(FutureValue::Uint8).collect(),
+                    ))),
                     None => {
                         self.register_mailbox_future_wait(
                             thread_id, thread_id, future_id, sender_id, timeout_ms,

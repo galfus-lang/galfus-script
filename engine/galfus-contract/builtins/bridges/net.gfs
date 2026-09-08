@@ -19,7 +19,7 @@ export struct TcpStream satisfies ReadStream<[u8]>, WriteStream<[u8]> {
 
 export fn(async) tcpConnect(host: [u8], port: u16): TcpStream | null {
     const id = await __provider_net_tcp_connect(host, port)
-    instanceof id {
+    return instanceof id {
         u64 id {
             return new(TcpStream) {
                 id: id,
@@ -29,7 +29,6 @@ export fn(async) tcpConnect(host: [u8], port: u16): TcpStream | null {
         },
         null { return null },
     }
-    return null
 }
 
 export fn(async) TcpStream::next(self): ReadStreamResult<[u8]> {
@@ -38,11 +37,10 @@ export fn(async) TcpStream::next(self): ReadStreamResult<[u8]> {
     }
 
     const bytes = await __provider_net_tcp_read(self.id, 65536)
-    instanceof bytes {
+    return instanceof bytes {
         [u8] bytes { return ReadStreamResult::Data(bytes) },
         null { return ReadStreamResult::End },
     }
-    return ReadStreamResult::End
 }
 
 export fn(async) TcpStream::write(self, bytes: [u8]): WriteStreamResult {
@@ -92,23 +90,21 @@ export struct Datagram {
 
 export fn(async) udpBind(host: [u8], port: u16): UdpSocket | null {
     const id = await __provider_net_udp_bind(host, port)
-    instanceof id {
+    return instanceof id {
         u64 id { return new(UdpSocket) { id: id } },
         null { return null },
     }
-    return null
 }
 
 export fn(async) UdpSocket::receive(self, maxBytes: u32): Datagram | null {
     const received = await __provider_net_udp_receive(self.id, maxBytes)
-    instanceof received {
+    return instanceof received {
         ([u8], [u8], u16) received {
             const (data, host, port) = received
             return new(Datagram) { data: data, host: host, port: port }
         },
         null { return null },
     }
-    return null
 }
 
 export fn(async) UdpSocket::sendTo(self, host: [u8], port: u16, data: [u8]): bool {

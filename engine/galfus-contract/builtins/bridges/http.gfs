@@ -36,14 +36,13 @@ export fn(async) HttpBody::next(self): ReadStreamResult<[u8]> {
     }
 
     const bytes = await __provider_http_response_read(self.id, 65536)
-    instanceof bytes {
+    return instanceof bytes {
         [u8] bytes { return ReadStreamResult::Data(bytes) },
         null {
             self.closed = true
             return ReadStreamResult::End
         },
     }
-    return ReadStreamResult::End
 }
 
 export fn(async) HttpBody::cancel(self): null {
@@ -56,19 +55,23 @@ export fn(async) HttpBody::cancel(self): null {
 
 export fn(async) request(method: [u8], url: [u8], headers: [Header] = [], body: [u8] | null = null): Response | null {
     const req_id = await __provider_http_request_open(method, url, headers)
+    var aborted = false
     instanceof body {
         null {},
         [u8] b {
             const ok = await __provider_http_request_write(req_id, b)
             if !ok {
                 await __provider_http_request_abort(req_id)
-                return null
+                aborted = true
             }
         }
     }
+    if aborted {
+        return null
+    }
     
     const raw = await __provider_http_request_finish(req_id)
-    instanceof raw {
+    return instanceof raw {
         ProviderResponse raw {
             return new(Response) {
                 status: raw.status,
@@ -78,7 +81,6 @@ export fn(async) request(method: [u8], url: [u8], headers: [Header] = [], body: 
         },
         null { return null }
     }
-    return null
 }
 
 export fn(async) requestUpload(method: [u8], url: [u8], headers: [Header] = []): HttpUpload {
@@ -126,7 +128,7 @@ export fn(async) HttpUpload::cancel(self): null {
 
 export fn(async) HttpUpload::response(self): Response | null {
     const raw = await __provider_http_request_finish(self.id)
-    instanceof raw {
+    return instanceof raw {
         ProviderResponse raw {
             return new(Response) {
                 status: raw.status,
@@ -136,5 +138,4 @@ export fn(async) HttpUpload::response(self): Response | null {
         },
         null { return null }
     }
-    return null
 }

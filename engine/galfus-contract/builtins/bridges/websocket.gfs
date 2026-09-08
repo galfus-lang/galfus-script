@@ -14,11 +14,10 @@ export struct WebSocketMessage {
 
 export fn(async) connect(url: [u8]): WebSocket | null {
     const id = await __provider_websocket_connect(url)
-    instanceof id {
+    return instanceof id {
         u64 id { return new(WebSocket) { id: id, closed: false } },
         null { return null },
     }
-    return null
 }
 
 export fn(async) WebSocket::receive(self): WebSocketMessage | null {
@@ -27,11 +26,10 @@ export fn(async) WebSocket::receive(self): WebSocketMessage | null {
     }
 
     const data = await __provider_websocket_receive(self.id)
-    instanceof data {
+    return instanceof data {
         [u8] data { return new(WebSocketMessage) { data: data } },
         null { return null },
     }
-    return null
 }
 
 export fn(async) WebSocket::send(self, data: [u8]): bool {

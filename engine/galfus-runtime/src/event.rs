@@ -9,15 +9,33 @@ use galfus_vm::{Continuation, VmEffect};
 /// Heap-independent completion data retained until the owning continuation resumes.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FutureValue {
+    Int8(i8),
+    Int16(i16),
     I32(i32),
     I64(i64),
+    Uint8(u8),
+    Uint16(u16),
+    Uint32(u32),
+    Uint64(u64),
+    F32(f32),
     F64(f64),
     Bool(bool),
-    Bytes(Vec<u8>),
     Null,
     Function {
         module_id: u32,
         func_idx: u32,
+    },
+    Array(Vec<Self>),
+    Tuple(Vec<Self>),
+    Struct(Vec<Self>),
+    Choice {
+        variant_idx: u16,
+        payload: Option<Box<Self>>,
+    },
+    Handle {
+        binding_id: galfus_core::BindingId,
+        type_id: galfus_core::OpaqueTypeId,
+        id: galfus_core::HandleId,
     },
     Surface {
         contract: SurfaceContract,

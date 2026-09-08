@@ -232,34 +232,25 @@ pub(crate) fn encode_future_value_into_thread_heap(
     module_id: galfus_core::ModuleId,
     module: &galfus_bytecode::BytecodeModule,
 ) -> Result<galfus_vm::VmValue, String> {
+    use galfus_bytecode::BytecodeType;
+
+    let expected_type = module
+        .types
+        .get(expected.raw() as usize)
+        .ok_or_else(|| "missing expected bytecode type".to_string())?;
+
     match value {
-        crate::event::FutureValue::I32(code) => Ok(galfus_vm::VmValue::Int32(code)),
-        crate::event::FutureValue::I64(val) => Ok(galfus_vm::VmValue::Int64(val)),
-        crate::event::FutureValue::F64(val) => Ok(galfus_vm::VmValue::Float64(val)),
-        crate::event::FutureValue::Bool(val) => Ok(galfus_vm::VmValue::Bool(val)),
-        crate::event::FutureValue::Null => Ok(galfus_vm::VmValue::Null),
-        crate::event::FutureValue::Function {
-            module_id: id,
-            func_idx: idx,
-        } => Ok(galfus_vm::VmValue::Function {
-            module_id: galfus_core::ModuleId::new(id),
-            func_idx: galfus_bytecode::instruction::FuncIdx(idx.try_into().unwrap()),
-        }),
-        crate::event::FutureValue::Bytes(bytes) => {
-            let element_ty = match module.types.get(expected.raw() as usize) {
-                Some(galfus_bytecode::BytecodeType::Array(ty)) => *ty,
-                _ => return Err("expected array type".to_string()),
-            };
-            let elements = bytes.into_iter().map(galfus_vm::VmValue::Uint8).collect();
-            let reference = heap
-                .alloc(galfus_vm::HeapObject::Array {
-                    module_id,
-                    element_ty,
-                    elements,
-                })
-                .map_err(|_| "bytes exceed heap quota".to_string())?;
-            Ok(galfus_vm::VmValue::Object(reference))
+        crate::event::FutureValue::Null
+            if matches!(
+                expected_type,
+                BytecodeType::Null | BytecodeType::Nullable(_) | BytecodeType::Any
+            ) =>
+        {
+            Ok(galfus_vm::VmValue::Null)
         }
+        crate::event::FutureValue::Null => Err(format!(
+            "null future result does not match {expected_type:?}"
+        )),
         crate::event::FutureValue::Surface {
             contract,
             value,
@@ -278,9 +269,234 @@ pub(crate) fn encode_future_value_into_thread_heap(
                 adapter_binding_id,
             )
         }
+        value => {
+            let expected = match expected_type {
+                BytecodeType::Nullable(inner) => *inner,
+                _ => expected,
+            };
+            encode_non_null_future_value_into_thread_heap(heap, value, expected, module_id, module)
+        }
+    }
+}
+
+fn encode_non_null_future_value_into_thread_heap(
+    heap: &mut galfus_vm::thread::PrivateHeap,
+    value: crate::event::FutureValue,
+    expected: galfus_bytecode::instruction::TypeIdx,
+    module_id: galfus_core::ModuleId,
+    module: &galfus_bytecode::BytecodeModule,
+) -> Result<galfus_vm::VmValue, String> {
+    use galfus_bytecode::BytecodeType;
+
+    let expected_type = module
+        .types
+        .get(expected.raw() as usize)
+        .ok_or_else(|| "missing expected bytecode type".to_string())?;
+    let mismatch = || format!("future result does not match {expected_type:?}");
+
+    match value {
+        crate::event::FutureValue::Int8(value)
+            if matches!(expected_type, BytecodeType::Int8 | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Int8(value))
+        }
+        crate::event::FutureValue::Int16(value)
+            if matches!(expected_type, BytecodeType::Int16 | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Int16(value))
+        }
+        crate::event::FutureValue::I32(value)
+            if matches!(expected_type, BytecodeType::Int32 | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Int32(value))
+        }
+        crate::event::FutureValue::I64(value)
+            if matches!(expected_type, BytecodeType::Int64 | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Int64(value))
+        }
+        crate::event::FutureValue::Uint8(value)
+            if matches!(expected_type, BytecodeType::Uint8 | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Uint8(value))
+        }
+        crate::event::FutureValue::Uint16(value)
+            if matches!(expected_type, BytecodeType::Uint16 | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Uint16(value))
+        }
+        crate::event::FutureValue::Uint32(value)
+            if matches!(expected_type, BytecodeType::Uint32 | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Uint32(value))
+        }
+        crate::event::FutureValue::Uint64(value)
+            if matches!(expected_type, BytecodeType::Uint64 | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Uint64(value))
+        }
+        crate::event::FutureValue::F32(value)
+            if matches!(expected_type, BytecodeType::Float32 | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Float32(galfus_core::normalize_f32(
+                value,
+            )))
+        }
+        crate::event::FutureValue::F64(value)
+            if matches!(expected_type, BytecodeType::Float64 | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Float64(galfus_core::normalize_f64(
+                value,
+            )))
+        }
+        crate::event::FutureValue::Bool(value)
+            if matches!(expected_type, BytecodeType::Bool | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Bool(value))
+        }
+        crate::event::FutureValue::Function {
+            module_id: id,
+            func_idx: idx,
+        } if matches!(
+            expected_type,
+            BytecodeType::Function { .. } | BytecodeType::Any
+        ) =>
+        {
+            Ok(galfus_vm::VmValue::Function {
+                module_id: galfus_core::ModuleId::new(id),
+                func_idx: galfus_bytecode::instruction::FuncIdx(
+                    idx.try_into()
+                        .map_err(|_| "future function index exceeds bytecode limits".to_string())?,
+                ),
+            })
+        }
+        crate::event::FutureValue::Array(values) => {
+            let BytecodeType::Array(element_ty) = expected_type else {
+                return Err(mismatch());
+            };
+            let elements = values
+                .into_iter()
+                .map(|value| {
+                    encode_future_value_into_thread_heap(
+                        heap,
+                        value,
+                        *element_ty,
+                        module_id,
+                        module,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Array {
+                    module_id,
+                    element_ty: *element_ty,
+                    elements,
+                })
+                .map_err(|_| "future array exceeds heap quota".to_string())?;
+            Ok(galfus_vm::VmValue::Object(reference))
+        }
+        crate::event::FutureValue::Tuple(values) => {
+            let BytecodeType::Tuple(item_types) = expected_type else {
+                return Err(mismatch());
+            };
+            if values.len() != item_types.len() {
+                return Err(mismatch());
+            }
+            let elements = values
+                .into_iter()
+                .zip(item_types)
+                .map(|(value, item_type)| {
+                    encode_future_value_into_thread_heap(heap, value, *item_type, module_id, module)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Tuple { elements })
+                .map_err(|_| "future tuple exceeds heap quota".to_string())?;
+            Ok(galfus_vm::VmValue::Object(reference))
+        }
+        crate::event::FutureValue::Struct(values) => {
+            let BytecodeType::Struct(layout_idx) = expected_type else {
+                return Err(mismatch());
+            };
+            let layout = module
+                .struct_layouts
+                .get(layout_idx.raw() as usize)
+                .ok_or_else(|| "missing future struct layout".to_string())?;
+            if values.len() != layout.fields.len() {
+                return Err(mismatch());
+            }
+            let fields = values
+                .into_iter()
+                .zip(layout.fields.iter())
+                .map(|(value, field)| {
+                    encode_future_value_into_thread_heap(heap, value, field.ty, module_id, module)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Struct {
+                    module_id,
+                    layout_idx: *layout_idx,
+                    fields,
+                })
+                .map_err(|_| "future struct exceeds heap quota".to_string())?;
+            Ok(galfus_vm::VmValue::Object(reference))
+        }
+        crate::event::FutureValue::Choice {
+            variant_idx,
+            payload,
+        } => {
+            let BytecodeType::Choice(layout_idx) = expected_type else {
+                return Err(mismatch());
+            };
+            let layout = module
+                .choice_layouts
+                .get(layout_idx.raw() as usize)
+                .ok_or_else(|| "missing future choice layout".to_string())?;
+            let variant = layout
+                .variants
+                .get(variant_idx as usize)
+                .ok_or_else(|| "future choice has an invalid variant".to_string())?;
+            let payload = match (payload, variant.payload_ty) {
+                (None, None) => galfus_vm::VmValue::Null,
+                (Some(value), Some(payload_ty)) => encode_future_value_into_thread_heap(
+                    heap, *value, payload_ty, module_id, module,
+                )?,
+                _ => return Err(mismatch()),
+            };
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Choice {
+                    module_id,
+                    layout_idx: *layout_idx,
+                    variant_idx,
+                    payload,
+                })
+                .map_err(|_| "future choice exceeds heap quota".to_string())?;
+            Ok(galfus_vm::VmValue::Object(reference))
+        }
+        crate::event::FutureValue::Handle {
+            binding_id,
+            type_id,
+            id,
+        } => match expected_type {
+            BytecodeType::AdapterHandle(expected_type_id) if *expected_type_id == type_id => {
+                let reference = heap
+                    .alloc(galfus_vm::HeapObject::AdapterHandle {
+                        binding_id,
+                        type_id,
+                        id,
+                    })
+                    .map_err(|_| "future handle exceeds heap quota".to_string())?;
+                Ok(galfus_vm::VmValue::Object(reference))
+            }
+            _ => Err(mismatch()),
+        },
         crate::event::FutureValue::Aggregate(values) => {
             encode_aggregate_into_thread_heap(heap, values, expected, module_id, module)
         }
+        crate::event::FutureValue::Null | crate::event::FutureValue::Surface { .. } => {
+            unreachable!("nullable and surface future values are handled before recursive encoding")
+        }
+        _ => Err(mismatch()),
     }
 }
 

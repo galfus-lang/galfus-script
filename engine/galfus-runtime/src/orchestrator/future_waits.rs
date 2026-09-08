@@ -131,7 +131,13 @@ impl Orchestrator {
             self.complete_future(
                 wait.waiting_thread_id,
                 wait.future_lease.id,
-                Ok(crate::event::FutureValue::Bytes(message.data)),
+                Ok(crate::event::FutureValue::Array(
+                    message
+                        .data
+                        .into_iter()
+                        .map(crate::event::FutureValue::Uint8)
+                        .collect(),
+                )),
             );
         }
     }

@@ -45,11 +45,10 @@ export fn(async) BytesStream::next(self): ReadStreamResult<[u8]> {
   const bytes = self.bytes
   self.bytes = null
 
-  instanceof bytes {
+  return instanceof bytes {
     [u8] data { return ReadStreamResult::Data(data) },
-    null {}
+    null { return ReadStreamResult::End }
   }
-  return ReadStreamResult::End
 }
 
 export fn(async) BytesStream::cancel(self): null {
@@ -114,19 +113,27 @@ export fn ByteBuffer::append(self, chunk: [u8]): null {
 export fn ByteBuffer::toBytes(self): [u8] => slice(self.data, 0, self.length)
 
 export fn(async) ByteBuffer::collect(self, stream: ReadStream<[u8]>, maxBytes: i32 = 16777216): CollectResult {
+  var outcome = CollectResult::Error("unreachable stream state")
   loop {
     const result = await stream::next()
     match result {
       ReadStreamResult::Data(chunk) {
         if maxBytes >= 0 && self.length + chunk.length > maxBytes {
           await stream::cancel()
-          return CollectResult::LimitExceeded
+          outcome = CollectResult::LimitExceeded
+          break
         }
         self::append(chunk)
       },
-      ReadStreamResult::End { return CollectResult::Data(self::toBytes()) },
-      ReadStreamResult::Error(message) { return CollectResult::Error(message) }
+      ReadStreamResult::End {
+        outcome = CollectResult::Data(self::toBytes())
+        break
+      },
+      ReadStreamResult::Error(message) {
+        outcome = CollectResult::Error(message)
+        break
+      }
     }
   }
-  return CollectResult::Error("unreachable stream state")
+  return outcome
 }

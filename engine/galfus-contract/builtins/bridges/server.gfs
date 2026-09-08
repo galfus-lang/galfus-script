@@ -119,12 +119,12 @@ export fn(async) RequestBody::next(self): ReadStreamResult<[u8]> {
     }
 
     const result = await __provider_server_request_read(self.id, 65536)
-    var ret = ReadStreamResult::End
+    var ret: ReadStreamResult<[u8]> = ReadStreamResult<[u8]>::End
     match result {
         ProviderReadResult::Data(chunk) { ret = ReadStreamResult::Data<[u8]>(chunk) },
         ProviderReadResult::End {
             self.closed = true
-            ret = ReadStreamResult::End
+            ret = ReadStreamResult<[u8]>::End
         },
         ProviderReadResult::Error(msg) {
             self.closed = true
