@@ -7,6 +7,7 @@ mod function_helpers;
 mod generic_specialization;
 pub mod helpers;
 mod module_items;
+mod narrowing;
 pub mod pattern;
 
 use std::collections;
