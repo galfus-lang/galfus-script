@@ -3,6 +3,7 @@ pub mod complex_literals;
 pub mod expression;
 pub mod function;
 mod function_helpers;
+mod generic_specialization;
 pub mod helpers;
 mod module_items;
 pub mod pattern;
