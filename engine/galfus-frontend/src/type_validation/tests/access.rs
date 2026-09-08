@@ -126,6 +126,49 @@ fn getId(user: User | null): i64 {
 }
 
 #[test]
+fn check_narrows_nullable_binding_after_returning_null_guard() {
+    let (_source, _graph, result, _string_table) = check_source(
+        r#"
+struct User {
+  id: i64,
+}
+
+fn getId(user: User | null): i64 {
+  if user == null {
+    return 0
+  }
+
+  return user.id
+}
+"#,
+    );
+
+    assert!(!result.has_errors(), "{:?}", result.diagnostics());
+}
+
+#[test]
+fn check_uses_a_nullable_binding_refinement_in_a_later_initializer() {
+    let (_source, _graph, result, _string_table) = check_source(
+        r#"
+struct User {
+  id: i64,
+}
+
+fn getId(user: User | null): i64 {
+  if user == null {
+    return 0
+  }
+
+  const id = user.id
+  return id
+}
+"#,
+    );
+
+    assert!(!result.has_errors(), "{:?}", result.diagnostics());
+}
+
+#[test]
 fn check_accepts_array_index_expression() {
     let (_source, _graph, result, _string_table) = check_source(
         r#"

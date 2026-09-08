@@ -72,7 +72,10 @@ impl<'a> DeclarationTypeChecker<'a> {
         (target != ty).then_some(target)
     }
 
-    fn generic_expression_argument_types(&self, arguments: NodeId) -> Option<Vec<TypeId>> {
+    pub(super) fn generic_expression_argument_types(
+        &self,
+        arguments: NodeId,
+    ) -> Option<Vec<TypeId>> {
         let argument_nodes = self.graph.syntax().node(arguments)?.children().to_vec();
 
         let mut argument_types = Vec::new();

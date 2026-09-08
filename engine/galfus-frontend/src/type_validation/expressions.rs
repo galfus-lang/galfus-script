@@ -17,8 +17,25 @@ impl<'a> DeclarationTypeChecker<'a> {
 
         if let Some(existing) = self.layer.node_type(node) {
             match syntax_node.kind() {
-                SyntaxNodeKind::PathExpression if expected.is_some() => {
+                // A binding can be refined by control flow after this node was
+                // first inferred. Names must therefore read the current symbol
+                // type instead of returning an outdated per-node cache entry.
+                SyntaxNodeKind::NameExpression => return self.infer_name_expression_type(node),
+                // A path can be a value-anchored method call whose receiver
+                // has been refined since this node was first inferred.
+                SyntaxNodeKind::PathExpression => {
                     return self.infer_path_variant_expression_type(node, expected);
+                }
+                // `instanceof` narrows from its subject, so an earlier cache
+                // cannot be reused after a preceding control-flow guard.
+                SyntaxNodeKind::InstanceofExpression => {
+                    return self.infer_instanceof_expression_type(node, expected);
+                }
+                // Calls inherit the flow sensitivity of their callee (notably
+                // a value-anchored method path), so their cached result may
+                // also have been produced before a guard narrowed the target.
+                SyntaxNodeKind::CallExpression => {
+                    return self.infer_call_expression_type(node, expected);
                 }
                 SyntaxNodeKind::IntegerLiteral => {
                     if let Some(expected) = self.expected_integer_literal_type(expected) {
@@ -182,6 +199,8 @@ impl<'a> DeclarationTypeChecker<'a> {
             })
             .map(|ty| self.apply_active_type_substitutions(ty));
 
+        let ty = ty.map(|ty| self.refine_type_from_preceding_null_guards(node, symbol, ty));
+
         if let Some(symbol_data) = resolution.symbol(symbol)
             && symbol_data.kind() == SymbolKind::Struct
             && self.is_opaque_struct_handle(symbol)
@@ -190,7 +209,111 @@ impl<'a> DeclarationTypeChecker<'a> {
             return Some(self.layer.table_mut().error());
         }
 
+        if let Some(ty) = ty {
+            self.layer.bind_node_type(node, ty);
+        }
+
         ty
+    }
+
+    fn refine_type_from_preceding_null_guards(
+        &mut self,
+        node: NodeId,
+        symbol: SymbolId,
+        ty: TypeId,
+    ) -> TypeId {
+        let Some(root) = self.graph.syntax().root() else {
+            return ty;
+        };
+
+        self.refine_type_in_enclosing_blocks(root, node, symbol, ty)
+    }
+
+    fn refine_type_in_enclosing_blocks(
+        &mut self,
+        current: NodeId,
+        target: NodeId,
+        symbol: SymbolId,
+        mut ty: TypeId,
+    ) -> TypeId {
+        let Some(current_node) = self.graph.syntax().node(current) else {
+            return ty;
+        };
+
+        let children = current_node.children().to_vec();
+        let target_child_index = children
+            .iter()
+            .position(|child| self.node_contains(*child, target));
+
+        if current_node.kind() == SyntaxNodeKind::Block
+            && let Some(target_child_index) = target_child_index
+        {
+            for statement in children.iter().take(target_child_index).copied() {
+                if self
+                    .graph
+                    .syntax()
+                    .node(statement)
+                    .is_none_or(|node| node.kind() != SyntaxNodeKind::IfStatement)
+                {
+                    continue;
+                }
+
+                let Some(condition) = self.graph.syntax().child(statement, 0) else {
+                    continue;
+                };
+                if self.null_equality_subject_symbol(condition) != Some(symbol)
+                    || !self.if_then_branch_guarantees_return(statement)
+                {
+                    continue;
+                }
+
+                ty = self.remove_null_from_type(ty).unwrap_or(ty);
+            }
+        }
+
+        let Some(child) = target_child_index
+            .and_then(|index| children.get(index))
+            .copied()
+        else {
+            return ty;
+        };
+
+        if child == target {
+            return ty;
+        }
+
+        self.refine_type_in_enclosing_blocks(child, target, symbol, ty)
+    }
+
+    fn node_contains(&self, root: NodeId, target: NodeId) -> bool {
+        root == target
+            || self.graph.syntax().node(root).is_some_and(|node| {
+                node.children()
+                    .iter()
+                    .copied()
+                    .any(|child| self.node_contains(child, target))
+            })
+    }
+
+    fn if_then_branch_guarantees_return(&self, statement: NodeId) -> bool {
+        self.graph
+            .syntax()
+            .child(statement, 1)
+            .is_some_and(|then_block| self.statement_guarantees_return(then_block))
+    }
+
+    fn remove_null_from_type(&mut self, ty: TypeId) -> Option<TypeId> {
+        let ty = self.resolve_alias_type(ty);
+        let TypeKind::Union { members } = self.layer.table().kind(ty)? else {
+            return (!self.is_null_type(ty)).then_some(ty);
+        };
+
+        let members = members
+            .iter()
+            .copied()
+            .filter(|member| !self.is_null_type(*member))
+            .collect::<Vec<_>>();
+        (!members.is_empty()).then(|| self.layer.table_mut().intern_union(members))
     }
 
     pub(super) fn checked_integer_literal_type(

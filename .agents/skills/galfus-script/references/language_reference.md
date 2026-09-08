@@ -112,6 +112,23 @@ null
   }
   ```
 
+### 2.6 Narrowing Block Returns
+
+`match`, `instanceof`, and `typeof` are narrowing expressions. A `return`
+inside a block arm returns a value from that arm to the narrowing expression;
+it does not return from the enclosing function.
+
+```galfus
+fn normalize(value: i32 | null): i32 {
+  return instanceof value {
+    i32 number { return number },
+    null { return 0 },
+  }
+}
+```
+
+To return from the enclosing function, return the narrowing expression itself.
+
 ---
 
 ## 3. Data Forms

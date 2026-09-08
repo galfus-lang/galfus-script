@@ -229,6 +229,21 @@ fn make(): Outcome<i32> {
 }
 
 #[test]
+fn check_accepts_explicit_generic_choice_variant_call() {
+    let (_source, _graph, result, _string_table) = check_source(
+        r#"
+choice Outcome<T> {
+  Ok(T),
+}
+
+var value: Outcome<i32> = Outcome::Ok<i32>(42)
+"#,
+    );
+
+    assert!(!result.has_errors(), "{:?}", result.diagnostics());
+}
+
+#[test]
 fn check_reports_choice_payload_required() {
     let source = source(
         r#"

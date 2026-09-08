@@ -136,6 +136,106 @@ fn module_surface_imports_exported_type_as_namespace_path() {
 }
 
 #[test]
+fn module_surface_includes_exported_struct_methods() {
+    let source = source(
+        r#"
+        export struct Stream {}
+
+        export fn(async) Stream::next(self): i32 {
+          return 0
+        }
+
+        export fn Stream::send(self, value: [u8]): bool => true
+        "#,
+    );
+
+    let parse_result = parse(&source);
+    assert!(!parse_result.has_errors());
+
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
+    assert!(!resolve_result.has_errors());
+
+    let graph = resolve_result.graph();
+    let type_result = check_declaration_types(&source, graph, &string_table, false);
+    assert!(!type_result.has_errors());
+
+    let surface = build_module_surface(
+        galfus_core::ModuleId::new(1),
+        &source,
+        graph,
+        &type_result,
+        &string_table,
+    );
+
+    let next = surface
+        .export("Stream")
+        .expect("Stream is exported")
+        .members()
+        .iter()
+        .find(|member| member.name() == "next" && member.kind() == SymbolKind::Function)
+        .expect("exported async method is included in the module surface");
+    assert_eq!(
+        next.ty(),
+        Some(&ImportedType::Function {
+            parameters: vec![crate::ImportedFunctionParameterType::new(
+                ImportedType::LocalPath {
+                    name: "Stream".to_string(),
+                },
+            )],
+            return_type: Box::new(ImportedType::GenericInstance {
+                base: Box::new(ImportedType::LocalPath {
+                    name: "Future".to_string(),
+                }),
+                arguments: vec![ImportedType::Primitive(PrimitiveType::Int32)],
+            }),
+        })
+    );
+    assert!(
+        surface
+            .export("Stream")
+            .expect("Stream is exported")
+            .members()
+            .iter()
+            .any(|member| member.name() == "send" && member.kind() == SymbolKind::Function),
+        "exported synchronous method is included in the module surface"
+    );
+}
+
+#[test]
+fn module_surface_includes_thread_methods() {
+    let source = source(galfus_contract::THREAD_SOURCE);
+    let parse_result = parse(&source);
+    assert!(!parse_result.has_errors());
+
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
+    assert!(!resolve_result.has_errors());
+
+    let graph = resolve_result.graph();
+    let type_result = check_declaration_types(&source, graph, &string_table, false);
+    assert!(!type_result.has_errors());
+
+    let surface = build_module_surface(
+        galfus_core::ModuleId::new(1),
+        &source,
+        graph,
+        &type_result,
+        &string_table,
+    );
+    let thread = surface.export("Thread").expect("Thread is exported");
+    for method in ["spawn", "send", "receiveMessage", "wait"] {
+        assert!(
+            thread
+                .members()
+                .iter()
+                .any(|member| member.name() == method && member.kind() == SymbolKind::Function),
+            "Thread::{method} is exported through the module surface"
+        );
+    }
+}
+
+#[test]
 fn module_surface_records_exported_function_signature() {
     let source = source(
         r#"

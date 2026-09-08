@@ -60,6 +60,7 @@ impl ImportedFunctionParameterType {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImportedType {
+    Error,
     Primitive(PrimitiveType),
     NamedLocal {
         symbol: SymbolId,
@@ -99,6 +100,7 @@ pub enum ImportedType {
 impl ImportedType {
     pub fn relocate(&self, namespace: SymbolId) -> Self {
         match self {
+            Self::Error => Self::Error,
             Self::Primitive(primitive) => Self::Primitive(*primitive),
             Self::NamedLocal { symbol } => Self::NamedLocal { symbol: *symbol },
             Self::SurfacePath {

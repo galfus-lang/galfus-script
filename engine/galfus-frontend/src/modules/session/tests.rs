@@ -43,6 +43,135 @@ fn empty_catalog_rejects_std_io_imports() {
 }
 
 #[test]
+fn check_exposes_methods_of_a_struct_returned_by_an_imported_function() {
+    let producer = SourceFile::new(
+        SourceId::new(1),
+        "src/producer.gfs".to_string(),
+        r#"
+        export struct Worker {}
+
+        export fn makeWorker(): Worker | null => new(Worker) {}
+        export fn Worker::ready(self): bool => true
+        "#
+        .to_string(),
+    );
+    let consumer = SourceFile::new(
+        SourceId::new(2),
+        "src/main.gfs".to_string(),
+        r#"
+        import { makeWorker } from "./producer"
+
+        export fn main(args: [[u8]]): i32 {
+            const previous = makeWorker()
+            if previous == null {
+                return 1
+            }
+            const next = makeWorker()
+            if next == null {
+                return 1
+            }
+            const ready = previous::ready()
+            if ready {
+                return 0
+            }
+            return 1
+        }
+        "#
+        .to_string(),
+    );
+    let sources = [
+        FrontendSource {
+            module_id: ModuleId::new(1),
+            path: path("src/producer.gfs"),
+            source: &producer,
+            kind: FrontendModuleKind::Standard,
+        },
+        FrontendSource {
+            module_id: ModuleId::new(2),
+            path: path("src/main.gfs"),
+            source: &consumer,
+            kind: FrontendModuleKind::Standard,
+        },
+    ];
+    let mut session = FrontendSession::new();
+    let report = session.check(FrontendUpdate {
+        catalog: io_catalog(),
+        source_revision: Revision::new(1),
+        sources: &sources,
+        removed_modules: &[],
+        roots: &FrontendRoots::default(),
+    });
+
+    assert!(
+        !report.diagnostics.has_errors(),
+        "{:#?}",
+        report.diagnostics
+    );
+}
+
+#[test]
+fn check_matches_a_generic_choice_returned_by_an_imported_function() {
+    let producer = SourceFile::new(
+        SourceId::new(1),
+        "src/producer.gfs".to_string(),
+        r#"
+        export choice Result<T> { Ok(T), Err }
+        export fn parse(): Result<i32> => Result<i32>::Ok(1)
+        "#
+        .to_string(),
+    );
+    let consumer = SourceFile::new(
+        SourceId::new(2),
+        "src/main.gfs".to_string(),
+        r#"
+        import { parse, Result } from "./producer"
+
+        export fn main(_args: [[u8]]): i32 {
+            const parsed = parse()
+            const created: Result<i32> = Result::Ok<i32>(1)
+            const failed: Result<i32> = Result<i32>::Err
+            return match parsed {
+                Result::Ok(_) => match created {
+                    Result::Ok(value) => value,
+                    Result::Err => 0,
+                },
+                Result::Err => 0,
+            }
+        }
+        "#
+        .to_string(),
+    );
+    let sources = [
+        FrontendSource {
+            module_id: ModuleId::new(1),
+            path: path("src/producer.gfs"),
+            source: &producer,
+            kind: FrontendModuleKind::Standard,
+        },
+        FrontendSource {
+            module_id: ModuleId::new(2),
+            path: path("src/main.gfs"),
+            source: &consumer,
+            kind: FrontendModuleKind::Standard,
+        },
+    ];
+    let mut session = FrontendSession::new();
+    let report = session.check(FrontendUpdate {
+        catalog: io_catalog(),
+        source_revision: Revision::new(1),
+        sources: &sources,
+        removed_modules: &[],
+        roots: &FrontendRoots::default(),
+    });
+
+    assert!(
+        !report.diagnostics.has_errors(),
+        "{:#?}",
+        report.diagnostics
+    );
+}
+
+#[test]
 fn check_binds_array_destructuring_types_in_entry_function() {
     let main = SourceFile::new(
         SourceId::new(1),

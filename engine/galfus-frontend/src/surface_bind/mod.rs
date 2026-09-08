@@ -7,7 +7,8 @@ use crate::{
     ImportedSurfaceTypes, ImportedType, ModuleAst, ResolutionLayer, StringTable, SymbolKind,
     SyntaxNodeKind, TypeCheckResult, TypeKind,
     type_validation::{
-        ImportedChoiceSurface, ImportedConstraintSurface, ImportedFunctionParameterType,
+        IMPLICIT_FUTURE_SYMBOL, ImportedChoiceSurface, ImportedConstraintSurface,
+        ImportedFunctionParameterType,
     },
 };
 pub use export::*;
@@ -379,6 +380,11 @@ pub fn imported_surface_types_for_named_export(
     };
 
     if let Some(ty) = surface.imported_type_for_export(local_symbol, name) {
+        let ty = if export.kind() == SymbolKind::Function {
+            ty.relocate(local_symbol)
+        } else {
+            ty
+        };
         imported_types.insert_symbol_type(local_symbol, ty);
     }
 
@@ -452,7 +458,7 @@ pub fn imported_surface_types_for_named_export(
             ) {
                 imported_types.insert_member_type(
                     ImportedMemberKey::new(local_symbol, struct_name, member.name()),
-                    ty,
+                    ty.relocate(local_symbol),
                 );
             }
         }
@@ -524,6 +530,12 @@ fn imported_function_return_struct_name(ty: Option<&ImportedType>) -> Option<&st
         ImportedType::LocalPath { name } | ImportedType::SurfacePath { name, .. } => {
             Some(name.as_str())
         }
+        ImportedType::Union { members } => members.iter().find_map(|member| match member {
+            ImportedType::LocalPath { name } | ImportedType::SurfacePath { name, .. } => {
+                Some(name.as_str())
+            }
+            _ => None,
+        }),
         _ => None,
     }
 }
@@ -994,6 +1006,8 @@ fn transport_type(
     ty: TypeId,
 ) -> Option<ImportedType> {
     match result.layer().table().kind(ty).cloned()? {
+        TypeKind::Error => Some(ImportedType::Error),
+
         TypeKind::Primitive(primitive) => Some(ImportedType::Primitive(primitive)),
 
         TypeKind::Array { element } => Some(ImportedType::Array {
@@ -1057,6 +1071,12 @@ fn transport_type(
             })
         }
         TypeKind::Named { symbol } => {
+            if symbol.raw() == IMPLICIT_FUTURE_SYMBOL {
+                return Some(ImportedType::LocalPath {
+                    name: "Future".to_string(),
+                });
+            }
+
             let symbol_data = resolution.symbol(symbol)?;
             if matches!(
                 symbol_data.kind(),
@@ -1115,7 +1135,6 @@ fn transport_type(
                 .collect::<Option<Vec<_>>>()?;
             Some(ImportedType::GenericInstance { base, arguments })
         }
-        _ => None,
     }
 }
 

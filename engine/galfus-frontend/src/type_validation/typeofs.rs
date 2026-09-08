@@ -1,7 +1,7 @@
 use std::collections;
 
 use super::DeclarationTypeChecker;
-use crate::{PrimitiveType, SyntaxNodeKind, TypeKind};
+use crate::{SyntaxNodeKind, TypeKind};
 use galfus_core::{NodeId, SymbolId, TypeId};
 
 impl<'a> DeclarationTypeChecker<'a> {
@@ -149,14 +149,6 @@ impl<'a> DeclarationTypeChecker<'a> {
         pattern_type: Option<TypeId>,
         expected: Option<TypeId>,
     ) -> Option<TypeId> {
-        let body_node = self.graph.syntax().node(body)?;
-
-        if body_node.kind() == SyntaxNodeKind::Block {
-            return Some(
-                expected.unwrap_or_else(|| self.layer.table().primitive(PrimitiveType::Null)),
-            );
-        }
-
         let mut pushed = false;
 
         if let Some((subject_generic, pattern_type)) = subject_generic.zip(pattern_type) {
@@ -166,7 +158,7 @@ impl<'a> DeclarationTypeChecker<'a> {
             pushed = true;
         }
 
-        let ty = self.infer_expression_type_with_expected(body, expected);
+        let ty = self.infer_narrowing_arm_body_type(body, expected);
 
         if pushed {
             self.active_type_substitutions.pop();

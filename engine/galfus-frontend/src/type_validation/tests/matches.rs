@@ -182,7 +182,7 @@ choice Outcome<T> {
   Err([u8]),
 }
 
-fn unwrap(value: Outcome<i32>): i32 {
+fn unwrap(value: Outcome<i32>): bool {
   var result = match value {
     Outcome::Ok(result) {
       return result
@@ -191,10 +191,12 @@ fn unwrap(value: Outcome<i32>): i32 {
       return 0
     },
   }
-  return 0
+  return true
 }
 "#,
     );
+
+    assert!(!result.has_errors(), "{:?}", result.diagnostics());
 
     let match_expression = find_node_by_kind(&graph, SyntaxNodeKind::MatchExpression).unwrap();
     let match_type = result.layer().node_type(match_expression).unwrap();
@@ -206,7 +208,7 @@ fn unwrap(value: Outcome<i32>): i32 {
 }
 
 #[test]
-fn check_accepts_statement_match_with_returning_arm() {
+fn check_accepts_match_with_scoped_arm_returns() {
     let (_source, _graph, result, _string_table) = check_source(
         r#"
 choice Outcome {
@@ -215,11 +217,14 @@ choice Outcome {
 }
 
 fn validate(value: Outcome): i32 {
-  match value {
-    Outcome::Ok(result) { if result != 42 { return 1 } },
+  const code = match value {
+    Outcome::Ok(result) {
+      if result != 42 { return 1 }
+      return 0
+    },
     Outcome::Err { return 1 },
   }
-  return 0
+  return code
 }
 "#,
     );

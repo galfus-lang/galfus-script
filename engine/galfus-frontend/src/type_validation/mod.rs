@@ -453,14 +453,32 @@ impl<'a> DeclarationTypeChecker<'a> {
 
     fn lower_imported_type(&mut self, imported_type: &ImportedType) -> TypeId {
         match imported_type {
+            ImportedType::Error => self.layer.table_mut().error(),
+
             ImportedType::Primitive(primitive) => self.layer.table().primitive(*primitive),
 
             ImportedType::NamedLocal { symbol } => self.layer.table_mut().intern_named(*symbol),
 
-            ImportedType::SurfacePath { namespace, name } => self
-                .layer
-                .table_mut()
-                .intern_path(*namespace, name.split("::").map(str::to_string).collect()),
+            ImportedType::SurfacePath { namespace, name } => {
+                let imported_symbol = self.graph.resolution().and_then(|resolution| {
+                    resolution
+                        .symbols()
+                        .iter()
+                        .find(|symbol| {
+                            self.string_table.resolve(symbol.name()) == Some(name.as_str())
+                                && symbol.kind() == SymbolKind::ImportBinding
+                        })
+                        .map(|symbol| symbol.id())
+                });
+
+                if let Some(symbol) = imported_symbol {
+                    self.layer.table_mut().intern_named(symbol)
+                } else {
+                    self.layer
+                        .table_mut()
+                        .intern_path(*namespace, name.split("::").map(str::to_string).collect())
+                }
+            }
 
             ImportedType::Array { element } => {
                 let element = self.lower_imported_type(element);

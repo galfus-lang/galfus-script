@@ -5,6 +5,15 @@ use std::collections::HashMap;
 
 impl<'a> DeclarationTypeChecker<'a> {
     pub(super) fn check_return_types(&mut self, node: NodeId, current_return_type: Option<TypeId>) {
+        self.check_return_types_in_context(node, current_return_type, None);
+    }
+
+    fn check_return_types_in_context(
+        &mut self,
+        node: NodeId,
+        current_return_type: Option<TypeId>,
+        narrowing_return_type: Option<TypeId>,
+    ) {
         let Some(syntax_node) = self.graph.syntax().node(node) else {
             return;
         };
@@ -16,7 +25,7 @@ impl<'a> DeclarationTypeChecker<'a> {
                     .and_then(|return_type| self.layer.node_type(return_type));
 
                 for child in syntax_node.children() {
-                    self.check_return_types(*child, function_return_type);
+                    self.check_return_types_in_context(*child, function_return_type, None);
                 }
 
                 return;
@@ -27,14 +36,54 @@ impl<'a> DeclarationTypeChecker<'a> {
             }
 
             SyntaxNodeKind::ReturnStatement => {
-                self.check_return_statement_type(node, current_return_type);
+                self.check_return_statement_type(
+                    node,
+                    narrowing_return_type.or(current_return_type),
+                );
+            }
+
+            SyntaxNodeKind::MatchExpression
+            | SyntaxNodeKind::InstanceofExpression
+            | SyntaxNodeKind::TypeofExpression => {
+                self.check_narrowing_arm_return_types(node, current_return_type);
+                return;
             }
 
             _ => {}
         }
 
         for child in syntax_node.children() {
-            self.check_return_types(*child, current_return_type);
+            self.check_return_types_in_context(*child, current_return_type, narrowing_return_type);
+        }
+    }
+
+    fn check_narrowing_arm_return_types(
+        &mut self,
+        narrowing_expression: NodeId,
+        current_return_type: Option<TypeId>,
+    ) {
+        let narrowing_return_type = self.layer.node_type(narrowing_expression);
+        let Some(arms) = self.graph.syntax().child(narrowing_expression, 1) else {
+            return;
+        };
+        let arm_nodes = self
+            .graph
+            .syntax()
+            .node(arms)
+            .map(|node| node.children().to_vec())
+            .unwrap_or_default();
+
+        for arm in arm_nodes {
+            let Some(body) = self
+                .graph
+                .syntax()
+                .child(arm, 1)
+                .and_then(|body| self.graph.syntax().child(body, 0))
+            else {
+                continue;
+            };
+
+            self.check_return_types_in_context(body, current_return_type, narrowing_return_type);
         }
     }
 
@@ -79,7 +128,11 @@ impl<'a> DeclarationTypeChecker<'a> {
         self.report_type_mismatch(diagnostic_node, expected, actual);
     }
 
-    fn is_unspecialized_choice_instance(&self, expected: TypeId, actual: TypeId) -> bool {
+    pub(super) fn is_unspecialized_choice_instance(
+        &self,
+        expected: TypeId,
+        actual: TypeId,
+    ) -> bool {
         let Some(TypeKind::GenericInstance { base, .. }) = self.layer.table().kind(expected) else {
             return false;
         };

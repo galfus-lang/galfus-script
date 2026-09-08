@@ -638,6 +638,14 @@ impl<'a> DeclarationTypeChecker<'a> {
         self.layer.node_type(bound_node)
     }
 
+    pub(super) fn generic_parameter_constraint_application(
+        &mut self,
+        parameter: SymbolId,
+    ) -> Option<ConstraintApplication> {
+        let bound_node = self.generic_parameter_bound_type_node(parameter)?;
+        self.constraint_application(bound_node).ok()
+    }
+
     fn generic_parameter_bound_type_node(&self, parameter: SymbolId) -> Option<NodeId> {
         let root = self.graph.syntax().root()?;
         self.find_generic_parameter_bound_type_node(root, parameter)
