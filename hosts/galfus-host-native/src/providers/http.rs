@@ -279,10 +279,7 @@ impl HostProvider for NativeHttpProvider {
                                 ("body".to_string(), SurfaceValue::U64(body_id)),
                             ]))
                         }
-                        err => {
-                            println!("HTTP ERR: {:?}", err);
-                            Ok(SurfaceValue::Null)
-                        }
+                        Ok(Err(_)) | Err(_) => Ok(SurfaceValue::Null),
                     }
                 } else {
                     Ok(SurfaceValue::Null)

@@ -81,13 +81,6 @@ impl ExecutionHost {
 
         let result = execution.run_sync_to_completion()?;
 
-        #[cfg(feature = "metrics")]
-        if std::env::var_os("GALFUS_RUNTIME_METRICS").is_some()
-            && let Some(report) = execution.shutdown_report()
-        {
-            eprintln!("FUTURE_METRICS={:?}", report.futures);
-        }
-
         Ok(result)
     }
 }

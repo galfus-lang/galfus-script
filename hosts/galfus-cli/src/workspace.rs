@@ -46,19 +46,6 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
         .map(|argument| argument.as_bytes().to_vec())
         .collect::<Vec<_>>();
 
-    if std::env::var("GALFUS_DEBUG_BYTECODE").is_ok() {
-        println!("{:#?}", compile_report.package.graph());
-    }
-    if std::env::var("GALFUS_DEBUG_BYTECODE_STATS").is_ok() {
-        let statistics = galfus_bytecode::collect_package_statistics(&compile_report.package)
-            .context("could not collect bytecode statistics")?;
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&statistics)
-                .context("could not serialize bytecode statistics")?
-        );
-    }
-
     let providers =
         galfus_host_native::providers::default_providers(compile_report.package.metadata().clone());
     let driver = std::rc::Rc::new(galfus_host_native::driver::NativeDriver::new());

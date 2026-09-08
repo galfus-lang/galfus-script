@@ -210,7 +210,6 @@ fn websocket_lifecycle_is_validated() {
         "server_ws_receive",
         vec![SurfaceValue::U64(request_id)],
     );
-    println!("MSG2: {:?}", msg2);
     let (status2, msg_null) = match msg2 {
         SurfaceValue::Struct(fields) => {
             let mut status = 0;
