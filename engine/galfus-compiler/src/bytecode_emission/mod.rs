@@ -94,6 +94,8 @@ pub struct LowerCtx<'a> {
     pub active_substitutions: HashMap<SymbolId, TypeId>,
     pub function_is_async: HashMap<FunctionId, bool>,
     pub mir_constants: &'a [MirConstant],
+    /// Errors found while lowering MIR that must prevent bytecode publication.
+    pub emission_errors: Vec<String>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -150,6 +152,7 @@ impl<'a> LowerCtx<'a> {
             active_substitutions: HashMap::new(),
             function_is_async: HashMap::new(),
             mir_constants,
+            emission_errors: Vec::new(),
         }
     }
 }

@@ -1,4 +1,4 @@
-use super::function::FunctionBuilder;
+use super::function::{FunctionBuilder, NarrowingReturnTarget};
 use super::function_helpers::parse_int;
 use galfus_core::{FunctionId, NodeId, SymbolId, TypeId};
 use galfus_frontend::{
@@ -153,6 +153,10 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     return Operand::Constant(Constant::Null);
                 };
 
+                let result_type = self.node_type(expr_id).unwrap_or_else(|| TypeId::new(0));
+                let result = self.declare_local(None, result_type);
+                let end = self.builder.next_block();
+
                 for arm in syntax
                     .node(arms)
                     .into_iter()
@@ -173,11 +177,33 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     });
 
                     if is_wildcard || matches_subject {
-                        return self.lower_narrowing_arm_body(body);
+                        let body_operand =
+                            self.lower_narrowing_arm_body(body, result, end, result_type);
+                        if !self.is_terminated() {
+                            self.current_instructions.push((
+                                Instruction::Assign(result, RValue::Use(body_operand)),
+                                None,
+                            ));
+                            self.close_current_block(Terminator::Jump {
+                                target: end,
+                                args: Vec::new(),
+                            });
+                        }
+                        self.begin_block(end);
+                        return Operand::Local(result);
                     }
                 }
 
-                Operand::Constant(Constant::Null)
+                self.current_instructions.push((
+                    Instruction::Assign(result, RValue::Use(Operand::Constant(Constant::Null))),
+                    None,
+                ));
+                self.close_current_block(Terminator::Jump {
+                    target: end,
+                    args: Vec::new(),
+                });
+                self.begin_block(end);
+                Operand::Local(result)
             }
 
             SyntaxNodeKind::NameExpression | SyntaxNodeKind::Identifier => {
@@ -925,13 +951,20 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 let subject_node = node.child(0).unwrap();
                 let arms_node = node.child(1).unwrap();
 
-                let subject_type = self
-                    .node_type(subject_node)
-                    .unwrap_or_else(|| TypeId::new(0));
-
                 let match_type = self.node_type(expr_id).unwrap_or_else(|| TypeId::new(0));
 
                 let subject_op = self.lower_expression(subject_node);
+
+                let mut subject_type = self
+                    .node_type(subject_node)
+                    .unwrap_or_else(|| TypeId::new(0));
+
+                if subject_type.raw() == 0
+                    && let Operand::Local(local_id) = &subject_op
+                    && let Some(local_decl) = self.locals.iter().find(|local| local.id == *local_id)
+                {
+                    subject_type = local_decl.ty;
+                }
 
                 let subject_temp = self.declare_local(None, subject_type);
                 self.current_instructions.push((
@@ -970,7 +1003,12 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
 
                     self.begin_block(arm_body_block);
 
-                    let body_op = self.lower_narrowing_arm_body(body_node);
+                    let body_op = self.lower_narrowing_arm_body(
+                        body_node,
+                        match_result,
+                        match_end,
+                        match_type,
+                    );
 
                     if !self.is_terminated() {
                         self.current_instructions.push((
@@ -1081,9 +1119,21 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
         }
     }
 
-    fn lower_narrowing_arm_body(&mut self, body: NodeId) -> Operand {
+    fn lower_narrowing_arm_body(
+        &mut self,
+        body: NodeId,
+        result: LocalId,
+        end: BlockId,
+        result_type: TypeId,
+    ) -> Operand {
+        self.narrowing_return_targets.push(NarrowingReturnTarget {
+            result,
+            end,
+            result_type,
+            scope_depth: self.scopes.len(),
+        });
         let syntax = self.builder.graph.syntax();
-        if syntax
+        let operand = if syntax
             .node(body)
             .is_some_and(|body| body.kind() == SyntaxNodeKind::Block)
         {
@@ -1091,7 +1141,9 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
             Operand::Constant(Constant::Null)
         } else {
             self.lower_expression(body)
-        }
+        };
+        self.narrowing_return_targets.pop();
+        operand
     }
 
     fn call_target_symbol(&self, target: NodeId) -> Option<SymbolId> {

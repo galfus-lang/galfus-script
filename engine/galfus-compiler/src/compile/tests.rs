@@ -169,3 +169,87 @@ fn compiler_lowers_a_namespace_imported_choice_pattern() {
             .any(|function| function.name == "unwrap")
     );
 }
+
+#[test]
+fn compiler_lowers_an_imported_generic_constraint_method_result() {
+    let stream = SourceFile::new(
+        SourceId::new(1),
+        "src/stream.gfs".to_string(),
+        r#"
+export choice StreamResult<T> { Data(T), End }
+
+export constraint ReadStream<T> {
+  fn next(self): StreamResult<T>
+}
+"#
+        .to_string(),
+    );
+    let consumer = SourceFile::new(
+        SourceId::new(2),
+        "src/consumer.gfs".to_string(),
+        r#"
+import { ReadStream, StreamResult } from './stream'
+
+export fn read(stream: ReadStream<i32>): i32 {
+  const item = stream::next()
+  return match item {
+    StreamResult::Data(value) => value,
+    StreamResult::End => 0,
+  }
+}
+"#
+        .to_string(),
+    );
+    let sources = [
+        FrontendSource {
+            module_id: ModuleId::new(10),
+            path: path("src/stream.gfs"),
+            source: &stream,
+            kind: FrontendModuleKind::Standard,
+        },
+        FrontendSource {
+            module_id: ModuleId::new(11),
+            path: path("src/consumer.gfs"),
+            source: &consumer,
+            kind: FrontendModuleKind::Standard,
+        },
+    ];
+    let mut frontend = FrontendSession::new();
+    let report = frontend.check(FrontendUpdate {
+        source_revision: Revision::new(1),
+        sources: &sources,
+        removed_modules: &[],
+        roots: &FrontendRoots::default(),
+        catalog: Arc::new(CapabilityCatalog::default()),
+    });
+    assert!(
+        !report.diagnostics.has_errors(),
+        "{:#?}",
+        report.diagnostics
+    );
+
+    let mut modules = frontend
+        .modules()
+        .iter()
+        .map(|module| {
+            CompiledModule::new(
+                module.id(),
+                module.path().clone(),
+                module.semantic_revision(),
+                module.source().clone(),
+                module.graph().clone(),
+                module.type_result().cloned(),
+                false,
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let images = compile_modules(
+        &mut modules,
+        &mut CompilerState::default(),
+        frontend.string_table(),
+    )
+    .expect("an imported generic constraint method result must compile");
+
+    assert!(images.iter().any(|module| module.id == ModuleId::new(11)));
+}

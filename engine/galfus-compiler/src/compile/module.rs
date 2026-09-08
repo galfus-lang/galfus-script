@@ -522,6 +522,14 @@ fn compile_single_module(
         });
     }
 
+    if !ctx.emission_errors.is_empty() {
+        return Err(anyhow::anyhow!(
+            "Bytecode emission failed for `{}`:\n{}",
+            module.path().as_str(),
+            ctx.emission_errors.join("\n")
+        ));
+    }
+
     let null_type_idx = if let Some(pos) = ctx
         .types
         .iter()

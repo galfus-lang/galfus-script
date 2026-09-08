@@ -347,21 +347,35 @@ pub(super) fn lower_choice_variant_type(
 pub(super) fn lower_imported_choice_variant_type(
     ctx: &mut LowerCtx,
     instance_ty: TypeId,
-    _choice_name: &str,
+    choice_name: &str,
     variant_name: &str,
 ) -> TypeIdx {
     let type_idx = crate::bytecode_emission::types::lower_type(ctx, instance_ty);
     let layout_idx = match &ctx.types[type_idx.raw() as usize] {
         BytecodeType::Choice(layout_idx) => *layout_idx,
-        _ => unreachable!("imported choice variant pattern operand must have a choice type"),
+        _ => {
+            ctx.emission_errors.push(format!(
+                "cannot lower imported choice pattern `{choice_name}::{variant_name}`: operand type {instance_ty:?} is not a choice"
+            ));
+            return type_idx;
+        }
     };
 
-    let Some(variant_index) = ctx.choice_layouts[layout_idx.raw() as usize]
+    let Some(layout) = ctx.choice_layouts.get(layout_idx.raw() as usize) else {
+        ctx.emission_errors.push(format!(
+            "cannot lower imported choice pattern `{choice_name}::{variant_name}`: choice layout {layout_idx:?} is unavailable"
+        ));
+        return type_idx;
+    };
+    let Some(variant_index) = layout
         .variants
         .iter()
         .position(|variant| variant.name == variant_name)
     else {
-        unreachable!("imported choice variant pattern must resolve to its variant");
+        ctx.emission_errors.push(format!(
+            "cannot lower imported choice pattern `{choice_name}::{variant_name}`: variant is unavailable"
+        ));
+        return type_idx;
     };
     let variant_index = variant_index as u16;
     if let Some(index) = ctx.types.iter().position(|ty| {

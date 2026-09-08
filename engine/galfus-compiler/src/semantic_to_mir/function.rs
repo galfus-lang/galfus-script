@@ -20,12 +20,21 @@ pub struct FunctionBuilder<'b, 'a> {
     pub(super) return_type: TypeId,
     pub(super) type_substitutions: HashMap<SymbolId, TypeId>,
     pub(super) loop_targets: Vec<LoopTargets>,
+    pub(super) narrowing_return_targets: Vec<NarrowingReturnTarget>,
 }
 
 pub(super) struct LoopTargets {
     pub(super) name: Option<String>,
     pub(super) break_target: BlockId,
     pub(super) continue_target: BlockId,
+    pub(super) scope_depth: usize,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct NarrowingReturnTarget {
+    pub(super) result: LocalId,
+    pub(super) end: BlockId,
+    pub(super) result_type: TypeId,
     pub(super) scope_depth: usize,
 }
 
@@ -512,6 +521,33 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
             }
             SyntaxNodeKind::ReturnStatement => {
                 let expr = node.first_child();
+                if let Some(target) = self.narrowing_return_targets.last().copied() {
+                    let operand = expr
+                        .map(|expression| {
+                            let operand = self.lower_expression(expression);
+                            let expression_type =
+                                self.node_type(expression).unwrap_or_else(|| TypeId::new(0));
+                            self.insert_cast_if_needed(operand, expression_type, target.result_type)
+                        })
+                        .unwrap_or(Operand::Constant(Constant::Null));
+                    if self.is_terminated() {
+                        return;
+                    }
+                    let result_local = match &operand {
+                        Operand::Local(local_id) => Some(*local_id),
+                        _ => None,
+                    };
+                    self.emit_control_flow_exit(target.scope_depth, result_local);
+                    self.current_instructions.push((
+                        Instruction::Assign(target.result, RValue::Use(operand)),
+                        None,
+                    ));
+                    self.close_current_block(Terminator::Jump {
+                        target: target.end,
+                        args: Vec::new(),
+                    });
+                    return;
+                }
                 let operand = expr.map(|e| {
                     let op = self.lower_expression(e);
                     let expr_ty = self.node_type(e).unwrap_or_else(|| TypeId::new(0));

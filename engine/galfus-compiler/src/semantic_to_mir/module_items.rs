@@ -132,6 +132,7 @@ impl<'a> MirBuilder<'a> {
             return_type,
             type_substitutions: type_substitutions.clone(),
             loop_targets: Vec::new(),
+            narrowing_return_targets: Vec::new(),
         };
 
         // Declare parameters as locals
@@ -298,6 +299,7 @@ impl<'a> MirBuilder<'a> {
             return_type,
             type_substitutions: collections::HashMap::new(),
             loop_targets: Vec::new(),
+            narrowing_return_targets: Vec::new(),
         };
 
         for (sym, ty) in param_symbols {

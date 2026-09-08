@@ -858,7 +858,7 @@ fn test_conditional_without_branch_arguments_uses_direct_targets() {
 }
 
 #[test]
-fn narrowing_blocks_can_await_and_return_without_implicit_continuations() {
+fn narrowing_block_returns_yield_to_the_enclosing_expression() {
     let source_id = SourceId::new(0);
     let code = r#"
         struct Future<T> { id: i64 }
@@ -873,7 +873,7 @@ fn narrowing_blocks_can_await_and_return_without_implicit_continuations() {
         }
 
         fn(async) narrow(value: Result): i32 {
-            match value {
+            const result = match value {
                 Result::Value(_) {
                     const number = await ready()
                     return number
@@ -882,7 +882,7 @@ fn narrowing_blocks_can_await_and_return_without_implicit_continuations() {
                     return 0
                 },
             }
-            return -1
+            return result
         }
     "#;
     let source = SourceFile::new(
@@ -913,18 +913,119 @@ fn narrowing_blocks_can_await_and_return_without_implicit_continuations() {
         .find(|function| function.name == "narrow")
         .expect("narrow function should be emitted");
 
+    let function_returns = narrow
+        .blocks
+        .iter()
+        .filter(|block| matches!(block.terminator.0, Terminator::Return(Some(_))))
+        .count();
+
+    assert_eq!(
+        function_returns, 1,
+        "only the outer return may end the function"
+    );
     assert!(
-        narrow.blocks.iter().any(|block| {
+        !narrow.blocks.iter().any(|block| {
             matches!(block.terminator.0, Terminator::Return(Some(_)))
                 && block
                     .instructions
                     .iter()
                     .any(|(instruction, _)| matches!(instruction, Instruction::Await { .. }))
         }),
-        "the Value arm should await and return from the same explicit block"
+        "an arm return must yield to the match expression instead of returning from narrow"
     );
     assert!(
         galfus_ir::validator::validate_module(&mir_module).is_ok(),
         "the explicit narrowing CFG should validate"
+    );
+}
+
+#[test]
+fn instanceof_and_typeof_block_returns_yield_to_the_enclosing_expression() {
+    let source_id = SourceId::new(0);
+    let code = r#"
+        fn narrowValue(value: i32 | null): i32 {
+            const result = instanceof value {
+                i32 number { return number },
+                null { return 0 },
+            }
+            return result
+        }
+
+        fn narrowType<T: i32 | bool>(): i32 {
+            const result = typeof T {
+                i32 { return 1 },
+                bool { return 0 },
+            }
+            return result
+        }
+
+        fn main(): i32 {
+            return narrowType<i32>()
+        }
+    "#;
+    let source = SourceFile::new(
+        source_id,
+        "narrowing_returns.gfs".to_string(),
+        code.to_string(),
+    );
+    let parse_result = parse(&source);
+    let mut string_table = galfus_frontend::StringTable::new();
+    let graph = resolve(&source, parse_result.into_graph(), &mut string_table).into_graph();
+    let type_result = check_definition_types(
+        &source,
+        &graph,
+        check_declaration_types(&source, &graph, &string_table, false),
+        &string_table,
+        false,
+    );
+    assert!(
+        !type_result.has_errors(),
+        "Typecheck error: {:?}",
+        type_result.diagnostics()
+    );
+
+    let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
+
+    let narrow_value = mir_module
+        .functions
+        .iter()
+        .find(|function| function.name == "narrowValue")
+        .expect("narrowValue should be emitted");
+    let main = mir_module
+        .functions
+        .iter()
+        .find(|function| function.name == "main")
+        .expect("main should be emitted");
+    let narrow_type_id = main
+        .blocks
+        .iter()
+        .flat_map(|block| block.instructions.iter())
+        .find_map(|(instruction, _)| match instruction {
+            Instruction::Call { func, .. } => Some(*func),
+            _ => None,
+        })
+        .expect("main should call narrowType");
+    let narrow_type = mir_module
+        .functions
+        .iter()
+        .find(|function| function.id == narrow_type_id)
+        .expect("narrowType specialization should be emitted");
+
+    for (name, function) in [("narrowValue", narrow_value), ("narrowType", narrow_type)] {
+        let function_returns = function
+            .blocks
+            .iter()
+            .filter(|block| matches!(block.terminator.0, Terminator::Return(Some(_))))
+            .count();
+
+        assert_eq!(
+            function_returns, 1,
+            "{name} may only return after its narrowing expression completes"
+        );
+    }
+
+    assert!(
+        galfus_ir::validator::validate_module(&mir_module).is_ok(),
+        "the narrowing CFG should validate"
     );
 }
