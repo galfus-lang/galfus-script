@@ -9,6 +9,7 @@ pub mod helpers;
 mod module_items;
 mod narrowing;
 pub mod pattern;
+mod typeof_lowering;
 
 use std::collections;
 
