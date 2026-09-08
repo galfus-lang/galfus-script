@@ -1,7 +1,7 @@
 use crate::{
     CURRENT_BOUNDARY_ABI_VERSION, ProviderDescriptor, ProviderFunctionSignature,
-    ProviderModuleDescriptor, SurfaceContract, SurfaceDirection, SurfaceFunctionContract,
-    SurfaceSchema, provider_schema_fingerprint,
+    ProviderModuleDescriptor, SurfaceContract, SurfaceDirection, SurfaceField,
+    SurfaceFunctionContract, SurfaceSchema, provider_schema_fingerprint,
 };
 
 pub const ASYNC_SOURCE: &str = include_str!("../builtins/internals/async.gfs");
@@ -601,14 +601,46 @@ fn net_surface_contracts() -> Vec<SurfaceFunctionContract> {
     ]
 }
 
+fn http_header_schema(bytes: &SurfaceSchema) -> SurfaceSchema {
+    SurfaceSchema::Struct {
+        name: "Header".to_string(),
+        fields: vec![
+            SurfaceField {
+                name: "name".to_string(),
+                schema: bytes.clone(),
+            },
+            SurfaceField {
+                name: "value".to_string(),
+                schema: bytes.clone(),
+            },
+        ],
+    }
+}
+
+fn http_response_schema(header: &SurfaceSchema) -> SurfaceSchema {
+    SurfaceSchema::Struct {
+        name: "ProviderResponse".to_string(),
+        fields: vec![
+            SurfaceField {
+                name: "status".to_string(),
+                schema: SurfaceSchema::I32,
+            },
+            SurfaceField {
+                name: "headers".to_string(),
+                schema: SurfaceSchema::List(Box::new(header.clone())),
+            },
+            SurfaceField {
+                name: "body".to_string(),
+                schema: SurfaceSchema::U64,
+            },
+        ],
+    }
+}
+
 pub fn std_http_provider_descriptor() -> ProviderDescriptor {
     let bytes = SurfaceSchema::Bytes;
-    let header = SurfaceSchema::Handle {
-        resource: "std/http.gfs::Header".to_string(),
-    };
-    let response = SurfaceSchema::Handle {
-        resource: "std/http.gfs::ProviderResponse".to_string(),
-    };
+    let header = http_header_schema(&bytes);
+    let response = http_response_schema(&header);
     ProviderDescriptor {
         modules: vec![ProviderModuleDescriptor {
             module_path: "std/http".to_string(),
@@ -935,15 +967,70 @@ impl BridgeModule {
         }
     }
 }
+fn server_url_schema(bytes: &SurfaceSchema) -> SurfaceSchema {
+    SurfaceSchema::Struct {
+        name: "URL".to_string(),
+        fields: [
+            "href", "protocol", "host", "hostname", "pathname", "search", "hash", "origin",
+        ]
+        .into_iter()
+        .map(|name| SurfaceField {
+            name: name.to_string(),
+            schema: bytes.clone(),
+        })
+        .collect(),
+    }
+}
+
+fn server_request_schema(bytes: &SurfaceSchema, header: &SurfaceSchema) -> SurfaceSchema {
+    SurfaceSchema::Struct {
+        name: "ProviderRequest".to_string(),
+        fields: vec![
+            SurfaceField {
+                name: "id".to_string(),
+                schema: SurfaceSchema::U64,
+            },
+            SurfaceField {
+                name: "url".to_string(),
+                schema: server_url_schema(bytes),
+            },
+            SurfaceField {
+                name: "method".to_string(),
+                schema: bytes.clone(),
+            },
+            SurfaceField {
+                name: "headers".to_string(),
+                schema: SurfaceSchema::List(Box::new(header.clone())),
+            },
+            SurfaceField {
+                name: "body".to_string(),
+                schema: SurfaceSchema::U64,
+            },
+        ],
+    }
+}
+
+fn server_ws_message_schema(bytes: &SurfaceSchema) -> SurfaceSchema {
+    SurfaceSchema::Struct {
+        name: "WsMessage".to_string(),
+        fields: vec![
+            SurfaceField {
+                name: "status".to_string(),
+                schema: SurfaceSchema::I32,
+            },
+            SurfaceField {
+                name: "msg".to_string(),
+                schema: SurfaceSchema::Optional(Box::new(bytes.clone())),
+            },
+        ],
+    }
+}
+
 pub fn std_server_provider_descriptor() -> ProviderDescriptor {
     let bytes = SurfaceSchema::Bytes;
     let header = SurfaceSchema::Tuple(vec![bytes.clone(), bytes.clone()]);
-    let request = SurfaceSchema::Handle {
-        resource: "std/server.gfs::ProviderRequest".to_string(),
-    };
-    let ws_message = SurfaceSchema::Handle {
-        resource: "std/server.gfs::WsMessage".to_string(),
-    };
+    let request = server_request_schema(&bytes, &header);
+    let ws_message = server_ws_message_schema(&bytes);
 
     ProviderDescriptor {
         modules: vec![ProviderModuleDescriptor {
@@ -1036,12 +1123,8 @@ pub fn std_server_provider_descriptor() -> ProviderDescriptor {
 fn server_surface_contracts() -> Vec<SurfaceFunctionContract> {
     let bytes = SurfaceSchema::Bytes;
     let header = SurfaceSchema::Tuple(vec![bytes.clone(), bytes.clone()]);
-    let request = SurfaceSchema::Handle {
-        resource: "std/server.gfs::ProviderRequest".to_string(),
-    };
-    let ws_message = SurfaceSchema::Handle {
-        resource: "std/server.gfs::WsMessage".to_string(),
-    };
+    let request = server_request_schema(&bytes, &header);
+    let ws_message = server_ws_message_schema(&bytes);
     vec![
         SurfaceFunctionContract {
             provider_operation: "server_bind".to_string(),
