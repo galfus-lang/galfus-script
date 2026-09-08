@@ -4,6 +4,7 @@ use galfus_core::{DefId, ModuleId, ModulePath, Revision, SourceFile, SourceId, S
 use galfus_frontend::modules::{
     FrontendModuleKind, FrontendRoots, FrontendSession, FrontendSource, FrontendUpdate,
 };
+use std::collections::HashSet;
 use std::sync::Arc;
 
 fn path(value: &str) -> ModulePath {
@@ -24,6 +25,42 @@ fn generic_choice_layout_cache_interns_an_instance_once_across_modules() {
     assert_eq!(first, second);
     assert_eq!(first.raw(), 0);
     assert_eq!(cache.len(), 1);
+}
+
+#[test]
+fn generic_choice_layout_cache_discards_changed_modules_without_reusing_ids() {
+    let mut cache = GenericChoiceLayoutCache::default();
+    let changed_module = ModuleId::new(7);
+    let retained_module = ModuleId::new(8);
+    let changed_key = GenericChoiceLayoutKey {
+        def_id: DefId::new(changed_module, SymbolId::new(3)),
+        arguments: vec!["[u8]".to_string()],
+    };
+    let retained_key = GenericChoiceLayoutKey {
+        def_id: DefId::new(retained_module, SymbolId::new(4)),
+        arguments: vec!["i32".to_string()],
+    };
+
+    assert_eq!(cache.intern(changed_key), super::GlobalChoiceLayoutId(0));
+    assert_eq!(
+        cache.intern(retained_key.clone()),
+        super::GlobalChoiceLayoutId(1)
+    );
+
+    cache.retain_modules(
+        &HashSet::from([changed_module, retained_module]),
+        &HashSet::from([changed_module]),
+    );
+
+    assert_eq!(cache.len(), 1);
+    assert_eq!(cache.intern(retained_key), super::GlobalChoiceLayoutId(1));
+    assert_eq!(
+        cache.intern(GenericChoiceLayoutKey {
+            def_id: DefId::new(changed_module, SymbolId::new(5)),
+            arguments: vec!["bool".to_string()],
+        }),
+        super::GlobalChoiceLayoutId(2)
+    );
 }
 
 #[test]

@@ -758,13 +758,12 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                         galfus_frontend::TypeKind::Array { element } => element,
                         _ => unreachable!(),
                     };
-                    let Some(ctx_ptr) = self.builder.workspace_ctx else {
+                    let Some(ctx) = self.builder.workspace_ctx.as_deref_mut() else {
                         return;
                     };
                     let Some(caller_module_id) = self.builder.workspace_module_id else {
                         return;
                     };
-                    let ctx = unsafe { &mut *ctx_ptr };
                     let iter_func = ctx
                         .specialize_builtin_function(
                             caller_module_id,

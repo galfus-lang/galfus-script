@@ -45,12 +45,31 @@ pub type GlobalChoiceLayouts = HashMap<GenericChoiceLayoutKey, GlobalChoiceLayou
 #[derive(Debug, Default, Clone)]
 pub struct GenericChoiceLayoutCache {
     layouts: GlobalChoiceLayouts,
+    next_id: u32,
 }
 
 impl GenericChoiceLayoutCache {
     pub fn intern(&mut self, key: GenericChoiceLayoutKey) -> GlobalChoiceLayoutId {
-        let next_id = GlobalChoiceLayoutId(self.layouts.len() as u32);
-        *self.layouts.entry(key).or_insert(next_id)
+        if let Some(id) = self.layouts.get(&key).copied() {
+            return id;
+        }
+
+        let id = GlobalChoiceLayoutId(self.next_id);
+        self.next_id = self.next_id.saturating_add(1);
+        self.layouts.insert(key, id);
+        id
+    }
+
+    pub fn retain_modules(
+        &mut self,
+        live_modules: &std::collections::HashSet<galfus_core::ModuleId>,
+        changed_modules: &std::collections::HashSet<galfus_core::ModuleId>,
+    ) {
+        self.layouts.retain(|key, _| {
+            key.def_id.module == galfus_core::ModuleId::new(0)
+                || (live_modules.contains(&key.def_id.module)
+                    && !changed_modules.contains(&key.def_id.module))
+        });
     }
 
     #[cfg(test)]

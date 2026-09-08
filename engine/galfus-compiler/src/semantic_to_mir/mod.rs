@@ -24,7 +24,7 @@ pub struct MirBuilder<'a> {
     pub(super) specialisations: HashMap<(FunctionId, Vec<TypeId>), FunctionId>,
     pub(super) specialized_functions: Vec<MirFunction>,
     pub(super) active_specialisations: HashSet<(FunctionId, Vec<TypeId>)>,
-    pub(super) workspace_ctx: Option<*mut (dyn WorkspaceContext + 'a)>,
+    pub(super) workspace_ctx: Option<&'a mut dyn WorkspaceContext>,
     pub(super) workspace_module_id: Option<ModuleId>,
 }
 
@@ -52,7 +52,7 @@ impl<'a> MirBuilder<'a> {
     }
 
     pub fn with_workspace_ctx(mut self, ctx: &'a mut dyn WorkspaceContext) -> Self {
-        self.workspace_ctx = Some(ctx as *mut (dyn WorkspaceContext + 'a));
+        self.workspace_ctx = Some(ctx);
         self
     }
 

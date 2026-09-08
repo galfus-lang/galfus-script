@@ -56,41 +56,63 @@ pub fn compile_changed_modules(
         return Ok(Vec::new());
     }
 
+    let live_modules = modules
+        .iter()
+        .map(CompiledModule::id)
+        .collect::<HashSet<_>>();
+    let changed_module_ids = modules
+        .iter()
+        .filter_map(|module| {
+            changed_modules
+                .contains(&module.id())
+                .then_some(module.id())
+        })
+        .collect::<HashSet<_>>();
+    state.begin_compilation(&live_modules, &changed_module_ids);
+
     // Phase 1: Build MIR only for changed modules. Generic specializations can
     // add functions to an imported module, which then becomes affected too.
     let mut ws_ctx = MyWorkspaceContext::new(modules, state, string_table);
-    let mut affected_modules = modules
+    let mut affected_modules = ws_ctx
+        .modules()
         .iter()
         .enumerate()
         .filter_map(|(index, module)| changed_modules.contains(&module.id()).then_some(index))
         .collect::<HashSet<_>>();
     let mut pending_modules = affected_modules.iter().copied().collect::<Vec<_>>();
     let mut mir_modules = iter::repeat_with(|| None)
-        .take(modules.len())
+        .take(ws_ctx.modules().len())
         .collect::<Vec<Option<galfus_ir::mir::MirModule>>>();
 
     while let Some(module_index) = pending_modules.pop() {
-        let module = &modules[module_index];
-        let type_res = module.type_result().ok_or_else(|| {
-            anyhow::anyhow!(
-                "Module is missing type checking result: {}",
-                module.path().as_str()
+        // The context may mutate an imported type table while the builder is
+        // running. Use owned snapshots for the builder instead of aliasing the
+        // module slice through a raw pointer.
+        let (module_id, graph, type_res, source_text) = {
+            let module = &ws_ctx.modules()[module_index];
+            (
+                module.id(),
+                module.graph().clone(),
+                module.type_result().cloned().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Module is missing type checking result: {}",
+                        module.path().as_str()
+                    )
+                })?,
+                module.source().text().to_owned(),
             )
-        })?;
-        let mir = crate::semantic_to_mir::MirBuilder::new(
-            module.graph(),
-            type_res,
-            module.source().text(),
-            string_table,
-        )
-        .with_workspace_module_id(module.id())
-        .with_workspace_ctx(&mut ws_ctx)
-        .build();
+        };
+        let mir =
+            crate::semantic_to_mir::MirBuilder::new(&graph, &type_res, &source_text, string_table)
+                .with_workspace_module_id(module_id)
+                .with_workspace_ctx(&mut ws_ctx)
+                .build();
         mir_modules[module_index] = Some(mir);
 
-        for (module_id, specialized) in ws_ctx.state.specialised_functions.iter() {
-            if !specialized.is_empty()
-                && let Some(target_index) = modules.iter().position(|m| m.id() == *module_id)
+        let pending_specialised_modules =
+            std::mem::take(&mut ws_ctx.state.pending_specialised_modules);
+        for module_id in pending_specialised_modules {
+            if let Some(target_index) = ws_ctx.modules().iter().position(|m| m.id() == module_id)
                 && affected_modules.insert(target_index)
             {
                 pending_modules.push(target_index);
@@ -100,7 +122,7 @@ pub fn compile_changed_modules(
 
     // Append specialized functions.
     for module_index in &affected_modules {
-        let module_id = modules[*module_index].id();
+        let module_id = ws_ctx.modules()[*module_index].id();
         let mut specialized = ws_ctx
             .state
             .specialised_functions

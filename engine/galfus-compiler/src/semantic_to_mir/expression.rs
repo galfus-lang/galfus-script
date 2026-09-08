@@ -113,13 +113,12 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                         )
                     }
                 };
-                let Some(ctx_ptr) = self.builder.workspace_ctx else {
+                let Some(ctx) = self.builder.workspace_ctx.as_deref_mut() else {
                     return Operand::Constant(Constant::Null);
                 };
                 let Some(caller_module_id) = self.builder.workspace_module_id else {
                     return Operand::Constant(Constant::Null);
                 };
-                let ctx = unsafe { &mut *ctx_ptr };
                 let Some(function) = ctx.specialize_builtin_function(
                     caller_module_id,
                     expr_id,
@@ -1360,53 +1359,55 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
             self.builder.active_specialisations.remove(&key);
 
             Some(specialized_id)
-        } else if let Some(ctx_ptr) = self.builder.workspace_ctx {
+        } else if self.builder.workspace_ctx.is_some() {
             let caller_module_id = self.builder.workspace_module_id?;
-            let ctx = unsafe { &mut *ctx_ptr };
-            if let Some((target_mod_idx, target_symbol)) =
-                ctx.resolve_import(caller_module_id, target_node)
-            {
-                if let Some(generic_params) = ctx.get_generic_params(target_mod_idx, target_symbol)
-                {
-                    if generic_params.is_empty() {
-                        return None;
-                    }
+            let (target_mod_idx, target_symbol, generic_params) = {
+                let ctx = self.builder.workspace_ctx.as_deref_mut()?;
+                let (target_mod_idx, target_symbol) =
+                    ctx.resolve_import(caller_module_id, target_node)?;
+                let generic_params = ctx.get_generic_params(target_mod_idx, target_symbol)?;
+                (target_mod_idx, target_symbol, generic_params)
+            };
+            if generic_params.is_empty() {
+                return None;
+            }
 
-                    let concrete_types = self
-                        .concrete_generic_arguments(target_node, &generic_params, arg_types)
-                        .or_else(|| {
-                            ctx.infer_imported_generic_arguments(
-                                caller_module_id,
-                                target_mod_idx,
-                                target_symbol,
-                                &generic_params,
-                                arg_types,
-                            )
-                        })?;
-                    if concrete_types.len() != generic_params.len() {
-                        return None;
-                    }
+            let concrete_types = self
+                .concrete_generic_arguments(target_node, &generic_params, arg_types)
+                .or_else(|| {
+                    self.builder
+                        .workspace_ctx
+                        .as_deref_mut()?
+                        .infer_imported_generic_arguments(
+                            caller_module_id,
+                            target_mod_idx,
+                            target_symbol,
+                            &generic_params,
+                            arg_types,
+                        )
+                })?;
+            if concrete_types.len() != generic_params.len() {
+                return None;
+            }
 
-                    let substitutions = generic_params
-                        .into_iter()
-                        .zip(concrete_types.clone())
-                        .collect::<HashMap<_, _>>();
+            let substitutions = generic_params
+                .into_iter()
+                .zip(concrete_types.clone())
+                .collect::<HashMap<_, _>>();
 
-                    let specialized_id = ctx.specialize_function(
+            Some(
+                self.builder
+                    .workspace_ctx
+                    .as_deref_mut()?
+                    .specialize_function(
                         caller_module_id,
                         target_node,
                         target_mod_idx,
                         target_symbol,
                         concrete_types,
                         substitutions,
-                    );
-                    Some(specialized_id)
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
+                    ),
+            )
         } else {
             None
         }
