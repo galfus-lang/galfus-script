@@ -3,7 +3,7 @@ use regex::Regex;
 use serde::Serialize;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitCode, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread::{self, JoinHandle};
@@ -130,6 +130,7 @@ struct RawBenchmarkReport<'a> {
 struct RunningServer {
     child: Child,
     monitor: JoinHandle<(u64, u64)>,
+    stderr: JoinHandle<Result<Vec<u8>, std::io::Error>>,
     stop_tx: mpsc::Sender<()>,
     started: Instant,
     command: String,
@@ -160,7 +161,7 @@ fn http_only() -> bool {
         .any(|argument| argument == "--http-only")
 }
 
-fn main() {
+fn main() -> ExitCode {
     let reuse_release = reuse_release_binaries();
     let http_only = http_only();
     if reuse_release {
@@ -173,19 +174,19 @@ fn main() {
             .expect("Failed to compile Galfus");
         if !status.success() {
             eprintln!("Compilation failed!");
-            return;
+            return ExitCode::FAILURE;
         }
     }
 
     if !http_only {
         for benchmark in BENCHMARK_CASES {
             if !compile_standalone(benchmark, reuse_release) {
-                return;
+                return ExitCode::FAILURE;
             }
         }
     }
     if !compile_standalone(&SERVER_BENCHMARK, reuse_release) {
-        return;
+        return ExitCode::FAILURE;
     }
 
     let re_result = Regex::new(r"RESULT=([^\r\n]+)").unwrap();
@@ -311,6 +312,7 @@ fn main() {
     if let Err(error) = write_reports(reuse_release, raw_runs.as_slice(), results.as_slice()) {
         eprintln!("Could not persist benchmark reports: {error}");
     }
+    ExitCode::SUCCESS
 }
 
 fn compile_standalone(benchmark: &BenchmarkCase, reuse_release: bool) -> bool {
@@ -638,7 +640,7 @@ fn start_server(command: &[String], port: u16) -> Result<RunningServer, String> 
         .iter()
         .map(|argument| argument.replace("{port}", &port.to_string()))
         .collect::<Vec<_>>();
-    let child = Command::new(&command[0])
+    let mut child = Command::new(&command[0])
         .args(&command[1..])
         .env("GALFUS_CACHE_DIR", ".tmp/galfus-cache")
         .stdout(Stdio::null())
@@ -646,11 +648,20 @@ fn start_server(command: &[String], port: u16) -> Result<RunningServer, String> 
         .spawn()
         .map_err(|error| error.to_string())?;
     let pid = Pid::from_u32(child.id());
+    let mut child_stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "server stderr was not captured".to_string())?;
+    let stderr = thread::spawn(move || {
+        let mut output = Vec::new();
+        child_stderr.read_to_end(&mut output).map(|_| output)
+    });
     let (stop_tx, stop_rx) = mpsc::channel();
     let monitor = thread::spawn(move || monitor_memory(pid, stop_rx));
     let server = RunningServer {
         child,
         monitor,
+        stderr,
         stop_tx,
         started,
         command: command.join(" "),
@@ -675,12 +686,12 @@ impl RunningServer {
     fn stop(mut self) -> Result<ServerMetrics, String> {
         let _ = self.child.kill();
         self.child.wait().map_err(|error| error.to_string())?;
-        let mut stderr = String::new();
-        if let Some(mut child_stderr) = self.child.stderr.take() {
-            child_stderr
-                .read_to_string(&mut stderr)
-                .map_err(|error| error.to_string())?;
-        }
+        let stderr = self
+            .stderr
+            .join()
+            .map_err(|_| "server stderr reader panicked".to_string())?
+            .map_err(|error| error.to_string())?;
+        let stderr = String::from_utf8_lossy(&stderr).into_owned();
         let _ = self.stop_tx.send(());
         let (peak_rss_bytes, peak_virtual_bytes) = self
             .monitor

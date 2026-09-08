@@ -14,7 +14,7 @@ fn serverPort(args: [[u8]]): i32 {
 export fn main(args: [[u8]]): i32 {
     const server = new(Server) {
         port: serverPort(args),
-        fetch: fn(_req: Request): Response {
+        fetch: fn(async) (_req: Request): Response {
             return new(Response) {}
         },
         websocket: new(WebSocketConfig) {
