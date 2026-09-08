@@ -1144,35 +1144,6 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
         self.narrowing_return_targets.pop();
         operand
     }
-
-    fn lower_await_futures_list(&mut self, target_id: NodeId) -> Vec<Operand> {
-        let syntax = self.builder.graph.syntax();
-        let mut futures = Vec::new();
-
-        let inner_id = if let Some(target_node) = syntax.node(target_id) {
-            if target_node.kind() == SyntaxNodeKind::GroupedExpression {
-                target_node.first_child().unwrap_or(target_id)
-            } else {
-                target_id
-            }
-        } else {
-            target_id
-        };
-
-        if let Some(inner_node) = syntax.node(inner_id) {
-            if inner_node.kind() == SyntaxNodeKind::TupleExpression {
-                for &child_id in inner_node.children() {
-                    futures.push(self.lower_expression(child_id));
-                }
-            } else {
-                futures.push(self.lower_expression(inner_id));
-            }
-        } else {
-            futures.push(self.lower_expression(target_id));
-        }
-
-        futures
-    }
 }
 
 pub(crate) fn unescape_string(s: &str) -> String {
