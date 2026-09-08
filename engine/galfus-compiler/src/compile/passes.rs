@@ -211,26 +211,22 @@ fn fold_primitive_binary(
 type CopyDefinition = (LocalId, BlockId, usize);
 
 fn propagate_ssa_copies(module: &mut MirModule) -> usize {
-    let globals = module.globals.clone();
-    let constant_pool = module.constant_pool.clone();
     module
         .functions
         .iter_mut()
         .map(|function| {
-            let original = function.clone();
-            let replaced = propagate_function_copies(function);
+            // Work on one candidate and publish it only after validation. This
+            // replaces the former two function clones plus cloned module-wide
+            // globals and constant pool for every changed function.
+            let mut candidate = function.clone();
+            let replaced = propagate_function_copies(&mut candidate);
             if replaced == 0 {
                 return 0;
             }
-            let verification_module = MirModule {
-                functions: vec![function.clone()],
-                globals: globals.clone(),
-                constant_pool: constant_pool.clone(),
-            };
-            if galfus_ir::validate_module(&verification_module).is_err() {
-                *function = original;
+            if galfus_ir::validate_function(&candidate).is_err() {
                 0
             } else {
+                *function = candidate;
                 replaced
             }
         })
@@ -324,53 +320,79 @@ fn instruction_destination(instruction: &Instruction) -> Option<LocalId> {
     }
 }
 
-fn dominators(function: &MirFunction) -> HashMap<BlockId, HashSet<BlockId>> {
-    let blocks = function
+struct Dominators {
+    indices: HashMap<BlockId, usize>,
+    sets: Vec<Vec<bool>>,
+}
+
+impl Dominators {
+    fn dominates(&self, block: BlockId, candidate: BlockId) -> bool {
+        let Some(&block_index) = self.indices.get(&block) else {
+            return false;
+        };
+        let Some(&candidate_index) = self.indices.get(&candidate) else {
+            return false;
+        };
+        self.sets[block_index][candidate_index]
+    }
+}
+
+fn dominators(function: &MirFunction) -> Dominators {
+    let indices = function
         .blocks
         .iter()
-        .map(|block| block.id)
-        .collect::<HashSet<_>>();
+        .enumerate()
+        .map(|(index, block)| (block.id, index))
+        .collect::<HashMap<_, _>>();
     let entry = function.blocks.first().map(|block| block.id);
-    let mut predecessors = HashMap::<BlockId, Vec<BlockId>>::new();
+    let mut predecessors = vec![Vec::new(); function.blocks.len()];
     for block in &function.blocks {
         for successor in successors(&block.terminator.0) {
-            predecessors.entry(successor).or_default().push(block.id);
+            if let (Some(&source), Some(&target)) =
+                (indices.get(&block.id), indices.get(&successor))
+            {
+                predecessors[target].push(source);
+            }
         }
     }
-    let mut result = function
+    let mut sets = function
         .blocks
         .iter()
-        .map(|block| {
-            let initial = if Some(block.id) == entry || !predecessors.contains_key(&block.id) {
-                [block.id].into_iter().collect()
+        .enumerate()
+        .map(|(index, block)| {
+            if Some(block.id) == entry || predecessors[index].is_empty() {
+                let mut initial = vec![false; function.blocks.len()];
+                initial[index] = true;
+                initial
             } else {
-                blocks.clone()
-            };
-            (block.id, initial)
+                vec![true; function.blocks.len()]
+            }
         })
-        .collect::<HashMap<_, HashSet<_>>>();
+        .collect::<Vec<_>>();
     let mut changed = true;
     while changed {
         changed = false;
-        for block in &function.blocks {
+        for (index, block) in function.blocks.iter().enumerate() {
             if Some(block.id) == entry {
                 continue;
             }
-            let Some(preds) = predecessors.get(&block.id) else {
+            let Some((&first, rest)) = predecessors[index].split_first() else {
                 continue;
             };
-            let mut next = blocks.clone();
-            for predecessor in preds {
-                next.retain(|candidate| result[predecessor].contains(candidate));
+            let mut next = sets[first].clone();
+            for predecessor in rest {
+                for (candidate, dominates) in next.iter_mut().zip(&sets[*predecessor]) {
+                    *candidate &= *dominates;
+                }
             }
-            next.insert(block.id);
-            if result[&block.id] != next {
-                result.insert(block.id, next);
+            next[index] = true;
+            if sets[index] != next {
+                sets[index] = next;
                 changed = true;
             }
         }
     }
-    result
+    Dominators { indices, sets }
 }
 
 fn successors(terminator: &Terminator) -> Vec<BlockId> {
@@ -390,7 +412,7 @@ fn replace_operand_copy(
     block: BlockId,
     use_index: usize,
     definitions: &HashMap<LocalId, CopyDefinition>,
-    dominators: &HashMap<BlockId, HashSet<BlockId>>,
+    dominators: &Dominators,
     replaced: &mut usize,
 ) {
     let Operand::Local(local) = operand else {
@@ -402,9 +424,7 @@ fn replace_operand_copy(
         let Some((next, definition_block, definition_index)) = definitions.get(&source) else {
             break;
         };
-        let dominates = dominators
-            .get(&block)
-            .is_some_and(|set| set.contains(definition_block));
+        let dominates = dominators.dominates(block, *definition_block);
         if !dominates || (*definition_block == block && *definition_index >= use_index) {
             break;
         }
@@ -421,7 +441,7 @@ fn replace_instruction_copies(
     block: BlockId,
     use_index: usize,
     definitions: &HashMap<LocalId, CopyDefinition>,
-    dominators: &HashMap<BlockId, HashSet<BlockId>>,
+    dominators: &Dominators,
     replaced: &mut usize,
 ) {
     let mut replace = |operand: &mut Operand| {
@@ -521,7 +541,7 @@ fn replace_terminator_copies(
     block: BlockId,
     use_index: usize,
     definitions: &HashMap<LocalId, CopyDefinition>,
-    dominators: &HashMap<BlockId, HashSet<BlockId>>,
+    dominators: &Dominators,
     replaced: &mut usize,
 ) {
     let mut replace = |operand: &mut Operand| {

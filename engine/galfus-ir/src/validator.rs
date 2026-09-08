@@ -25,7 +25,12 @@ pub fn validate_module(module: &MirModule) -> Result<(), Vec<ValidationError>> {
     }
 }
 
-fn validate_function(func: &MirFunction) -> Result<(), Vec<ValidationError>> {
+/// Validate a single MIR function.
+///
+/// This is useful for local transformations which need to validate a tentative
+/// function without cloning unrelated functions, globals, or constants into a
+/// temporary module.
+pub fn validate_function(func: &MirFunction) -> Result<(), Vec<ValidationError>> {
     let mut errors = Vec::new();
     let mut blocks = HashMap::new();
     for block in &func.blocks {

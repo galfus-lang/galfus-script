@@ -111,6 +111,86 @@ fn inlining_is_independently_enabled_and_reports_removed_call() {
 }
 
 #[test]
+fn dominator_analysis_tracks_branch_predecessors() {
+    let ty = TypeId::new(0);
+    let module = MirModule {
+        functions: vec![MirFunction {
+            id: FunctionId::new(1),
+            name: "dominance".to_string(),
+            return_type: ty,
+            parameter_types: vec![ty],
+            locals: vec![
+                LocalDecl {
+                    id: LocalId::new(0),
+                    ty,
+                    is_owned: false,
+                },
+                LocalDecl {
+                    id: LocalId::new(1),
+                    ty,
+                    is_owned: false,
+                },
+            ],
+            blocks: vec![
+                BasicBlock {
+                    id: galfus_ir::mir::BlockId::new(0),
+                    parameters: Vec::new(),
+                    instructions: vec![(
+                        Instruction::Assign(
+                            LocalId::new(1),
+                            RValue::Use(Operand::Local(LocalId::new(0))),
+                        ),
+                        None,
+                    )],
+                    terminator: (
+                        Terminator::Branch {
+                            cond: Operand::Local(LocalId::new(0)),
+                            true_block: galfus_ir::mir::BlockId::new(1),
+                            true_args: Vec::new(),
+                            false_block: galfus_ir::mir::BlockId::new(2),
+                            false_args: Vec::new(),
+                        },
+                        None,
+                    ),
+                },
+                BasicBlock {
+                    id: galfus_ir::mir::BlockId::new(1),
+                    parameters: Vec::new(),
+                    instructions: Vec::new(),
+                    terminator: (
+                        Terminator::Return(Some(Operand::Local(LocalId::new(1)))),
+                        None,
+                    ),
+                },
+                BasicBlock {
+                    id: galfus_ir::mir::BlockId::new(2),
+                    parameters: Vec::new(),
+                    instructions: Vec::new(),
+                    terminator: (
+                        Terminator::Return(Some(Operand::Constant(Constant::Int32(0)))),
+                        None,
+                    ),
+                },
+            ],
+            type_substitutions: Default::default(),
+            is_async: false,
+        }],
+        globals: Vec::new(),
+        constant_pool: Vec::new(),
+    };
+
+    let dominators = super::dominators(&module.functions[0]);
+    assert!(dominators.dominates(
+        galfus_ir::mir::BlockId::new(1),
+        galfus_ir::mir::BlockId::new(0)
+    ));
+    assert!(!dominators.dominates(
+        galfus_ir::mir::BlockId::new(1),
+        galfus_ir::mir::BlockId::new(2)
+    ));
+}
+
+#[test]
 fn inlining_respects_the_function_instruction_budget() {
     let ty = TypeId::new(0);
     let callee = function(

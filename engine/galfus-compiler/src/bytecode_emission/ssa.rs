@@ -22,7 +22,7 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
         }
     }
 
-    let mut new_locals = func.locals.clone();
+    let mut new_locals = std::mem::take(&mut func.locals);
     let mut current_def: HashMap<(BlockId, LocalId), LocalId> = HashMap::new();
     let mut block_parameters: HashMap<BlockId, Vec<(LocalId, LocalId)>> = HashMap::new();
     let mut phi_operands: HashMap<LocalId, Vec<(BlockId, LocalId)>> = HashMap::new();
@@ -43,6 +43,27 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
     }
 
     impl<'a> SsaBuilder<'a> {
+        fn local_decl(&self, id: LocalId) -> LocalDecl {
+            self.new_locals
+                .get(id.raw() as usize)
+                .filter(|decl| decl.id == id)
+                .cloned()
+                .expect("MIR local id must index its declaration")
+        }
+
+        fn define_destination(&mut self, block: BlockId, destination: &mut LocalId) {
+            let original = *destination;
+            let declaration = self.local_decl(original);
+            let id = LocalId::new(self.new_locals.len() as u32);
+            self.new_locals.push(LocalDecl {
+                id,
+                ty: declaration.ty,
+                is_owned: declaration.is_owned,
+            });
+            *destination = id;
+            self.write_variable(block, original, id);
+        }
+
         fn write_variable(&mut self, block: BlockId, variable: LocalId, value: LocalId) {
             self.current_def.insert((block, variable), value);
         }
@@ -57,12 +78,7 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
             } else if preds.len() == 1 {
                 self.read_variable(preds[0], variable)
             } else {
-                let phi_decl = self
-                    .new_locals
-                    .iter()
-                    .find(|d| d.id == variable)
-                    .unwrap()
-                    .clone();
+                let phi_decl = self.local_decl(variable);
                 let phi_id = LocalId::new(self.new_locals.len() as u32);
                 self.new_locals.push(LocalDecl {
                     id: phi_id,
@@ -157,21 +173,7 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
             match &mut inst.0 {
                 Instruction::Assign(target, rvalue) => {
                     self.replace_rvalue(block, rvalue);
-                    let orig_target = *target;
-                    let target_decl = self
-                        .new_locals
-                        .iter()
-                        .find(|d| d.id == orig_target)
-                        .unwrap()
-                        .clone();
-                    let new_id = LocalId::new(self.new_locals.len() as u32);
-                    self.new_locals.push(LocalDecl {
-                        id: new_id,
-                        ty: target_decl.ty,
-                        is_owned: target_decl.is_owned,
-                    });
-                    *target = new_id;
-                    self.write_variable(block, orig_target, new_id);
+                    self.define_destination(block, target);
                 }
                 Instruction::Drop(id) => {
                     *id = self.read_variable(block, *id);
@@ -195,21 +197,7 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
                     for op in args {
                         self.replace_operand(block, op);
                     }
-                    let orig_target = *destination;
-                    let target_decl = self
-                        .new_locals
-                        .iter()
-                        .find(|d| d.id == orig_target)
-                        .unwrap()
-                        .clone();
-                    let new_id = LocalId::new(self.new_locals.len() as u32);
-                    self.new_locals.push(LocalDecl {
-                        id: new_id,
-                        ty: target_decl.ty,
-                        is_owned: target_decl.is_owned,
-                    });
-                    *destination = new_id;
-                    self.write_variable(block, orig_target, new_id);
+                    self.define_destination(block, destination);
                 }
                 Instruction::ConstraintCall {
                     obj,
@@ -221,21 +209,7 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
                     for op in args {
                         self.replace_operand(block, op);
                     }
-                    let orig_target = *destination;
-                    let target_decl = self
-                        .new_locals
-                        .iter()
-                        .find(|d| d.id == orig_target)
-                        .unwrap()
-                        .clone();
-                    let new_id = LocalId::new(self.new_locals.len() as u32);
-                    self.new_locals.push(LocalDecl {
-                        id: new_id,
-                        ty: target_decl.ty,
-                        is_owned: target_decl.is_owned,
-                    });
-                    *destination = new_id;
-                    self.write_variable(block, orig_target, new_id);
+                    self.define_destination(block, destination);
                 }
                 Instruction::IndirectCall {
                     func,
@@ -246,21 +220,7 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
                     for op in args {
                         self.replace_operand(block, op);
                     }
-                    let orig_target = *destination;
-                    let target_decl = self
-                        .new_locals
-                        .iter()
-                        .find(|d| d.id == orig_target)
-                        .unwrap()
-                        .clone();
-                    let new_id = LocalId::new(self.new_locals.len() as u32);
-                    self.new_locals.push(LocalDecl {
-                        id: new_id,
-                        ty: target_decl.ty,
-                        is_owned: target_decl.is_owned,
-                    });
-                    *destination = new_id;
-                    self.write_variable(block, orig_target, new_id);
+                    self.define_destination(block, destination);
                 }
                 Instruction::Await {
                     future,
@@ -268,21 +228,7 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
                     ..
                 } => {
                     self.replace_operand(block, future);
-                    let orig_target = *destination;
-                    let target_decl = self
-                        .new_locals
-                        .iter()
-                        .find(|d| d.id == orig_target)
-                        .unwrap()
-                        .clone();
-                    let new_id = LocalId::new(self.new_locals.len() as u32);
-                    self.new_locals.push(LocalDecl {
-                        id: new_id,
-                        ty: target_decl.ty,
-                        is_owned: target_decl.is_owned,
-                    });
-                    *destination = new_id;
-                    self.write_variable(block, orig_target, new_id);
+                    self.define_destination(block, destination);
                 }
                 Instruction::AwaitAll {
                     futures,
@@ -295,21 +241,7 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
                     for fut in futures {
                         self.replace_operand(block, fut);
                     }
-                    let orig_target = *destination;
-                    let target_decl = self
-                        .new_locals
-                        .iter()
-                        .find(|d| d.id == orig_target)
-                        .unwrap()
-                        .clone();
-                    let new_id = LocalId::new(self.new_locals.len() as u32);
-                    self.new_locals.push(LocalDecl {
-                        id: new_id,
-                        ty: target_decl.ty,
-                        is_owned: target_decl.is_owned,
-                    });
-                    *destination = new_id;
-                    self.write_variable(block, orig_target, new_id);
+                    self.define_destination(block, destination);
                 }
             }
         }
@@ -323,7 +255,7 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
         phi_operands: &mut phi_operands,
     };
 
-    let mut new_blocks = func.blocks.clone();
+    let mut new_blocks = std::mem::take(&mut func.blocks);
 
     // Process instructions forward
     for block in &mut new_blocks {
@@ -365,12 +297,7 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
         let block_id = block.id;
         if let Some(params) = builder.block_parameters.get(&block_id) {
             for (_orig, phi) in params {
-                let phi_decl = builder
-                    .new_locals
-                    .iter()
-                    .find(|d| d.id == *phi)
-                    .unwrap()
-                    .clone();
+                let phi_decl = builder.local_decl(*phi);
                 block.parameters.push(phi_decl);
             }
         }
@@ -416,6 +343,7 @@ pub fn convert_to_ssa(func: &mut MirFunction) {
         }
     }
 
-    func.locals = builder.new_locals.clone();
+    let locals = std::mem::take(builder.new_locals);
+    func.locals = locals;
     func.blocks = new_blocks;
 }
