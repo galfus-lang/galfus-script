@@ -1,3 +1,6 @@
+mod analysis;
+mod constants;
+mod dead_definitions;
 #[cfg(test)]
 mod tests;
 
@@ -5,15 +8,14 @@ use anyhow::{Result, anyhow};
 use std::collections::{HashMap, HashSet};
 
 use galfus_ir::mir::{
-    BlockId, Constant, Instruction, LocalId, MirBinaryOp, MirFunction, MirModule, Operand, RValue,
-    Terminator,
+    BlockId, Instruction, LocalId, MirFunction, MirModule, Operand, RValue, Terminator,
 };
-use galfus_ir::{
-    for_each_instruction_operand, for_each_instruction_operand_mut, for_each_terminator_operand,
-    for_each_terminator_operand_mut,
-};
+use galfus_ir::{for_each_instruction_operand_mut, for_each_terminator_operand_mut};
 
 use super::{inline::inline_functions, tco::optimize_tail_calls};
+use analysis::{Dominators, dominators};
+use constants::propagate_and_fold_constants;
+use dead_definitions::remove_dead_constant_definitions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MirPassConfiguration {
@@ -94,122 +96,6 @@ pub fn run(module: &mut MirModule, configuration: MirPassConfiguration) -> Resul
     report.calls_after = call_count(module);
     report.call_graph_changed = report.inlined_calls > 0;
     Ok(report)
-}
-
-fn propagate_and_fold_constants(module: &mut MirModule) -> usize {
-    let mut changed = 0;
-    for function in &mut module.functions {
-        for block in &mut function.blocks {
-            let mut constants = HashMap::<galfus_ir::mir::LocalId, Constant>::new();
-            for (instruction, _) in &mut block.instructions {
-                let Instruction::Assign(destination, rvalue) = instruction else {
-                    continue;
-                };
-                match rvalue {
-                    RValue::Use(Operand::Local(local)) => {
-                        if let Some(value) = constants.get(local).cloned() {
-                            *rvalue = RValue::Use(Operand::Constant(value.clone()));
-                            constants.insert(*destination, value);
-                            changed += 1;
-                        } else {
-                            constants.remove(destination);
-                        }
-                    }
-                    RValue::Use(Operand::Constant(value)) => {
-                        constants.insert(*destination, value.clone());
-                    }
-                    RValue::BinaryOp(operation, lhs, rhs) => {
-                        let lhs = resolve_constant(lhs, &constants);
-                        let rhs = resolve_constant(rhs, &constants);
-                        if let Some(value) =
-                            fold_primitive_binary(*operation, lhs.as_ref(), rhs.as_ref())
-                        {
-                            *rvalue = RValue::Use(Operand::Constant(value.clone()));
-                            constants.insert(*destination, value);
-                            changed += 1;
-                        } else {
-                            constants.remove(destination);
-                        }
-                    }
-                    _ => {
-                        constants.remove(destination);
-                    }
-                }
-            }
-        }
-    }
-    changed
-}
-
-fn resolve_constant(
-    operand: &Operand,
-    constants: &HashMap<galfus_ir::mir::LocalId, Constant>,
-) -> Option<Constant> {
-    match operand {
-        Operand::Constant(value) => Some(value.clone()),
-        Operand::Local(local) => constants.get(local).cloned(),
-        Operand::ConstRef(_) => None,
-    }
-}
-
-fn fold_primitive_binary(
-    operation: MirBinaryOp,
-    lhs: Option<&Constant>,
-    rhs: Option<&Constant>,
-) -> Option<Constant> {
-    macro_rules! fold {
-        ($left:expr, $right:expr, $variant:ident) => {
-            Some(match operation {
-                MirBinaryOp::Add => Constant::$variant($left.wrapping_add($right)),
-                MirBinaryOp::Subtract => Constant::$variant($left.wrapping_sub($right)),
-                MirBinaryOp::Multiply => Constant::$variant($left.wrapping_mul($right)),
-                MirBinaryOp::Divide if $right != 0 => {
-                    Constant::$variant($left.wrapping_div($right))
-                }
-                MirBinaryOp::Remainder if $right != 0 => {
-                    Constant::$variant($left.wrapping_rem($right))
-                }
-                MirBinaryOp::Equal => Constant::Bool($left == $right),
-                MirBinaryOp::NotEqual => Constant::Bool($left != $right),
-                MirBinaryOp::Less => Constant::Bool($left < $right),
-                MirBinaryOp::LessEqual => Constant::Bool($left <= $right),
-                MirBinaryOp::Greater => Constant::Bool($left > $right),
-                MirBinaryOp::GreaterEqual => Constant::Bool($left >= $right),
-                _ => return None,
-            })
-        };
-    }
-    macro_rules! fold_float {
-        ($left:expr, $right:expr, $variant:ident) => {
-            Some(match operation {
-                MirBinaryOp::Add => Constant::$variant($left + $right),
-                MirBinaryOp::Subtract => Constant::$variant($left - $right),
-                MirBinaryOp::Multiply => Constant::$variant($left * $right),
-                MirBinaryOp::Divide => Constant::$variant($left / $right),
-                MirBinaryOp::Remainder => Constant::$variant($left % $right),
-                MirBinaryOp::Equal => Constant::Bool($left == $right),
-                MirBinaryOp::NotEqual => Constant::Bool($left != $right),
-                MirBinaryOp::Less => Constant::Bool($left < $right),
-                MirBinaryOp::LessEqual => Constant::Bool($left <= $right),
-                MirBinaryOp::Greater => Constant::Bool($left > $right),
-                MirBinaryOp::GreaterEqual => Constant::Bool($left >= $right),
-                _ => return None,
-            })
-        };
-    }
-    match (lhs?, rhs?) {
-        (Constant::Int8(left), Constant::Int8(right)) => fold!(*left, *right, Int8),
-        (Constant::Int16(left), Constant::Int16(right)) => fold!(*left, *right, Int16),
-        (Constant::Int32(left), Constant::Int32(right)) => fold!(*left, *right, Int32),
-        (Constant::Int64(left), Constant::Int64(right)) => fold!(*left, *right, Int64),
-        (Constant::Uint8(left), Constant::Uint8(right)) => fold!(*left, *right, Uint8),
-        (Constant::Uint16(left), Constant::Uint16(right)) => fold!(*left, *right, Uint16),
-        (Constant::Uint32(left), Constant::Uint32(right)) => fold!(*left, *right, Uint32),
-        (Constant::Uint64(left), Constant::Uint64(right)) => fold!(*left, *right, Uint64),
-        (Constant::Float32(left), Constant::Float32(right)) => fold_float!(*left, *right, Float32),
-        (Constant::Float64(left), Constant::Float64(right)) => fold_float!(*left, *right, Float64),
-        _ => None,
-    }
 }
 
 type CopyDefinition = (LocalId, BlockId, usize);
@@ -323,93 +209,6 @@ fn instruction_destination(instruction: &Instruction) -> Option<LocalId> {
     }
 }
 
-struct Dominators {
-    indices: HashMap<BlockId, usize>,
-    sets: Vec<Vec<bool>>,
-}
-
-impl Dominators {
-    fn dominates(&self, block: BlockId, candidate: BlockId) -> bool {
-        let Some(&block_index) = self.indices.get(&block) else {
-            return false;
-        };
-        let Some(&candidate_index) = self.indices.get(&candidate) else {
-            return false;
-        };
-        self.sets[block_index][candidate_index]
-    }
-}
-
-fn dominators(function: &MirFunction) -> Dominators {
-    let indices = function
-        .blocks
-        .iter()
-        .enumerate()
-        .map(|(index, block)| (block.id, index))
-        .collect::<HashMap<_, _>>();
-    let entry = function.blocks.first().map(|block| block.id);
-    let mut predecessors = vec![Vec::new(); function.blocks.len()];
-    for block in &function.blocks {
-        for successor in successors(&block.terminator.0) {
-            if let (Some(&source), Some(&target)) =
-                (indices.get(&block.id), indices.get(&successor))
-            {
-                predecessors[target].push(source);
-            }
-        }
-    }
-    let mut sets = function
-        .blocks
-        .iter()
-        .enumerate()
-        .map(|(index, block)| {
-            if Some(block.id) == entry || predecessors[index].is_empty() {
-                let mut initial = vec![false; function.blocks.len()];
-                initial[index] = true;
-                initial
-            } else {
-                vec![true; function.blocks.len()]
-            }
-        })
-        .collect::<Vec<_>>();
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for (index, block) in function.blocks.iter().enumerate() {
-            if Some(block.id) == entry {
-                continue;
-            }
-            let Some((&first, rest)) = predecessors[index].split_first() else {
-                continue;
-            };
-            let mut next = sets[first].clone();
-            for predecessor in rest {
-                for (candidate, dominates) in next.iter_mut().zip(&sets[*predecessor]) {
-                    *candidate &= *dominates;
-                }
-            }
-            next[index] = true;
-            if sets[index] != next {
-                sets[index] = next;
-                changed = true;
-            }
-        }
-    }
-    Dominators { indices, sets }
-}
-
-fn successors(terminator: &Terminator) -> Vec<BlockId> {
-    match terminator {
-        Terminator::Jump { target, .. } => vec![*target],
-        Terminator::Branch {
-            true_block,
-            false_block,
-            ..
-        } => vec![*true_block, *false_block],
-        _ => Vec::new(),
-    }
-}
-
 fn replace_operand_copy(
     operand: &mut Operand,
     block: BlockId,
@@ -480,82 +279,6 @@ fn replace_terminator_copies(
         replace_operand_copy(operand, block, use_index, definitions, dominators, replaced);
     };
     for_each_terminator_operand_mut(terminator, replace);
-}
-
-fn remove_dead_constant_definitions(module: &mut MirModule) -> usize {
-    let mut removed = 0;
-    for function in &mut module.functions {
-        let ownership = function
-            .locals
-            .iter()
-            .map(|local| (local.id, local.is_owned))
-            .collect::<HashMap<_, _>>();
-        let mut used = HashSet::new();
-        for block in &function.blocks {
-            for (instruction, _) in &block.instructions {
-                collect_instruction_uses(instruction, &mut used);
-            }
-            collect_terminator_uses(&block.terminator.0, &mut used);
-        }
-        for block in &mut function.blocks {
-            block.instructions.retain(|(instruction, _)| {
-                let dead = match instruction {
-                    Instruction::Assign(destination, RValue::Use(Operand::Constant(constant))) => {
-                        !used.contains(destination)
-                            && !ownership.get(destination).copied().unwrap_or(true)
-                            && is_trivially_discardable_constant(constant)
-                    }
-                    Instruction::Assign(destination, RValue::Use(Operand::Local(source))) => {
-                        !used.contains(destination)
-                            && !ownership.get(destination).copied().unwrap_or(true)
-                            && !ownership.get(source).copied().unwrap_or(true)
-                    }
-                    _ => false,
-                };
-                removed += usize::from(dead);
-                !dead
-            });
-        }
-    }
-    removed
-}
-
-fn is_trivially_discardable_constant(constant: &Constant) -> bool {
-    matches!(
-        constant,
-        Constant::Null
-            | Constant::Bool(_)
-            | Constant::Int8(_)
-            | Constant::Int16(_)
-            | Constant::Int32(_)
-            | Constant::Int64(_)
-            | Constant::Uint8(_)
-            | Constant::Uint16(_)
-            | Constant::Uint32(_)
-            | Constant::Uint64(_)
-            | Constant::Float32(_)
-            | Constant::Float64(_)
-            | Constant::Function(_)
-    )
-}
-
-fn collect_operand(operand: &Operand, used: &mut HashSet<galfus_ir::mir::LocalId>) {
-    if let Operand::Local(local) = operand {
-        used.insert(*local);
-    }
-}
-fn collect_instruction_uses(
-    instruction: &Instruction,
-    used: &mut HashSet<galfus_ir::mir::LocalId>,
-) {
-    if let Instruction::Drop(local) = instruction {
-        used.insert(*local);
-        return;
-    }
-    for_each_instruction_operand(instruction, |operand| collect_operand(operand, used));
-}
-fn collect_terminator_uses(terminator: &Terminator, used: &mut HashSet<galfus_ir::mir::LocalId>) {
-    for_each_terminator_operand(terminator, |operand| collect_operand(operand, used));
 }
 
 fn validate(module: &MirModule, stage: &str) -> Result<()> {
