@@ -8,6 +8,7 @@ pub mod expression;
 pub mod function;
 mod function_expressions;
 mod function_helpers;
+mod future_types;
 mod generic_specialization;
 pub mod helpers;
 mod literal_lowering;
