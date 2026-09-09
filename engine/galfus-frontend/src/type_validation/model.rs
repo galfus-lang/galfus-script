@@ -1,5 +1,6 @@
 mod ownership_model;
 
+use super::LoweredImportedConstraint;
 use crate::{PrimitiveType, TypeLayer};
 use galfus_core::{DefId, DiagnosticBag, NodeId, SymbolId, TypeId};
 pub use ownership_model::*;
@@ -549,6 +550,8 @@ pub struct TypeCheckResult {
     pub imported_path_choices: HashMap<NodeId, LoweredImportedChoice>,
     pub imported_namespace_choices: HashMap<(SymbolId, String), LoweredImportedChoice>,
     pub imported_struct_fields: HashMap<SymbolId, Vec<ImportedStructField>>,
+    pub(super) imported_struct_constraints: HashMap<SymbolId, Vec<TypeId>>,
+    pub(super) imported_symbol_constraints: HashMap<SymbolId, LoweredImportedConstraint>,
     pub imported_symbol_enum_values: HashMap<SymbolId, Vec<(String, i64)>>,
     pub(super) range_desugars: HashMap<NodeId, RangeDesugarTarget>,
 }
@@ -565,6 +568,8 @@ pub(super) struct TypeCheckSupplementalData {
     pub(super) imported_path_choices: HashMap<NodeId, LoweredImportedChoice>,
     pub(super) imported_namespace_choices: HashMap<(SymbolId, String), LoweredImportedChoice>,
     pub(super) imported_struct_fields: HashMap<SymbolId, Vec<ImportedStructField>>,
+    pub(super) imported_struct_constraints: HashMap<SymbolId, Vec<TypeId>>,
+    pub(super) imported_symbol_constraints: HashMap<SymbolId, LoweredImportedConstraint>,
     pub(super) imported_symbol_enum_values: HashMap<SymbolId, Vec<(String, i64)>>,
     pub(super) range_desugars: HashMap<NodeId, RangeDesugarTarget>,
 }
@@ -593,6 +598,8 @@ impl TypeCheckResult {
             imported_path_choices: supplemental.imported_path_choices,
             imported_namespace_choices: supplemental.imported_namespace_choices,
             imported_struct_fields: supplemental.imported_struct_fields,
+            imported_struct_constraints: supplemental.imported_struct_constraints,
+            imported_symbol_constraints: supplemental.imported_symbol_constraints,
             imported_symbol_enum_values: supplemental.imported_symbol_enum_values,
             range_desugars: supplemental.range_desugars,
         }
@@ -612,6 +619,18 @@ impl TypeCheckResult {
 
     pub fn ownership_metadata(&self) -> &OwnershipMetadata {
         &self.ownership_metadata
+    }
+
+    pub fn imported_constraint_name(&self, symbol: SymbolId) -> Option<&str> {
+        self.imported_symbol_constraints
+            .get(&symbol)
+            .map(|constraint| constraint.name.as_str())
+    }
+
+    pub fn imported_struct_constraints(&self, symbol: SymbolId) -> Option<&[TypeId]> {
+        self.imported_struct_constraints
+            .get(&symbol)
+            .map(Vec::as_slice)
     }
 
     pub fn range_desugar(&self, node: NodeId) -> Option<RangeDesugarTarget> {

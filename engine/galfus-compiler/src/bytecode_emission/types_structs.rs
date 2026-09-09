@@ -39,6 +39,13 @@ pub fn get_or_create_struct_layout(ctx: &mut LowerCtx, struct_symbol: SymbolId) 
 }
 
 fn get_struct_constraints(ctx: &LowerCtx, struct_symbol: SymbolId) -> Vec<String> {
+    if let Some(constraints) = ctx.type_result.imported_struct_constraints(struct_symbol) {
+        return constraints
+            .iter()
+            .filter_map(|&constraint| constraint_type_name(ctx, constraint))
+            .collect();
+    }
+
     let Some(struct_item) =
         crate::bytecode_emission::helpers::type_item_for_symbol(ctx, struct_symbol)
     else {
@@ -77,6 +84,29 @@ fn get_struct_constraints(ctx: &LowerCtx, struct_symbol: SymbolId) -> Vec<String
                 })
         })
         .collect()
+}
+
+fn constraint_type_name(ctx: &LowerCtx, ty: TypeId) -> Option<String> {
+    let table = ctx.type_result.layer().table();
+    let base = match table.kind(ty)? {
+        galfus_frontend::TypeKind::Named { .. } => ty,
+        galfus_frontend::TypeKind::GenericInstance { base, .. } => *base,
+        _ => return None,
+    };
+    let galfus_frontend::TypeKind::Named { symbol } = table.kind(base)? else {
+        return None;
+    };
+
+    if let Some(name) = ctx.type_result.imported_constraint_name(*symbol) {
+        return Some(name.to_string());
+    }
+
+    let resolution = ctx.graph.resolution()?;
+    resolution
+        .symbol(*symbol)
+        .filter(|symbol| symbol.kind() == SymbolKind::Constraint)
+        .and_then(|symbol| ctx.string_table.resolve(symbol.name()))
+        .map(str::to_string)
 }
 
 pub fn get_struct_fields(ctx: &LowerCtx, struct_symbol: SymbolId) -> Vec<(String, TypeId)> {

@@ -66,6 +66,9 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: TypeId) -> TypeIdx {
                     let layout_idx = get_or_create_imported_choice_layout(ctx, choice);
                     BytecodeType::Choice(layout_idx)
                 }
+                _ if let Some(name) = ctx.type_result.imported_constraint_name(*symbol) => {
+                    BytecodeType::Constraint(name.to_string())
+                }
                 Some(SymbolKind::Struct) => {
                     if ctx.is_adapter_proxy {
                         let name = ctx

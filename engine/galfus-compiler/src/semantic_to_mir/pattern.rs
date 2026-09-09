@@ -382,15 +382,16 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     .builder
                     .type_result
                     .layer()
-                    .node_type(type_node)
+                    .node_type(pattern_node_id)
+                    .or_else(|| self.builder.type_result.layer().node_type(type_node))
                     .unwrap_or_else(|| TypeId::new(0));
 
                 let bool_ty = self
                     .builder
                     .type_result
                     .layer()
-                    .node_type(pattern_node_id)
-                    .unwrap_or_else(|| TypeId::new(0));
+                    .table()
+                    .primitive(galfus_frontend::PrimitiveType::Bool);
 
                 let cond_temp = self.declare_local(None, bool_ty);
                 self.current_instructions.push((
