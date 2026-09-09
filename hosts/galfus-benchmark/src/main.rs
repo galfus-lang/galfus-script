@@ -40,19 +40,35 @@ const BENCHMARK_CASES: &[BenchmarkCase] = &[
             ("Lua JIT", &["luajit", "benchmark/fib.lua"]),
             ("Lua 5.4", &["lua", "benchmark/fib.lua"]),
             ("Python 3", &["python3", "benchmark/fib.py"]),
+            ("Ruby", &["ruby", "benchmark/fib.rb"]),
+            ("Perl", &["perl", "benchmark/fib.pl"]),
         ],
     },
     BenchmarkCase {
-        name: "Matrix 4x4 (i64)",
-        galfus_source: "benchmark/matrix4.gfs",
-        standalone_output: "./target/release/matrix4_standalone",
-        java_class: "Matrix4",
+        name: "Matrix 4x4 (i32 + f32)",
+        galfus_source: "benchmark/matrix32.gfs",
+        standalone_output: "./target/release/matrix32_standalone",
+        java_class: "Matrix32",
         targets: &[
-            ("JavaScript (Bun)", &["benchmark/matrix4.js"]),
-            ("JavaScript (QuickJS)", &["qjs", "benchmark/matrix4.js"]),
-            ("Lua JIT", &["luajit", "benchmark/matrix4.lua"]),
-            ("Lua 5.4", &["lua", "benchmark/matrix4.lua"]),
-            ("Python 3", &["python3", "benchmark/matrix4.py"]),
+            ("JavaScript (Bun)", &["benchmark/matrix32.js"]),
+            ("JavaScript (QuickJS)", &["qjs", "benchmark/matrix32.js"]),
+            ("Python 3", &["python3", "benchmark/matrix32.py"]),
+            ("Ruby", &["ruby", "benchmark/matrix32.rb"]),
+            ("Perl", &["perl", "benchmark/matrix32.pl"]),
+        ],
+    },
+    BenchmarkCase {
+        name: "Matrix 4x4 (i64 + f64)",
+        galfus_source: "benchmark/matrix64.gfs",
+        standalone_output: "./target/release/matrix64_standalone",
+        java_class: "Matrix64",
+        targets: &[
+            ("JavaScript (Bun)", &["benchmark/matrix64.js"]),
+            ("JavaScript (QuickJS)", &["qjs", "benchmark/matrix64.js"]),
+            ("Lua 5.4", &["lua", "benchmark/matrix64.lua"]),
+            ("Python 3", &["python3", "benchmark/matrix64.py"]),
+            ("Ruby", &["ruby", "benchmark/matrix64.rb"]),
+            ("Perl", &["perl", "benchmark/matrix64.pl"]),
         ],
     },
     BenchmarkCase {
@@ -63,6 +79,8 @@ const BENCHMARK_CASES: &[BenchmarkCase] = &[
         targets: &[
             ("JavaScript (Bun)", &["benchmark/tasks.js"]),
             ("Python 3", &["python3", "benchmark/tasks.py"]),
+            ("Ruby", &["ruby", "benchmark/tasks.rb"]),
+            ("Perl", &["perl", "benchmark/tasks.pl"]),
         ],
     },
 ];
@@ -75,6 +93,24 @@ const SERVER_BENCHMARK: BenchmarkCase = BenchmarkCase {
     targets: &[
         ("JavaScript (Bun)", &["benchmark/server.js", "{port}"]),
         ("Python 3", &["python3", "benchmark/server.py", "{port}"]),
+        ("Ruby", &["ruby", "benchmark/server.rb", "{port}"]),
+        ("Perl", &["perl", "benchmark/server.pl", "{port}"]),
+    ],
+};
+
+const SERVER_POST_BENCHMARK: BenchmarkCase = BenchmarkCase {
+    name: "HTTP/1.1 POST Echo",
+    galfus_source: "benchmark/server_post.gfs",
+    standalone_output: "./target/release/server_post_standalone",
+    java_class: "ServerPost",
+    targets: &[
+        ("JavaScript (Bun)", &["benchmark/server_post.js", "{port}"]),
+        (
+            "Python 3",
+            &["python3", "benchmark/server_post.py", "{port}"],
+        ),
+        ("Ruby", &["ruby", "benchmark/server_post.rb", "{port}"]),
+        ("Perl", &["perl", "benchmark/server_post.pl", "{port}"]),
     ],
 };
 
@@ -188,6 +224,9 @@ fn main() -> ExitCode {
     if !compile_standalone(&SERVER_BENCHMARK, reuse_release) {
         return ExitCode::FAILURE;
     }
+    if !compile_standalone(&SERVER_POST_BENCHMARK, reuse_release) {
+        return ExitCode::FAILURE;
+    }
 
     let re_result = Regex::new(r"RESULT=([^\r\n]+)").unwrap();
     let re_time = Regex::new(r"TIME_MS=(\d+)").unwrap();
@@ -299,6 +338,16 @@ fn main() -> ExitCode {
         reuse_release,
         &bun_bin,
         java_available,
+        false,
+        &mut results,
+        &mut raw_runs,
+    );
+    run_server_benchmark(
+        &SERVER_POST_BENCHMARK,
+        reuse_release,
+        &bun_bin,
+        java_available,
+        true,
         &mut results,
         &mut raw_runs,
     );
@@ -352,9 +401,11 @@ fn prepare_java_benchmarks() -> bool {
             "-d",
             JAVA_OUTPUT_DIR,
             "benchmark/Fib.java",
-            "benchmark/Matrix4.java",
+            "benchmark/Matrix32.java",
+            "benchmark/Matrix64.java",
             "benchmark/Tasks.java",
             "benchmark/Server.java",
+            "benchmark/ServerPost.java",
         ])
         .status()
     {
@@ -414,6 +465,8 @@ fn write_reports(
             bun_binary(),
             "java".to_string(),
             "python3".to_string(),
+            "ruby".to_string(),
+            "perl".to_string(),
             "lua".to_string(),
             "luajit".to_string(),
         ]
@@ -502,6 +555,7 @@ fn run_server_benchmark(
     reuse_release: bool,
     bun_bin: &str,
     java_available: bool,
+    is_post: bool,
     results: &mut Vec<BenchmarkResult>,
     raw_runs: &mut Vec<RawBenchmarkRun>,
 ) {
@@ -562,7 +616,7 @@ fn run_server_benchmark(
         let mut samples = Vec::with_capacity(SAMPLE_COUNT);
         let mut failure = None;
         for _ in 0..SAMPLE_COUNT {
-            match run_server_sample(&command) {
+            match run_server_sample(&command, is_post) {
                 Ok(sample) => {
                     samples.push(sample);
                     print!(".");
@@ -602,10 +656,10 @@ fn run_server_benchmark(
     }
 }
 
-fn run_server_sample(command: &[String]) -> Result<BenchmarkSample, String> {
+fn run_server_sample(command: &[String], is_post: bool) -> Result<BenchmarkSample, String> {
     let (port, server) = start_server_with_retry(command)?;
     let load_started = Instant::now();
-    let result = run_http_load(port);
+    let result = run_http_load(port, is_post);
     let script_time_ms = load_started.elapsed().as_millis() as u64;
     let metrics = server.stop()?;
     result?;
@@ -720,7 +774,7 @@ fn available_server_port() -> Result<u16, String> {
 fn wait_for_server(port: u16) -> Result<(), String> {
     let deadline = Instant::now() + SERVER_READY_TIMEOUT;
     loop {
-        if send_http_request(port).is_ok() {
+        if send_http_request(port, false).is_ok() {
             return Ok(());
         }
         if Instant::now() >= deadline {
@@ -732,7 +786,7 @@ fn wait_for_server(port: u16) -> Result<(), String> {
     }
 }
 
-fn run_http_load(port: u16) -> Result<(), String> {
+fn run_http_load(port: u16, is_post: bool) -> Result<(), String> {
     let next_request = Arc::new(AtomicUsize::new(0));
     let (error_tx, error_rx) = mpsc::channel();
     let mut workers = Vec::with_capacity(SERVER_CONCURRENCY);
@@ -745,7 +799,7 @@ fn run_http_load(port: u16) -> Result<(), String> {
                 if next_request.fetch_add(1, Ordering::Relaxed) >= SERVER_REQUEST_COUNT {
                     return;
                 }
-                if let Err(error) = send_http_request(port) {
+                if let Err(error) = send_http_request(port, is_post) {
                     let _ = error_tx.send(error);
                     return;
                 }
@@ -762,7 +816,7 @@ fn run_http_load(port: u16) -> Result<(), String> {
     error_rx.try_recv().map_or(Ok(()), Err)
 }
 
-fn send_http_request(port: u16) -> Result<(), String> {
+fn send_http_request(port: u16, is_post: bool) -> Result<(), String> {
     let mut stream =
         TcpStream::connect(("127.0.0.1", port)).map_err(|error| format!("connect: {error}"))?;
     stream
@@ -771,9 +825,24 @@ fn send_http_request(port: u16) -> Result<(), String> {
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
         .map_err(|error| format!("set read timeout: {error}"))?;
-    stream
-        .write_all(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
-        .map_err(|error| format!("write request: {error}"))?;
+
+    if is_post {
+        let payload = b"Hello World";
+        let request = format!(
+            "POST / HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            payload.len()
+        );
+        stream
+            .write_all(request.as_bytes())
+            .map_err(|error| format!("write request: {error}"))?;
+        stream
+            .write_all(payload)
+            .map_err(|error| format!("write request body: {error}"))?;
+    } else {
+        stream
+            .write_all(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+            .map_err(|error| format!("write request: {error}"))?;
+    }
 
     let mut response = Vec::new();
     stream
@@ -783,6 +852,9 @@ fn send_http_request(port: u16) -> Result<(), String> {
     let status_line = response.lines().next().unwrap_or("empty response");
     if !status_line.starts_with("HTTP/") || status_line.split_whitespace().nth(1) != Some("200") {
         return Err(format!("expected HTTP 200, got {}", status_line));
+    }
+    if is_post && !response.contains("Hello World") {
+        return Err("POST response did not contain the payload".to_string());
     }
     Ok(())
 }
