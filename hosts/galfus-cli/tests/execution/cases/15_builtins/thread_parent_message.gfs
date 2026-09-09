@@ -1,0 +1,67 @@
+import { createThread, getMessage, getSelfId, getThread, sendToParent } from "std/thread"
+import { println } from "std/io"
+
+fn handler(_args: [[u8]]): i32 {
+  const parent = getThread("parent")
+  if parent == null {
+    return 1
+  }
+  if getSelfId() <= 0 || getSelfId() == parent.id {
+    return 2
+  }
+
+  const requestLength = instanceof parent::receiveMessage(1000) {
+    [u8] message => <i32> message.length,
+    null => 0
+  }
+  if requestLength != 7 {
+    return 3
+  }
+
+  if !sendToParent("ready") {
+    return 4
+  }
+  return 0
+}
+
+fn parentWorker(_args: [[u8]]): i32 {
+  if getSelfId() <= 0 {
+    return 5
+  }
+  const child = createThread(handler)
+  if !child::spawn() {
+    return 6
+  }
+  if !child::send("request") {
+    return 7
+  }
+  if child::wait() != 0 {
+    return 8
+  }
+
+  const responseLength = instanceof getMessage() {
+    [u8] message => <i32> message.length,
+    null => 0
+  }
+  if responseLength != 5 {
+    return 9
+  }
+  return 0
+}
+
+export fn main(_args: [[u8]]): i32 {
+  if getSelfId() <= 0 {
+    return 10
+  }
+  const parent = createThread(parentWorker, "parent")
+  if !parent::spawn() {
+    return 11
+  }
+  const parentResult = parent::wait()
+  instanceof parentResult {
+    i32 code { return code },
+    null { return 12 }
+  }
+  println("ok")
+  return 0
+}

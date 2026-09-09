@@ -36,6 +36,7 @@ pub struct MailboxMessage {
 
 pub struct ThreadControlBlock {
     pub id: ThreadId,
+    pub parent_id: Option<ThreadId>,
     pub state: ThreadState,
     pub mailbox: Option<Arc<Mutex<VecDeque<MailboxMessage>>>>,
     pub quota: Arc<galfus_vm::quota::ThreadQuota>,
@@ -70,7 +71,17 @@ impl ThreadRegistry {
         thread: VmThreadState,
         key: Option<String>,
     ) -> Result<(), galfus_contract::ExecutionFailure> {
-        self.park(id, thread, key)
+        self.register_with_parent(id, thread, key, None)
+    }
+
+    pub fn register_with_parent(
+        &mut self,
+        id: ThreadId,
+        thread: VmThreadState,
+        key: Option<String>,
+        parent_id: Option<ThreadId>,
+    ) -> Result<(), galfus_contract::ExecutionFailure> {
+        self.park(id, thread, key, parent_id)
     }
 
     pub fn park(
@@ -78,6 +89,7 @@ impl ThreadRegistry {
         id: ThreadId,
         thread: VmThreadState,
         key: Option<String>,
+        parent_id: Option<ThreadId>,
     ) -> Result<(), galfus_contract::ExecutionFailure> {
         if let Some(ref k) = key {
             if self.keys.contains_key(k) {
@@ -92,6 +104,7 @@ impl ThreadRegistry {
             id,
             ThreadControlBlock {
                 id,
+                parent_id,
                 state: ThreadState::Created,
                 mailbox: Some(Arc::new(Mutex::new(VecDeque::new()))),
                 quota: thread.thread_quota().clone(),
@@ -137,6 +150,10 @@ impl ThreadRegistry {
 
     pub fn lookup_key(&self, key: &str) -> Option<ThreadId> {
         self.keys.get(key).copied()
+    }
+
+    pub fn parent_id(&self, id: ThreadId) -> Option<ThreadId> {
+        self.tcbs.get(&id).and_then(|tcb| tcb.parent_id)
     }
 
     pub fn take(&mut self, id: ThreadId) -> Option<VmThreadState> {

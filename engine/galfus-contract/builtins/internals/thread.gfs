@@ -1,10 +1,12 @@
 fn(async) __internal_thread_create(func: fn([[u8]]): i32, key: [u8] | null): i64
 fn __internal_thread_get(key: [u8]): i64
+fn __internal_thread_get_self_id(): i64
 fn(async) __internal_thread_spawn(id: i64, args: [[u8]] | null): bool
 fn __internal_thread_is_running(id: i64): bool
 fn __internal_thread_is_exited(id: i64): bool
 fn __internal_thread_exit_reason(id: i64): i32 | null
 fn __internal_thread_send(id: i64, data: [u8]): bool
+fn __internal_thread_send_to_parent(data: [u8]): bool
 fn(async) __internal_thread_receive(id: i64, timeout: i32): [u8] | null
 fn __internal_thread_has_messages(): bool
 fn __internal_thread_get_message(): [u8] | null
@@ -30,6 +32,10 @@ export fn getThread(key: [u8]): Thread | null {
         return null
     }
     return new(Thread) { id: id, key: key }
+}
+
+export fn getSelfId(): i64 {
+    return __internal_thread_get_self_id()
 }
 
 export fn hasMessages(): bool {
@@ -58,6 +64,10 @@ export fn Thread::exitReason(self): i32 | null {
 
 export fn Thread::send(self, data: [u8]): bool {
     return __internal_thread_send(self.id, data)
+}
+
+export fn sendToParent(data: [u8]): bool {
+    return __internal_thread_send_to_parent(data)
 }
 
 export fn Thread::tryReceiveMessage(self): [u8] | null {

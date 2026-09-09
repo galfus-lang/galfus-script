@@ -59,10 +59,12 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                 matches!(
                     *name,
                     "__internal_thread_get"
+                        | "__internal_thread_get_self_id"
                         | "__internal_thread_is_running"
                         | "__internal_thread_is_exited"
                         | "__internal_thread_exit_reason"
                         | "__internal_thread_send"
+                        | "__internal_thread_send_to_parent"
                         | "__internal_thread_has_messages"
                         | "__internal_thread_get_message"
                         | "__internal_thread_try_receive"

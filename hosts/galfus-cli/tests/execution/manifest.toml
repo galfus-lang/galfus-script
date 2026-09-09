@@ -204,6 +204,13 @@ exit_code = 0
 stdout = "ok\n"
 
 [[case]]
+name = "parent and child threads exchange messages"
+path = "cases/15_builtins/thread_parent_message.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
 name = "server provider accepts requests using its declared surface contract"
 path = "cases/15_builtins/server_provider.gfs"
 command = "run"

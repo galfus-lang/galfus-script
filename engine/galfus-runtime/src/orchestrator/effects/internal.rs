@@ -193,6 +193,9 @@ impl Orchestrator {
                     .map(|id| id.raw() as i64)
                     .unwrap_or(-1),
             )),
+            "__internal_thread_get_self_id" => {
+                Ok(galfus_vm::VmValue::Int64(thread_id.raw() as i64))
+            }
             "__internal_thread_is_running" => Ok(galfus_vm::VmValue::Bool(
                 internal_thread_arg(&args, 0).is_some_and(|id| self.kernel.is_running(id)),
             )),
@@ -266,6 +269,13 @@ impl Orchestrator {
                     internal_bytes_arg(&thread.heap, args.get(1)),
                 )))
             }
+            "__internal_thread_send_to_parent" => {
+                Ok(galfus_vm::VmValue::Bool(self.send_internal_thread_message(
+                    thread_id,
+                    self.kernel.parent_thread_id(thread_id),
+                    internal_bytes_arg(&thread.heap, args.first()),
+                )))
+            }
             _ => Err(ExecutionFailure::new(
                 ExecutionFailureKind::InvalidBytecode,
                 format!("unknown synchronous internal operation: {operation}"),
@@ -316,6 +326,7 @@ impl Orchestrator {
                     .unwrap_or(-1);
                 Some(Ok(FutureValue::I64(id)))
             }
+            "__internal_thread_get_self_id" => Some(Ok(FutureValue::I64(thread_id.raw() as i64))),
             "__internal_thread_is_running" => Some(Ok(FutureValue::Bool(
                 internal_thread_arg(&args, 0).is_some_and(|id| self.kernel.is_running(id)),
             ))),
@@ -333,6 +344,13 @@ impl Orchestrator {
                     thread_id,
                     internal_thread_arg(&args, 0),
                     internal_bytes_arg(&thread.heap, args.get(1)),
+                ))))
+            }
+            "__internal_thread_send_to_parent" => {
+                Some(Ok(FutureValue::Bool(self.send_internal_thread_message(
+                    thread_id,
+                    self.kernel.parent_thread_id(thread_id),
+                    internal_bytes_arg(&thread.heap, args.first()),
                 ))))
             }
             "__internal_thread_has_messages" => Some(Ok(FutureValue::Bool(
@@ -467,7 +485,7 @@ impl Orchestrator {
                             module_id: *module_id,
                             func_idx: *func_idx,
                         });
-                        match self.kernel.spawn(new_thread, key) {
+                        match self.kernel.spawn_child(new_thread, key, thread_id) {
                             Ok(id) => id.raw() as i64,
                             Err(e) => {
                                 self.failure = Some(

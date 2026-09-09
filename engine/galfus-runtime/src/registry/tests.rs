@@ -20,6 +20,23 @@ fn registry_preserves_the_executor_assigned_identity() {
 }
 
 #[test]
+fn registry_records_the_parent_of_a_child_thread() {
+    let parent_id = galfus_core::ThreadId::new(1);
+    let child_id = galfus_core::ThreadId::new(2);
+    let mut registry = ThreadRegistry::new();
+
+    registry
+        .register(parent_id, VmThreadState::test_new(), None)
+        .unwrap();
+    registry
+        .register_with_parent(child_id, VmThreadState::test_new(), None, Some(parent_id))
+        .unwrap();
+
+    assert_eq!(registry.parent_id(child_id), Some(parent_id));
+    assert_eq!(registry.parent_id(parent_id), None);
+}
+
+#[test]
 fn registry_keeps_the_mailbox_and_key_while_a_thread_is_running() {
     let id = galfus_core::ThreadId::new(1);
     let thread = VmThreadState::test_new();

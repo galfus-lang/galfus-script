@@ -29,8 +29,26 @@ impl VirtualKernel {
     /// Allocates a new ThreadId and registers the thread as runnable.
     pub fn spawn(
         &mut self,
+        thread: VmThreadState,
+        key: Option<String>,
+    ) -> Result<ThreadId, ExecutionFailure> {
+        self.spawn_with_parent(thread, key, None)
+    }
+
+    pub fn spawn_child(
+        &mut self,
+        thread: VmThreadState,
+        key: Option<String>,
+        parent_id: ThreadId,
+    ) -> Result<ThreadId, ExecutionFailure> {
+        self.spawn_with_parent(thread, key, Some(parent_id))
+    }
+
+    fn spawn_with_parent(
+        &mut self,
         mut thread: VmThreadState,
         key: Option<String>,
+        parent_id: Option<ThreadId>,
     ) -> Result<ThreadId, ExecutionFailure> {
         thread
             .mark_spawned()
@@ -50,7 +68,10 @@ impl VirtualKernel {
                 "thread id space exhausted",
             )
         })?;
-        if let Err(error) = self.registry.register(id, thread, key) {
+        if let Err(error) = self
+            .registry
+            .register_with_parent(id, thread, key, parent_id)
+        {
             self.thread_id_manager.free(id);
             return Err(error);
         }
@@ -275,6 +296,10 @@ impl VirtualKernel {
 
     pub fn lookup_key(&self, key: &str) -> Option<ThreadId> {
         self.registry.lookup_key(key)
+    }
+
+    pub fn parent_thread_id(&self, id: ThreadId) -> Option<ThreadId> {
+        self.registry.parent_id(id)
     }
 
     pub fn get_mailbox(&self, id: ThreadId) -> Option<Arc<Mutex<VecDeque<MailboxMessage>>>> {
