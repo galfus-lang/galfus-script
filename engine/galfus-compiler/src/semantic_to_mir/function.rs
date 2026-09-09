@@ -39,66 +39,6 @@ pub(super) struct NarrowingReturnTarget {
 }
 
 impl<'b, 'a> FunctionBuilder<'b, 'a> {
-    pub(super) fn node_type(&self, node: NodeId) -> Option<TypeId> {
-        let ty = self.builder.type_result.layer().node_type(node);
-
-        ty.map(|ty| self.substitute_type(ty))
-    }
-
-    pub(super) fn symbol_type(&self, symbol: SymbolId) -> Option<TypeId> {
-        let ty = self.builder.type_result.layer().symbol_type(symbol);
-        ty.map(|ty| self.substitute_type(ty))
-    }
-
-    pub(super) fn substitute_type(&self, ty: TypeId) -> TypeId {
-        let ty = self.builder.resolve_alias_type(ty);
-
-        match self.builder.type_result.layer().table().kind(ty) {
-            Some(TypeKind::GenericParameter { symbol }) => {
-                self.type_substitutions.get(symbol).copied().unwrap_or(ty)
-            }
-            _ => ty,
-        }
-    }
-
-    pub(super) fn declare_local(&mut self, symbol: Option<SymbolId>, ty: TypeId) -> LocalId {
-        let local_id = self.builder.next_local();
-        self.locals.push(LocalDecl {
-            id: local_id,
-            ty,
-            is_owned: self.builder.is_owned_type(ty),
-        });
-        if let Some(sym) = symbol {
-            self.symbol_to_local.insert(sym, local_id);
-        }
-        if let Some(current_scope) = self.scopes.last_mut() {
-            current_scope.push(local_id);
-        }
-        local_id
-    }
-
-    pub(super) fn collect_declaration_symbols(&self, node_id: NodeId) -> Vec<SymbolId> {
-        let mut symbols = Vec::new();
-        self.collect_symbols_recursive(node_id, &mut symbols);
-        symbols
-    }
-
-    pub(super) fn collect_symbols_recursive(&self, node_id: NodeId, symbols: &mut Vec<SymbolId>) {
-        if let Some(sym) = self
-            .builder
-            .graph
-            .resolution()
-            .and_then(|res| res.declaration_symbol(node_id))
-        {
-            symbols.push(sym);
-        }
-        if let Some(node) = self.builder.graph.syntax().node(node_id) {
-            for &child in node.children() {
-                self.collect_symbols_recursive(child, symbols);
-            }
-        }
-    }
-
     pub(super) fn is_terminated(&self) -> bool {
         self.is_block_terminated(self.current_block)
     }
