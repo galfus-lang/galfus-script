@@ -212,7 +212,6 @@ command = "run"
 address = "127.0.0.1:18981"
 path = "/"
 expected_status = 200
-
 [[case]]
 name = "narrowing block returns produce the enclosing expression value"
 path = "cases/15_builtins/narrowing_block_returns.gfs"
@@ -282,3 +281,14 @@ path = "cases/17_imported_empty_variants"
 command = "run"
 exit_code = 0
 stdout = "ok\n"
+
+[[case]]
+name = "server post benchmark"
+path = "cases/15_builtins/http_server_post.gfs"
+command = "run"
+args = ["18982"]
+
+[case.http_request]
+address = "127.0.0.1:18982"
+path = "/"
+expected_status = 200

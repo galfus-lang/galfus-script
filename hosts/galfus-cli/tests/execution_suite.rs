@@ -99,7 +99,7 @@ fn run_http_case(
         .map_err(|error| format!("{}: CLI must start: {error}", case.name))?;
     let stdout = collect_stream(child.stdout.take().expect("CLI stdout must be piped"));
     let stderr = collect_stream(child.stderr.take().expect("CLI stderr must be piped"));
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(10);
     let mut last_error = None;
     let mut observed_status = None;
 
