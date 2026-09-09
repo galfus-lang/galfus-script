@@ -6,6 +6,7 @@ mod module;
 mod parallel_copies;
 pub mod ssa;
 pub mod types;
+mod types_structs;
 
 #[cfg(test)]
 mod tests;
