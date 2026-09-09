@@ -266,3 +266,292 @@ export fn read(stream: ReadStream<i32>): i32 {
 
     assert!(images.iter().any(|module| module.id == ModuleId::new(11)));
 }
+
+#[test]
+fn compiler_resolves_a_method_on_a_transitively_reachable_field_type() {
+    let provider = SourceFile::new(
+        SourceId::new(1),
+        "src/provider.gfs".to_string(),
+        r#"
+export struct RequestBody {}
+
+export fn RequestBody::next(self): i32 => 7
+
+export struct Request {
+  body: RequestBody
+}
+"#
+        .to_string(),
+    );
+    let consumer = SourceFile::new(
+        SourceId::new(2),
+        "src/consumer.gfs".to_string(),
+        r#"
+import { Request } from './provider'
+
+export fn read(request: Request): i32 => request.body::next()
+"#
+        .to_string(),
+    );
+    let sources = [
+        FrontendSource {
+            module_id: ModuleId::new(10),
+            path: path("src/provider.gfs"),
+            source: &provider,
+            kind: FrontendModuleKind::Standard,
+        },
+        FrontendSource {
+            module_id: ModuleId::new(11),
+            path: path("src/consumer.gfs"),
+            source: &consumer,
+            kind: FrontendModuleKind::Standard,
+        },
+    ];
+    let mut frontend = FrontendSession::new();
+    let report = frontend.check(FrontendUpdate {
+        source_revision: Revision::new(1),
+        sources: &sources,
+        removed_modules: &[],
+        roots: &FrontendRoots::default(),
+        catalog: Arc::new(CapabilityCatalog::default()),
+    });
+    assert!(
+        !report.diagnostics.has_errors(),
+        "{:#?}",
+        report.diagnostics
+    );
+
+    let mut modules = frontend
+        .modules()
+        .iter()
+        .map(|module| {
+            CompiledModule::new(
+                module.id(),
+                module.path().clone(),
+                module.semantic_revision(),
+                module.source().clone(),
+                module.graph().clone(),
+                module.type_result().cloned(),
+                false,
+            )
+        })
+        .collect::<Vec<_>>();
+    compile_modules(
+        &mut modules,
+        &mut CompilerState::default(),
+        frontend.string_table(),
+    )
+    .expect("a field type reachable from an imported struct resolves its anchored method");
+}
+
+#[test]
+fn compiler_uses_the_import_origin_for_a_transitively_reachable_method() {
+    let first_provider = SourceFile::new(
+        SourceId::new(1),
+        "src/first_provider.gfs".to_string(),
+        r#"
+export struct Body {}
+export fn Body::next(self): i32 => 1
+export struct Request { body: Body }
+"#
+        .to_string(),
+    );
+    let second_provider = SourceFile::new(
+        SourceId::new(2),
+        "src/second_provider.gfs".to_string(),
+        r#"
+export struct Body {}
+export fn Body::next(self): i32 => 2
+"#
+        .to_string(),
+    );
+    let consumer = SourceFile::new(
+        SourceId::new(3),
+        "src/consumer.gfs".to_string(),
+        r#"
+import { Request } from './first_provider'
+
+export fn read(request: Request): i32 => request.body::next()
+"#
+        .to_string(),
+    );
+    let sources = [
+        FrontendSource {
+            module_id: ModuleId::new(10),
+            path: path("src/first_provider.gfs"),
+            source: &first_provider,
+            kind: FrontendModuleKind::Standard,
+        },
+        FrontendSource {
+            module_id: ModuleId::new(11),
+            path: path("src/second_provider.gfs"),
+            source: &second_provider,
+            kind: FrontendModuleKind::Standard,
+        },
+        FrontendSource {
+            module_id: ModuleId::new(12),
+            path: path("src/consumer.gfs"),
+            source: &consumer,
+            kind: FrontendModuleKind::Standard,
+        },
+    ];
+    let mut frontend = FrontendSession::new();
+    let report = frontend.check(FrontendUpdate {
+        source_revision: Revision::new(1),
+        sources: &sources,
+        removed_modules: &[],
+        roots: &FrontendRoots::default(),
+        catalog: Arc::new(CapabilityCatalog::default()),
+    });
+    assert!(
+        !report.diagnostics.has_errors(),
+        "{:#?}",
+        report.diagnostics
+    );
+
+    let mut modules = frontend
+        .modules()
+        .iter()
+        .map(|module| {
+            CompiledModule::new(
+                module.id(),
+                module.path().clone(),
+                module.semantic_revision(),
+                module.source().clone(),
+                module.graph().clone(),
+                module.type_result().cloned(),
+                false,
+            )
+        })
+        .collect::<Vec<_>>();
+    compile_modules(
+        &mut modules,
+        &mut CompilerState::default(),
+        frontend.string_table(),
+    )
+    .expect("the anchored method is resolved from Request's import origin");
+}
+
+#[test]
+fn compiler_requires_a_direct_import_for_a_transitively_reachable_type_name() {
+    let provider = SourceFile::new(
+        SourceId::new(1),
+        "src/provider.gfs".to_string(),
+        r#"
+export struct RequestBody {}
+export struct Request { body: RequestBody }
+"#
+        .to_string(),
+    );
+    let consumer = SourceFile::new(
+        SourceId::new(2),
+        "src/consumer.gfs".to_string(),
+        r#"
+import { Request } from './provider'
+
+export fn makeBody(): RequestBody => new(RequestBody) {}
+"#
+        .to_string(),
+    );
+    let sources = [
+        FrontendSource {
+            module_id: ModuleId::new(10),
+            path: path("src/provider.gfs"),
+            source: &provider,
+            kind: FrontendModuleKind::Standard,
+        },
+        FrontendSource {
+            module_id: ModuleId::new(11),
+            path: path("src/consumer.gfs"),
+            source: &consumer,
+            kind: FrontendModuleKind::Standard,
+        },
+    ];
+    let mut frontend = FrontendSession::new();
+    let report = frontend.check(FrontendUpdate {
+        source_revision: Revision::new(1),
+        sources: &sources,
+        removed_modules: &[],
+        roots: &FrontendRoots::default(),
+        catalog: Arc::new(CapabilityCatalog::default()),
+    });
+
+    assert!(
+        report.diagnostics.has_errors(),
+        "RequestBody must not become a local symbol when only Request is imported"
+    );
+}
+
+#[test]
+fn compiler_resolves_a_method_on_a_field_of_a_returned_struct() {
+    let provider = SourceFile::new(
+        SourceId::new(1),
+        "src/provider.gfs".to_string(),
+        r#"
+export struct RequestBody {}
+export fn RequestBody::next(self): i32 => 7
+export struct Request { body: RequestBody }
+export fn request(): Request => new(Request) { body: new(RequestBody) {} }
+"#
+        .to_string(),
+    );
+    let consumer = SourceFile::new(
+        SourceId::new(2),
+        "src/consumer.gfs".to_string(),
+        r#"
+import { request } from './provider'
+
+export fn read(): i32 => request().body::next()
+"#
+        .to_string(),
+    );
+    let sources = [
+        FrontendSource {
+            module_id: ModuleId::new(10),
+            path: path("src/provider.gfs"),
+            source: &provider,
+            kind: FrontendModuleKind::Standard,
+        },
+        FrontendSource {
+            module_id: ModuleId::new(11),
+            path: path("src/consumer.gfs"),
+            source: &consumer,
+            kind: FrontendModuleKind::Standard,
+        },
+    ];
+    let mut frontend = FrontendSession::new();
+    let report = frontend.check(FrontendUpdate {
+        source_revision: Revision::new(1),
+        sources: &sources,
+        removed_modules: &[],
+        roots: &FrontendRoots::default(),
+        catalog: Arc::new(CapabilityCatalog::default()),
+    });
+    assert!(
+        !report.diagnostics.has_errors(),
+        "{:#?}",
+        report.diagnostics
+    );
+
+    let mut modules = frontend
+        .modules()
+        .iter()
+        .map(|module| {
+            CompiledModule::new(
+                module.id(),
+                module.path().clone(),
+                module.semantic_revision(),
+                module.source().clone(),
+                module.graph().clone(),
+                module.type_result().cloned(),
+                false,
+            )
+        })
+        .collect::<Vec<_>>();
+    compile_modules(
+        &mut modules,
+        &mut CompilerState::default(),
+        frontend.string_table(),
+    )
+    .expect("a field type reachable from a returned struct resolves its anchored method");
+}

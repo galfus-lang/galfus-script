@@ -13,7 +13,7 @@ use crate::{
 };
 pub use export::*;
 use galfus_core::{NodeId, SymbolId, TypeId};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModuleSurface {
@@ -407,6 +407,11 @@ pub fn imported_surface_types_for_named_export(
             export.name(),
             member.name(),
         ) {
+            let ty = if member.kind() == SymbolKind::StructField {
+                ty.relocate(local_symbol)
+            } else {
+                ty
+            };
             imported_types
                 .insert_member_type(ImportedMemberKey::new(local_symbol, "", member.name()), ty);
         }
@@ -422,7 +427,7 @@ pub fn imported_surface_types_for_named_export(
                     ImportedStructFieldSurface::new(
                         member.name().to_string(),
                         export.def_id,
-                        ty,
+                        ty.relocate(local_symbol),
                         member.has_default(),
                         member.default_value(),
                     )
@@ -432,6 +437,8 @@ pub fn imported_surface_types_for_named_export(
         imported_types.insert_struct_fields(local_symbol, fields);
         imported_types
             .insert_struct_constraints(local_symbol, export.satisfied_constraints().to_vec());
+
+        insert_reachable_member_types(surface, local_symbol, export, &mut imported_types);
     }
 
     for struct_export in surface
@@ -472,7 +479,7 @@ pub fn imported_surface_types_for_named_export(
                     ImportedStructFieldSurface::new(
                         member.name().to_string(),
                         struct_export.def_id,
-                        ty,
+                        ty.relocate(local_symbol),
                         member.has_default(),
                         member.default_value(),
                     )
@@ -480,9 +487,88 @@ pub fn imported_surface_types_for_named_export(
             })
             .collect();
         imported_types.insert_struct_fields(local_symbol, fields);
+        insert_reachable_member_types(surface, local_symbol, struct_export, &mut imported_types);
     }
 
     imported_types
+}
+
+fn insert_reachable_member_types(
+    surface: &ModuleSurface,
+    local_symbol: SymbolId,
+    root_export: &ModuleSurfaceExport,
+    imported_types: &mut ImportedSurfaceTypes,
+) {
+    let mut pending = Vec::new();
+    let mut visited = HashSet::new();
+
+    for field in root_export
+        .members()
+        .iter()
+        .filter(|member| member.kind() == SymbolKind::StructField)
+    {
+        if let Some(ty) = field.ty() {
+            collect_reachable_type_names(ty, &mut pending);
+        }
+    }
+
+    while let Some(owner_name) = pending.pop() {
+        if !visited.insert(owner_name.clone()) {
+            continue;
+        }
+        let Some(owner) = surface.export(owner_name.as_str()) else {
+            continue;
+        };
+
+        for member in owner.members() {
+            if let Some(ty) = surface.imported_member_path_type_for_named_export(
+                local_symbol,
+                owner.name(),
+                member.name(),
+            ) {
+                collect_reachable_type_names(&ty, &mut pending);
+                imported_types.insert_member_type(
+                    ImportedMemberKey::new(local_symbol, owner.name(), member.name()),
+                    ty.relocate(local_symbol),
+                );
+            }
+        }
+    }
+}
+
+fn collect_reachable_type_names(ty: &ImportedType, names: &mut Vec<String>) {
+    match ty {
+        ImportedType::LocalPath { name } | ImportedType::SurfacePath { name, .. } => {
+            names.push(name.clone());
+        }
+        ImportedType::Array { element } | ImportedType::Range { element } => {
+            collect_reachable_type_names(element, names);
+        }
+        ImportedType::Tuple { elements } | ImportedType::Union { members: elements } => {
+            for element in elements {
+                collect_reachable_type_names(element, names);
+            }
+        }
+        ImportedType::Function {
+            parameters,
+            return_type,
+        } => {
+            for parameter in parameters {
+                collect_reachable_type_names(parameter.ty(), names);
+            }
+            collect_reachable_type_names(return_type, names);
+        }
+        ImportedType::GenericInstance { base, arguments } => {
+            collect_reachable_type_names(base, names);
+            for argument in arguments {
+                collect_reachable_type_names(argument, names);
+            }
+        }
+        ImportedType::Error
+        | ImportedType::Primitive(_)
+        | ImportedType::NamedLocal { .. }
+        | ImportedType::GenericParameter { .. } => {}
+    }
 }
 
 fn surface_satisfied_constraints(

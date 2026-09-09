@@ -273,16 +273,9 @@ pub(super) fn resolve_import_target(
         if let Some(syntax_node) = module.graph().syntax().node(node_id)
             && syntax_node.kind() == SyntaxNodeKind::PathExpression
             && let Some(receiver) = syntax_node.child(0)
-            && let Some(receiver_symbol) = resolution.reference_symbol(receiver).or_else(|| {
-                module
-                    .graph()
-                    .syntax()
-                    .first_child_of_kind(receiver, SyntaxNodeKind::Identifier)
-                    .and_then(|identifier| resolution.reference_symbol(identifier))
-            })
             && let Some(receiver_ty) = module
                 .type_result()
-                .and_then(|result| result.layer().symbol_type(receiver_symbol))
+                .and_then(|result| result.layer().node_type(receiver))
             && let Some(TypeKind::Named {
                 symbol: type_symbol,
             }) = module
@@ -345,25 +338,48 @@ pub(super) fn resolve_import_target(
             && let Some(receiver_ty) = module
                 .type_result()
                 .and_then(|result| result.layer().node_type(receiver))
-            && let Some(TypeKind::Path { segments, .. }) = module
+            && let Some(TypeKind::Path { root, segments }) = module
                 .type_result()
                 .and_then(|result| result.layer().table().kind(receiver_ty))
             && let Some(type_name) = segments.last()
         {
-            let mut candidates = Vec::new();
             let anchored_name = format!("{type_name}::{member_name}");
-            for target_module in modules.iter() {
-                if let Some(target_resolution) = target_module.graph().resolution() {
-                    for export in target_resolution.exports() {
-                        if export.kind() == SymbolKind::Function && export.name() == anchored_name {
-                            candidates
-                                .push((target_module.id(), FunctionId::new(export.symbol().raw())));
+            if let Some(import) = resolution
+                .import_for_symbol(*root)
+                .and_then(|id| resolution.import(id))
+                && let Some(target_idx) =
+                    module_index.import_target_index(modules, mod_idx, import.source())
+                && let Some(target_resolution) = modules[target_idx].graph().resolution()
+                && let Some(export) = target_resolution
+                    .export_by_name(&anchored_name)
+                    .and_then(|id| target_resolution.export_record(id))
+                    .filter(|export| export.kind() == SymbolKind::Function)
+            {
+                return Some((
+                    modules[target_idx].id(),
+                    FunctionId::new(export.symbol().raw()),
+                ));
+            }
+
+            if resolution.import_for_symbol(*root).is_none() {
+                let mut candidates = Vec::new();
+                for target_module in modules.iter() {
+                    if let Some(target_resolution) = target_module.graph().resolution() {
+                        for export in target_resolution.exports() {
+                            if export.kind() == SymbolKind::Function
+                                && export.name() == anchored_name
+                            {
+                                candidates.push((
+                                    target_module.id(),
+                                    FunctionId::new(export.symbol().raw()),
+                                ));
+                            }
                         }
                     }
                 }
-            }
-            if candidates.len() == 1 {
-                return Some(candidates[0]);
+                if candidates.len() == 1 {
+                    return Some(candidates[0]);
+                }
             }
         }
 
