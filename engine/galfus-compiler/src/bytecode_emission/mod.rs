@@ -1,6 +1,7 @@
 pub mod constants;
 mod expression;
 pub mod function;
+mod function_terminators;
 pub mod helpers;
 mod module;
 mod parallel_copies;

@@ -6,9 +6,7 @@ use galfus_ir::mir;
 use super::LowerCtx;
 use galfus_bytecode::Instruction;
 use galfus_bytecode::instruction::{GlobalIdx, ImmediateValue, Reg};
-use galfus_ir::mir::{
-    Constant as MirConstant, Instruction as MirInstruction, MirFunction, Terminator,
-};
+use galfus_ir::mir::{Constant as MirConstant, Instruction as MirInstruction, MirFunction};
 
 #[allow(dead_code)]
 pub enum JumpKind {
@@ -89,7 +87,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
         }
     }
 
-    fn target_params(&self, target: mir::BlockId) -> Vec<Reg> {
+    pub(super) fn target_params(&self, target: mir::BlockId) -> Vec<Reg> {
         self.func
             .blocks
             .iter()
@@ -751,112 +749,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
             }
 
             let initial_pc = self.instructions.len();
-            match &bb.terminator.0 {
-                Terminator::Return(opt_operand) => {
-                    if let Some(op) = opt_operand {
-                        let src = self.operand_reg(op);
-                        self.instructions.push(Instruction::Ret { src });
-                        self.free_temp_if_operand(op);
-                    } else {
-                        self.instructions.push(Instruction::RetNull);
-                    }
-                }
-                Terminator::TailCall {
-                    func,
-                    args,
-                    is_external: _,
-                } => {
-                    let start_reg = if args.is_empty() {
-                        Reg(0) // Dummy if no args
-                    } else {
-                        let reg = self.alloc_temp();
-                        let mut temp_regs = vec![reg];
-                        for _ in 1..args.len() {
-                            temp_regs.push(self.alloc_temp());
-                        }
-                        for (i, arg_op) in args.iter().enumerate() {
-                            self.load_operand_to(arg_op, temp_regs[i]);
-                        }
-                        reg
-                    };
-
-                    let func_idx = *self.ctx.function_map.get(func).unwrap_or_else(|| {
-                        panic!(
-                            "missing lowered function mapping for {:?} while emitting {} ({:?})",
-                            func, self.func.name, self.func.id
-                        )
-                    });
-
-                    self.instructions.push(Instruction::TailCall {
-                        func: func_idx,
-                        args_start: start_reg,
-                        arg_count: args.len() as u8,
-                    });
-
-                    if !args.is_empty() {
-                        self.free_temps(args.len() as u16);
-                    }
-                }
-
-                Terminator::Panic(msg) => {
-                    let const_idx = crate::bytecode_emission::constants::get_or_create_constant(
-                        self.ctx,
-                        &MirConstant::String(msg.clone()),
-                    );
-                    self.instructions.push(Instruction::Panic { const_idx });
-                }
-                Terminator::Jump { target, args } => {
-                    let target_params = self.target_params(*target);
-                    self.emit_parallel_copies(&target_params, args);
-                    self.emit_jump(block_labels[target], JumpKind::Unconditional);
-                }
-                Terminator::Branch {
-                    cond,
-                    true_block,
-                    true_args,
-                    false_block,
-                    false_args,
-                } => {
-                    let cond_reg = self.operand_reg(cond);
-
-                    if true_args.is_empty()
-                        && false_args.is_empty()
-                        && next_block == Some(*true_block)
-                    {
-                        self.emit_jump(block_labels[false_block], JumpKind::IfFalse(cond_reg));
-                    } else if true_args.is_empty() {
-                        self.emit_jump(block_labels[true_block], JumpKind::IfTrue(cond_reg));
-
-                        let false_target_params = self.target_params(*false_block);
-                        self.emit_parallel_copies(&false_target_params, false_args);
-                        if next_block != Some(*false_block) {
-                            self.emit_jump(block_labels[false_block], JumpKind::Unconditional);
-                        }
-                    } else if false_args.is_empty() {
-                        self.emit_jump(block_labels[false_block], JumpKind::IfFalse(cond_reg));
-
-                        let true_target_params = self.target_params(*true_block);
-                        self.emit_parallel_copies(&true_target_params, true_args);
-                        if next_block != Some(*true_block) {
-                            self.emit_jump(block_labels[true_block], JumpKind::Unconditional);
-                        }
-                    } else {
-                        let true_trampoline = self.new_label();
-                        self.emit_jump(true_trampoline, JumpKind::IfTrue(cond_reg));
-
-                        let false_target_params = self.target_params(*false_block);
-                        self.emit_parallel_copies(&false_target_params, false_args);
-                        self.emit_jump(block_labels[false_block], JumpKind::Unconditional);
-
-                        self.emit_label(true_trampoline);
-                        let true_target_params = self.target_params(*true_block);
-                        self.emit_parallel_copies(&true_target_params, true_args);
-                        self.emit_jump(block_labels[true_block], JumpKind::Unconditional);
-                    }
-
-                    self.free_temp_if_operand(cond);
-                }
-            }
+            self.emit_terminator(&bb.terminator.0, next_block, &block_labels);
             if let Some(span) = &bb.terminator.1 {
                 for pc in initial_pc..self.instructions.len() {
                     self.instruction_spans.insert(pc, *span);
