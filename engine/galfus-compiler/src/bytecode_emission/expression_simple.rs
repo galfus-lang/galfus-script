@@ -1,6 +1,6 @@
 use super::function::FnEmitter;
 use galfus_bytecode::Instruction;
-use galfus_bytecode::instruction::{GlobalIdx, Reg};
+use galfus_bytecode::instruction::Reg;
 use galfus_core::{SymbolId, TypeId};
 use galfus_ir::mir::{MirUnaryOp, Operand};
 
@@ -118,22 +118,14 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
     }
 
     pub(super) fn emit_load_global(&mut self, dest: Reg, name: &str) {
-        let global_idx = self
-            .ctx
-            .graph
-            .resolution()
-            .and_then(|res| {
-                let name_id = self.ctx.string_table.get(name);
-                res.symbols()
-                    .iter()
-                    .find(|symbol| name_id.is_some() && symbol.name() == name_id.unwrap())
-                    .map(|symbol| symbol.id().raw() as u16)
-            })
-            .unwrap_or(0);
+        let Some(global_idx) = self.global_idx_for_name(name) else {
+            self.instructions.push(Instruction::LoadNull { dest });
+            return;
+        };
         self.instructions.push(Instruction::LoadGlobal {
             dest,
             module_id: galfus_core::ModuleId::new(0),
-            global_idx: GlobalIdx(global_idx),
+            global_idx,
         });
     }
 }

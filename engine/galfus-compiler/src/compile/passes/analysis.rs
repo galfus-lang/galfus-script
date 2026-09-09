@@ -7,14 +7,16 @@ pub(super) struct Dominators {
 }
 
 impl Dominators {
-    pub(super) fn dominates(&self, block: BlockId, candidate: BlockId) -> bool {
-        let Some(&block_index) = self.indices.get(&block) else {
-            return false;
-        };
-        let Some(&candidate_index) = self.indices.get(&candidate) else {
-            return false;
-        };
-        self.sets[block_index][candidate_index]
+    pub(super) fn block_index(&self, block: BlockId) -> Option<usize> {
+        self.indices.get(&block).copied()
+    }
+
+    pub(super) fn dominates_indices(&self, block_index: usize, candidate_index: usize) -> bool {
+        self.sets
+            .get(block_index)
+            .and_then(|set| set.get(candidate_index))
+            .copied()
+            .unwrap_or(false)
     }
 }
 

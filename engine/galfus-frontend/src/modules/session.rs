@@ -95,6 +95,9 @@ pub struct FrontendSession {
     semantic_graph: SemanticModuleGraph,
     pub diagnostics: DiagnosticBag,
     string_table: crate::StringTable,
+    /// Semantic results depend on provider and adapter declarations, so a
+    /// catalog change invalidates every cached type-check result.
+    catalog_fingerprint: Option<u64>,
     /// Incremented each time a module's semantic result changes in this session.
     next_semantic_revision: u64,
 }
@@ -105,6 +108,10 @@ impl FrontendSession {
     }
 
     pub fn check(&mut self, update: FrontendUpdate<'_>) -> FrontendReport {
+        let catalog_changed = self
+            .catalog_fingerprint
+            .replace(update.catalog.fingerprint())
+            .is_some_and(|previous| previous != update.catalog.fingerprint());
         let mut changed_modules =
             self.transitive_dependents(update.removed_modules.iter().copied(), &update.catalog);
         for id in update.removed_modules {
@@ -131,7 +138,10 @@ impl FrontendSession {
             }
 
             if let Some(index) = existing_index {
-                changed_modules.insert(self.modules[index].id());
+                let previous_module_id = self.modules[index].id();
+                changed_modules
+                    .extend(self.transitive_dependents([previous_module_id], &update.catalog));
+                changed_modules.insert(input.module_id);
                 self.modules[index] = self.parse_module(input, update.source_revision);
             } else {
                 changed_modules.insert(input.module_id);
@@ -142,8 +152,18 @@ impl FrontendSession {
         }
 
         self.rebuild_reverse_import_index(&update.catalog);
+        if catalog_changed {
+            changed_modules.extend(self.modules.iter().map(|module| module.id()));
+        }
         changed_modules
             .extend(self.transitive_dependents(changed_modules.iter().copied(), &update.catalog));
+        let modules_without_type_results = self
+            .modules
+            .iter()
+            .filter_map(|module| module.type_result().is_none().then_some(module.id()))
+            .collect::<Vec<_>>();
+        changed_modules
+            .extend(self.transitive_dependents(modules_without_type_results, &update.catalog));
 
         self.type_check_modules(&changed_modules, &update.catalog);
         self.rebuild_diagnostics(&update.catalog);
@@ -550,10 +570,23 @@ impl FrontendSession {
         changed_modules: &HashSet<ModuleId>,
         catalog: &galfus_contract::CapabilityCatalog,
     ) {
-        let baseline_results = self
+        let affected_modules = self
             .modules
             .iter()
-            .map(|module| {
+            .enumerate()
+            .filter_map(|(index, module)| {
+                (changed_modules.contains(&module.id()) || module.type_result().is_none())
+                    .then_some(index)
+            })
+            .collect::<Vec<_>>();
+        if affected_modules.is_empty() {
+            return;
+        }
+
+        let baseline_results = affected_modules
+            .iter()
+            .map(|&module_index| {
+                let module = &self.modules[module_index];
                 check_declaration_types(
                     module.source(),
                     module.graph(),
@@ -569,11 +602,21 @@ impl FrontendSession {
             })
             .collect::<Vec<_>>();
 
+        let affected_positions = affected_modules
+            .iter()
+            .enumerate()
+            .map(|(position, &module_index)| (module_index, position))
+            .collect::<HashMap<_, _>>();
         let mut surfaces = self
             .modules
             .iter()
-            .zip(baseline_results.iter())
-            .map(|(module, result)| {
+            .enumerate()
+            .map(|(module_index, module)| {
+                let result = affected_positions
+                    .get(&module_index)
+                    .map(|position| &baseline_results[*position])
+                    .or_else(|| module.type_result())
+                    .expect("every module must have a type result or be affected");
                 build_module_surface(
                     module.id(),
                     module.source(),
@@ -584,24 +627,20 @@ impl FrontendSession {
             })
             .collect::<Vec<_>>();
 
-        let mut results = baseline_results.clone();
-        for _ in 0..self.modules.len().max(1) {
-            let imported_types = (0..self.modules.len())
-                .map(|module_index| {
-                    self.imported_surface_types_for_module(module_index, &surfaces, catalog)
-                })
-                .collect::<Vec<_>>();
-
-            results = imported_types
+        let mut results = Vec::new();
+        for _ in 0..affected_modules.len().max(1) {
+            results = affected_modules
                 .iter()
                 .enumerate()
-                .map(|(module_index, imported_type)| {
+                .map(|(position, &module_index)| {
                     let module = &self.modules[module_index];
+                    let imported_types =
+                        self.imported_surface_types_for_module(module_index, &surfaces, catalog);
                     check_definition_types_with_surfaces(
                         module.source(),
                         module.graph(),
-                        baseline_results[module_index].clone(),
-                        imported_type,
+                        baseline_results[position].clone(),
+                        &imported_types,
                         &self.string_table,
                         catalog.is_provider_module(
                             module
@@ -614,26 +653,23 @@ impl FrontendSession {
                 })
                 .collect();
 
-            surfaces = self
-                .modules
-                .iter()
-                .zip(results.iter())
-                .map(|(module, result)| {
-                    build_module_surface(
-                        module.id(),
-                        module.source(),
-                        module.graph(),
-                        result,
-                        &self.string_table,
-                    )
-                })
-                .collect();
+            for (position, &module_index) in affected_modules.iter().enumerate() {
+                let module = &self.modules[module_index];
+                surfaces[module_index] = build_module_surface(
+                    module.id(),
+                    module.source(),
+                    module.graph(),
+                    &results[position],
+                    &self.string_table,
+                );
+            }
         }
 
-        for (module_index, result) in results.into_iter().enumerate() {
-            if !changed_modules.contains(&self.modules[module_index].id()) {
-                continue;
-            }
+        for (position, module_index) in affected_modules.into_iter().enumerate() {
+            let result = results
+                .get(position)
+                .cloned()
+                .expect("affected modules are type checked at least once");
             let module = Arc::make_mut(&mut self.modules[module_index]);
             if module.type_result.is_some() {
                 self.next_semantic_revision += 1;

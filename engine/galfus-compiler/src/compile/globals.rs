@@ -1,8 +1,11 @@
-use super::resolve::import_target_index;
+use super::resolve::ModuleIndex;
 use crate::input::CompiledModule;
 use anyhow::Result;
 use galfus_bytecode::instruction::{GlobalIdx, Instruction};
 use galfus_bytecode::{BytecodeFunction, ExportKind, ExportSlot};
+use std::collections::HashMap;
+
+type GlobalRefCache = HashMap<u16, (galfus_core::ModuleId, GlobalIdx)>;
 
 pub(super) fn global_count(
     module_id: galfus_core::ModuleId,
@@ -43,6 +46,7 @@ pub(super) fn global_count(
 
 fn canonical_global_ref(
     modules: &[CompiledModule],
+    module_index: &ModuleIndex,
     mod_idx: usize,
     local_pos: u16,
 ) -> Result<(galfus_core::ModuleId, GlobalIdx)> {
@@ -65,9 +69,8 @@ fn canonical_global_ref(
         })?;
 
     if let Some(import) = resolution
-        .imports()
-        .iter()
-        .find(|import| import.local_symbol() == symbol.id())
+        .import_for_symbol(symbol.id())
+        .and_then(|id| resolution.import(id))
     {
         let imported_name = import.imported_name().ok_or_else(|| {
             anyhow::anyhow!(
@@ -76,8 +79,9 @@ fn canonical_global_ref(
                 module.path().as_str()
             )
         })?;
-        let target_idx =
-            import_target_index(modules, mod_idx, import.source()).ok_or_else(|| {
+        let target_idx = module_index
+            .import_target_index(modules, mod_idx, import.source())
+            .ok_or_else(|| {
                 anyhow::anyhow!(
                     "could not resolve import `{}` from module `{}` while rewriting global `{}`",
                     import.source(),
@@ -93,9 +97,8 @@ fn canonical_global_ref(
             )
         })?;
         let target_global_idx = target_resolution
-            .exports()
-            .iter()
-            .find(|export| export.name() == imported_name)
+            .export_by_name(imported_name)
+            .and_then(|id| target_resolution.export_record(id))
             .map(|export| export.symbol().raw())
             .ok_or_else(|| {
                 anyhow::anyhow!(
@@ -113,7 +116,9 @@ fn canonical_global_ref(
 pub(super) fn rewrite_global_indices(
     instructions: &mut [Instruction],
     modules: &[CompiledModule],
+    module_index: &ModuleIndex,
     mod_idx: usize,
+    cache: &mut GlobalRefCache,
 ) -> Result<()> {
     for instruction in instructions {
         match instruction {
@@ -127,8 +132,16 @@ pub(super) fn rewrite_global_indices(
                 global_idx,
                 ..
             } => {
-                (*module_id, *global_idx) =
-                    canonical_global_ref(modules, mod_idx, global_idx.raw())?;
+                let local_idx = global_idx.raw();
+                let reference = if let Some(&reference) = cache.get(&local_idx) {
+                    reference
+                } else {
+                    let reference =
+                        canonical_global_ref(modules, module_index, mod_idx, local_idx)?;
+                    cache.insert(local_idx, reference);
+                    reference
+                };
+                (*module_id, *global_idx) = reference;
             }
             _ => {}
         }

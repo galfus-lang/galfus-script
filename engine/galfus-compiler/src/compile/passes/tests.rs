@@ -180,14 +180,17 @@ fn dominator_analysis_tracks_branch_predecessors() {
     };
 
     let dominators = super::dominators(&module.functions[0]);
-    assert!(dominators.dominates(
-        galfus_ir::mir::BlockId::new(1),
-        galfus_ir::mir::BlockId::new(0)
-    ));
-    assert!(!dominators.dominates(
-        galfus_ir::mir::BlockId::new(1),
-        galfus_ir::mir::BlockId::new(2)
-    ));
+    let branch = dominators
+        .block_index(galfus_ir::mir::BlockId::new(1))
+        .expect("branch block must be indexed");
+    let entry = dominators
+        .block_index(galfus_ir::mir::BlockId::new(0))
+        .expect("entry block must be indexed");
+    let sibling = dominators
+        .block_index(galfus_ir::mir::BlockId::new(2))
+        .expect("sibling block must be indexed");
+    assert!(dominators.dominates_indices(branch, entry));
+    assert!(!dominators.dominates_indices(branch, sibling));
 }
 
 #[test]

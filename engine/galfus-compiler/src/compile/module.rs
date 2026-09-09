@@ -14,6 +14,7 @@ use super::module_imported_types::lower_imported_async_return_type;
 use crate::compile::{
     context::MyWorkspaceContext,
     globals::{global_count, image_local_count, rewrite_global_indices},
+    resolve::ModuleIndex,
 };
 use crate::input::CompiledModule;
 /// Compile all modules in `modules`, each producing its own
@@ -69,10 +70,11 @@ pub fn compile_changed_modules(
         })
         .collect::<HashSet<_>>();
     state.begin_compilation(&live_modules, &changed_module_ids);
+    let module_index = ModuleIndex::new(modules);
 
     // Phase 1: Build MIR only for changed modules. Generic specializations can
     // add functions to an imported module, which then becomes affected too.
-    let mut ws_ctx = MyWorkspaceContext::new(modules, state, string_table);
+    let mut ws_ctx = MyWorkspaceContext::new(modules, state, string_table, &module_index);
     let mut affected_modules = ws_ctx
         .modules()
         .iter()
@@ -84,12 +86,12 @@ pub fn compile_changed_modules(
         .take(ws_ctx.modules().len())
         .collect::<Vec<Option<galfus_ir::mir::MirModule>>>();
 
-    while let Some(module_index) = pending_modules.pop() {
+    while let Some(current_module_index) = pending_modules.pop() {
         // The context may mutate an imported type table while the builder is
         // running. Use owned snapshots for the builder instead of aliasing the
         // module slice through a raw pointer.
         let (module_id, graph, type_res, source_text) = {
-            let module = &ws_ctx.modules()[module_index];
+            let module = &ws_ctx.modules()[current_module_index];
             (
                 module.id(),
                 module.graph().clone(),
@@ -107,12 +109,12 @@ pub fn compile_changed_modules(
                 .with_workspace_module_id(module_id)
                 .with_workspace_ctx(&mut ws_ctx)
                 .build();
-        mir_modules[module_index] = Some(mir);
+        mir_modules[current_module_index] = Some(mir);
 
         let pending_specialised_modules =
             std::mem::take(&mut ws_ctx.state.pending_specialised_modules);
         for module_id in pending_specialised_modules {
-            if let Some(target_index) = ws_ctx.modules().iter().position(|m| m.id() == module_id)
+            if let Some(target_index) = module_index.by_id(module_id)
                 && affected_modules.insert(target_index)
             {
                 pending_modules.push(target_index);
@@ -155,6 +157,7 @@ pub fn compile_changed_modules(
         let semantic_revision = modules[mod_idx].semantic_revision();
         let (image, metadata) = compile_single_module(
             modules,
+            &module_index,
             &mir_modules,
             &specialized_targets,
             mod_idx,
@@ -203,6 +206,7 @@ pub fn compile_transaction(
 
 fn compile_single_module(
     modules: &mut [CompiledModule],
+    module_index: &ModuleIndex,
     mir_modules: &[Option<galfus_ir::mir::MirModule>],
     specialized_targets: &HashMap<
         galfus_core::FunctionId,
@@ -236,7 +240,9 @@ fn compile_single_module(
             {
                 // Local call — no import needed.
                 let _ = local_id;
-            } else if let Some(resolved) = resolve_import_target(modules, mod_idx, func_id) {
+            } else if let Some(resolved) =
+                resolve_import_target(modules, module_index, mod_idx, func_id)
+            {
                 cross_module_calls.insert(func_id, resolved);
             }
         }
@@ -258,41 +264,35 @@ fn compile_single_module(
     for entry in &cross_module_call_entries {
         let local_id = *entry.0;
         let (target_module_id, target_func_id) = *entry.1;
-        let slot = import_func_map
-            .entry((target_module_id, target_func_id))
-            .or_insert_with(|| {
-                let slot_idx = own_func_count + import_slots.len() as u16;
-                let target_mod_idx = modules
-                    .iter()
-                    .position(|m| m.id() == target_module_id)
-                    .unwrap_or(0);
-                let target_module = &modules[target_mod_idx];
-                let symbol_name = target_module
-                    .graph()
-                    .resolution()
-                    .and_then(|res| {
-                        res.exports().iter().find_map(|export| {
-                            if export.symbol().raw() == target_func_id.raw() {
-                                Some(export.name().to_string())
-                            } else {
-                                None
-                            }
-                        })
-                    })
-                    .unwrap_or_else(|| format!("func_{}", target_func_id.raw()));
-
-                let module_name = target_module.path().as_str().to_string();
-
-                import_slots.push(ImportSlot {
-                    module_name,
-                    symbol_name,
-                    // Type info not yet resolved — placeholder.
-                    ty: TypeIdx(0),
-                    kind: galfus_bytecode::ImportKind::Function,
-                });
-
-                FuncIdx(slot_idx)
+        let slot = if let Some(&slot) = import_func_map.get(&(target_module_id, target_func_id)) {
+            slot
+        } else {
+            let target_mod_idx = target_module_index(
+                module_index,
+                target_module_id,
+                modules[mod_idx].path().as_str(),
+            )?;
+            let target_module = &modules[target_mod_idx];
+            let symbol_name = target_module
+                .graph()
+                .resolution()
+                .and_then(|res| {
+                    res.export_for_symbol(galfus_core::SymbolId::new(target_func_id.raw()))
+                        .and_then(|id| res.export_record(id))
+                        .map(|export| export.name().to_string())
+                })
+                .unwrap_or_else(|| format!("func_{}", target_func_id.raw()));
+            let slot = FuncIdx(own_func_count + import_slots.len() as u16);
+            import_slots.push(ImportSlot {
+                module_name: target_module.path().as_str().to_string(),
+                symbol_name,
+                // Type info not yet resolved — placeholder.
+                ty: TypeIdx(0),
+                kind: galfus_bytecode::ImportKind::Function,
             });
+            import_func_map.insert((target_module_id, target_func_id), slot);
+            slot
+        };
         let _ = (local_id, slot);
     }
 
@@ -306,7 +306,7 @@ fn compile_single_module(
                 continue;
             };
             let Some(target_mod_idx) =
-                crate::compile::resolve::import_target_index(modules, mod_idx, import.source())
+                module_index.import_target_index(modules, mod_idx, import.source())
             else {
                 continue;
             };
@@ -315,9 +315,8 @@ fn compile_single_module(
                 continue;
             };
             let Some(export) = target_resolution
-                .exports()
-                .iter()
-                .find(|export| export.name() == symbol_name)
+                .export_by_name(symbol_name)
+                .and_then(|id| target_resolution.export_record(id))
             else {
                 continue;
             };
@@ -457,10 +456,11 @@ fn compile_single_module(
     for (&local_id, &(target_mod_id, target_func_id)) in &cross_module_calls {
         if let Some(&import_idx) = import_func_map.get(&(target_mod_id, target_func_id)) {
             ctx.function_map.insert(local_id, import_idx);
-            let target_mod_idx = modules
-                .iter()
-                .position(|m| m.id() == target_mod_id)
-                .unwrap_or(0);
+            let target_mod_idx = target_module_index(
+                module_index,
+                target_mod_id,
+                modules[mod_idx].path().as_str(),
+            )?;
             if let Some(target_mir) = &mir_modules[target_mod_idx]
                 && let Some(target_func) = target_mir
                     .functions
@@ -487,6 +487,7 @@ fn compile_single_module(
 
     let mut functions: Vec<BytecodeFunction> = Vec::new();
     let mut init_func_idx: Option<FuncIdx> = None;
+    let mut global_refs = HashMap::new();
 
     for mir_func in &mir_mod.functions {
         let is_init = mir_func.name == "__init_module";
@@ -531,7 +532,13 @@ fn compile_single_module(
         }
         execution_metadata.set_function_spans(local_func_idx, function_spans);
 
-        rewrite_global_indices(&mut instructions, modules, mod_idx)?;
+        rewrite_global_indices(
+            &mut instructions,
+            modules,
+            module_index,
+            mod_idx,
+            &mut global_refs,
+        )?;
 
         functions.push(BytecodeFunction {
             name: mir_func.name.clone(),
@@ -579,4 +586,17 @@ fn compile_single_module(
         init_func_idx,
     };
     Ok((module, execution_metadata))
+}
+
+pub(super) fn target_module_index(
+    module_index: &ModuleIndex,
+    target_module_id: galfus_core::ModuleId,
+    caller_path: &str,
+) -> Result<usize> {
+    module_index.by_id(target_module_id).ok_or_else(|| {
+        anyhow::anyhow!(
+            "cross-module call target module {:?} is unavailable while compiling `{caller_path}`",
+            target_module_id,
+        )
+    })
 }

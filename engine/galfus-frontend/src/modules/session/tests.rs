@@ -1,6 +1,6 @@
 use super::*;
 use crate::modules::{SemanticImportKind, SemanticRoot, SemanticRootKind};
-use galfus_contract::CapabilityCatalog;
+use galfus_contract::{BridgeModule, CapabilityCatalog};
 use galfus_core::{DefId, SourceId};
 use std::sync::Arc;
 
@@ -539,6 +539,79 @@ fn check_reprocesses_changed_modules_and_transitive_dependents_only() {
             .semantic_revision(ModuleId::new(13)),
         Some(isolated_revision)
     );
+}
+
+#[test]
+fn check_invalidates_cached_type_results_when_the_catalog_changes() {
+    let provider = SourceFile::new(
+        SourceId::new(1),
+        "std/custom.gfs".to_string(),
+        "export fn value(): i32 { return 1 }".to_string(),
+    );
+    let main = SourceFile::new(
+        SourceId::new(2),
+        "src/main.gfs".to_string(),
+        "import { value } from \"std/custom\"\nfn main(): i32 { return value() }".to_string(),
+    );
+    let sources = [
+        FrontendSource {
+            module_id: ModuleId::new(1),
+            path: path("std/custom.gfs"),
+            source: &provider,
+            kind: FrontendModuleKind::Standard,
+        },
+        FrontendSource {
+            module_id: ModuleId::new(2),
+            path: path("src/main.gfs"),
+            source: &main,
+            kind: FrontendModuleKind::Standard,
+        },
+    ];
+    let initial_catalog = Arc::new(
+        CapabilityCatalog::new(
+            vec![BridgeModule::new("std/custom", provider.text())],
+            Vec::new(),
+        )
+        .expect("valid provider catalog"),
+    );
+    let changed_catalog = Arc::new(
+        CapabilityCatalog::new(
+            vec![BridgeModule::new(
+                "std/custom",
+                format!("{}\n", provider.text()),
+            )],
+            Vec::new(),
+        )
+        .expect("valid provider catalog"),
+    );
+    let roots = FrontendRoots::default();
+    let mut session = FrontendSession::new();
+
+    let initial_report = session.check(FrontendUpdate {
+        catalog: initial_catalog,
+        source_revision: Revision::new(1),
+        sources: &sources,
+        removed_modules: &[],
+        roots: &roots,
+    });
+    assert!(
+        !initial_report.diagnostics.has_errors(),
+        "{:?}",
+        initial_report.diagnostics
+    );
+
+    let report = session.check(FrontendUpdate {
+        catalog: changed_catalog,
+        source_revision: Revision::new(2),
+        sources: &[],
+        removed_modules: &[],
+        roots: &roots,
+    });
+
+    assert_eq!(report.changed_modules.len(), 2);
+    assert!(report.changed_modules.contains(&ModuleId::new(1)));
+    assert!(report.changed_modules.contains(&ModuleId::new(2)));
+    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
 }
 
 #[test]

@@ -70,6 +70,24 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
         self.temp_count_current = self.temp_count_current.saturating_sub(count);
     }
 
+    pub(super) fn global_idx_for_name(&mut self, name: &str) -> Option<GlobalIdx> {
+        let Some(name_id) = self.ctx.string_table.get(name) else {
+            self.ctx.emission_errors.push(format!(
+                "cannot resolve global `{name}` while emitting `{}`: name is not interned",
+                self.func.name
+            ));
+            return None;
+        };
+        let global_idx = self.ctx.global_indices.get(&name_id).copied();
+        if global_idx.is_none() {
+            self.ctx.emission_errors.push(format!(
+                "cannot resolve global `{name}` while emitting `{}`",
+                self.func.name
+            ));
+        }
+        global_idx
+    }
+
     fn is_future_type(&self, ty: galfus_core::TypeId) -> bool {
         match self.ctx.type_result.layer().table().kind(ty) {
             Some(galfus_frontend::TypeKind::Named { symbol }) => {
@@ -144,24 +162,13 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                         });
                     }
                     MirInstruction::StoreGlobal(name, op) => {
-                        let global_idx = self
-                            .ctx
-                            .graph
-                            .resolution()
-                            .and_then(|res| {
-                                let name_id = self.ctx.string_table.get(name);
-                                res.symbols()
-                                    .iter()
-                                    .find(|symbol| {
-                                        name_id.is_some() && symbol.name() == name_id.unwrap()
-                                    })
-                                    .map(|symbol| symbol.id().raw() as u16)
-                            })
-                            .unwrap_or(0);
+                        let Some(global_idx) = self.global_idx_for_name(name) else {
+                            continue;
+                        };
                         let val_reg = self.operand_reg(op);
                         self.instructions.push(Instruction::StoreGlobal {
                             module_id: galfus_core::ModuleId::new(0),
-                            global_idx: GlobalIdx(global_idx),
+                            global_idx,
                             src: val_reg,
                         });
                         self.free_temp_if_operand(op);

@@ -2,7 +2,7 @@ use super::context::MyWorkspaceContext;
 use galfus_core::{SymbolId, TypeId};
 use galfus_frontend::{FunctionParameterType, FunctionType, ResolutionLayer, TypeKind, TypeTable};
 
-impl<'a> MyWorkspaceContext<'a> {
+impl<'a, 'index> MyWorkspaceContext<'a, 'index> {
     fn translate_symbol(
         string_table: &galfus_frontend::StringTable,
         caller_resolution: Option<&ResolutionLayer>,

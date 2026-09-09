@@ -1,4 +1,7 @@
-use super::module::compile_modules;
+use super::{
+    module::{compile_modules, target_module_index},
+    resolve::ModuleIndex,
+};
 use crate::{CompiledModule, CompilerState};
 use galfus_contract::CapabilityCatalog;
 use galfus_core::{ModuleId, ModulePath, Revision, SourceFile, SourceId};
@@ -9,6 +12,16 @@ use std::sync::Arc;
 
 fn path(value: &str) -> ModulePath {
     ModulePath::new(value).expect("test module path is valid")
+}
+
+#[test]
+fn compiler_rejects_missing_cross_module_target() {
+    let error = target_module_index(&ModuleIndex::default(), ModuleId::new(99), "src/main.gfs")
+        .expect_err("a missing cross-module target must fail compilation");
+
+    assert!(error.to_string().contains(
+        "cross-module call target module ModuleId(99) is unavailable while compiling `src/main.gfs`"
+    ));
 }
 
 #[test]

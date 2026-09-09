@@ -1,6 +1,6 @@
 use std::collections;
 
-use super::resolve::resolve_import_target;
+use super::resolve::{ModuleIndex, resolve_import_target};
 use crate::CompilerState;
 use crate::input::CompiledModule;
 use crate::semantic_to_mir::WorkspaceContext;
@@ -8,22 +8,25 @@ use galfus_core::{FunctionId, NodeId, SymbolId, TypeId};
 use galfus_frontend::{SymbolKind, SyntaxNodeKind, TypeKind};
 use std::collections::HashMap;
 
-pub(super) struct MyWorkspaceContext<'a> {
+pub(super) struct MyWorkspaceContext<'a, 'index> {
     pub(super) modules: &'a mut [CompiledModule],
     pub(super) state: &'a mut CompilerState,
     pub(super) string_table: &'a galfus_frontend::StringTable,
+    module_index: &'index ModuleIndex,
 }
 
-impl<'a> MyWorkspaceContext<'a> {
+impl<'a, 'index> MyWorkspaceContext<'a, 'index> {
     pub(super) fn new(
         modules: &'a mut [CompiledModule],
         state: &'a mut CompilerState,
         string_table: &'a galfus_frontend::StringTable,
+        module_index: &'index ModuleIndex,
     ) -> Self {
         Self {
             modules,
             state,
             string_table,
+            module_index,
         }
     }
 
@@ -32,7 +35,7 @@ impl<'a> MyWorkspaceContext<'a> {
     }
 }
 
-impl<'a> WorkspaceContext for MyWorkspaceContext<'a> {
+impl<'a, 'index> WorkspaceContext for MyWorkspaceContext<'a, 'index> {
     fn string_table(&self) -> &galfus_frontend::StringTable {
         self.string_table
     }
@@ -41,10 +44,7 @@ impl<'a> WorkspaceContext for MyWorkspaceContext<'a> {
         caller_module_id: galfus_core::ModuleId,
         node_id: NodeId,
     ) -> Option<(usize, SymbolId)> {
-        let current_mod_idx = self
-            .modules
-            .iter()
-            .position(|m| m.id() == caller_module_id)?;
+        let current_mod_idx = self.module_index.by_id(caller_module_id)?;
 
         let mut real_target = node_id;
         let module = &self.modules[current_mod_idx];
@@ -61,11 +61,8 @@ impl<'a> WorkspaceContext for MyWorkspaceContext<'a> {
 
         let func_id = FunctionId::new(0x8000_0000 | real_target.raw());
         let (target_module_id, target_func_id) =
-            resolve_import_target(self.modules, current_mod_idx, func_id)?;
-        let target_mod_idx = self
-            .modules
-            .iter()
-            .position(|m| m.id() == target_module_id)?;
+            resolve_import_target(self.modules, self.module_index, current_mod_idx, func_id)?;
+        let target_mod_idx = self.module_index.by_id(target_module_id)?;
         let target_symbol = SymbolId::new(target_func_id.raw());
         Some((target_mod_idx, target_symbol))
     }
@@ -144,10 +141,9 @@ impl<'a> WorkspaceContext for MyWorkspaceContext<'a> {
         substitutions: collections::HashMap<SymbolId, TypeId>,
     ) -> FunctionId {
         let caller_mod_idx = self
-            .modules
-            .iter()
-            .position(|m| m.id() == caller_module_id)
-            .unwrap_or(0);
+            .module_index
+            .by_id(caller_module_id)
+            .expect("generic specialization caller module must be present in the workspace");
 
         let concrete_types = concrete_types
             .iter()
@@ -236,20 +232,19 @@ impl<'a> WorkspaceContext for MyWorkspaceContext<'a> {
         function_name: &str,
         concrete_types: Vec<TypeId>,
     ) -> Option<FunctionId> {
-        let target_mod_idx_opt = self.modules.iter().position(|module| {
-            module.path().as_str() == module_name
-                || module.path().as_str() == format!("{module_name}.gfs")
-        });
-        let target_mod_idx = target_mod_idx_opt?;
+        let target_mod_idx = self
+            .module_index
+            .module_path_index(module_name)
+            .or_else(|| {
+                self.module_index
+                    .module_path_index(&format!("{module_name}.gfs"))
+            })?;
         let resolution = self.modules[target_mod_idx].graph().resolution()?;
         let target_symbol = resolution
-            .symbols()
-            .iter()
-            .find(|symbol| {
-                symbol.kind() == SymbolKind::Function
-                    && self.string_table.resolve(symbol.name()).unwrap_or("") == function_name
-            })
-            .map(|symbol| symbol.id())?;
+            .export_by_name(function_name)
+            .and_then(|id| resolution.export_record(id))
+            .filter(|export| export.kind() == SymbolKind::Function)
+            .map(|export| export.symbol())?;
         let generic_params = self.get_generic_params(target_mod_idx, target_symbol)?;
         if generic_params.len() != concrete_types.len() {
             return None;
@@ -278,7 +273,7 @@ impl<'a> WorkspaceContext for MyWorkspaceContext<'a> {
     }
 }
 
-impl<'a> MyWorkspaceContext<'a> {
+impl<'a, 'index> MyWorkspaceContext<'a, 'index> {
     fn specialize_anchored_function(
         &mut self,
         target_mod_idx: usize,

@@ -1,6 +1,60 @@
 use crate::input::CompiledModule;
-use galfus_core::{FunctionId, NodeId, SymbolId};
+use galfus_core::{FunctionId, ModuleId, ModulePath, NodeId, SymbolId};
 use galfus_frontend::{SymbolKind, SyntaxNodeKind, TypeKind};
+use std::collections::HashMap;
+
+#[derive(Debug, Default)]
+pub(super) struct ModuleIndex {
+    by_id: HashMap<ModuleId, usize>,
+    by_path: HashMap<ModulePath, usize>,
+}
+
+impl ModuleIndex {
+    pub(super) fn new(modules: &[CompiledModule]) -> Self {
+        Self {
+            by_id: modules
+                .iter()
+                .enumerate()
+                .map(|(index, module)| (module.id(), index))
+                .collect(),
+            by_path: modules
+                .iter()
+                .enumerate()
+                .map(|(index, module)| (module.path().clone(), index))
+                .collect(),
+        }
+    }
+
+    pub(super) fn by_id(&self, module_id: ModuleId) -> Option<usize> {
+        self.by_id.get(&module_id).copied()
+    }
+
+    pub(super) fn import_target_index(
+        &self,
+        modules: &[CompiledModule],
+        mod_idx: usize,
+        source: &str,
+    ) -> Option<usize> {
+        let direct_path =
+            ModulePath::new(source).or_else(|| ModulePath::new(format!("{source}.gfs").as_str()));
+        if let Some(target) = direct_path
+            && let Some(index) = self.by_path.get(&target)
+        {
+            return Some(*index);
+        }
+
+        let target = galfus_frontend::modules::resolution::resolve_relative_import(
+            modules[mod_idx].path(),
+            source,
+            None,
+        )?;
+        self.by_path.get(&target).copied()
+    }
+
+    pub(super) fn module_path_index(&self, path: &str) -> Option<usize> {
+        ModulePath::new(path).and_then(|path| self.by_path.get(&path).copied())
+    }
+}
 
 pub(super) fn collect_call_targets(
     blocks: &[galfus_ir::mir::BasicBlock],
@@ -145,6 +199,7 @@ fn collect_operand_function_target(
 
 pub(super) fn resolve_import_target(
     modules: &[CompiledModule],
+    module_index: &ModuleIndex,
     mod_idx: usize,
     func_id: FunctionId,
 ) -> Option<(galfus_core::ModuleId, FunctionId)> {
@@ -167,17 +222,18 @@ pub(super) fn resolve_import_target(
                     .and_then(|identifier| resolution.reference_symbol(identifier))
             })
             && let Some(import) = resolution
-                .imports()
-                .iter()
-                .find(|import| import.local_symbol() == symbol)
+                .import_for_symbol(symbol)
+                .and_then(|id| resolution.import(id))
             && let Some(imported_name) = import.imported_name()
         {
-            let target_idx = import_target_index(modules, mod_idx, import.source())?;
+            let target_idx = module_index.import_target_index(modules, mod_idx, import.source())?;
             let target_mod = &modules[target_idx];
             let target_resolution = target_mod.graph().resolution()?;
-            if let Some(export) = target_resolution.exports().iter().find(|export| {
-                export.kind() == SymbolKind::Function && export.name() == imported_name
-            }) {
+            if let Some(export) = target_resolution
+                .export_by_name(imported_name)
+                .and_then(|id| target_resolution.export_record(id))
+                .filter(|export| export.kind() == SymbolKind::Function)
+            {
                 return Some((target_mod.id(), FunctionId::new(export.symbol().raw())));
             }
         }
@@ -189,9 +245,8 @@ pub(super) fn resolve_import_target(
             let root_sym = resolution.reference_symbol(root_node);
             if let Some(root_symbol) = root_sym {
                 let import_found = resolution
-                    .imports()
-                    .iter()
-                    .find(|imp| imp.local_symbol() == root_symbol);
+                    .import_for_symbol(root_symbol)
+                    .and_then(|id| resolution.import(id));
                 if let Some(import) = import_found
                     && let Some(member_node) = syntax_node.child(1)
                 {
@@ -199,17 +254,16 @@ pub(super) fn resolve_import_target(
                     let member_node_data = syntax.node(member_node)?;
                     let member_span = member_node_data.span();
                     let member_name = module.source().slice(member_span)?;
-                    let target_idx = import_target_index(modules, mod_idx, import.source());
+                    let target_idx =
+                        module_index.import_target_index(modules, mod_idx, import.source());
                     if let Some(target_idx) = target_idx {
                         let target_mod = &modules[target_idx];
                         let target_resolution = target_mod.graph().resolution()?;
-                        for export in target_resolution.exports() {
-                            if export.name() == member_name {
-                                return Some((
-                                    target_mod.id(),
-                                    FunctionId::new(export.symbol().raw()),
-                                ));
-                            }
+                        if let Some(export) = target_resolution
+                            .export_by_name(member_name)
+                            .and_then(|id| target_resolution.export_record(id))
+                        {
+                            return Some((target_mod.id(), FunctionId::new(export.symbol().raw())));
                         }
                     }
                 }
@@ -235,20 +289,22 @@ pub(super) fn resolve_import_target(
                 .type_result()
                 .and_then(|result| result.layer().table().kind(receiver_ty))
             && let Some(import) = resolution
-                .imports()
-                .iter()
-                .find(|import| import.local_symbol() == *type_symbol)
+                .import_for_symbol(*type_symbol)
+                .and_then(|id| resolution.import(id))
             && let Some(imported_name) = import.imported_name()
             && let Some(member_node) = syntax_node.child(1)
             && let Some(member_data) = module.graph().syntax().node(member_node)
             && let Some(member_name) = module.source().slice(member_data.span())
-            && let Some(target_idx) = import_target_index(modules, mod_idx, import.source())
+            && let Some(target_idx) =
+                module_index.import_target_index(modules, mod_idx, import.source())
             && let Some(target_resolution) = modules[target_idx].graph().resolution()
         {
             let anchored_name = format!("{imported_name}::{member_name}");
-            if let Some(export) = target_resolution.exports().iter().find(|export| {
-                export.kind() == SymbolKind::Function && export.name() == anchored_name
-            }) {
+            if let Some(export) = target_resolution
+                .export_by_name(&anchored_name)
+                .and_then(|id| target_resolution.export_record(id))
+                .filter(|export| export.kind() == SymbolKind::Function)
+            {
                 return Some((
                     modules[target_idx].id(),
                     FunctionId::new(export.symbol().raw()),
@@ -263,7 +319,7 @@ pub(super) fn resolve_import_target(
             && let Some(member_name) = module.source().slice(member_node_data.span())
             && let Some(receiver) = syntax_node.child(0)
             && let Some(source) = import_source_for_expression(module, receiver)
-            && let Some(target_idx) = import_target_index(modules, mod_idx, source)
+            && let Some(target_idx) = module_index.import_target_index(modules, mod_idx, source)
             && let Some(target_resolution) = modules[target_idx].graph().resolution()
         {
             let mut candidates = target_resolution.exports().iter().filter_map(|export| {
@@ -320,18 +376,18 @@ pub(super) fn resolve_import_target(
     }
 
     if let Some(import) = resolution
-        .imports()
-        .iter()
-        .find(|imp| imp.local_symbol() == import_symbol)
+        .import_for_symbol(import_symbol)
+        .and_then(|id| resolution.import(id))
         && let Some(imported_name) = import.imported_name()
     {
-        let target_idx = import_target_index(modules, mod_idx, import.source())?;
+        let target_idx = module_index.import_target_index(modules, mod_idx, import.source())?;
         let target_mod = &modules[target_idx];
         let target_resolution = target_mod.graph().resolution()?;
-        for export in target_resolution.exports() {
-            if export.name() == imported_name {
-                return Some((target_mod.id(), FunctionId::new(export.symbol().raw())));
-            }
+        if let Some(export) = target_resolution
+            .export_by_name(imported_name)
+            .and_then(|id| target_resolution.export_record(id))
+        {
+            return Some((target_mod.id(), FunctionId::new(export.symbol().raw())));
         }
     }
 
@@ -341,14 +397,12 @@ pub(super) fn resolve_import_target(
         .imports()
         .iter()
         .filter_map(|import| {
-            let target_idx = import_target_index(modules, mod_idx, import.source())?;
+            let target_idx = module_index.import_target_index(modules, mod_idx, import.source())?;
             let target_resolution = modules[target_idx].graph().resolution()?;
             target_resolution
-                .exports()
-                .iter()
-                .find(|export| {
-                    export.kind() == SymbolKind::Function && export.symbol().raw() == func_id.raw()
-                })
+                .export_for_symbol(SymbolId::new(func_id.raw()))
+                .and_then(|id| target_resolution.export_record(id))
+                .filter(|export| export.kind() == SymbolKind::Function)
                 .map(|export| {
                     (
                         modules[target_idx].id(),
@@ -409,28 +463,6 @@ const PATH_CALL_TARGET_TAG: u32 = 0x8000_0000;
 fn path_call_target_node(func_id: FunctionId) -> Option<NodeId> {
     let raw = func_id.raw();
     (raw & PATH_CALL_TARGET_TAG != 0).then(|| NodeId::new(raw & !PATH_CALL_TARGET_TAG))
-}
-
-/// Resolve the index into `modules` for a relative import from `mod_idx`.
-pub(super) fn import_target_index(
-    modules: &[CompiledModule],
-    mod_idx: usize,
-    source: &str,
-) -> Option<usize> {
-    let direct_path = galfus_core::ModulePath::new(source)
-        .or_else(|| galfus_core::ModulePath::new(format!("{source}.gfs").as_str()));
-    if let Some(target) = direct_path
-        && let Some(index) = modules.iter().position(|module| module.path() == &target)
-    {
-        return Some(index);
-    }
-
-    let target = galfus_frontend::modules::resolution::resolve_relative_import(
-        modules[mod_idx].path(),
-        source,
-        None,
-    )?;
-    modules.iter().position(|m| m.path() == &target)
 }
 
 fn import_source_for_expression(module: &CompiledModule, expr: NodeId) -> Option<&str> {

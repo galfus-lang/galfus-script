@@ -23,10 +23,10 @@ mod types_structs;
 mod tests;
 
 use crate::bytecode_emission::constants::HashableConstant;
-use galfus_bytecode::instruction::{ConstIdx, FuncIdx, TypeIdx};
+use galfus_bytecode::instruction::{ConstIdx, FuncIdx, GlobalIdx, TypeIdx};
 use galfus_bytecode::*;
 use galfus_core::{DefId, FunctionId, SymbolId, TypeId};
-use galfus_frontend::{ModuleGraph, TypeCheckResult};
+use galfus_frontend::{ModuleGraph, NameId, TypeCheckResult};
 use galfus_ir::mir::Constant as MirConstant;
 pub use module::*;
 use std::collections::HashMap;
@@ -125,6 +125,7 @@ pub struct LowerCtx<'a> {
     pub imported_struct_fields: HashMap<SymbolId, Vec<(String, TypeId)>>,
     pub active_substitutions: HashMap<SymbolId, TypeId>,
     pub function_is_async: HashMap<FunctionId, bool>,
+    pub global_indices: HashMap<NameId, GlobalIdx>,
     pub mir_constants: &'a [MirConstant],
     /// Errors found while lowering MIR that must prevent bytecode publication.
     pub emission_errors: Vec<String>,
@@ -183,6 +184,20 @@ impl<'a> LowerCtx<'a> {
                 .collect(),
             active_substitutions: HashMap::new(),
             function_is_async: HashMap::new(),
+            global_indices: graph
+                .resolution()
+                .map(|resolution| {
+                    resolution
+                        .symbols()
+                        .iter()
+                        .fold(HashMap::new(), |mut indices, symbol| {
+                            indices
+                                .entry(symbol.name())
+                                .or_insert(GlobalIdx(symbol.id().raw() as u16));
+                            indices
+                        })
+                })
+                .unwrap_or_default(),
             mir_constants,
             emission_errors: Vec::new(),
         }

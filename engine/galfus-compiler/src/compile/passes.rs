@@ -69,27 +69,39 @@ pub fn run(module: &mut MirModule, configuration: MirPassConfiguration) -> Resul
     // The passes below therefore never rewrite a local outside its defining block.
     if configuration.local_simplification {
         report.simplified_instructions = simplify_local_identities(module);
-        validate(module, "after local simplification")?;
+        validate_if_changed(
+            module,
+            "after local simplification",
+            report.simplified_instructions,
+        )?;
     }
     if configuration.constant_propagation {
         report.folded_constants = propagate_and_fold_constants(module);
-        validate(module, "after constant propagation")?;
+        validate_if_changed(
+            module,
+            "after constant propagation",
+            report.folded_constants,
+        )?;
     }
     if configuration.copy_propagation {
         report.propagated_copies = propagate_ssa_copies(module);
-        validate(module, "after copy propagation")?;
+        validate_if_changed(module, "after copy propagation", report.propagated_copies)?;
     }
     if configuration.dead_definitions {
         report.removed_dead_definitions = remove_dead_constant_definitions(module);
-        validate(module, "after dead definition elimination")?;
+        validate_if_changed(
+            module,
+            "after dead definition elimination",
+            report.removed_dead_definitions,
+        )?;
     }
     if configuration.inlining {
         report.inlined_calls = inline_functions(module, configuration.max_inline_instructions);
-        validate(module, "after inlining")?;
+        validate_if_changed(module, "after inlining", report.inlined_calls)?;
     }
     if configuration.tail_calls {
         report.tail_calls = optimize_tail_calls(module);
-        validate(module, "after tail-call recognition")?;
+        validate_if_changed(module, "after tail-call recognition", report.tail_calls)?;
     }
 
     report.instructions_after = instruction_count(module);
@@ -99,16 +111,23 @@ pub fn run(module: &mut MirModule, configuration: MirPassConfiguration) -> Resul
 }
 
 type CopyDefinition = (LocalId, BlockId, usize);
+type IndexedCopyDefinition = (LocalId, usize, usize);
 
 fn propagate_ssa_copies(module: &mut MirModule) -> usize {
     module
         .functions
         .iter_mut()
         .map(|function| {
+            let definitions = collect_copy_definitions(function);
+            if definitions.is_empty() {
+                return 0;
+            }
+
             // Work on one candidate and publish it only after validation. This
-            // globals and constant pool for every changed function.
+            // avoids cloning the rest of the module, and skips cloning
+            // functions that contain no copy-propagation candidates.
             let mut candidate = function.clone();
-            let replaced = propagate_function_copies(&mut candidate);
+            let replaced = propagate_function_copies(&mut candidate, &definitions);
             if replaced == 0 {
                 return 0;
             }
@@ -122,23 +141,29 @@ fn propagate_ssa_copies(module: &mut MirModule) -> usize {
         .sum()
 }
 
-fn propagate_function_copies(function: &mut MirFunction) -> usize {
-    let ownership = function
-        .locals
+fn propagate_function_copies(
+    function: &mut MirFunction,
+    definitions: &HashMap<LocalId, CopyDefinition>,
+) -> usize {
+    let dominators = dominators(function);
+    let definitions = definitions
         .iter()
-        .map(|local| (local.id, local.is_owned))
-        .collect::<HashMap<_, _>>();
-    let definitions = collect_copy_definitions(function, &ownership);
+        .filter_map(|(&destination, &(source, block, instruction_index))| {
+            dominators
+                .block_index(block)
+                .map(|block_index| (destination, (source, block_index, instruction_index)))
+        })
+        .collect::<HashMap<_, IndexedCopyDefinition>>();
     if definitions.is_empty() {
         return 0;
     }
-    let dominators = dominators(function);
+
     let mut replaced = 0;
-    for block in &mut function.blocks {
+    for (block_index, block) in function.blocks.iter_mut().enumerate() {
         for (index, (instruction, _)) in block.instructions.iter_mut().enumerate() {
             replace_instruction_copies(
                 instruction,
-                block.id,
+                block_index,
                 index,
                 &definitions,
                 &dominators,
@@ -147,7 +172,7 @@ fn propagate_function_copies(function: &mut MirFunction) -> usize {
         }
         replace_terminator_copies(
             &mut block.terminator.0,
-            block.id,
+            block_index,
             usize::MAX,
             &definitions,
             &dominators,
@@ -157,10 +182,12 @@ fn propagate_function_copies(function: &mut MirFunction) -> usize {
     replaced
 }
 
-fn collect_copy_definitions(
-    function: &MirFunction,
-    ownership: &HashMap<LocalId, bool>,
-) -> HashMap<LocalId, CopyDefinition> {
+fn collect_copy_definitions(function: &MirFunction) -> HashMap<LocalId, CopyDefinition> {
+    let ownership = function
+        .locals
+        .iter()
+        .map(|local| (local.id, local.is_owned))
+        .collect::<HashMap<_, _>>();
     let mut definition_counts = function
         .parameter_types
         .iter()
@@ -211,9 +238,9 @@ fn instruction_destination(instruction: &Instruction) -> Option<LocalId> {
 
 fn replace_operand_copy(
     operand: &mut Operand,
-    block: BlockId,
+    block_index: usize,
     use_index: usize,
-    definitions: &HashMap<LocalId, CopyDefinition>,
+    definitions: &HashMap<LocalId, IndexedCopyDefinition>,
     dominators: &Dominators,
     replaced: &mut usize,
 ) {
@@ -226,8 +253,9 @@ fn replace_operand_copy(
         let Some((next, definition_block, definition_index)) = definitions.get(&source) else {
             break;
         };
-        let dominates = dominators.dominates(block, *definition_block);
-        if !dominates || (*definition_block == block && *definition_index >= use_index) {
+        if !dominators.dominates_indices(block_index, *definition_block)
+            || (*definition_block == block_index && *definition_index >= use_index)
+        {
             break;
         }
         source = *next;
@@ -240,9 +268,9 @@ fn replace_operand_copy(
 
 fn replace_instruction_copies(
     instruction: &mut Instruction,
-    block: BlockId,
+    block_index: usize,
     use_index: usize,
-    definitions: &HashMap<LocalId, CopyDefinition>,
+    definitions: &HashMap<LocalId, IndexedCopyDefinition>,
     dominators: &Dominators,
     replaced: &mut usize,
 ) {
@@ -250,7 +278,7 @@ fn replace_instruction_copies(
         let mut operand = Operand::Local(*local);
         replace_operand_copy(
             &mut operand,
-            block,
+            block_index,
             use_index,
             definitions,
             dominators,
@@ -262,21 +290,35 @@ fn replace_instruction_copies(
         return;
     }
     let replace = |operand: &mut Operand| {
-        replace_operand_copy(operand, block, use_index, definitions, dominators, replaced);
+        replace_operand_copy(
+            operand,
+            block_index,
+            use_index,
+            definitions,
+            dominators,
+            replaced,
+        );
     };
     for_each_instruction_operand_mut(instruction, replace);
 }
 
 fn replace_terminator_copies(
     terminator: &mut Terminator,
-    block: BlockId,
+    block_index: usize,
     use_index: usize,
-    definitions: &HashMap<LocalId, CopyDefinition>,
+    definitions: &HashMap<LocalId, IndexedCopyDefinition>,
     dominators: &Dominators,
     replaced: &mut usize,
 ) {
     let replace = |operand: &mut Operand| {
-        replace_operand_copy(operand, block, use_index, definitions, dominators, replaced);
+        replace_operand_copy(
+            operand,
+            block_index,
+            use_index,
+            definitions,
+            dominators,
+            replaced,
+        );
     };
     for_each_terminator_operand_mut(terminator, replace);
 }
@@ -284,6 +326,13 @@ fn replace_terminator_copies(
 fn validate(module: &MirModule, stage: &str) -> Result<()> {
     galfus_ir::validate_module(module)
         .map_err(|errors| anyhow!("MIR validation failed {stage}: {errors:?}"))
+}
+
+fn validate_if_changed(module: &MirModule, stage: &str, changes: usize) -> Result<()> {
+    if changes == 0 {
+        return Ok(());
+    }
+    validate(module, stage)
 }
 
 fn simplify_local_identities(module: &mut MirModule) -> usize {
