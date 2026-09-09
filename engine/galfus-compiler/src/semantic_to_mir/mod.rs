@@ -19,6 +19,7 @@ mod literal_lowering;
 mod match_lowering;
 mod module_generics;
 mod module_items;
+mod module_structs;
 mod name_lowering;
 mod narrowing;
 mod operation_lowering;
