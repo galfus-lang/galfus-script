@@ -8,6 +8,7 @@ pub mod expression;
 pub mod function;
 mod function_assignments;
 mod function_blocks;
+mod function_control_flow;
 mod function_expressions;
 mod function_helpers;
 mod function_state;
