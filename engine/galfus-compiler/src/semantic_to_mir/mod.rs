@@ -6,6 +6,7 @@ pub mod complex_literals;
 mod destructuring;
 pub mod expression;
 pub mod function;
+mod function_assignments;
 mod function_blocks;
 mod function_expressions;
 mod function_helpers;
