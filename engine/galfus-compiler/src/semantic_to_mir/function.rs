@@ -1,5 +1,4 @@
 use std::collections;
-use std::mem;
 
 use galfus_ir::mir;
 
@@ -39,92 +38,6 @@ pub(super) struct NarrowingReturnTarget {
 }
 
 impl<'b, 'a> FunctionBuilder<'b, 'a> {
-    pub(super) fn is_terminated(&self) -> bool {
-        self.is_block_terminated(self.current_block)
-    }
-
-    pub(super) fn is_block_terminated(&self, block: BlockId) -> bool {
-        let block_idx = self.blocks.iter().position(|b| b.id == block).unwrap();
-        !matches!(
-            self.blocks[block_idx].terminator.0,
-            Terminator::Return(None)
-        )
-    }
-
-    pub(super) fn lower_block(&mut self, block_node_id: NodeId) {
-        let syntax = self.builder.graph.syntax();
-        let Some(block_node) = syntax.node(block_node_id) else {
-            self.flush_current_instructions();
-            if !self.is_terminated() {
-                let current_idx = self
-                    .blocks
-                    .iter()
-                    .position(|b| b.id == self.current_block)
-                    .unwrap();
-                self.blocks[current_idx].terminator = (Terminator::Return(None), None);
-            }
-            return;
-        };
-
-        self.scopes.push(Vec::new());
-
-        for &stmt_id in block_node.children() {
-            self.lower_statement(stmt_id);
-            if self.is_terminated() {
-                break;
-            }
-        }
-
-        if let Some(scope_locals) = self.scopes.pop()
-            && !self.is_terminated()
-        {
-            for local_id in scope_locals {
-                if let Some(decl) = self.locals.iter().find(|l| l.id == local_id)
-                    && self.builder.is_owned_type(decl.ty)
-                {
-                    self.current_instructions
-                        .push((Instruction::Drop(local_id), None));
-                }
-            }
-        }
-    }
-
-    pub(super) fn flush_current_instructions(&mut self) {
-        let instructions = mem::take(&mut self.current_instructions);
-        let block_idx = self
-            .blocks
-            .iter()
-            .position(|b| b.id == self.current_block)
-            .unwrap();
-        self.blocks[block_idx].instructions.extend(instructions);
-    }
-
-    /// Finalizes the active basic block without selecting a continuation.
-    ///
-    /// Control-flow constructs that own their successors (such as narrowing)
-    /// must use this together with [`Self::begin_block`].
-    pub(super) fn close_current_block(&mut self, terminator: Terminator) {
-        self.flush_current_instructions();
-        let block_idx = self
-            .blocks
-            .iter()
-            .position(|b| b.id == self.current_block)
-            .unwrap();
-        self.blocks[block_idx].terminator = (terminator, None);
-    }
-
-    /// Materializes and selects a basic block supplied by the caller.
-    pub(super) fn begin_block(&mut self, id: BlockId) {
-        let bb = BasicBlock {
-            id,
-            parameters: Vec::new(),
-            instructions: Vec::new(),
-            terminator: (Terminator::Return(None), None),
-        };
-        self.blocks.push(bb);
-        self.current_block = id;
-    }
-
     fn loop_target_name(&self, loop_node: NodeId) -> Option<String> {
         let syntax = self.builder.graph.syntax();
         let metadata =
