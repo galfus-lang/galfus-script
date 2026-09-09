@@ -7,7 +7,7 @@ use super::LowerCtx;
 use galfus_bytecode::Instruction;
 use galfus_bytecode::instruction::{GlobalIdx, ImmediateValue, Reg};
 use galfus_ir::mir::{
-    Constant as MirConstant, Instruction as MirInstruction, MirFunction, Operand, Terminator,
+    Constant as MirConstant, Instruction as MirInstruction, MirFunction, Terminator,
 };
 
 #[allow(dead_code)]
@@ -87,80 +87,6 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
             }
             _ => false,
         }
-    }
-
-    fn emit_parallel_copies(&mut self, dests: &[Reg], srcs: &[Operand]) {
-        assert_eq!(dests.len(), srcs.len());
-        if dests.is_empty() {
-            return;
-        }
-
-        let temps_before = self.temp_count_current;
-
-        let mut src_regs = Vec::new();
-        for src in srcs {
-            let reg = match src {
-                Operand::Local(loc) => Reg(loc.raw() as u16),
-                _ => {
-                    let temp = self.alloc_temp();
-                    self.load_operand_to(src, temp);
-                    temp
-                }
-            };
-            src_regs.push(reg);
-        }
-
-        let mut in_degree = collections::BTreeMap::new();
-        let mut edges = collections::BTreeMap::new();
-
-        for i in 0..dests.len() {
-            let d = dests[i];
-            let s = src_regs[i];
-            if d != s {
-                edges.insert(d, s);
-                *in_degree.entry(s).or_insert(0) += 1;
-                in_degree.entry(d).or_insert(0);
-            }
-        }
-
-        let mut ready = collections::BTreeSet::new();
-        for (node, deg) in &in_degree {
-            if *deg == 0 && edges.contains_key(node) {
-                ready.insert(*node);
-            }
-        }
-
-        while !edges.is_empty() {
-            if let Some(d) = ready.pop_first() {
-                let s = edges.remove(&d).unwrap();
-                self.instructions
-                    .push(Instruction::Move { dest: d, src: s });
-
-                let deg = in_degree.get_mut(&s).unwrap();
-                *deg -= 1;
-                if *deg == 0 && edges.contains_key(&s) {
-                    ready.insert(s);
-                }
-            } else {
-                let d = *edges.keys().next().unwrap();
-                let s = edges.remove(&d).unwrap();
-
-                let temp = self.alloc_temp();
-                self.instructions
-                    .push(Instruction::Move { dest: temp, src: s });
-
-                edges.insert(d, temp);
-                in_degree.insert(temp, 1);
-
-                let deg = in_degree.get_mut(&s).unwrap();
-                *deg -= 1;
-                if *deg == 0 && edges.contains_key(&s) {
-                    ready.insert(s);
-                }
-            }
-        }
-
-        self.temp_count_current = temps_before;
     }
 
     fn target_params(&self, target: mir::BlockId) -> Vec<Reg> {

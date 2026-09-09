@@ -3,6 +3,7 @@ mod expression;
 pub mod function;
 pub mod helpers;
 mod module;
+mod parallel_copies;
 pub mod ssa;
 pub mod types;
 
