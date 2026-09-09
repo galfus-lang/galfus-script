@@ -1,5 +1,6 @@
 mod awaits;
 mod call_arguments;
+mod call_lowering;
 mod call_resolution;
 pub mod complex_literals;
 pub mod expression;
