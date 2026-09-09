@@ -359,7 +359,8 @@ impl VirtualMachine {
                 {
                     resolved_target = Some((resolution_module_id, FuncIdx(index as u16)));
                 }
-                if resolved_target.is_none()
+                if receiver_layout.is_none()
+                    && resolved_target.is_none()
                     && let Some(index) = resolution_image
                         .functions
                         .iter()
@@ -387,6 +388,33 @@ impl VirtualMachine {
                             resolved_target = Some((imp.module_id, target_func_idx));
                             break;
                         }
+                    }
+                }
+
+                // Constraint calls reference only a method name. If the receiver's defining
+                // module has no direct function import, resolve an unambiguous qualified method
+                // from the loaded graph instead of falling back to another struct's same-named
+                // method in the receiver module.
+                if resolved_target.is_none()
+                    && let Some(qualified_name) = &qualified_name
+                {
+                    let matches = self
+                        .fast_modules
+                        .iter()
+                        .flat_map(|(module_id, module)| {
+                            let module = unsafe { &**module };
+                            module
+                                .functions
+                                .iter()
+                                .enumerate()
+                                .filter(move |(_, function)| {
+                                    check_name(&function.name, qualified_name, true)
+                                })
+                                .map(move |(index, _)| (*module_id, FuncIdx(index as u16)))
+                        })
+                        .collect::<Vec<_>>();
+                    if matches.len() == 1 {
+                        resolved_target = matches.first().copied();
                     }
                 }
 
@@ -422,7 +450,6 @@ impl VirtualMachine {
                         ),
                     }
                 })?;
-
                 if let Some(return_type) = return_type {
                     let mut args = Vec::with_capacity(arg_count as usize);
                     if arg_count > 0 {

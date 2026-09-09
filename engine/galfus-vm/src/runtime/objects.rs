@@ -45,26 +45,26 @@ impl VirtualMachine {
                 let obj_val = thread.read_reg(obj);
                 if let Value::Object(obj_ref) = obj_val {
                     let heap_obj = thread.heap.get_object(obj_ref)?;
-                    if let HeapObject::Struct { fields, .. } = heap_obj {
-                        let val = fields
+                    let val = if let HeapObject::Struct { fields, .. } = heap_obj {
+                        fields
                             .get(field.raw() as usize)
                             .cloned()
-                            .ok_or(VmError::FieldOutOfBounds { index: field })?;
-                        thread.write_reg(dest, val);
+                            .ok_or(VmError::FieldOutOfBounds { index: field })?
                     } else if let HeapObject::Tuple { elements } = heap_obj {
-                        let val = elements
+                        elements
                             .get(field.raw() as usize)
                             .cloned()
-                            .ok_or(VmError::FieldOutOfBounds { index: field })?;
-                        thread.write_reg(dest, val);
+                            .ok_or(VmError::FieldOutOfBounds { index: field })?
                     } else if let HeapObject::Choice { payload, .. } = heap_obj {
-                        thread.write_reg(dest, *payload);
+                        *payload
                     } else {
                         return Err(VmError::TypeMismatch {
                             expected: "Struct or Choice object".to_string(),
                             found: format!("{:?}", heap_obj),
                         });
-                    }
+                    };
+                    thread.retain_anchor_val(&val);
+                    thread.write_reg(dest, val);
                 } else {
                     return Err(VmError::TypeMismatch {
                         expected: "Object reference".to_string(),
@@ -175,6 +175,7 @@ impl VirtualMachine {
                         }
                     };
 
+                    thread.retain_anchor_val(&val);
                     thread.write_reg(dest, val);
                 } else {
                     return Err(VmError::TypeMismatch {

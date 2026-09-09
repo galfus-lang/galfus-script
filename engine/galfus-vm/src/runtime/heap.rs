@@ -138,9 +138,14 @@ impl VirtualMachine {
             (Value::Null, BytecodeType::Nullable(_)) => true,
             (value, BytecodeType::Nullable(inner)) => self.check_value_type(thread, value, *inner),
             (Value::Object(obj_ref), BytecodeType::Struct(expected_layout_idx)) => {
-                if let Ok(HeapObject::Struct { layout_idx, .. }) = thread.heap.get_object(*obj_ref)
+                if let Ok(HeapObject::Struct {
+                    module_id,
+                    layout_idx,
+                    ..
+                }) = thread.heap.get_object(*obj_ref)
                 {
-                    *layout_idx == *expected_layout_idx
+                    let expected_module = thread.call_stack.last().unwrap().module_id;
+                    *module_id == expected_module && *layout_idx == *expected_layout_idx
                 } else {
                     false
                 }
@@ -241,9 +246,13 @@ impl VirtualMachine {
                 }
             }
             (Value::Object(obj_ref), BytecodeType::Constraint(expected_constraint)) => {
-                if let Ok(HeapObject::Struct { layout_idx, .. }) = thread.heap.get_object(*obj_ref)
+                if let Ok(HeapObject::Struct {
+                    module_id,
+                    layout_idx,
+                    ..
+                }) = thread.heap.get_object(*obj_ref)
                 {
-                    let Ok(image) = self.current_image(thread) else {
+                    let Ok(image) = self.get_module(*module_id) else {
                         return false;
                     };
                     image

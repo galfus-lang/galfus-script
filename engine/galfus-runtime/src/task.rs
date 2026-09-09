@@ -386,6 +386,7 @@ fn encode_non_null_future_value_into_thread_heap(
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            let edge_values = elements.clone();
             let reference = heap
                 .alloc(galfus_vm::HeapObject::Array {
                     module_id,
@@ -393,6 +394,7 @@ fn encode_non_null_future_value_into_thread_heap(
                     elements,
                 })
                 .map_err(|_| "future array exceeds heap quota".to_string())?;
+            transfer_values_to_heap_edges(heap, edge_values)?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
         crate::event::FutureValue::Tuple(values) => {
@@ -409,9 +411,11 @@ fn encode_non_null_future_value_into_thread_heap(
                     encode_future_value_into_thread_heap(heap, value, *item_type, module_id, module)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            let edge_values = elements.clone();
             let reference = heap
                 .alloc(galfus_vm::HeapObject::Tuple { elements })
                 .map_err(|_| "future tuple exceeds heap quota".to_string())?;
+            transfer_values_to_heap_edges(heap, edge_values)?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
         crate::event::FutureValue::Struct(values) => {
@@ -432,6 +436,7 @@ fn encode_non_null_future_value_into_thread_heap(
                     encode_future_value_into_thread_heap(heap, value, field.ty, module_id, module)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            let edge_values = fields.clone();
             let reference = heap
                 .alloc(galfus_vm::HeapObject::Struct {
                     module_id,
@@ -439,6 +444,7 @@ fn encode_non_null_future_value_into_thread_heap(
                     fields,
                 })
                 .map_err(|_| "future struct exceeds heap quota".to_string())?;
+            transfer_values_to_heap_edges(heap, edge_values)?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
         crate::event::FutureValue::Choice {
@@ -463,6 +469,7 @@ fn encode_non_null_future_value_into_thread_heap(
                 )?,
                 _ => return Err(mismatch()),
             };
+            let edge_payload = payload;
             let reference = heap
                 .alloc(galfus_vm::HeapObject::Choice {
                     module_id,
@@ -471,6 +478,7 @@ fn encode_non_null_future_value_into_thread_heap(
                     payload,
                 })
                 .map_err(|_| "future choice exceeds heap quota".to_string())?;
+            transfer_values_to_heap_edges(heap, [edge_payload])?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
         crate::event::FutureValue::Handle {
@@ -597,6 +605,7 @@ pub(crate) fn encode_surface_into_thread_heap(
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            let edge_values = elements.clone();
             let reference = heap
                 .alloc(galfus_vm::HeapObject::Array {
                     module_id,
@@ -604,6 +613,7 @@ pub(crate) fn encode_surface_into_thread_heap(
                     elements,
                 })
                 .map_err(|_| "surface list exceeds heap quota".to_string())?;
+            transfer_values_to_heap_edges(heap, edge_values)?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
         (
@@ -626,9 +636,11 @@ pub(crate) fn encode_surface_into_thread_heap(
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            let edge_values = elements.clone();
             let reference = heap
                 .alloc(galfus_vm::HeapObject::Tuple { elements })
                 .map_err(|_| "surface tuple exceeds heap quota".to_string())?;
+            transfer_values_to_heap_edges(heap, edge_values)?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
         (
@@ -665,6 +677,7 @@ pub(crate) fn encode_surface_into_thread_heap(
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            let edge_values = fields.clone();
             let reference = heap
                 .alloc(galfus_vm::HeapObject::Struct {
                     module_id,
@@ -672,6 +685,7 @@ pub(crate) fn encode_surface_into_thread_heap(
                     fields,
                 })
                 .map_err(|_| "surface struct exceeds heap quota".to_string())?;
+            transfer_values_to_heap_edges(heap, edge_values)?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
         (
@@ -709,6 +723,7 @@ pub(crate) fn encode_surface_into_thread_heap(
                 )?,
                 _ => return Err(mismatch()),
             };
+            let edge_payload = payload;
             let reference = heap
                 .alloc(galfus_vm::HeapObject::Choice {
                     module_id,
@@ -717,6 +732,7 @@ pub(crate) fn encode_surface_into_thread_heap(
                     payload,
                 })
                 .map_err(|_| "surface choice exceeds heap quota".to_string())?;
+            transfer_values_to_heap_edges(heap, [edge_payload])?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
         (
@@ -737,6 +753,21 @@ pub(crate) fn encode_surface_into_thread_heap(
         }
         _ => Err(mismatch()),
     }
+}
+
+fn transfer_values_to_heap_edges(
+    heap: &mut galfus_vm::thread::PrivateHeap,
+    values: impl IntoIterator<Item = galfus_vm::VmValue>,
+) -> Result<(), String> {
+    for value in values {
+        if let galfus_vm::VmValue::Object(reference) = value {
+            heap.retain_edge(reference)
+                .map_err(|_| "composite child reference is invalid".to_string())?;
+            heap.release_anchor(reference)
+                .map_err(|_| "composite child reference is invalid".to_string())?;
+        }
+    }
+    Ok(())
 }
 
 fn encode_aggregate_into_thread_heap(
@@ -766,6 +797,7 @@ fn encode_aggregate_into_thread_heap(
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            let edge_values = elements.clone();
             let reference = heap
                 .alloc(galfus_vm::HeapObject::Array {
                     module_id,
@@ -773,6 +805,7 @@ fn encode_aggregate_into_thread_heap(
                     elements,
                 })
                 .map_err(|_| "aggregate exceeds heap quota".to_string())?;
+            transfer_values_to_heap_edges(heap, edge_values)?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
         BytecodeType::Tuple(element_types) if element_types.len() == values.len() => {
@@ -789,9 +822,11 @@ fn encode_aggregate_into_thread_heap(
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            let edge_values = elements.clone();
             let reference = heap
                 .alloc(galfus_vm::HeapObject::Tuple { elements })
                 .map_err(|_| "aggregate exceeds heap quota".to_string())?;
+            transfer_values_to_heap_edges(heap, edge_values)?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
         _ => Err(format!("aggregate result does not match {expected_type:?}")),
