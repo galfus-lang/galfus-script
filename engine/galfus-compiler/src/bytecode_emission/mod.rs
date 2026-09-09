@@ -4,6 +4,7 @@ mod expression_allocations;
 mod expression_fields;
 mod expression_immediates;
 mod expression_operands;
+mod expression_simple;
 mod expression_types;
 pub mod function;
 mod function_calls;
