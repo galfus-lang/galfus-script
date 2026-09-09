@@ -347,13 +347,20 @@ impl Parser {
         keyword_span: Span,
         require_initializer: bool,
     ) -> Option<(Vec<NodeId>, Span)> {
-        self.skip_newlines();
+        if self.at(&TokenKind::Newline)
+            && (self.peek_after_newlines(0).kind() == &TokenKind::Colon
+                || self.peek_after_newlines(0).kind() == &TokenKind::Equal)
+        {
+            self.skip_newlines();
+        }
 
         let binding = self.parse_binding_pattern()?;
         let mut children = vec![binding];
         let mut end_span = self.node_span(binding);
 
-        self.skip_newlines();
+        if self.at(&TokenKind::Newline) && self.peek_after_newlines(0).kind() == &TokenKind::Colon {
+            self.skip_newlines();
+        }
 
         if self.at(&TokenKind::Colon) {
             let annotation = self.parse_type_annotation()?;
@@ -361,7 +368,9 @@ impl Parser {
             children.push(annotation);
         }
 
-        self.skip_newlines();
+        if self.at(&TokenKind::Newline) && self.peek_after_newlines(0).kind() == &TokenKind::Equal {
+            self.skip_newlines();
+        }
 
         if self.at(&TokenKind::Equal) {
             let initializer = self.parse_initializer()?;

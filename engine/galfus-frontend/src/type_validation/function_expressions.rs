@@ -113,7 +113,6 @@ impl<'a> DeclarationTypeChecker<'a> {
         };
 
         if body_node.kind() == SyntaxNodeKind::Block {
-            self.check_return_types(body, Some(expected));
             return;
         }
 

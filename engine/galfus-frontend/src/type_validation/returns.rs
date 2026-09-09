@@ -32,6 +32,14 @@ impl<'a> DeclarationTypeChecker<'a> {
             }
 
             kind if kind.is_function_expression() => {
+                let function_return_type = self
+                    .last_direct_type_child(node)
+                    .and_then(|return_type| self.layer.node_type(return_type));
+
+                for child in syntax_node.children() {
+                    self.check_return_types_in_context(*child, function_return_type, None);
+                }
+
                 return;
             }
 
@@ -74,12 +82,7 @@ impl<'a> DeclarationTypeChecker<'a> {
             .unwrap_or_default();
 
         for arm in arm_nodes {
-            let Some(body) = self
-                .graph
-                .syntax()
-                .child(arm, 1)
-                .and_then(|body| self.graph.syntax().child(body, 0))
-            else {
+            let Some(body) = self.graph.syntax().child(arm, 1) else {
                 continue;
             };
 
