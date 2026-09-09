@@ -1,5 +1,6 @@
 pub mod constants;
 mod expression;
+mod expression_fields;
 mod expression_immediates;
 mod expression_operands;
 pub mod function;
