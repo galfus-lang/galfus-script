@@ -459,7 +459,9 @@ async function main(): Promise<void> {
 
     console.log("[5/8] Testando requisições concorrentes...");
     await testConcurrentRequests();
-    console.log("[5.5/8] Testando upload streaming (Transfer-Encoding: chunked)...");
+    console.log(
+      "[5.5/8] Testando upload streaming (Transfer-Encoding: chunked)...",
+    );
     await testStreamingUpload();
 
     console.log("[6/8] Testando WebSocket texto e binário...");
@@ -487,33 +489,37 @@ main().catch((error: unknown) => {
 
 async function testStreamingUpload(): Promise<void> {
   const { request } = await import("http");
-  
+
   return new Promise((resolve, reject) => {
-    const req = request(SERVER_URL + "/echo", {
-      method: "POST",
-      headers: {
-        "Transfer-Encoding": "chunked",
-        "Content-Type": "application/octet-stream",
-      }
-    }, (res) => {
-      let body = "";
-      res.on("data", chunk => body += chunk.toString());
-      res.on("end", () => {
-        if (res.statusCode !== 201) {
-          reject(new Error(`Expected 201, got ${res.statusCode}`));
-          return;
-        }
-        if (body !== "chunk1-chunk2-chunk3") {
-          reject(new Error(`Body mismatch: ${body}`));
-          return;
-        }
-        resolve();
-      });
-    });
-    
+    const req = request(
+      SERVER_URL + "/echo",
+      {
+        method: "POST",
+        headers: {
+          "Transfer-Encoding": "chunked",
+          "Content-Type": "application/octet-stream",
+        },
+      },
+      (res) => {
+        let body = "";
+        res.on("data", (chunk) => (body += chunk.toString()));
+        res.on("end", () => {
+          if (res.statusCode !== 201) {
+            reject(new Error(`Expected 201, got ${res.statusCode}`));
+            return;
+          }
+          if (body !== "chunk1-chunk2-chunk3") {
+            reject(new Error(`Body mismatch: ${body}`));
+            return;
+          }
+          resolve();
+        });
+      },
+    );
+
     req.on("error", reject);
     req.write("chunk1-");
-    
+
     setTimeout(() => {
       req.write("chunk2-");
       setTimeout(() => {
