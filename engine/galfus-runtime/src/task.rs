@@ -10,235 +10,545 @@ use galfus_vm::VirtualMachine;
 
 use std::sync::Arc;
 
-fn type_mismatch<T: std::fmt::Debug>(
-    expected: &galfus_bytecode::BytecodeType,
-    found: &T,
-) -> galfus_contract::BoundaryCodecError {
-    galfus_contract::BoundaryCodecError::TypeMismatch {
-        expected: format!("{expected:?}"),
-        found: format!("{found:?}"),
-    }
-}
-
-pub(crate) fn decode_from_thread_heap(
+pub(crate) fn decode_surface_from_thread_heap(
     heap: &galfus_vm::thread::PrivateHeap,
+    schema: &galfus_contract::SurfaceSchema,
     value: galfus_vm::VmValue,
     expected: galfus_bytecode::instruction::TypeIdx,
     module: &galfus_bytecode::BytecodeModule,
-) -> Result<galfus_contract::BoundaryValue, galfus_contract::BoundaryCodecError> {
+) -> Result<galfus_contract::SurfaceValue, String> {
     use galfus_bytecode::BytecodeType;
-    use galfus_contract::{BoundaryCodecError, BoundaryValue};
+    use galfus_contract::{SurfaceCodecError, SurfaceSchema, SurfaceValue};
 
     let expected_type = module
         .types
         .get(expected.raw() as usize)
-        .ok_or(BoundaryCodecError::UnsupportedType)?;
-    match (expected_type, value) {
-        (BytecodeType::Null, galfus_vm::VmValue::Null) => Ok(BoundaryValue::Null),
-        (BytecodeType::Bool, galfus_vm::VmValue::Bool(value)) => Ok(BoundaryValue::Bool(value)),
-        (BytecodeType::Int8, galfus_vm::VmValue::Int8(value)) => Ok(BoundaryValue::I8(value)),
-        (BytecodeType::Int16, galfus_vm::VmValue::Int16(value)) => Ok(BoundaryValue::I16(value)),
-        (BytecodeType::Int32, galfus_vm::VmValue::Int32(value)) => Ok(BoundaryValue::I32(value)),
-        (BytecodeType::Int64, galfus_vm::VmValue::Int64(value)) => Ok(BoundaryValue::I64(value)),
-        (BytecodeType::Uint8, galfus_vm::VmValue::Uint8(value)) => Ok(BoundaryValue::U8(value)),
-        (BytecodeType::Uint16, galfus_vm::VmValue::Uint16(value)) => Ok(BoundaryValue::U16(value)),
-        (BytecodeType::Uint32, galfus_vm::VmValue::Uint32(value)) => Ok(BoundaryValue::U32(value)),
-        (BytecodeType::Uint64, galfus_vm::VmValue::Uint64(value)) => Ok(BoundaryValue::U64(value)),
-        (BytecodeType::Float32, galfus_vm::VmValue::Float32(value)) => {
-            Ok(BoundaryValue::F32(galfus_core::normalize_f32(value)))
+        .ok_or_else(|| "missing expected bytecode type".to_string())?;
+    let mismatch = || format!("surface schema {schema:?} does not match {expected_type:?}");
+    match (schema, value, expected_type) {
+        (SurfaceSchema::Null, galfus_vm::VmValue::Null, BytecodeType::Null) => {
+            Ok(SurfaceValue::Null)
         }
-        (BytecodeType::Float64, galfus_vm::VmValue::Float64(value)) => {
-            Ok(BoundaryValue::F64(galfus_core::normalize_f64(value)))
+        (SurfaceSchema::Bool, galfus_vm::VmValue::Bool(value), BytecodeType::Bool) => {
+            Ok(SurfaceValue::Bool(value))
+        }
+        (SurfaceSchema::U16, galfus_vm::VmValue::Uint16(value), BytecodeType::Uint16) => {
+            Ok(SurfaceValue::U16(value))
+        }
+        (SurfaceSchema::I32, galfus_vm::VmValue::Int32(value), BytecodeType::Int32) => {
+            Ok(SurfaceValue::I32(value))
+        }
+        (SurfaceSchema::I64, galfus_vm::VmValue::Int64(value), BytecodeType::Int64) => {
+            Ok(SurfaceValue::I64(value))
+        }
+        (SurfaceSchema::U32, galfus_vm::VmValue::Uint32(value), BytecodeType::Uint32) => {
+            Ok(SurfaceValue::U32(value))
+        }
+        (SurfaceSchema::U64, galfus_vm::VmValue::Uint64(value), BytecodeType::Uint64) => {
+            Ok(SurfaceValue::U64(value))
+        }
+        (SurfaceSchema::F32, galfus_vm::VmValue::Float32(value), BytecodeType::Float32) => {
+            Ok(SurfaceValue::F32(galfus_core::normalize_f32(value)))
+        }
+        (SurfaceSchema::F64, galfus_vm::VmValue::Float64(value), BytecodeType::Float64) => {
+            Ok(SurfaceValue::F64(galfus_core::normalize_f64(value)))
         }
         (
-            BytecodeType::Function { .. },
-            galfus_vm::VmValue::Function {
-                module_id,
-                func_idx,
-            },
-        ) => Ok(BoundaryValue::Function {
-            module_id: module_id.raw(),
-            func_idx: func_idx.raw(),
-        }),
-        (BytecodeType::AdapterHandle(type_id), galfus_vm::VmValue::Object(reference)) => {
-            match heap.get_object(reference) {
-                Ok(galfus_vm::HeapObject::AdapterHandle {
-                    binding_id,
-                    type_id: actual,
-                    id,
-                }) if actual == type_id => Ok(BoundaryValue::Handle {
-                    type_id: type_id.clone(),
-                    binding_id: Some(*binding_id),
-                    id: *id,
-                }),
-                _ => Err(type_mismatch(
-                    expected_type,
-                    &galfus_vm::VmValue::Object(reference),
-                )),
-            }
-        }
-        (BytecodeType::Array(element_type), galfus_vm::VmValue::Object(reference)) => {
+            SurfaceSchema::Bytes,
+            galfus_vm::VmValue::Object(reference),
+            BytecodeType::Array(item),
+        ) if matches!(
+            module.types.get(item.raw() as usize),
+            Some(BytecodeType::Uint8)
+        ) =>
+        {
             let galfus_vm::HeapObject::Array { elements, .. } = heap
                 .get_object(reference)
-                .map_err(|_| BoundaryCodecError::UnsupportedType)?
+                .map_err(|_| "surface bytes reference is invalid".to_string())?
             else {
-                return Err(type_mismatch(
-                    expected_type,
-                    &galfus_vm::VmValue::Object(reference),
-                ));
+                return Err(mismatch());
             };
-            if let Some(BytecodeType::Uint8) = module.types.get(element_type.raw() as usize) {
-                let bytes: Result<Vec<u8>, _> = elements
-                    .iter()
-                    .map(|element| {
-                        if let galfus_vm::VmValue::Uint8(b) = element {
-                            Ok(*b)
-                        } else {
-                            Err(type_mismatch(
-                                expected_type,
-                                &galfus_vm::VmValue::Object(reference),
-                            ))
-                        }
-                    })
-                    .collect();
-                return Ok(BoundaryValue::Bytes(bytes?));
-            }
+            let bytes = elements
+                .iter()
+                .map(|value| match value {
+                    galfus_vm::VmValue::Uint8(value) => Ok(*value),
+                    _ => Err(mismatch()),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(SurfaceValue::Bytes(bytes))
+        }
+        (SurfaceSchema::Optional(_), galfus_vm::VmValue::Null, BytecodeType::Nullable(_)) => {
+            Ok(SurfaceValue::Null)
+        }
+        (SurfaceSchema::Optional(schema), value, BytecodeType::Nullable(item)) => {
+            decode_surface_from_thread_heap(heap, schema, value, *item, module)
+        }
+        (
+            SurfaceSchema::List(schema),
+            galfus_vm::VmValue::Object(reference),
+            BytecodeType::Array(item),
+        ) => {
+            let galfus_vm::HeapObject::Array { elements, .. } = heap
+                .get_object(reference)
+                .map_err(|_| "surface list reference is invalid".to_string())?
+            else {
+                return Err(mismatch());
+            };
             let values = elements
                 .iter()
                 .cloned()
-                .map(|element| decode_from_thread_heap(heap, element, *element_type, module))
+                .map(|value| decode_surface_from_thread_heap(heap, schema, value, *item, module))
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok(BoundaryValue::Array {
-                element_type: module.boundary_type(*element_type)?,
-                values,
-            })
+            Ok(SurfaceValue::List(values))
         }
-        (BytecodeType::Nullable(_), galfus_vm::VmValue::Null) => Ok(BoundaryValue::Null),
-        (BytecodeType::Nullable(inner), value) => {
-            decode_from_thread_heap(heap, value, *inner, module)
-        }
-        (BytecodeType::Tuple(element_types), galfus_vm::VmValue::Object(reference)) => {
+        (
+            SurfaceSchema::Tuple(schemas),
+            galfus_vm::VmValue::Object(reference),
+            BytecodeType::Tuple(item_types),
+        ) => {
             let galfus_vm::HeapObject::Tuple { elements } = heap
                 .get_object(reference)
-                .map_err(|_| BoundaryCodecError::UnsupportedType)?
+                .map_err(|_| "surface tuple reference is invalid".to_string())?
             else {
-                return Err(type_mismatch(
-                    expected_type,
-                    &galfus_vm::VmValue::Object(reference),
-                ));
+                return Err(mismatch());
             };
-            if elements.len() != element_types.len() {
-                return Err(type_mismatch(
-                    expected_type,
-                    &galfus_vm::VmValue::Object(reference),
-                ));
+            if schemas.len() != elements.len() || elements.len() != item_types.len() {
+                return Err(mismatch());
             }
-            let values = elements
+            let values = schemas
                 .iter()
-                .cloned()
-                .zip(element_types)
-                .map(|(element, ty)| decode_from_thread_heap(heap, element, *ty, module))
+                .zip(elements.iter().cloned().zip(item_types))
+                .map(|(schema, (value, item_type))| {
+                    decode_surface_from_thread_heap(heap, schema, value, *item_type, module)
+                })
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok(BoundaryValue::Tuple(values))
+            Ok(SurfaceValue::Tuple(values))
         }
-        (BytecodeType::Choice(layout_idx), galfus_vm::VmValue::Object(reference)) => {
+        (
+            SurfaceSchema::Struct { fields, .. },
+            galfus_vm::VmValue::Object(reference),
+            BytecodeType::Struct(layout_idx),
+        ) => {
+            let galfus_vm::HeapObject::Struct { fields: values, .. } =
+                heap.get_object(reference)
+                    .map_err(|_| "surface struct reference is invalid".to_string())?
+            else {
+                return Err(mismatch());
+            };
+            let layout = module
+                .struct_layouts
+                .get(layout_idx.raw() as usize)
+                .ok_or_else(|| "missing struct layout".to_string())?;
+            if fields.len() != values.len() || values.len() != layout.fields.len() {
+                return Err(mismatch());
+            }
+            let values = fields
+                .iter()
+                .zip(values.iter().cloned().zip(layout.fields.iter()))
+                .map(|(field, (value, layout))| {
+                    Ok((
+                        field.name.clone(),
+                        decode_surface_from_thread_heap(
+                            heap,
+                            &field.schema,
+                            value,
+                            layout.ty,
+                            module,
+                        )?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            Ok(SurfaceValue::Struct(values))
+        }
+        (
+            SurfaceSchema::Choice { variants, .. },
+            galfus_vm::VmValue::Object(reference),
+            BytecodeType::Choice(layout_idx),
+        ) => {
             let galfus_vm::HeapObject::Choice {
-                layout_idx: actual_layout,
                 variant_idx,
                 payload,
                 ..
             } = heap
                 .get_object(reference)
-                .map_err(|_| BoundaryCodecError::UnsupportedType)?
+                .map_err(|_| "surface choice reference is invalid".to_string())?
             else {
-                return Err(type_mismatch(
-                    expected_type,
-                    &galfus_vm::VmValue::Object(reference),
-                ));
+                return Err(mismatch());
             };
-            if actual_layout != layout_idx {
-                return Err(type_mismatch(
-                    expected_type,
-                    &galfus_vm::VmValue::Object(reference),
-                ));
-            }
-            let variant = module
+            let schema_variant = variants
+                .get(*variant_idx as usize)
+                .ok_or_else(|| "surface choice has too many variants".to_string())?;
+            let layout = module
                 .choice_layouts
                 .get(layout_idx.raw() as usize)
-                .and_then(|layout| layout.variants.get(*variant_idx as usize))
-                .ok_or(BoundaryCodecError::UnsupportedType)?;
-            let payload = variant
-                .payload_ty
-                .map(|payload_type| {
-                    decode_from_thread_heap(heap, *payload, payload_type, module).map(Box::new)
-                })
-                .transpose()?;
-            Ok(BoundaryValue::Choice {
-                variant: *variant_idx as u32,
+                .ok_or_else(|| "missing choice layout".to_string())?;
+            let variant_layout = layout
+                .variants
+                .get(*variant_idx as usize)
+                .ok_or_else(|| "surface choice layout has too many variants".to_string())?;
+            let payload = match (schema_variant.payload.as_ref(), variant_layout.payload_ty) {
+                (None, None) => None,
+                (Some(schema), Some(payload_type)) => Some(Box::new(
+                    decode_surface_from_thread_heap(heap, schema, *payload, payload_type, module)?,
+                )),
+                _ => return Err(mismatch()),
+            };
+            Ok(SurfaceValue::Choice {
+                variant: schema_variant.name.clone(),
                 payload,
             })
         }
-        (_, found) => Err(type_mismatch(expected_type, &found)),
+        (
+            SurfaceSchema::Handle { .. },
+            galfus_vm::VmValue::Object(reference),
+            BytecodeType::AdapterHandle(type_id),
+        ) => {
+            let galfus_vm::HeapObject::AdapterHandle {
+                type_id: actual,
+                id,
+                ..
+            } = heap
+                .get_object(reference)
+                .map_err(|_| "surface handle reference is invalid".to_string())?
+            else {
+                return Err(mismatch());
+            };
+            if actual != type_id {
+                return Err(SurfaceCodecError::InvalidHandle.to_string());
+            }
+            Ok(SurfaceValue::Handle(galfus_contract::SurfaceHandle {
+                type_id: actual.clone(),
+                id: *id,
+            }))
+        }
+        _ => Err(mismatch()),
     }
 }
 
-pub(crate) fn encode_into_thread_heap(
+pub(crate) fn encode_future_value_into_thread_heap(
     heap: &mut galfus_vm::thread::PrivateHeap,
-    value: galfus_contract::BoundaryValue,
+    value: crate::event::FutureValue,
     expected: galfus_bytecode::instruction::TypeIdx,
     module_id: galfus_core::ModuleId,
     module: &galfus_bytecode::BytecodeModule,
-) -> Result<galfus_vm::VmValue, galfus_contract::BoundaryCodecError> {
+) -> Result<galfus_vm::VmValue, String> {
     use galfus_bytecode::BytecodeType;
-    use galfus_contract::{BoundaryCodecError, BoundaryValue};
 
     let expected_type = module
         .types
         .get(expected.raw() as usize)
-        .ok_or(BoundaryCodecError::UnsupportedType)?;
-    match (expected_type, value) {
-        (BytecodeType::Null, BoundaryValue::Null) => Ok(galfus_vm::VmValue::Null),
-        (BytecodeType::Bool, BoundaryValue::Bool(value)) => Ok(galfus_vm::VmValue::Bool(value)),
-        (BytecodeType::Int8, BoundaryValue::I8(value)) => Ok(galfus_vm::VmValue::Int8(value)),
-        (BytecodeType::Int16, BoundaryValue::I16(value)) => Ok(galfus_vm::VmValue::Int16(value)),
-        (BytecodeType::Int32, BoundaryValue::I32(value)) => Ok(galfus_vm::VmValue::Int32(value)),
-        (BytecodeType::Int64, BoundaryValue::I64(value)) => Ok(galfus_vm::VmValue::Int64(value)),
-        (BytecodeType::Uint8, BoundaryValue::U8(value)) => Ok(galfus_vm::VmValue::Uint8(value)),
-        (BytecodeType::Uint16, BoundaryValue::U16(value)) => Ok(galfus_vm::VmValue::Uint16(value)),
-        (BytecodeType::Uint32, BoundaryValue::U32(value)) => Ok(galfus_vm::VmValue::Uint32(value)),
-        (BytecodeType::Uint64, BoundaryValue::U64(value)) => Ok(galfus_vm::VmValue::Uint64(value)),
-        (BytecodeType::Float32, BoundaryValue::F32(value)) => Ok(galfus_vm::VmValue::Float32(
-            galfus_core::normalize_f32(value),
+        .ok_or_else(|| "missing expected bytecode type".to_string())?;
+
+    match value {
+        crate::event::FutureValue::Null
+            if matches!(
+                expected_type,
+                BytecodeType::Null | BytecodeType::Nullable(_) | BytecodeType::Any
+            ) =>
+        {
+            Ok(galfus_vm::VmValue::Null)
+        }
+        crate::event::FutureValue::Null => Err(format!(
+            "null future result does not match {expected_type:?}"
         )),
-        (BytecodeType::Float64, BoundaryValue::F64(value)) => Ok(galfus_vm::VmValue::Float64(
-            galfus_core::normalize_f64(value),
-        )),
-        (
-            BytecodeType::Function { .. },
-            BoundaryValue::Function {
+        crate::event::FutureValue::Surface {
+            contract,
+            value,
+            adapter_binding_id,
+        } => {
+            if !contract.validates() {
+                return Err("surface contract fingerprint is invalid".to_string());
+            }
+            encode_surface_into_thread_heap(
+                heap,
+                &contract.schema,
+                value,
+                expected,
                 module_id,
-                func_idx,
-            },
-        ) => Ok(galfus_vm::VmValue::Function {
-            module_id: galfus_core::ModuleId::new(module_id),
-            func_idx: galfus_bytecode::instruction::FuncIdx(func_idx),
-        }),
-        (
-            BytecodeType::AdapterHandle(type_id),
-            BoundaryValue::Handle {
-                type_id: actual,
-                binding_id: Some(binding_id),
-                id,
-            },
-        ) if type_id == &actual => Ok(galfus_vm::VmValue::Object(
-            heap.alloc(galfus_vm::HeapObject::AdapterHandle {
-                binding_id,
-                type_id: actual,
-                id,
+                module,
+                adapter_binding_id,
+            )
+        }
+        value => {
+            let expected = match expected_type {
+                BytecodeType::Nullable(inner) => *inner,
+                _ => expected,
+            };
+            encode_non_null_future_value_into_thread_heap(heap, value, expected, module_id, module)
+        }
+    }
+}
+
+fn encode_non_null_future_value_into_thread_heap(
+    heap: &mut galfus_vm::thread::PrivateHeap,
+    value: crate::event::FutureValue,
+    expected: galfus_bytecode::instruction::TypeIdx,
+    module_id: galfus_core::ModuleId,
+    module: &galfus_bytecode::BytecodeModule,
+) -> Result<galfus_vm::VmValue, String> {
+    use galfus_bytecode::BytecodeType;
+
+    let expected_type = module
+        .types
+        .get(expected.raw() as usize)
+        .ok_or_else(|| "missing expected bytecode type".to_string())?;
+    let mismatch = || format!("future result does not match {expected_type:?}");
+
+    match value {
+        crate::event::FutureValue::Int8(value)
+            if matches!(expected_type, BytecodeType::Int8 | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Int8(value))
+        }
+        crate::event::FutureValue::Int16(value)
+            if matches!(expected_type, BytecodeType::Int16 | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Int16(value))
+        }
+        crate::event::FutureValue::I32(value)
+            if matches!(expected_type, BytecodeType::Int32 | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Int32(value))
+        }
+        crate::event::FutureValue::I64(value)
+            if matches!(expected_type, BytecodeType::Int64 | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Int64(value))
+        }
+        crate::event::FutureValue::Uint8(value)
+            if matches!(expected_type, BytecodeType::Uint8 | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Uint8(value))
+        }
+        crate::event::FutureValue::Uint16(value)
+            if matches!(expected_type, BytecodeType::Uint16 | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Uint16(value))
+        }
+        crate::event::FutureValue::Uint32(value)
+            if matches!(expected_type, BytecodeType::Uint32 | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Uint32(value))
+        }
+        crate::event::FutureValue::Uint64(value)
+            if matches!(expected_type, BytecodeType::Uint64 | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Uint64(value))
+        }
+        crate::event::FutureValue::F32(value)
+            if matches!(expected_type, BytecodeType::Float32 | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Float32(galfus_core::normalize_f32(
+                value,
+            )))
+        }
+        crate::event::FutureValue::F64(value)
+            if matches!(expected_type, BytecodeType::Float64 | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Float64(galfus_core::normalize_f64(
+                value,
+            )))
+        }
+        crate::event::FutureValue::Bool(value)
+            if matches!(expected_type, BytecodeType::Bool | BytecodeType::Any) =>
+        {
+            Ok(galfus_vm::VmValue::Bool(value))
+        }
+        crate::event::FutureValue::Function {
+            module_id: id,
+            func_idx: idx,
+        } if matches!(
+            expected_type,
+            BytecodeType::Function { .. } | BytecodeType::Any
+        ) =>
+        {
+            Ok(galfus_vm::VmValue::Function {
+                module_id: galfus_core::ModuleId::new(id),
+                func_idx: galfus_bytecode::instruction::FuncIdx(
+                    idx.try_into()
+                        .map_err(|_| "future function index exceeds bytecode limits".to_string())?,
+                ),
             })
-            .map_err(|_| BoundaryCodecError::HeapExhausted)?,
-        )),
-        (BytecodeType::Array(element_type), BoundaryValue::Bytes(bytes))
+        }
+        crate::event::FutureValue::Array(values) => {
+            let BytecodeType::Array(element_ty) = expected_type else {
+                return Err(mismatch());
+            };
+            let elements = values
+                .into_iter()
+                .map(|value| {
+                    encode_future_value_into_thread_heap(
+                        heap,
+                        value,
+                        *element_ty,
+                        module_id,
+                        module,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Array {
+                    module_id,
+                    element_ty: *element_ty,
+                    elements,
+                })
+                .map_err(|_| "future array exceeds heap quota".to_string())?;
+            Ok(galfus_vm::VmValue::Object(reference))
+        }
+        crate::event::FutureValue::Tuple(values) => {
+            let BytecodeType::Tuple(item_types) = expected_type else {
+                return Err(mismatch());
+            };
+            if values.len() != item_types.len() {
+                return Err(mismatch());
+            }
+            let elements = values
+                .into_iter()
+                .zip(item_types)
+                .map(|(value, item_type)| {
+                    encode_future_value_into_thread_heap(heap, value, *item_type, module_id, module)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Tuple { elements })
+                .map_err(|_| "future tuple exceeds heap quota".to_string())?;
+            Ok(galfus_vm::VmValue::Object(reference))
+        }
+        crate::event::FutureValue::Struct(values) => {
+            let BytecodeType::Struct(layout_idx) = expected_type else {
+                return Err(mismatch());
+            };
+            let layout = module
+                .struct_layouts
+                .get(layout_idx.raw() as usize)
+                .ok_or_else(|| "missing future struct layout".to_string())?;
+            if values.len() != layout.fields.len() {
+                return Err(mismatch());
+            }
+            let fields = values
+                .into_iter()
+                .zip(layout.fields.iter())
+                .map(|(value, field)| {
+                    encode_future_value_into_thread_heap(heap, value, field.ty, module_id, module)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Struct {
+                    module_id,
+                    layout_idx: *layout_idx,
+                    fields,
+                })
+                .map_err(|_| "future struct exceeds heap quota".to_string())?;
+            Ok(galfus_vm::VmValue::Object(reference))
+        }
+        crate::event::FutureValue::Choice {
+            variant_idx,
+            payload,
+        } => {
+            let BytecodeType::Choice(layout_idx) = expected_type else {
+                return Err(mismatch());
+            };
+            let layout = module
+                .choice_layouts
+                .get(layout_idx.raw() as usize)
+                .ok_or_else(|| "missing future choice layout".to_string())?;
+            let variant = layout
+                .variants
+                .get(variant_idx as usize)
+                .ok_or_else(|| "future choice has an invalid variant".to_string())?;
+            let payload = match (payload, variant.payload_ty) {
+                (None, None) => galfus_vm::VmValue::Null,
+                (Some(value), Some(payload_ty)) => encode_future_value_into_thread_heap(
+                    heap, *value, payload_ty, module_id, module,
+                )?,
+                _ => return Err(mismatch()),
+            };
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Choice {
+                    module_id,
+                    layout_idx: *layout_idx,
+                    variant_idx,
+                    payload,
+                })
+                .map_err(|_| "future choice exceeds heap quota".to_string())?;
+            Ok(galfus_vm::VmValue::Object(reference))
+        }
+        crate::event::FutureValue::Handle {
+            binding_id,
+            type_id,
+            id,
+        } => match expected_type {
+            BytecodeType::AdapterHandle(expected_type_id) if *expected_type_id == type_id => {
+                let reference = heap
+                    .alloc(galfus_vm::HeapObject::AdapterHandle {
+                        binding_id,
+                        type_id,
+                        id,
+                    })
+                    .map_err(|_| "future handle exceeds heap quota".to_string())?;
+                Ok(galfus_vm::VmValue::Object(reference))
+            }
+            _ => Err(mismatch()),
+        },
+        crate::event::FutureValue::Aggregate(values) => {
+            encode_aggregate_into_thread_heap(heap, values, expected, module_id, module)
+        }
+        crate::event::FutureValue::Null | crate::event::FutureValue::Surface { .. } => {
+            unreachable!("nullable and surface future values are handled before recursive encoding")
+        }
+        _ => Err(mismatch()),
+    }
+}
+
+pub(crate) fn encode_surface_into_thread_heap(
+    heap: &mut galfus_vm::thread::PrivateHeap,
+    schema: &galfus_contract::SurfaceSchema,
+    value: galfus_contract::SurfaceValue,
+    expected: galfus_bytecode::instruction::TypeIdx,
+    module_id: galfus_core::ModuleId,
+    module: &galfus_bytecode::BytecodeModule,
+    adapter_binding_id: Option<galfus_core::BindingId>,
+) -> Result<galfus_vm::VmValue, String> {
+    use galfus_bytecode::BytecodeType;
+    use galfus_contract::{SurfaceCodecError, SurfaceSchema, SurfaceValue};
+
+    schema
+        .validate_value(&value)
+        .map_err(|error| format!("surface value: {error}"))?;
+    let expected_type = module
+        .types
+        .get(expected.raw() as usize)
+        .ok_or_else(|| "missing expected bytecode type".to_string())?;
+    let mismatch = || format!("surface schema {schema:?} does not match {expected_type:?}");
+    match (schema, value, expected_type) {
+        (SurfaceSchema::Null, SurfaceValue::Null, BytecodeType::Null) => {
+            Ok(galfus_vm::VmValue::Null)
+        }
+        (SurfaceSchema::Bool, SurfaceValue::Bool(value), BytecodeType::Bool) => {
+            Ok(galfus_vm::VmValue::Bool(value))
+        }
+        (SurfaceSchema::U16, SurfaceValue::U16(value), BytecodeType::Uint16) => {
+            Ok(galfus_vm::VmValue::Uint16(value))
+        }
+        (SurfaceSchema::I32, SurfaceValue::I32(value), BytecodeType::Int32) => {
+            Ok(galfus_vm::VmValue::Int32(value))
+        }
+        (SurfaceSchema::I64, SurfaceValue::I64(value), BytecodeType::Int64) => {
+            Ok(galfus_vm::VmValue::Int64(value))
+        }
+        (SurfaceSchema::U32, SurfaceValue::U32(value), BytecodeType::Uint32) => {
+            Ok(galfus_vm::VmValue::Uint32(value))
+        }
+        (SurfaceSchema::U64, SurfaceValue::U64(value), BytecodeType::Uint64) => {
+            Ok(galfus_vm::VmValue::Uint64(value))
+        }
+        (SurfaceSchema::F32, SurfaceValue::F32(value), BytecodeType::Float32) => Ok(
+            galfus_vm::VmValue::Float32(galfus_core::normalize_f32(value)),
+        ),
+        (SurfaceSchema::F64, SurfaceValue::F64(value), BytecodeType::Float64) => Ok(
+            galfus_vm::VmValue::Float64(galfus_core::normalize_f64(value)),
+        ),
+        (SurfaceSchema::Bytes, SurfaceValue::Bytes(bytes), BytecodeType::Array(element_type))
             if matches!(
                 module.types.get(element_type.raw() as usize),
                 Some(BytecodeType::Uint8)
@@ -251,27 +561,209 @@ pub(crate) fn encode_into_thread_heap(
                     element_ty: *element_type,
                     elements,
                 })
-                .map_err(|_| BoundaryCodecError::HeapExhausted)?;
+                .map_err(|_| "surface bytes exceed heap quota".to_string())?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
-        (BytecodeType::Array(element_type), value @ BoundaryValue::Array { .. }) => {
-            let BoundaryValue::Array {
-                element_type: actual_element_type,
-                ..
-            } = &value
-            else {
-                unreachable!("array value matched above");
-            };
-            if actual_element_type != &module.boundary_type(*element_type)? {
-                return Err(type_mismatch(expected_type, &value));
-            }
-            let BoundaryValue::Array { values, .. } = value else {
-                unreachable!("array value matched above");
-            };
+        (SurfaceSchema::Optional(_), SurfaceValue::Null, BytecodeType::Nullable(_)) => {
+            Ok(galfus_vm::VmValue::Null)
+        }
+        (SurfaceSchema::Optional(inner), value, BytecodeType::Nullable(inner_type)) => {
+            encode_surface_into_thread_heap(
+                heap,
+                inner,
+                value,
+                *inner_type,
+                module_id,
+                module,
+                adapter_binding_id,
+            )
+        }
+        (
+            SurfaceSchema::List(item_schema),
+            SurfaceValue::List(values),
+            BytecodeType::Array(item_type),
+        ) => {
             let elements = values
                 .into_iter()
-                .map(|element| {
-                    encode_into_thread_heap(heap, element, *element_type, module_id, module)
+                .map(|value| {
+                    encode_surface_into_thread_heap(
+                        heap,
+                        item_schema,
+                        value,
+                        *item_type,
+                        module_id,
+                        module,
+                        adapter_binding_id,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Array {
+                    module_id,
+                    element_ty: *item_type,
+                    elements,
+                })
+                .map_err(|_| "surface list exceeds heap quota".to_string())?;
+            Ok(galfus_vm::VmValue::Object(reference))
+        }
+        (
+            SurfaceSchema::Tuple(schemas),
+            SurfaceValue::Tuple(values),
+            BytecodeType::Tuple(item_types),
+        ) if schemas.len() == values.len() && values.len() == item_types.len() => {
+            let elements = schemas
+                .iter()
+                .zip(values.into_iter().zip(item_types))
+                .map(|(schema, (value, item_type))| {
+                    encode_surface_into_thread_heap(
+                        heap,
+                        schema,
+                        value,
+                        *item_type,
+                        module_id,
+                        module,
+                        adapter_binding_id,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Tuple { elements })
+                .map_err(|_| "surface tuple exceeds heap quota".to_string())?;
+            Ok(galfus_vm::VmValue::Object(reference))
+        }
+        (
+            SurfaceSchema::Struct { fields, .. },
+            SurfaceValue::Struct(values),
+            BytecodeType::Struct(layout_idx),
+        ) => {
+            let layout = module
+                .struct_layouts
+                .get(layout_idx.raw() as usize)
+                .ok_or_else(|| "missing struct layout".to_string())?;
+            if fields.len() != layout.fields.len() {
+                return Err(mismatch());
+            }
+            let fields = fields
+                .iter()
+                .zip(layout.fields.iter())
+                .map(|(field_schema, field_layout)| {
+                    let value = values
+                        .iter()
+                        .find_map(|(name, value)| (name == &field_schema.name).then_some(value))
+                        .cloned()
+                        .ok_or_else(|| {
+                            SurfaceCodecError::MissingField(field_schema.name.clone()).to_string()
+                        })?;
+                    encode_surface_into_thread_heap(
+                        heap,
+                        &field_schema.schema,
+                        value,
+                        field_layout.ty,
+                        module_id,
+                        module,
+                        adapter_binding_id,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Struct {
+                    module_id,
+                    layout_idx: *layout_idx,
+                    fields,
+                })
+                .map_err(|_| "surface struct exceeds heap quota".to_string())?;
+            Ok(galfus_vm::VmValue::Object(reference))
+        }
+        (
+            SurfaceSchema::Choice { variants, .. },
+            SurfaceValue::Choice { variant, payload },
+            BytecodeType::Choice(layout_idx),
+        ) => {
+            let schema_variant = variants
+                .iter()
+                .enumerate()
+                .find(|(_, candidate)| candidate.name == variant)
+                .ok_or_else(|| SurfaceCodecError::InvalidTag(variant.clone()).to_string())?;
+            let layout = module
+                .choice_layouts
+                .get(layout_idx.raw() as usize)
+                .ok_or_else(|| "missing choice layout".to_string())?;
+            let variant_layout = layout
+                .variants
+                .get(schema_variant.0)
+                .ok_or_else(|| "surface choice has too many variants".to_string())?;
+            let payload = match (
+                schema_variant.1.payload.as_ref(),
+                variant_layout.payload_ty,
+                payload,
+            ) {
+                (None, None, None) => galfus_vm::VmValue::Null,
+                (Some(schema), Some(payload_type), Some(value)) => encode_surface_into_thread_heap(
+                    heap,
+                    schema,
+                    *value,
+                    payload_type,
+                    module_id,
+                    module,
+                    adapter_binding_id,
+                )?,
+                _ => return Err(mismatch()),
+            };
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::Choice {
+                    module_id,
+                    layout_idx: *layout_idx,
+                    variant_idx: schema_variant.0 as u16,
+                    payload,
+                })
+                .map_err(|_| "surface choice exceeds heap quota".to_string())?;
+            Ok(galfus_vm::VmValue::Object(reference))
+        }
+        (
+            SurfaceSchema::Handle { .. },
+            SurfaceValue::Handle(handle),
+            BytecodeType::AdapterHandle(type_id),
+        ) if handle.type_id == *type_id => {
+            let binding_id = adapter_binding_id
+                .ok_or_else(|| "surface handle is missing its adapter binding".to_string())?;
+            let reference = heap
+                .alloc(galfus_vm::HeapObject::AdapterHandle {
+                    binding_id,
+                    type_id: handle.type_id,
+                    id: handle.id,
+                })
+                .map_err(|_| "surface handle exceeds heap quota".to_string())?;
+            Ok(galfus_vm::VmValue::Object(reference))
+        }
+        _ => Err(mismatch()),
+    }
+}
+
+fn encode_aggregate_into_thread_heap(
+    heap: &mut galfus_vm::thread::PrivateHeap,
+    values: Vec<crate::event::FutureValue>,
+    expected: galfus_bytecode::instruction::TypeIdx,
+    module_id: galfus_core::ModuleId,
+    module: &galfus_bytecode::BytecodeModule,
+) -> Result<galfus_vm::VmValue, String> {
+    use galfus_bytecode::BytecodeType;
+
+    let expected_type = module
+        .types
+        .get(expected.raw() as usize)
+        .ok_or_else(|| "missing aggregate bytecode type".to_string())?;
+    match expected_type {
+        BytecodeType::Array(element_type) => {
+            let elements = values
+                .into_iter()
+                .map(|value| {
+                    encode_future_value_into_thread_heap(
+                        heap,
+                        value,
+                        *element_type,
+                        module_id,
+                        module,
+                    )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let reference = heap
@@ -280,72 +772,29 @@ pub(crate) fn encode_into_thread_heap(
                     element_ty: *element_type,
                     elements,
                 })
-                .map_err(|_| BoundaryCodecError::HeapExhausted)?;
+                .map_err(|_| "aggregate exceeds heap quota".to_string())?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
-        (BytecodeType::Nullable(_), BoundaryValue::Null) => Ok(galfus_vm::VmValue::Null),
-        (BytecodeType::Nullable(inner), value) => {
-            encode_into_thread_heap(heap, value, *inner, module_id, module)
-        }
-        (BytecodeType::Tuple(element_types), value @ BoundaryValue::Tuple(_)) => {
-            let BoundaryValue::Tuple(values) = &value else {
-                unreachable!("tuple value matched above");
-            };
-            if values.len() != element_types.len() {
-                return Err(type_mismatch(expected_type, &value));
-            }
-            let BoundaryValue::Tuple(values) = value else {
-                unreachable!("tuple value matched above");
-            };
+        BytecodeType::Tuple(element_types) if element_types.len() == values.len() => {
             let elements = values
                 .into_iter()
                 .zip(element_types)
-                .map(|(element, ty)| encode_into_thread_heap(heap, element, *ty, module_id, module))
+                .map(|(value, element_type)| {
+                    encode_future_value_into_thread_heap(
+                        heap,
+                        value,
+                        *element_type,
+                        module_id,
+                        module,
+                    )
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             let reference = heap
                 .alloc(galfus_vm::HeapObject::Tuple { elements })
-                .map_err(|_| BoundaryCodecError::HeapExhausted)?;
+                .map_err(|_| "aggregate exceeds heap quota".to_string())?;
             Ok(galfus_vm::VmValue::Object(reference))
         }
-        (BytecodeType::Choice(layout_idx), value @ BoundaryValue::Choice { .. }) => {
-            let BoundaryValue::Choice { variant, payload } = &value else {
-                unreachable!("choice value matched above");
-            };
-            let layout = module
-                .choice_layouts
-                .get(layout_idx.raw() as usize)
-                .ok_or(BoundaryCodecError::UnsupportedType)?;
-            let variant_layout = layout
-                .variants
-                .get(*variant as usize)
-                .ok_or_else(|| type_mismatch(expected_type, &value))?;
-            if matches!(
-                (variant_layout.payload_ty, payload),
-                (None, Some(_)) | (Some(_), None)
-            ) {
-                return Err(type_mismatch(expected_type, &value));
-            }
-            let BoundaryValue::Choice { variant, payload } = value else {
-                unreachable!("choice value matched above");
-            };
-            let payload = match (variant_layout.payload_ty, payload) {
-                (None, None) => galfus_vm::VmValue::Null,
-                (Some(payload_type), Some(payload)) => {
-                    encode_into_thread_heap(heap, *payload, payload_type, module_id, module)?
-                }
-                _ => unreachable!("choice payload shape was validated above"),
-            };
-            let reference = heap
-                .alloc(galfus_vm::HeapObject::Choice {
-                    module_id,
-                    layout_idx: *layout_idx,
-                    variant_idx: variant as u16,
-                    payload,
-                })
-                .map_err(|_| BoundaryCodecError::HeapExhausted)?;
-            Ok(galfus_vm::VmValue::Object(reference))
-        }
-        (_, found) => Err(type_mismatch(expected_type, &found)),
+        _ => Err(format!("aggregate result does not match {expected_type:?}")),
     }
 }
 
@@ -502,7 +951,7 @@ impl RunnableTask for RuntimeTask {
             galfus_vm::VmStep::Return {
                 value,
                 module_id,
-                return_type,
+                return_type: _,
             } => {
                 if let Some(module_id) = thread.finish_module_initialization() {
                     let _ = self.events.submit(crate::event::RuntimeEvent::Initialized {
@@ -510,23 +959,13 @@ impl RunnableTask for RuntimeTask {
                         thread,
                         module_id,
                     });
-                    return ThreadResult::Completed(Ok(galfus_contract::BoundaryValue::I32(0)));
+                    return ThreadResult::Completed(Ok(0));
                 }
-                let module = match self.vm.graph.get(module_id) {
-                    Some(node) => &node.module,
-                    None => {
-                        return ThreadResult::Completed(Err(ExecutionFailure::new(
-                            ExecutionFailureKind::InternalRuntimeFailure,
-                            format!("module {} missing during return decoding", module_id.raw()),
-                        )));
-                    }
-                };
-                let result = match decode_from_thread_heap(&thread.heap, value, return_type, module)
-                {
-                    Ok(value) => Ok(value),
-                    Err(e) => Err(ExecutionFailure::new(
+                let result = match value {
+                    galfus_vm::VmValue::Int32(code) => Ok(code),
+                    _ => Err(ExecutionFailure::new(
                         ExecutionFailureKind::BoundaryCodecFailure,
-                        format!("failed to decode thread return value: {e:?}"),
+                        format!("failed to extract i32 from thread return value (got {value:?})"),
                     )
                     .with_thread_id(self.thread_id)
                     .with_module_id(module_id.raw().into())

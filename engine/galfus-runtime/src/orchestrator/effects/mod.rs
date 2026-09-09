@@ -63,14 +63,14 @@ impl Orchestrator {
                 target_module_id,
                 func_idx,
                 args,
-                arg_types,
+                &arg_types,
                 return_type,
             ),
             galfus_vm::VmEffect::CreateAwaitFuture {
                 module_id,
                 operation,
                 args,
-                ref arg_types,
+                arg_types: _,
                 return_type,
             } => self.handle_create_await_future(
                 thread_id,
@@ -79,14 +79,13 @@ impl Orchestrator {
                 module_id,
                 operation,
                 args,
-                arg_types,
                 return_type,
             ),
             galfus_vm::VmEffect::InternalThreadCall {
                 module_id,
                 operation,
                 args,
-                ref arg_types,
+                arg_types: _,
                 return_type,
             } => self.handle_internal_thread_call(
                 thread_id,
@@ -95,7 +94,6 @@ impl Orchestrator {
                 module_id,
                 operation,
                 args,
-                arg_types,
                 return_type,
             ),
             galfus_vm::VmEffect::CreateIndirectFuture {
@@ -111,7 +109,7 @@ impl Orchestrator {
                 module_id,
                 func,
                 args,
-                arg_types,
+                &arg_types,
                 return_type,
             ),
             galfus_vm::VmEffect::FutureWaitAll {

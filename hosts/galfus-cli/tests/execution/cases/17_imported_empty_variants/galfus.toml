@@ -1,0 +1,7 @@
+[module]
+name = "17_imported_empty_variants"
+target = "app"
+
+[entry]
+path = "src/main.gfs"
+function = "main"

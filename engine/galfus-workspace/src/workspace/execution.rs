@@ -66,7 +66,7 @@ impl Workspace {
         args: &[Vec<u8>],
         providers: Option<Providers>,
         driver: std::rc::Rc<dyn galfus_runtime::driver::ExecutionDriver>,
-    ) -> Result<galfus_contract::BoundaryValue, crate::state::WorkspaceRunError> {
+    ) -> Result<i32, crate::state::WorkspaceRunError> {
         let mut execution = self.start_execution(args, providers, driver)?;
         execution
             .run_sync_to_completion()
@@ -79,7 +79,7 @@ impl Workspace {
         providers: Option<Providers>,
         bindings: galfus_contract::AdapterBindings,
         driver: std::rc::Rc<dyn galfus_runtime::driver::ExecutionDriver>,
-    ) -> Result<galfus_contract::BoundaryValue, crate::state::WorkspaceRunError> {
+    ) -> Result<i32, crate::state::WorkspaceRunError> {
         let mut execution =
             self.start_execution_with_bindings(args, providers, bindings, driver)?;
         execution

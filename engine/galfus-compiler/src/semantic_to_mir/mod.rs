@@ -1,10 +1,32 @@
+mod awaits;
+mod call_arguments;
+mod call_lowering;
+mod call_resolution;
 pub mod complex_literals;
+mod destructuring;
 pub mod expression;
 pub mod function;
+mod function_assignments;
+mod function_blocks;
+mod function_control_flow;
+mod function_expressions;
 mod function_helpers;
+mod function_state;
+mod future_types;
+mod generic_specialization;
 pub mod helpers;
+mod literal_lowering;
+mod match_lowering;
+mod module_generics;
 mod module_items;
+mod module_structs;
+mod name_lowering;
+mod narrowing;
+mod operation_lowering;
 pub mod pattern;
+mod pattern_symbols;
+mod typeof_lowering;
+mod value_access;
 
 use std::collections;
 
@@ -24,7 +46,7 @@ pub struct MirBuilder<'a> {
     pub(super) specialisations: HashMap<(FunctionId, Vec<TypeId>), FunctionId>,
     pub(super) specialized_functions: Vec<MirFunction>,
     pub(super) active_specialisations: HashSet<(FunctionId, Vec<TypeId>)>,
-    pub(super) workspace_ctx: Option<*mut (dyn WorkspaceContext + 'a)>,
+    pub(super) workspace_ctx: Option<&'a mut dyn WorkspaceContext>,
     pub(super) workspace_module_id: Option<ModuleId>,
 }
 
@@ -52,7 +74,7 @@ impl<'a> MirBuilder<'a> {
     }
 
     pub fn with_workspace_ctx(mut self, ctx: &'a mut dyn WorkspaceContext) -> Self {
-        self.workspace_ctx = Some(ctx as *mut (dyn WorkspaceContext + 'a));
+        self.workspace_ctx = Some(ctx);
         self
     }
 
@@ -197,6 +219,7 @@ impl<'a> MirBuilder<'a> {
             return_type: TypeId::new(0),
             type_substitutions: HashMap::new(),
             loop_targets: Vec::new(),
+            narrowing_return_targets: Vec::new(),
         };
 
         let syntax = builder_ctx.builder.graph.syntax();
@@ -247,7 +270,7 @@ impl<'a> MirBuilder<'a> {
             return None;
         }
 
-        builder_ctx.terminate_block(Terminator::Return(None));
+        builder_ctx.close_current_block(Terminator::Return(None));
 
         let mut func = MirFunction {
             id: FunctionId::new(u32::MAX),

@@ -1,7 +1,7 @@
 use std::collections;
 
 use super::DeclarationTypeChecker;
-use crate::{PrimitiveType, SymbolKind, SyntaxNodeKind, TypeKind};
+use crate::{SymbolKind, SyntaxNodeKind, TypeKind};
 use galfus_core::{NodeId, TypeId};
 
 struct InstanceofArmContext<'a> {
@@ -262,15 +262,7 @@ impl<'a> DeclarationTypeChecker<'a> {
         body: NodeId,
         expected: Option<TypeId>,
     ) -> Option<TypeId> {
-        let body_node = self.graph.syntax().node(body)?;
-
-        if body_node.kind() == SyntaxNodeKind::Block {
-            return Some(
-                expected.unwrap_or_else(|| self.layer.table().primitive(PrimitiveType::Null)),
-            );
-        }
-
-        self.infer_expression_type_with_expected(body, expected)
+        self.infer_narrowing_arm_body_type(body, expected)
     }
 
     fn check_instanceof_pattern_type(

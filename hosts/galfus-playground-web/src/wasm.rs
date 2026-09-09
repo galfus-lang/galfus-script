@@ -238,12 +238,7 @@ impl WasmPlayground {
                         }
                     });
 
-                    // Converter o BoundaryValue (i32) para JsValue
-                    if let galfus_contract::BoundaryValue::I32(code) = result {
-                        return Ok(JsValue::from(code));
-                    } else {
-                        return Ok(JsValue::from(0));
-                    }
+                    return Ok(JsValue::from(result));
                 }
                 galfus_contract::ExecutorStepResult::Blocked { .. } => {
                     yield_macro_task().await;

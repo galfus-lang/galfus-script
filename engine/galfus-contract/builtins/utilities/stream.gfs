@@ -1,0 +1,139 @@
+import { Future } from "std/async"
+import { slice } from "text"
+
+const DEFAULT_CAPACITY = 4096
+
+export choice ReadStreamResult<Item> {
+  Data(Item),
+  End,
+  Error([u8])
+}
+
+export choice WriteStreamResult {
+  Accepted,
+  Error([u8])
+}
+
+export constraint ReadStream<Item> {
+  fn next(self): Future<ReadStreamResult<Item>>,
+  fn cancel(self): Future<null>
+}
+
+export constraint WriteStream<Item> {
+  fn write(self, item: Item): Future<WriteStreamResult>,
+  fn finish(self): Future<WriteStreamResult>,
+  fn cancel(self): Future<null>
+}
+
+export struct BytesStream satisfies ReadStream<[u8]> {
+  bytes: [u8] | null,
+  cancelled: bool
+}
+
+export fn fromBytes(bytes: [u8]): BytesStream {
+  return new(BytesStream) {
+    bytes: bytes,
+    cancelled: false
+  }
+}
+
+export fn(async) BytesStream::next(self): ReadStreamResult<[u8]> {
+  if self.cancelled {
+    return ReadStreamResult::End
+  }
+
+  const bytes = self.bytes
+  self.bytes = null
+
+  return instanceof bytes {
+    [u8] data { return ReadStreamResult::Data(data) },
+    null { return ReadStreamResult::End }
+  }
+}
+
+export fn(async) BytesStream::cancel(self): null {
+  self.cancelled = true
+  self.bytes = null
+  return null
+}
+
+export choice CollectResult {
+  Data([u8]),
+  LimitExceeded,
+  Error([u8])
+}
+
+export struct ByteBuffer {
+  data: [u8],
+  length: i32
+}
+
+export fn ByteBuffer::create(initialLength: i32 = DEFAULT_CAPACITY): ByteBuffer {
+  return new(ByteBuffer) {
+    data: new([u8], initialLength),
+    length: 0
+  }
+}
+
+export fn ByteBuffer::append(self, chunk: [u8]): null {
+  const required = self.length + chunk.length
+  if required > self.data.length {
+    var capacity = self.data.length
+    if capacity == 0 {
+      capacity = DEFAULT_CAPACITY
+    }
+    loop {
+      if capacity >= required {
+        break
+      }
+      capacity = capacity * 2
+    }
+
+    const expanded = new([u8], capacity)
+    var index: i32 = 0
+    for byte in self.data {
+      if index >= self.length {
+        break
+      }
+      expanded[index] = byte
+      index += 1
+    }
+    self.data = expanded
+  }
+
+  var offset: i32 = 0
+  for byte in chunk {
+    self.data[self.length + offset] = byte
+    offset += 1
+  }
+  self.length += chunk.length
+  return null
+}
+
+export fn ByteBuffer::toBytes(self): [u8] => slice(self.data, 0, self.length)
+
+export fn(async) ByteBuffer::collect(self, stream: ReadStream<[u8]>, maxBytes: i32 = 16777216): CollectResult {
+  var outcome = CollectResult::Error("unreachable stream state")
+  loop {
+    const result = await stream::next()
+    match result {
+      ReadStreamResult::Data(chunk) {
+        if maxBytes >= 0 && self.length + chunk.length > maxBytes {
+          await stream::cancel()
+          outcome = CollectResult::LimitExceeded
+          break
+        }
+        self::append(chunk)
+      },
+      ReadStreamResult::End {
+        outcome = CollectResult::Data(self::toBytes())
+        break
+      },
+      ReadStreamResult::Error(message) {
+        outcome = CollectResult::Error(message)
+        break
+      }
+    }
+  }
+  return outcome
+}

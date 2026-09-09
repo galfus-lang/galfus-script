@@ -1,5 +1,5 @@
 use super::DeclarationTypeChecker;
-use crate::{SymbolKind, SyntaxNodeKind, TypeKind};
+use crate::{PrimitiveType, SymbolKind, SyntaxNodeKind, TypeKind};
 use galfus_core::{NodeId, SymbolId, TypeId};
 
 impl<'a> DeclarationTypeChecker<'a> {
@@ -126,6 +126,44 @@ impl<'a> DeclarationTypeChecker<'a> {
                 | SyntaxNodeKind::GenericType
                 | SyntaxNodeKind::FunctionType
         )
+    }
+
+    pub(super) fn infer_narrowing_arm_body_type(
+        &mut self,
+        body: NodeId,
+        expected: Option<TypeId>,
+    ) -> Option<TypeId> {
+        let body_node = self.graph.syntax().node(body)?;
+
+        if body_node.kind() != SyntaxNodeKind::Block {
+            return self.infer_expression_type_with_expected(body, expected);
+        }
+
+        let return_expression = body_node.children().last().and_then(|statement| {
+            self.graph
+                .syntax()
+                .node(*statement)
+                .filter(|node| node.kind() == SyntaxNodeKind::ReturnStatement)
+                .and_then(|_| self.graph.syntax().child(*statement, 0))
+        });
+
+        match return_expression {
+            Some(expression) => {
+                let ty = self.infer_expression_type_with_expected(expression, expected);
+
+                if let (Some(expected), Some(actual)) = (expected, ty)
+                    && self.is_unspecialized_choice_instance(expected, actual)
+                {
+                    self.layer.bind_node_type(expression, expected);
+                    return Some(expected);
+                }
+
+                ty
+            }
+            None => {
+                Some(expected.unwrap_or_else(|| self.layer.table().primitive(PrimitiveType::Null)))
+            }
+        }
     }
 
     pub(super) fn node_text(&self, node: NodeId) -> String {

@@ -2,9 +2,10 @@
 mod tests;
 
 use super::pending::PendingContinuation;
+use crate::event::FutureResult;
 use crate::registry::ThreadId;
 use galfus_bytecode::instruction::{FuncIdx, TypeIdx};
-use galfus_contract::{BoundaryValue, ExecutionFailure};
+use galfus_contract::{ExecutionFailure, SurfaceValue};
 use galfus_core::ModuleId;
 use std::collections::HashMap;
 use std::sync::{
@@ -13,27 +14,32 @@ use std::sync::{
 };
 
 #[derive(Debug, Clone)]
+pub enum ProviderArguments {
+    Surface(Vec<SurfaceValue>),
+}
+
+#[derive(Debug, Clone)]
 pub enum Activation {
     GalfusFunction {
         module_id: ModuleId,
         func_idx: FuncIdx,
-        args: Vec<BoundaryValue>,
-        arg_types: Box<[TypeIdx]>,
+        args: Vec<galfus_vm::VmValue>,
     },
     Internal {
         operation: String,
-        args: Vec<BoundaryValue>,
+        module_id: ModuleId,
+        args: Vec<galfus_vm::VmValue>,
     },
     Provider {
         alias: String,
         name: String,
-        args: Vec<BoundaryValue>,
+        args: ProviderArguments,
         request_id: Option<galfus_core::RequestId>,
     },
     Adapter {
         proxy_module: String,
         symbol: String,
-        args: Vec<BoundaryValue>,
+        args: Vec<galfus_contract::SurfaceValue>,
         request_id: Option<galfus_core::RequestId>,
     },
 }
@@ -50,16 +56,20 @@ impl Activation {
                 module_id: *module_id,
                 func_idx: *func_idx,
                 args: Vec::new(),
-                arg_types: Box::new([]),
             },
-            Self::Internal { operation, .. } => Self::Internal {
+            Self::Internal {
+                operation,
+                module_id,
+                ..
+            } => Self::Internal {
                 operation: operation.clone(),
+                module_id: *module_id,
                 args: Vec::new(),
             },
             Self::Provider { alias, name, .. } => Self::Provider {
                 alias: alias.clone(),
                 name: name.clone(),
-                args: Vec::new(),
+                args: ProviderArguments::Surface(Vec::new()),
                 request_id: None,
             },
             Self::Adapter {
@@ -80,7 +90,7 @@ impl Activation {
 pub enum FutureState {
     Created(Activation),
     Running(Activation),
-    Resolved(Result<BoundaryValue, ExecutionFailure>),
+    Resolved(FutureResult),
     Discarded,
 }
 
@@ -158,13 +168,13 @@ pub enum WaitDisposition {
     Registered,
     Resolved {
         waiter: Waiter,
-        result: Result<BoundaryValue, ExecutionFailure>,
+        result: FutureResult,
     },
     Discarded,
 }
 
 pub enum DiscardDisposition {
-    Created,
+    Created(Activation),
     Running(Activation),
     Retained,
     Terminal,
@@ -302,6 +312,38 @@ impl FutureRegistry {
             }
             FutureState::Running(_) | FutureState::Resolved(_) | FutureState::Discarded => Ok(None),
         }
+    }
+
+    pub fn take_inline_galfus_activation(
+        &mut self,
+        owner_thread_id: ThreadId,
+        future_id: galfus_core::FutureId,
+    ) -> Result<Option<Activation>, ExecutionFailure> {
+        let record = self
+            .records
+            .get_mut(&(owner_thread_id, future_id))
+            .ok_or_else(|| {
+                ExecutionFailure::new(
+                    galfus_contract::ExecutionFailureKind::InvalidContinuation,
+                    "unknown future",
+                )
+                .with_thread_id(owner_thread_id)
+                .with_future_id(future_id)
+            })?;
+
+        if !matches!(
+            record.state,
+            FutureState::Created(Activation::GalfusFunction { .. })
+        ) {
+            return Ok(None);
+        }
+
+        let activation = match std::mem::replace(&mut record.state, FutureState::Discarded) {
+            FutureState::Created(activation @ Activation::GalfusFunction { .. }) => activation,
+            _ => unreachable!(),
+        };
+        record.state = FutureState::Running(activation.running_descriptor());
+        Ok(Some(activation))
     }
 
     pub fn adapter_proxy_module(
@@ -497,11 +539,15 @@ impl FutureRegistry {
             }
             match record.state {
                 FutureState::Created(_) => {
+                    let activation =
+                        match std::mem::replace(&mut record.state, FutureState::Discarded) {
+                            FutureState::Created(activation) => activation,
+                            _ => unreachable!(),
+                        };
                     if let Some(active) = &record.active {
                         active.store(false, Ordering::Release);
                     }
-                    record.state = FutureState::Discarded;
-                    (true, Ok(DiscardDisposition::Created))
+                    (true, Ok(DiscardDisposition::Created(activation)))
                 }
                 FutureState::Running(_) => {
                     let activation =
@@ -527,12 +573,13 @@ impl FutureRegistry {
         res
     }
 
-    pub fn complete(
+    pub fn complete<V: Into<crate::event::FutureValue>>(
         &mut self,
         owner_thread_id: ThreadId,
         future_id: galfus_core::FutureId,
-        result: Result<BoundaryValue, ExecutionFailure>,
+        result: Result<V, ExecutionFailure>,
     ) -> Result<Vec<Waiter>, ExecutionFailure> {
+        let result = result.map(Into::into);
         let record = match self.records.get_mut(&(owner_thread_id, future_id)) {
             Some(r) => r,
             None => {

@@ -1,3 +1,4 @@
+use crate::for_each_rvalue_operand;
 use crate::mir;
 
 use crate::LocalId;
@@ -25,7 +26,12 @@ pub fn validate_module(module: &MirModule) -> Result<(), Vec<ValidationError>> {
     }
 }
 
-fn validate_function(func: &MirFunction) -> Result<(), Vec<ValidationError>> {
+/// Validate a single MIR function.
+///
+/// This is useful for local transformations which need to validate a tentative
+/// function without cloning unrelated functions, globals, or constants into a
+/// temporary module.
+pub fn validate_function(func: &MirFunction) -> Result<(), Vec<ValidationError>> {
     let mut errors = Vec::new();
     let mut blocks = HashMap::new();
     for block in &func.blocks {
@@ -187,16 +193,11 @@ fn initialized_at_block_entries(
         let mut outgoing = initialized[&block_id].clone();
         apply_initialization_effects(block, &mut outgoing);
 
-        for (successor, args) in successor_blocks(&block.terminator.0) {
+        for (successor, _args) in successor_blocks(&block.terminator.0) {
             if !blocks.contains_key(&successor) {
                 continue;
             }
-            let mut edge_outgoing = outgoing.clone();
-            for arg in args {
-                if let Operand::Local(l) = arg {
-                    edge_outgoing.remove(l);
-                }
-            }
+            let edge_outgoing = outgoing.clone();
             let changed = match initialized.get(&successor) {
                 Some(previous) => {
                     let merged = previous
@@ -233,15 +234,6 @@ fn apply_initialization_effects(block: &BasicBlock, initialized: &mut HashSet<Lo
             mir::Instruction::Assign(_, RValue::Use(Operand::Local(l))) => {
                 initialized.remove(l);
             }
-            mir::Instruction::Call { args, .. }
-            | mir::Instruction::ConstraintCall { args, .. }
-            | mir::Instruction::IndirectCall { args, .. } => {
-                for arg in args {
-                    if let Operand::Local(l) = arg {
-                        initialized.remove(l);
-                    }
-                }
-            }
             mir::Instruction::StoreGlobal(_, Operand::Local(l)) => {
                 initialized.remove(l);
             }
@@ -260,6 +252,20 @@ fn apply_initialization_effects(block: &BasicBlock, initialized: &mut HashSet<Lo
             mir::Instruction::Drop(local) => {
                 initialized.remove(local);
             }
+            mir::Instruction::Await {
+                future: Operand::Local(l),
+                ..
+            } => {
+                initialized.remove(l);
+            }
+            mir::Instruction::AwaitAll { futures, .. }
+            | mir::Instruction::AwaitRace { futures, .. } => {
+                for fut in futures {
+                    if let Operand::Local(l) = fut {
+                        initialized.remove(l);
+                    }
+                }
+            }
             _ => {}
         }
 
@@ -267,24 +273,18 @@ fn apply_initialization_effects(block: &BasicBlock, initialized: &mut HashSet<Lo
             mir::Instruction::Assign(destination, _)
             | mir::Instruction::Call { destination, .. }
             | mir::Instruction::ConstraintCall { destination, .. }
-            | mir::Instruction::IndirectCall { destination, .. } => {
+            | mir::Instruction::IndirectCall { destination, .. }
+            | mir::Instruction::Await { destination, .. }
+            | mir::Instruction::AwaitAll { destination, .. }
+            | mir::Instruction::AwaitRace { destination, .. } => {
                 initialized.insert(*destination);
             }
             _ => {}
         }
     }
 
-    match &block.terminator.0 {
-        mir::Terminator::Return(Some(Operand::Local(l))) => {
-            initialized.remove(l);
-        }
-        mir::Terminator::Branch {
-            cond: Operand::Local(l),
-            ..
-        } => {
-            initialized.remove(l);
-        }
-        _ => {}
+    if let mir::Terminator::Return(Some(Operand::Local(local))) = &block.terminator.0 {
+        initialized.remove(local);
     }
 }
 
@@ -372,6 +372,7 @@ fn validate_basic_block(
                 obj,
                 args,
                 destination,
+                ..
             } => {
                 validate_operand(obj, func, initialized, errors);
                 for arg in args {
@@ -470,62 +471,9 @@ fn validate_rvalue_operands(
     initialized: &HashSet<LocalId>,
     errors: &mut Vec<ValidationError>,
 ) {
-    match rvalue {
-        RValue::Use(operand)
-        | RValue::UnaryOp(_, operand)
-        | RValue::Len(operand)
-        | RValue::Copy(operand)
-        | RValue::MemberAccess(operand, _)
-        | RValue::ChoiceVariantIs(operand, _)
-        | RValue::ImportedChoiceVariantIs(operand, _, _)
-        | RValue::Instanceof(operand, _)
-        | RValue::Cast(operand, _) => {
-            validate_operand(operand, func, initialized, errors);
-        }
-        RValue::BinaryOp(_, lhs, rhs) | RValue::ArrayIndex(lhs, rhs) => {
-            validate_operand(lhs, func, initialized, errors);
-            validate_operand(rhs, func, initialized, errors);
-        }
-        RValue::Choice(_, _, op) => {
-            if let Some(op) = op {
-                validate_operand(op, func, initialized, errors);
-            }
-        }
-        RValue::NewStruct { fields, .. }
-        | RValue::NewArray(_, fields)
-        | RValue::NewTuple(_, fields) => {
-            for op in fields {
-                validate_operand(op, func, initialized, errors);
-            }
-        }
-        RValue::NewArrayDynamic(_, elements) => {
-            for elem in elements {
-                match elem {
-                    ArrayLiteralElement::Single(op) | ArrayLiteralElement::Spread(op) => {
-                        validate_operand(op, func, initialized, errors);
-                    }
-                }
-            }
-        }
-        RValue::NewArrayZeroed { .. } | RValue::LoadGlobal(_) => {}
-        RValue::NewArrayZeroedDynamic { length, .. } => {
-            validate_operand(length, func, initialized, errors);
-        }
-        RValue::CreateFuture { args, .. } => {
-            for arg in args {
-                validate_operand(arg, func, initialized, errors);
-            }
-        }
-        RValue::CreateIndirectFuture {
-            func: func_op,
-            args,
-        } => {
-            validate_operand(func_op, func, initialized, errors);
-            for arg in args {
-                validate_operand(arg, func, initialized, errors);
-            }
-        }
-    }
+    for_each_rvalue_operand(rvalue, |operand| {
+        validate_operand(operand, func, initialized, errors);
+    });
 }
 
 fn validate_operand(

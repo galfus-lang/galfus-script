@@ -2,8 +2,50 @@
 mod tests;
 
 use crate::registry::ThreadId;
+use galfus_contract::{ExecutionFailure, SurfaceContract, SurfaceValue};
 use galfus_vm::thread::VmThreadState;
 use galfus_vm::{Continuation, VmEffect};
+
+/// Heap-independent completion data retained until the owning continuation resumes.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FutureValue {
+    Int8(i8),
+    Int16(i16),
+    I32(i32),
+    I64(i64),
+    Uint8(u8),
+    Uint16(u16),
+    Uint32(u32),
+    Uint64(u64),
+    F32(f32),
+    F64(f64),
+    Bool(bool),
+    Null,
+    Function {
+        module_id: u32,
+        func_idx: u32,
+    },
+    Array(Vec<Self>),
+    Tuple(Vec<Self>),
+    Struct(Vec<Self>),
+    Choice {
+        variant_idx: u16,
+        payload: Option<Box<Self>>,
+    },
+    Handle {
+        binding_id: galfus_core::BindingId,
+        type_id: galfus_core::OpaqueTypeId,
+        id: galfus_core::HandleId,
+    },
+    Surface {
+        contract: SurfaceContract,
+        value: SurfaceValue,
+        adapter_binding_id: Option<galfus_core::BindingId>,
+    },
+    Aggregate(Vec<Self>),
+}
+
+pub type FutureResult = Result<FutureValue, ExecutionFailure>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EventSequence(pub u64);
@@ -32,7 +74,7 @@ pub enum RuntimeEvent {
     Exited {
         thread_id: ThreadId,
         thread: VmThreadState,
-        result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
+        result: Result<i32, galfus_contract::ExecutionFailure>,
     },
     /// A module initializer completed and the startup sequence can advance.
     Initialized {
@@ -54,13 +96,14 @@ pub enum RuntimeEvent {
     EffectCompleted {
         thread_id: ThreadId,
         request_lease: galfus_core::RequestLease,
-        result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
+        contract: galfus_contract::SurfaceContract,
+        result: Result<galfus_contract::SurfaceValue, galfus_contract::ExecutionFailure>,
     },
     /// Completes a previously suspended future effect.
     FutureCompleted {
         thread_id: ThreadId,
         future_lease: galfus_core::FutureLease,
-        result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
+        result: FutureResult,
     },
     /// A dedicated worker completed a Galfus future activation.
     FutureWorkerCompleted {
@@ -68,7 +111,7 @@ pub enum RuntimeEvent {
         owner_thread_id: ThreadId,
         future_lease: galfus_core::FutureLease,
         thread: VmThreadState,
-        result: Result<galfus_contract::BoundaryValue, galfus_contract::ExecutionFailure>,
+        result: Result<i32, galfus_contract::ExecutionFailure>,
     },
     /// Advances the virtual clock for blocked threads.
     Tick {

@@ -169,6 +169,65 @@ exit_code = 0
 stdout = "ok\n"
 
 [[case]]
+name = "stream builtin preserves direct async object identity"
+path = "cases/15_builtins/stream.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "net builtin exposes stream contracts"
+path = "cases/15_builtins/net.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "websocket builtin exposes nominal message API"
+path = "cases/15_builtins/websocket.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "http builtin exposes a response body stream"
+path = "cases/15_builtins/http.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "thread keys reach worker lookups as byte arrays"
+path = "cases/15_builtins/thread_key_lookup.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "server provider accepts requests using its declared surface contract"
+path = "cases/15_builtins/server_provider.gfs"
+command = "run"
+
+[case.http_request]
+address = "127.0.0.1:18981"
+path = "/"
+expected_status = 200
+
+[[case]]
+name = "narrowing block returns produce the enclosing expression value"
+path = "cases/15_builtins/narrowing_block_returns.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "unknown imported constraint members report diagnostics"
+path = "diagnostics/types/imported_constraint_unknown_member.gfs"
+command = "check"
+exit_code = 1
+diagnostic = "T0006"
+
+[[case]]
 name = "immutable bindings are rejected"
 path = "diagnostics/types/immutable_assignment.gfs"
 command = "check"
@@ -213,6 +272,13 @@ diagnostic = "T0049"
 [[case]]
 name = "functions with default parameters and wildcards"
 path = "cases/07_functions/default_parameters.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
+name = "imported choices support empty payload variants"
+path = "cases/17_imported_empty_variants"
 command = "run"
 exit_code = 0
 stdout = "ok\n"

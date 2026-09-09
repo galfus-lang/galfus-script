@@ -1,7 +1,7 @@
 use galfus_contract::builtins::std_env_provider_descriptor;
 use galfus_contract::{
-    BoundaryValue, CancellationOutcome, ExecutionFailure, ExecutionFailureKind, HostProvider,
-    MessageInjector, ProviderDescriptor, TaskAffinity,
+    CancellationOutcome, ExecutionFailure, ExecutionFailureKind, HostProvider, MessageInjector,
+    ProviderDescriptor, SurfaceValue, TaskAffinity,
 };
 use std::sync::Arc;
 
@@ -24,77 +24,44 @@ impl HostProvider for NativeEnvProvider {
         TaskAffinity::Any
     }
 
-    fn dispatch(
+    fn dispatch_surface(
         &mut self,
         thread_id: galfus_core::ThreadId,
         request_lease: galfus_core::RequestLease,
         name: &str,
-        args: &[BoundaryValue],
+        args: &[SurfaceValue],
         injector: Arc<dyn MessageInjector>,
-    ) {
-        match name {
-            "env_get" | "env_has" => {
-                let key = match args.first() {
-                    Some(BoundaryValue::Bytes(bytes)) => match std::str::from_utf8(bytes) {
-                        Ok(k) => k,
-                        Err(_) => {
-                            let _ = injector.inject_system_response(
-                                thread_id,
-                                request_lease,
-                                Err(ExecutionFailure::new(
-                                    ExecutionFailureKind::ProviderFailure,
-                                    "Invalid UTF-8 key".to_string(),
-                                )),
-                            );
-                            return;
-                        }
-                    },
-                    _ => {
-                        let _ = injector.inject_system_response(
-                            thread_id,
-                            request_lease,
-                            Err(ExecutionFailure::new(
-                                ExecutionFailureKind::ProviderFailure,
-                                "Expected byte array for key".to_string(),
-                            )),
-                        );
-                        return;
-                    }
-                };
-
-                let val = match key {
-                    "pkg.name" => Some(self.metadata.name.clone()),
-                    "pkg.version" => self.metadata.version.clone(),
-                    "pkg.author" => self.metadata.author.clone(),
-                    "pkg.description" => self.metadata.description.clone(),
-                    _ => std::env::var(key).ok(),
-                };
-
-                if name == "env_has" {
-                    let _ = injector.inject_system_response(
-                        thread_id,
-                        request_lease,
-                        Ok(BoundaryValue::Bool(val.is_some())),
-                    );
-                } else {
-                    let response = val.map_or(BoundaryValue::Null, |value| {
-                        BoundaryValue::Bytes(value.into_bytes())
-                    });
-
-                    let _ = injector.inject_system_response(thread_id, request_lease, Ok(response));
-                }
+    ) -> bool {
+        let result = (|| -> Result<SurfaceValue, ExecutionFailure> {
+            let [SurfaceValue::Bytes(key)] = args else {
+                return Err(ExecutionFailure::new(
+                    ExecutionFailureKind::ProviderFailure,
+                    "expected surface environment key",
+                ));
+            };
+            let key = std::str::from_utf8(key).map_err(|_| {
+                ExecutionFailure::new(ExecutionFailureKind::ProviderFailure, "invalid UTF-8 key")
+            })?;
+            let value = match key {
+                "pkg.name" => Some(self.metadata.name.clone()),
+                "pkg.version" => self.metadata.version.clone(),
+                "pkg.author" => self.metadata.author.clone(),
+                "pkg.description" => self.metadata.description.clone(),
+                _ => std::env::var(key).ok(),
+            };
+            match name {
+                "env_get" => Ok(value.map_or(SurfaceValue::Null, |value| {
+                    SurfaceValue::Bytes(value.into_bytes())
+                })),
+                "env_has" => Ok(SurfaceValue::Bool(value.is_some())),
+                _ => Err(ExecutionFailure::new(
+                    ExecutionFailureKind::ProviderFailure,
+                    "unknown environment operation",
+                )),
             }
-            _ => {
-                let _ = injector.inject_system_response(
-                    thread_id,
-                    request_lease,
-                    Err(ExecutionFailure::new(
-                        ExecutionFailureKind::ProviderFailure,
-                        format!("Function {} not implemented in NativeEnvProvider", name),
-                    )),
-                );
-            }
-        }
+        })();
+        let _ = injector.inject_surface_response(thread_id, request_lease, result);
+        true
     }
 
     fn cancel(

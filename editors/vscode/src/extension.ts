@@ -11,6 +11,14 @@ import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 
 let client: LanguageClient;
+const DIAGNOSTIC_DEBOUNCE_MS = 300;
+
+type PendingDocumentChange = {
+  timeout: ReturnType<typeof setTimeout>;
+  resolve: () => void;
+};
+
+const pendingDocumentChanges = new Map<string, PendingDocumentChange>();
 
 export async function activate(context: vscode.ExtensionContext) {
   let versionOutput = "";
@@ -78,6 +86,24 @@ export async function activate(context: vscode.ExtensionContext) {
     },
     markdown: {
       isTrusted: true,
+    },
+    middleware: {
+      didChange: (event, next) => {
+        const uri = event.document.uri.toString();
+        const previous = pendingDocumentChanges.get(uri);
+        if (previous) {
+          clearTimeout(previous.timeout);
+          previous.resolve();
+        }
+
+        return new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            pendingDocumentChanges.delete(uri);
+            void next(event).then(resolve, reject);
+          }, DIAGNOSTIC_DEBOUNCE_MS);
+          pendingDocumentChanges.set(uri, { timeout, resolve });
+        });
+      },
     },
   };
 
@@ -170,6 +196,12 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate(): Thenable<void> | undefined {
+  for (const pending of pendingDocumentChanges.values()) {
+    clearTimeout(pending.timeout);
+    pending.resolve();
+  }
+  pendingDocumentChanges.clear();
+
   if (!client) {
     return undefined;
   }

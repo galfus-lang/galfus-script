@@ -346,3 +346,28 @@ fn normalize(value: i32): i32 {
         diagnostic.code().as_str() == TypeDiagnosticCode::UnreachablePattern.as_code()
     }));
 }
+
+#[test]
+fn check_instanceof_block_returns_type_the_enclosing_expression() {
+    let (_source, graph, result, _string_table) = check_source(
+        r#"
+fn normalize(value: i32 | null): bool {
+  const selected = instanceof value {
+    i32 number { return number },
+    null { return 0 },
+  }
+  return true
+}
+"#,
+    );
+
+    assert!(!result.has_errors(), "{:?}", result.diagnostics());
+
+    let expression = find_node_by_kind(&graph, SyntaxNodeKind::InstanceofExpression).unwrap();
+    let ty = result.layer().node_type(expression).unwrap();
+
+    assert_eq!(
+        result.layer().table().kind(ty),
+        Some(&TypeKind::Primitive(PrimitiveType::Int32))
+    );
+}

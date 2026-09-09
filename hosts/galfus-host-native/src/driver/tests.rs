@@ -1,6 +1,6 @@
 use super::*;
 
-use galfus_contract::{BoundaryValue, RunnableTask};
+use galfus_contract::RunnableTask;
 use std::time::{Duration, Instant};
 
 struct BlockingTask {
@@ -10,7 +10,7 @@ struct BlockingTask {
 impl RunnableTask for BlockingTask {
     fn run(self: Box<Self>, _budget: usize) -> ThreadResult {
         self.release.recv().unwrap();
-        ThreadResult::Completed(Ok(BoundaryValue::I32(0)))
+        ThreadResult::Completed(Ok(0))
     }
 }
 

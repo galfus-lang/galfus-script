@@ -291,6 +291,8 @@ fn finalization_restores_dynamic_dispatch_candidates_from_the_unfinalized_graph(
                     name_const: ConstIdx(0),
                     args_start: Reg(0),
                     arg_count: 1,
+                    arg_types: vec![TypeIdx(0)].into_boxed_slice(),
+                    return_type: None,
                 },
                 Instruction::RetNull,
             ]

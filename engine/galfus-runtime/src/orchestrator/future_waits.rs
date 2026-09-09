@@ -1,7 +1,5 @@
 use super::*;
 
-use galfus_contract::BoundaryValue;
-
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct MailboxFutureWait {
     pub waiting_thread_id: crate::registry::ThreadId,
@@ -133,7 +131,13 @@ impl Orchestrator {
             self.complete_future(
                 wait.waiting_thread_id,
                 wait.future_lease.id,
-                Ok(BoundaryValue::Bytes(message.data)),
+                Ok(crate::event::FutureValue::Array(
+                    message
+                        .data
+                        .into_iter()
+                        .map(crate::event::FutureValue::Uint8)
+                        .collect(),
+                )),
             );
         }
     }
@@ -162,7 +166,7 @@ impl Orchestrator {
             self.complete_future(
                 wait.waiting_thread_id,
                 wait.future_lease.id,
-                Ok(BoundaryValue::Null),
+                Ok(crate::event::FutureValue::Null),
             );
         }
     }
@@ -208,7 +212,7 @@ impl Orchestrator {
             self.complete_future(
                 wait.waiting_thread_id,
                 wait.future_lease.id,
-                Ok(BoundaryValue::Null),
+                Ok(crate::event::FutureValue::Null),
             );
         }
     }

@@ -65,13 +65,8 @@ impl NativeDriver {
         match result {
             ThreadResult::Discarded => Some(ExecutorStepResult::Running),
             ThreadResult::Blocked { timeout } => Some(ExecutorStepResult::Blocked { timeout }),
-            ThreadResult::Completed(res) => {
-                let code = if let Ok(galfus_contract::BoundaryValue::I32(c)) = res {
-                    c
-                } else {
-                    0
-                };
-                Some(ExecutorStepResult::Completed(code))
+            ThreadResult::Completed(result) => {
+                Some(ExecutorStepResult::Completed(result.unwrap_or(0)))
             }
         }
     }

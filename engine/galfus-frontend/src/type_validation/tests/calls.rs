@@ -390,6 +390,47 @@ var rename = User::rename
 }
 
 #[test]
+fn check_reports_unknown_value_anchor_member_and_binds_error() {
+    let source = source(
+        r#"
+struct User { id: i32 }
+
+fn getId(user: User): i32 {
+  const value = user::missing()
+  return value
+}
+"#,
+    );
+
+    let parse_result = parse(&source);
+    assert!(!parse_result.has_errors());
+
+    let mut string_table = crate::StringTable::new();
+    let resolve_result = resolve(&source, parse_result.into_graph(), &mut string_table);
+    assert!(!resolve_result.has_errors());
+
+    let graph = resolve_result.into_graph();
+    let result = check_declaration_types(&source, &graph, &string_table, false);
+    let result = check_definition_types(&source, &graph, result, &string_table, false);
+
+    assert!(result.has_errors());
+    assert!(result.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code().as_str() == TypeDiagnosticCode::UnknownMember.as_code()
+            && diagnostic.message().contains("has no member `missing`")
+    }));
+
+    let path = find_node_by_kind_and_text(
+        &source,
+        &graph,
+        SyntaxNodeKind::PathExpression,
+        "user::missing",
+    )
+    .unwrap();
+    let ty = result.layer().node_type(path).unwrap();
+    assert_eq!(result.layer().table().kind(ty), Some(&TypeKind::Error));
+}
+
+#[test]
 fn check_reports_expression_statement_type_mismatch() {
     let source = source(
         r#"

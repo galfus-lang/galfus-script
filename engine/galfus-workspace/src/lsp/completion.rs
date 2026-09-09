@@ -7,6 +7,140 @@ use std::collections::HashSet;
 
 use crate::workspace::Workspace;
 
+fn node_contains_declaration(
+    syntax: &galfus_frontend::SyntaxLayer,
+    resolution: &galfus_frontend::ResolutionLayer,
+    node: galfus_core::NodeId,
+    symbol: galfus_core::SymbolId,
+) -> bool {
+    resolution.declaration_symbol(node) == Some(symbol)
+        || syntax.node(node).is_some_and(|node| {
+            node.children()
+                .iter()
+                .any(|child| node_contains_declaration(syntax, resolution, *child, symbol))
+        })
+}
+
+fn type_symbol_in_node(
+    syntax: &galfus_frontend::SyntaxLayer,
+    resolution: &galfus_frontend::ResolutionLayer,
+    node: galfus_core::NodeId,
+) -> Option<galfus_core::SymbolId> {
+    resolution
+        .type_reference_symbol(node)
+        .or_else(|| resolution.type_path_reference_symbol(node))
+        .or_else(|| {
+            syntax
+                .node(node)?
+                .children()
+                .iter()
+                .find_map(|child| type_symbol_in_node(syntax, resolution, *child))
+        })
+}
+
+fn fallback_value_type_symbol(
+    syntax: &galfus_frontend::SyntaxLayer,
+    resolution: &galfus_frontend::ResolutionLayer,
+    node: galfus_core::NodeId,
+    value_symbol: galfus_core::SymbolId,
+) -> Option<galfus_core::SymbolId> {
+    let syntax_node = syntax.node(node)?;
+    if matches!(
+        syntax_node.kind(),
+        SyntaxNodeKind::Parameter
+            | SyntaxNodeKind::RestParameter
+            | SyntaxNodeKind::VarItem
+            | SyntaxNodeKind::ConstItem
+            | SyntaxNodeKind::VarStatement
+            | SyntaxNodeKind::ConstStatement
+    ) && node_contains_declaration(syntax, resolution, node, value_symbol)
+    {
+        return type_symbol_in_node(syntax, resolution, node);
+    }
+
+    syntax_node
+        .children()
+        .iter()
+        .find_map(|child| fallback_value_type_symbol(syntax, resolution, *child, value_symbol))
+}
+
+fn append_anchored_function_completions(
+    items: &mut Vec<CompletionItem>,
+    resolution: &galfus_frontend::ResolutionLayer,
+    string_table: &galfus_frontend::StringTable,
+    owner_symbol: galfus_core::SymbolId,
+    exported_only: bool,
+) {
+    let Some(owner) = resolution.symbol(owner_symbol) else {
+        return;
+    };
+    let Some(owner_name) = string_table.resolve(owner.name()) else {
+        return;
+    };
+    let anchor_prefix = format!("{owner_name}::");
+
+    for function in resolution.symbols() {
+        if function.kind() != SymbolKind::Function
+            || (exported_only && resolution.export_for_symbol(function.id()).is_none())
+        {
+            continue;
+        }
+
+        let Some(name) = string_table.resolve(function.name()) else {
+            continue;
+        };
+        let Some(method_name) = name.strip_prefix(anchor_prefix.as_str()) else {
+            continue;
+        };
+
+        items.push(CompletionItem {
+            label: method_name.to_string(),
+            kind: Some(CompletionItemKind::METHOD),
+            sort_text: Some("0".to_string()),
+            ..Default::default()
+        });
+    }
+}
+
+fn import_path_label(
+    workspace: &Workspace,
+    current: &ModulePath,
+    candidate: &ModulePath,
+) -> String {
+    let candidate = candidate.as_str();
+    let is_builtin = galfus_contract::is_builtin_module(candidate.trim_end_matches(".gfs"));
+    let is_provider = workspace
+        .catalog
+        .is_provider_module(candidate.trim_end_matches(".gfs"));
+    if is_builtin || is_provider {
+        return candidate.trim_end_matches(".gfs").to_string();
+    }
+
+    let current_directory = current
+        .as_str()
+        .rsplit_once('/')
+        .map_or("", |(path, _)| path);
+    let target = candidate.trim_end_matches(".gfs");
+    let current_parts = current_directory.split('/').filter(|part| !part.is_empty());
+    let target_parts = target.split('/').filter(|part| !part.is_empty());
+    let mut current_parts = current_parts.peekable();
+    let mut target_parts = target_parts.peekable();
+
+    while current_parts.peek() == target_parts.peek() {
+        current_parts.next();
+        target_parts.next();
+    }
+
+    let mut relative_parts = vec![".."; current_parts.count()];
+    relative_parts.extend(target_parts);
+    let relative = relative_parts.join("/");
+    if relative.starts_with("../") {
+        relative
+    } else {
+        format!("./{relative}")
+    }
+}
+
 pub fn completion(
     workspace: &Workspace,
     path: &str,
@@ -88,18 +222,35 @@ pub fn completion(
                 if module.id() == module_id {
                     continue;
                 }
-                let mut path_str = module.path().as_str().to_string();
-                if let Some(stripped) = path_str.strip_suffix(".gfs") {
-                    path_str = stripped.to_string();
-                } else if let Some(stripped) = path_str.strip_suffix(".gfp") {
-                    path_str = stripped.to_string();
-                }
+                let path_str = import_path_label(workspace, &module_path, module.path());
 
                 if seen_labels.insert(path_str.clone()) {
                     items.push(CompletionItem {
                         label: path_str,
                         kind: Some(CompletionItemKind::MODULE),
                         detail: Some("Galfus Module".to_string()),
+                        sort_text: Some("0".to_string()),
+                        ..Default::default()
+                    });
+                }
+            }
+            for &(path_str, _) in galfus_contract::BUILTIN_MODULES {
+                if seen_labels.insert(path_str.to_string()) {
+                    items.push(CompletionItem {
+                        label: path_str.to_string(),
+                        kind: Some(CompletionItemKind::MODULE),
+                        detail: Some("Galfus Builtin Module".to_string()),
+                        sort_text: Some("0".to_string()),
+                        ..Default::default()
+                    });
+                }
+            }
+            for path_str in workspace.catalog.provider_module_paths() {
+                if seen_labels.insert(path_str.to_string()) {
+                    items.push(CompletionItem {
+                        label: path_str.to_string(),
+                        kind: Some(CompletionItemKind::MODULE),
+                        detail: Some("Galfus Provider Module".to_string()),
                         sort_text: Some("0".to_string()),
                         ..Default::default()
                     });
@@ -113,27 +264,21 @@ pub fn completion(
         }
 
         if in_named_import_list {
-            if let Some(import_item) = syntax_graph.node(item_node)
-                && let Some(source_node_id) = import_item.child(1)
+            if let Some(source_node_id) =
+                syntax_graph.first_child_of_kind(item_node, SyntaxNodeKind::ImportSource)
                 && let Some(source_node) = syntax_graph.node(source_node_id)
                 && let Some(string_node_id) = source_node.first_child()
                 && let Some(string_node) = syntax_graph.node(string_node_id)
             {
                 let literal_text = source.slice(string_node.span()).unwrap_or("");
-                let clean_path = literal_text.trim_matches('"');
-                let mut found_target_module = None;
-                for ext in ["", ".gfs", ".gfp"] {
-                    let mut p = clean_path.to_string();
-                    if !ext.is_empty() && !p.ends_with(".gfs") && !p.ends_with(".gfp") {
-                        p.push_str(ext);
-                    }
-                    if let Some(module_path) = ModulePath::new(&p)
-                        && let Some(id) = semantic_graph.module_by_path(&module_path)
-                    {
-                        found_target_module = semantic_graph.get(id);
-                        break;
-                    }
-                }
+                let clean_path = literal_text.trim_matches(['"', '\'']);
+                let found_target_module = galfus_frontend::modules::resolve_relative_import(
+                    &module_path,
+                    clean_path,
+                    Some(workspace.catalog.as_ref()),
+                )
+                .and_then(|target_path| semantic_graph.module_by_path(&target_path))
+                .and_then(|id| semantic_graph.get(id));
 
                 if let Some(target_module) = found_target_module
                     && let Some(target_resolution) = target_module.graph().resolution()
@@ -171,6 +316,8 @@ pub fn completion(
     let mut is_member_access = false;
     let mut is_path_access = false;
     let mut target_node = None;
+    let mut imported_target = false;
+    let mut trailing_path_target_symbol = None;
 
     if path_stack.len() >= 2 {
         let parent_node = path_stack[path_stack.len() - 2];
@@ -215,11 +362,32 @@ pub fn completion(
             }
 
             let trim_str = if is_path { "::" } else { "." };
-            let target_offset = trimmed
-                .trim_end_matches(trim_str)
-                .trim_end()
-                .len()
-                .saturating_sub(1);
+            let target_text = trimmed.trim_end_matches(trim_str).trim_end();
+            let target_offset = target_text.len().saturating_sub(1);
+
+            if is_path {
+                let target_name = target_text
+                    .rsplit(|character: char| {
+                        !character.is_ascii_alphanumeric() && character != '_'
+                    })
+                    .next()
+                    .unwrap_or("");
+                if let Some(name_id) = string_table.get(target_name) {
+                    trailing_path_target_symbol =
+                        resolution.symbols().iter().rev().find_map(|symbol| {
+                            matches!(
+                                symbol.kind(),
+                                SymbolKind::Parameter
+                                    | SymbolKind::RestParameter
+                                    | SymbolKind::Var
+                                    | SymbolKind::Const
+                            )
+                            .then_some(symbol)
+                            .filter(|symbol| symbol.name() == name_id)
+                            .map(|symbol| symbol.id())
+                        });
+                }
+            }
 
             let mut target_path_stack = Vec::new();
             let mut curr = root;
@@ -272,12 +440,26 @@ pub fn completion(
                 .or_else(|| resolution.type_path_reference_symbol(target))
                 .or_else(|| resolution.declaration_symbol(target));
         }
-
         if target_symbol.is_none() {
-            let mut resolved_type_id;
+            target_symbol = trailing_path_target_symbol;
+        }
 
+        let target_requires_type_lookup = target_symbol
+            .and_then(|symbol| resolution.symbol(symbol))
+            .is_none_or(|symbol| {
+                !matches!(
+                    symbol.kind(),
+                    SymbolKind::Struct
+                        | SymbolKind::Enum
+                        | SymbolKind::Choice
+                        | SymbolKind::ImportBinding
+                        | SymbolKind::ImportNamespace
+                )
+            });
+
+        if target_requires_type_lookup {
             if let Some(type_result) = type_result {
-                resolved_type_id = type_result.layer().node_type(target);
+                let mut resolved_type_id = type_result.layer().node_type(target);
 
                 if resolved_type_id.is_none()
                     && let Some(n) = syntax_graph.node(target)
@@ -329,9 +511,29 @@ pub fn completion(
                         TypeKind::Named { symbol } => {
                             target_symbol = Some(*symbol);
                         }
+                        TypeKind::GenericInstance { base, .. }
+                            if matches!(
+                                type_result.layer().table().kind(*base),
+                                Some(TypeKind::Named { .. })
+                            ) =>
+                        {
+                            if let Some(TypeKind::Named { symbol }) =
+                                type_result.layer().table().kind(*base)
+                            {
+                                target_symbol = Some(*symbol);
+                            }
+                        }
                         _ => {}
                     }
                 }
+            }
+
+            if let Some(value_symbol) = target_symbol
+                && let Some(root) = syntax_graph.root()
+                && let Some(type_symbol) =
+                    fallback_value_type_symbol(syntax_graph, resolution, root, value_symbol)
+            {
+                target_symbol = Some(type_symbol);
             }
         }
 
@@ -365,6 +567,7 @@ pub fn completion(
                     {
                         final_sym = Some(export_record.symbol());
                         final_res = to_res;
+                        imported_target = true;
                     }
                 } else if symbol.kind() == SymbolKind::ImportNamespace {
                     final_sym = None; // For namespace, we just want to iterate over its exports
@@ -425,6 +628,14 @@ pub fn completion(
                     });
                 }
             }
+
+            append_anchored_function_completions(
+                &mut items,
+                final_res,
+                string_table,
+                sym,
+                imported_target,
+            );
         }
 
         if is_member_access || is_path_access {

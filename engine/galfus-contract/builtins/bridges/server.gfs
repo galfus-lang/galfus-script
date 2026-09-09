@@ -1,6 +1,6 @@
 import { createThread } from "std/thread"
-
-type UrlInfo = ([u8], [u8], [u8], [u8], [u8], [u8], [u8], [u8])
+import { Future } from "std/async"
+import { ReadStream, ReadStreamResult, BytesStream } from "std/stream"
 
 export struct URL {
     href: [u8],
@@ -19,18 +19,47 @@ export type Header = ([u8], [u8])
 
 export fn header(name: [u8], value: [u8]): ([u8], [u8]) => (name, value)
 
+export struct RequestBody satisfies ReadStream<[u8]> {
+    id: u64,
+    closed: bool
+}
+
+
+choice ProviderReadResult {
+    Data([u8]),
+    End,
+    Error([u8])
+}
+
 export struct Request {
     id: u64,
     url: URL,
     method: [u8],
     headers: [Header],
-    body: [u8] | null
+    body: RequestBody
+}
+
+struct ProviderRequest {
+    id: u64,
+    url: URL,
+    method: [u8],
+    headers: [Header],
+    body: u64
 }
 
 export struct Response {
     status: i32 = 200,
     headers: [Header] = [],
-    body: [u8] | null = null
+    body: ReadStream<[u8]> | null = null
+}
+
+
+export fn fromBytes(bytes: [u8]): Response {
+    return new(Response) {
+        status: 200,
+        headers: [],
+        body: new(BytesStream) { bytes: bytes, cancelled: false }
+    }
 }
 
 export fn upgradeToWs(): Response {
@@ -41,7 +70,7 @@ export fn upgradeToWs(): Response {
 }
 // Compatibility helper for code that builds responses outside a struct literal.
 // A WebSocket upgrade is represented by HTTP status 101, not a struct field.
-export fn createResponse(status: i32, headers: [Header], body: [u8] | null, is_ws_upgrade: bool): Response {
+export fn createResponse(status: i32, headers: [Header], body: ReadStream<[u8]> | null, is_ws_upgrade: bool): Response {
     if is_ws_upgrade {
         return new(Response) {
             status: 101,
@@ -72,15 +101,46 @@ export struct WsMessage {
     msg: [u8] | null
 }
 
-type RequestTuple = (u64, UrlInfo, [u8], [Header], [u8] | null)
-export type WsMessageTuple = (i32, [u8] | null)
-
 fn(async) __provider_server_bind(port: i32): u64
-fn(async) __provider_server_accept(server_id: u64): (u64, ([u8], [u8], [u8], [u8], [u8], [u8], [u8], [u8]), [u8], [([u8], [u8])], [u8] | null)
-fn(async) __provider_server_respond(req_id: u64, status: i32, headers: [([u8], [u8])], body: [u8] | null, is_upgrade: bool): bool
-fn(async) __provider_server_ws_receive(ws_id: u64): (i32, [u8] | null) | null
+fn(async) __provider_server_accept(server_id: u64): ProviderRequest
+fn(async) __provider_server_response_start(req_id: u64, status: i32, headers: [([u8], [u8])], is_upgrade: bool): bool
+fn(async) __provider_server_response_write(req_id: u64, chunk: [u8]): bool
+fn(async) __provider_server_response_finish(req_id: u64): bool
+fn(async) __provider_server_response_abort(req_id: u64): bool
+fn(async) __provider_server_request_read(request_id: u64, max_bytes: u32): ProviderReadResult
+fn(async) __provider_server_request_close(request_id: u64): bool
+fn(async) __provider_server_ws_receive(ws_id: u64): WsMessage | null
 fn(async) __provider_server_ws_send(ws_id: u64, data: [u8]): bool
 fn(async) __provider_server_ws_close(ws_id: u64): bool
+
+export fn(async) RequestBody::next(self): ReadStreamResult<[u8]> {
+    if self.closed {
+        return ReadStreamResult::End
+    }
+
+    const result = await __provider_server_request_read(self.id, 65536)
+    var ret: ReadStreamResult<[u8]> = ReadStreamResult<[u8]>::End
+    match result {
+        ProviderReadResult::Data(chunk) { ret = ReadStreamResult::Data<[u8]>(chunk) },
+        ProviderReadResult::End {
+            self.closed = true
+            ret = ReadStreamResult<[u8]>::End
+        },
+        ProviderReadResult::Error(msg) {
+            self.closed = true
+            ret = ReadStreamResult::Error<[u8]>(msg)
+        }
+    }
+    return ret
+}
+
+export fn(async) RequestBody::cancel(self): null {
+    if !self.closed {
+        self.closed = true
+        await __provider_server_request_close(self.id)
+    }
+    return null
+}
 
 export struct WebSocketConfig {
     onOpen: fn(WebSocket, i32): null,
@@ -105,11 +165,11 @@ export fn createWebSocketConfig(
 
 export struct Server {
     port: i32,
-    fetch: fn(Request): Response,
+    fetch: fn(Request): Future<Response>,
     websocket: WebSocketConfig
 }
 
-export fn createServer(port: i32, fetch: fn(Request): Response, websocket: WebSocketConfig): Server {
+export fn createServer(port: i32, fetch: fn(Request): Future<Response>, websocket: WebSocketConfig): Server {
     return new(Server) {
         port: port,
         fetch: fetch,
@@ -120,38 +180,57 @@ export fn createServer(port: i32, fetch: fn(Request): Response, websocket: WebSo
 export fn Server::start(server: Server): null {
     const server_id = await __provider_server_bind(server.port)
     loop {
-        const reqTuple = await __provider_server_accept(server_id)
-        const (reqId, reqUrl, reqMethod, reqHeaders, reqBody) = reqTuple
-        const (href, protocol, host, hostname, pathname, search, hash, origin) = reqUrl
-        const url = new(URL) {
-            href: href,
-            protocol: protocol,
-            host: host,
-            hostname: hostname,
-            pathname: pathname,
-            search: search,
-            hash: hash,
-            origin: origin
-        }
+        const raw_req = await __provider_server_accept(server_id)
         const req = new(Request) {
-            id: reqId,
-            url: url,
-            method: reqMethod,
-            headers: reqHeaders,
-            body: reqBody
+            id: raw_req.id,
+            url: raw_req.url,
+            method: raw_req.method,
+            headers: raw_req.headers,
+            body: new(RequestBody) { id: raw_req.body, closed: false }
         }
         const req_id = req.id
         
         const fetchCb = (copy server).fetch
         const fetch_req = copy req
-        const res = fetchCb(fetch_req)
+        const res = await fetchCb(fetch_req)
         
         const res_status = res.status
         const is_upgrade = res_status == 101
         const res_headers = copy res.headers
         const res_body = copy res.body
         
-        await __provider_server_respond(copy req_id, copy res_status, res_headers, res_body, is_upgrade)
+        await __provider_server_response_start(copy req_id, copy res_status, res_headers, is_upgrade)
+        
+        instanceof res_body {
+            null {
+                await __provider_server_response_finish(copy req_id)
+            },
+            ReadStream<[u8]> stream {
+                var stream_aborted = false
+                loop {
+                    const chunk_res = await stream::next()
+                    match chunk_res {
+                        ReadStreamResult::Data(chunk) {
+                            const ok = await __provider_server_response_write(copy req_id, chunk)
+                            if !ok {
+                                stream_aborted = true
+                                break
+                            }
+                        },
+                        ReadStreamResult::End { break },
+                        ReadStreamResult::Error(_) {
+                            stream_aborted = true
+                            break
+                        }
+                    }
+                }
+                if stream_aborted {
+                    await __provider_server_response_abort(copy req_id)
+                } else {
+                    await __provider_server_response_finish(copy req_id)
+                }
+            }
+        }
         
         if is_upgrade {
             const ws = new(WebSocket) { id: req_id }
@@ -163,8 +242,9 @@ export fn Server::start(server: Server): null {
                 const payload = await __provider_server_ws_receive(copy req_id)
                 instanceof payload {
                     null { break },
-                    WsMessageTuple p {
-                        const (p_status, p_msg) = p
+                    WsMessage p {
+                        const p_status = p.status
+                        const p_msg = p.msg
                         if p_status < 0 {
                             instanceof p_msg {
                                 [u8] err {

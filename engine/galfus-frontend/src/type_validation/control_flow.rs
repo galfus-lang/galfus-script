@@ -86,6 +86,92 @@ impl<'a> DeclarationTypeChecker<'a> {
         for child in children.into_iter().skip(1) {
             self.check_control_flow(child);
         }
+
+        self.narrow_fallthrough_after_null_guard(node, condition);
+    }
+
+    /// A guard such as `if value == null { return }` proves that `value` is
+    /// non-null for the statements that follow it. Keep that refinement on the
+    /// binding, rather than requiring every later access to be null-safe.
+    fn narrow_fallthrough_after_null_guard(&mut self, statement: NodeId, condition: NodeId) {
+        let Some(then_block) = self.graph.syntax().child(statement, 1) else {
+            return;
+        };
+
+        if !self.statement_guarantees_return(then_block) {
+            return;
+        }
+
+        let Some(subject_symbol) = self.null_equality_subject_symbol(condition) else {
+            return;
+        };
+
+        let Some(subject_type) = self.layer.symbol_type(subject_symbol) else {
+            return;
+        };
+
+        let Some(narrowed_type) = self.non_null_type(subject_type) else {
+            return;
+        };
+
+        self.layer.bind_symbol_type(subject_symbol, narrowed_type);
+    }
+
+    pub(super) fn null_equality_subject_symbol(
+        &self,
+        condition: NodeId,
+    ) -> Option<galfus_core::SymbolId> {
+        if self.graph.syntax().node(condition)?.kind() != SyntaxNodeKind::BinaryExpression {
+            return None;
+        }
+
+        let left = self.graph.syntax().child(condition, 0)?;
+        let operator = self.graph.syntax().child(condition, 1)?;
+        let right = self.graph.syntax().child(condition, 2)?;
+
+        if self.node_text(operator) != "==" {
+            return None;
+        }
+
+        let subject = if self.is_null_literal(left) {
+            right
+        } else if self.is_null_literal(right) {
+            left
+        } else {
+            return None;
+        };
+
+        let resolution = self.graph.resolution()?;
+        resolution.reference_symbol(subject).or_else(|| {
+            let identifier = self
+                .graph
+                .syntax()
+                .first_child_of_kind(subject, SyntaxNodeKind::Identifier)?;
+            resolution.reference_symbol(identifier)
+        })
+    }
+
+    fn is_null_literal(&self, node: NodeId) -> bool {
+        self.graph
+            .syntax()
+            .node(node)
+            .is_some_and(|node| node.kind() == SyntaxNodeKind::NullLiteral)
+    }
+
+    fn non_null_type(&mut self, ty: TypeId) -> Option<TypeId> {
+        let resolved = self.resolve_alias_type(ty);
+
+        let TypeKind::Union { members } = self.layer.table().kind(resolved)? else {
+            return (!self.is_null_type(resolved)).then_some(ty);
+        };
+
+        let members = members
+            .iter()
+            .copied()
+            .filter(|member| !self.is_null_type(*member))
+            .collect::<Vec<_>>();
+
+        (!members.is_empty()).then(|| self.layer.table_mut().intern_union(members))
     }
 
     fn check_loop_statement_control_flow(&mut self, node: NodeId) {

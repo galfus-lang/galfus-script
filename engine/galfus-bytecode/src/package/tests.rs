@@ -1,8 +1,8 @@
 use galfus_contract::LimitsMetadata;
 use galfus_contract::{
     AdapterConfig, AdapterFunctionSignature, AdapterModuleDescriptor, AdapterModuleRequirement,
-    BoundaryType, CURRENT_BOUNDARY_ABI_VERSION, CURRENT_NUMERIC_SEMANTICS_VERSION,
-    CURRENT_PRODUCER_VERSION, ExecutionTarget,
+    CURRENT_BOUNDARY_ABI_VERSION, CURRENT_NUMERIC_SEMANTICS_VERSION, CURRENT_PRODUCER_VERSION,
+    ExecutionTarget, SurfaceSchema,
 };
 use galfus_core::{ModuleId, ModulePath, SemanticRevision};
 
@@ -173,14 +173,14 @@ fn package_image_canonicalizes_adapter_requirement_and_export_order() {
         AdapterFunctionSignature {
             name: "zeta".to_string(),
             is_async: true,
-            parameter_types: vec![BoundaryType::I32],
-            return_type: BoundaryType::I32,
+            parameter_types: vec![SurfaceSchema::I32],
+            return_type: SurfaceSchema::I32,
         },
         AdapterFunctionSignature {
             name: "alpha".to_string(),
             is_async: true,
             parameter_types: Vec::new(),
-            return_type: BoundaryType::Null,
+            return_type: SurfaceSchema::Null,
         },
     ];
     let package = PackageImage::try_new(

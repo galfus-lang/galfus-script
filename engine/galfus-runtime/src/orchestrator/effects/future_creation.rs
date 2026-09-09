@@ -1,8 +1,8 @@
 use super::*;
 
-use crate::task::execution_stack;
+use crate::task::{decode_surface_from_thread_heap, execution_stack};
 use galfus_bytecode::instruction::{FuncIdx, TypeIdx};
-use galfus_contract::{BoundaryValue, ExecutionFailure, ExecutionFailureKind};
+use galfus_contract::{ExecutionFailure, ExecutionFailureKind};
 use galfus_core::ModuleId;
 
 impl Orchestrator {
@@ -14,78 +14,17 @@ impl Orchestrator {
         module_id: ModuleId,
         operation: Box<str>,
         args: Vec<galfus_vm::VmValue>,
-        arg_types: &[TypeIdx],
         return_type: TypeIdx,
     ) {
-        let encoded_args = {
-            let module = &self
-                .vm
-                .as_ref()
-                .unwrap()
-                .graph
-                .get(module_id)
-                .unwrap()
-                .module;
-            let mut encoded_args = Vec::with_capacity(args.len());
-            for (arg, ty) in args.into_iter().zip(arg_types.iter()) {
-                match crate::task::decode_from_thread_heap(&thread.heap, arg, *ty, module) {
-                    Ok(value) => encoded_args.push(value),
-                    Err(_) if matches!(arg, galfus_vm::VmValue::Function { .. }) => {
-                        let galfus_vm::VmValue::Function {
-                            module_id,
-                            func_idx,
-                        } = arg
-                        else {
-                            unreachable!();
-                        };
-                        encoded_args.push(BoundaryValue::Function {
-                            module_id: module_id.raw(),
-                            func_idx: func_idx.raw(),
-                        });
-                    }
-                    Err(error) => {
-                        self.failure = Some(
-                            ExecutionFailure::new(
-                                ExecutionFailureKind::BoundaryCodecFailure,
-                                format!("invalid future argument: {error:?}"),
-                            )
-                            .with_thread_id(thread_id)
-                            .with_module_id(module_id.raw().into())
-                            .with_stack(execution_stack(&thread)),
-                        );
-                        self.kernel.cancel(thread_id);
-                        return;
-                    }
-                };
-            }
-            encoded_args
-        };
-
-        if let Some(result) = self.try_complete_internal_await(thread_id, &operation, &encoded_args)
-        {
-            let module = &self
-                .vm
-                .as_ref()
-                .unwrap()
-                .graph
-                .get(module_id)
-                .unwrap()
-                .module;
-            let value = match result.and_then(|value| {
-                crate::task::encode_into_thread_heap(
-                    &mut thread.heap,
-                    value,
-                    return_type,
-                    module_id,
-                    module,
-                )
-                .map_err(|error| {
-                    ExecutionFailure::new(
-                        ExecutionFailureKind::BoundaryCodecFailure,
-                        format!("invalid asynchronous result: {error:?}"),
-                    )
-                })
-            }) {
+        if let Some(result) = self.try_complete_internal_await(
+            thread_id,
+            &mut thread.heap,
+            module_id,
+            return_type,
+            &operation,
+            &args,
+        ) {
+            let value = match result {
                 Ok(value) => value,
                 Err(error) => {
                     self.failure = Some(
@@ -101,6 +40,11 @@ impl Orchestrator {
             {
                 self.future_metrics.internal_await_immediate += 1;
             }
+            for arg in args {
+                if let galfus_vm::VmValue::Object(reference) = arg {
+                    let _ = thread.heap.release_anchor(reference);
+                }
+            }
             self.resume_or_fail_front(thread_id, thread, continuation, value);
             return;
         }
@@ -108,7 +52,7 @@ impl Orchestrator {
         #[cfg(feature = "metrics")]
         {
             self.future_metrics.created += 1;
-            self.future_metrics.boundary_arguments += encoded_args.len();
+            self.future_metrics.boundary_arguments += args.len();
             self.future_metrics.internal_await_suspended += 1;
         }
         let Some(future_lease) = self.allocate_future_lease(thread_id, &thread) else {
@@ -118,7 +62,8 @@ impl Orchestrator {
 
         let activation = crate::orchestrator::future_registry::Activation::Internal {
             operation: operation.into(),
-            args: encoded_args,
+            module_id,
+            args,
         };
         if let Err(error) = self.future_registry.insert_direct_await(
             thread_id,
@@ -141,6 +86,7 @@ impl Orchestrator {
         );
     }
 
+    #[allow(clippy::boxed_local)]
     pub(super) fn handle_create_future(
         &mut self,
         thread_id: crate::registry::ThreadId,
@@ -150,7 +96,7 @@ impl Orchestrator {
         target_module_id: ModuleId,
         func_idx: FuncIdx,
         args: Vec<galfus_vm::VmValue>,
-        arg_types: Box<[TypeIdx]>,
+        arg_types: &[TypeIdx],
         return_type: TypeIdx,
     ) {
         #[cfg(feature = "metrics")]
@@ -171,42 +117,47 @@ impl Orchestrator {
             .get(module_id)
             .unwrap()
             .module;
-        let mut encoded_args = Vec::with_capacity(args.len());
-        for (arg, ty) in args.into_iter().zip(arg_types.iter()) {
-            match crate::task::decode_from_thread_heap(&thread.heap, arg, *ty, module) {
-                Ok(value) => encoded_args.push(value),
-                Err(_) if matches!(arg, galfus_vm::VmValue::Function { .. }) => {
-                    let galfus_vm::VmValue::Function {
-                        module_id,
-                        func_idx,
-                    } = arg
-                    else {
-                        unreachable!();
-                    };
-                    encoded_args.push(BoundaryValue::Function {
-                        module_id: module_id.raw(),
-                        func_idx: func_idx.raw(),
-                    });
-                    continue;
-                }
-                Err(error) => {
-                    self.failure = Some(
-                        ExecutionFailure::new(
-                            ExecutionFailureKind::BoundaryCodecFailure,
-                            format!("invalid future argument: {error:?}"),
-                        )
-                        .with_thread_id(thread_id)
-                        .with_module_id(module_id.raw().into())
-                        .with_stack(execution_stack(&thread)),
-                    );
-                    self.kernel.cancel(thread_id);
-                    return;
-                }
-            };
-        }
+        let activation_result = self.future_activation(
+            module_id,
+            target_module_id,
+            func_idx,
+            args.clone(),
+            |schemas| {
+                args.iter()
+                    .cloned()
+                    .zip(arg_types.iter().zip(schemas.iter()))
+                    .map(|(arg, (ty, schema))| {
+                        decode_surface_from_thread_heap(&thread.heap, schema, arg, *ty, module)
+                    })
+                    .collect()
+            },
+            |schemas| {
+                args.iter()
+                    .cloned()
+                    .zip(arg_types.iter().zip(schemas.iter()))
+                    .map(|(arg, (ty, schema))| {
+                        decode_surface_from_thread_heap(&thread.heap, schema, arg, *ty, module)
+                    })
+                    .collect()
+            },
+        );
 
-        let activation =
-            self.future_activation(target_module_id, func_idx, encoded_args, arg_types);
+        let activation = match activation_result {
+            Ok(activation) => activation,
+            Err(error) => {
+                self.failure = Some(
+                    ExecutionFailure::new(
+                        ExecutionFailureKind::BoundaryCodecFailure,
+                        format!("invalid future argument: {error:?}"),
+                    )
+                    .with_thread_id(thread_id)
+                    .with_module_id(module_id.raw().into())
+                    .with_stack(execution_stack(&thread)),
+                );
+                self.kernel.cancel(thread_id);
+                return;
+            }
+        };
         if let Err(error) = self.future_registry.insert_created(
             thread_id,
             future_id,
@@ -227,6 +178,7 @@ impl Orchestrator {
         );
     }
 
+    #[allow(clippy::boxed_local)]
     pub(super) fn handle_create_indirect_future(
         &mut self,
         thread_id: crate::registry::ThreadId,
@@ -235,7 +187,7 @@ impl Orchestrator {
         module_id: ModuleId,
         func: galfus_vm::VmValue,
         args: Vec<galfus_vm::VmValue>,
-        arg_types: Box<[TypeIdx]>,
+        arg_types: &[TypeIdx],
         return_type: TypeIdx,
     ) {
         #[cfg(feature = "metrics")]
@@ -264,35 +216,67 @@ impl Orchestrator {
             self.kernel.cancel(thread_id);
             return;
         };
-        let target_module = &self
+        let source_module = &self
             .vm
             .as_ref()
             .unwrap()
             .graph
-            .get(target_module_id)
+            .get(module_id)
             .unwrap()
             .module;
-        let mut encoded_args = Vec::with_capacity(args.len());
-        for (arg, ty) in args.into_iter().zip(arg_types.iter()) {
-            match crate::task::decode_from_thread_heap(&thread.heap, arg, *ty, target_module) {
-                Ok(value) => encoded_args.push(value),
-                Err(error) => {
-                    self.failure = Some(
-                        ExecutionFailure::new(
-                            ExecutionFailureKind::BoundaryCodecFailure,
-                            format!("invalid indirect future argument: {error:?}"),
+        let activation_result = self.future_activation(
+            module_id,
+            target_module_id,
+            func_idx,
+            args.clone(),
+            |schemas| {
+                args.iter()
+                    .cloned()
+                    .zip(arg_types.iter().zip(schemas.iter()))
+                    .map(|(arg, (ty, schema))| {
+                        crate::task::decode_surface_from_thread_heap(
+                            &thread.heap,
+                            schema,
+                            arg,
+                            *ty,
+                            source_module,
                         )
-                        .with_thread_id(thread_id)
-                        .with_module_id(module_id.raw().into())
-                        .with_stack(execution_stack(&thread)),
-                    );
-                    self.kernel.cancel(thread_id);
-                    return;
-                }
+                    })
+                    .collect()
+            },
+            |schemas| {
+                args.iter()
+                    .cloned()
+                    .zip(arg_types.iter().zip(schemas.iter()))
+                    .map(|(arg, (ty, schema))| {
+                        decode_surface_from_thread_heap(
+                            &thread.heap,
+                            schema,
+                            arg,
+                            *ty,
+                            source_module,
+                        )
+                    })
+                    .collect()
+            },
+        );
+
+        let activation = match activation_result {
+            Ok(activation) => activation,
+            Err(error) => {
+                self.failure = Some(
+                    ExecutionFailure::new(
+                        ExecutionFailureKind::BoundaryCodecFailure,
+                        format!("invalid indirect future argument: {error:?}"),
+                    )
+                    .with_thread_id(thread_id)
+                    .with_module_id(module_id.raw().into())
+                    .with_stack(execution_stack(&thread)),
+                );
+                self.kernel.cancel(thread_id);
+                return;
             }
-        }
-        let activation =
-            self.future_activation(target_module_id, func_idx, encoded_args, arg_types);
+        };
         if let Err(error) = self.future_registry.insert_created(
             thread_id,
             future_id,
@@ -391,11 +375,17 @@ impl Orchestrator {
 
     pub(super) fn future_activation(
         &self,
+        source_module_id: ModuleId,
         target_module_id: ModuleId,
         func_idx: FuncIdx,
-        args: Vec<BoundaryValue>,
-        arg_types: Box<[TypeIdx]>,
-    ) -> crate::orchestrator::future_registry::Activation {
+        args_vm: Vec<galfus_vm::VmValue>,
+        encoded_adapter_args: impl FnOnce(
+            &[galfus_contract::SurfaceSchema],
+        ) -> Result<Vec<galfus_contract::SurfaceValue>, String>,
+        encoded_surface_args: impl FnOnce(
+            &[galfus_contract::SurfaceSchema],
+        ) -> Result<Vec<galfus_contract::SurfaceValue>, String>,
+    ) -> Result<crate::orchestrator::future_registry::Activation, String> {
         let target = &self
             .vm
             .as_ref()
@@ -414,31 +404,85 @@ impl Orchestrator {
             let alias = galfus_contract::provider_alias_from_operation(name)
                 .expect("compiled provider operations have a valid alias")
                 .to_string();
-            crate::orchestrator::future_registry::Activation::Provider {
+            let surface_contract = self.provider_surface_contract(&alias, name);
+            let contract = surface_contract
+                .ok_or_else(|| format!("provider operation {name} has no surface contract"))?;
+            if contract.parameters.len() != args_vm.len() {
+                return Err(format!(
+                    "surface contract {} expects {} arguments, received {}",
+                    contract.bridge_symbol,
+                    contract.parameters.len(),
+                    args_vm.len(),
+                ));
+            }
+            let args = crate::orchestrator::future_registry::ProviderArguments::Surface(
+                encoded_surface_args(
+                    &contract
+                        .parameters
+                        .iter()
+                        .map(|contract| contract.schema.clone())
+                        .collect::<Vec<_>>(),
+                )?,
+            );
+            Ok(crate::orchestrator::future_registry::Activation::Provider {
                 alias,
                 name: name.to_string(),
                 args,
                 request_id: None,
-            }
+            })
         } else if function_name.starts_with("__internal_") {
-            crate::orchestrator::future_registry::Activation::Internal {
+            Ok(crate::orchestrator::future_registry::Activation::Internal {
                 operation: function_name,
-                args,
-            }
+                module_id: source_module_id,
+                args: args_vm,
+            })
         } else if let Some((proxy_module, symbol)) = adapter_identity {
-            crate::orchestrator::future_registry::Activation::Adapter {
+            let parameter_types = if let Some(bindings) = self.adapter_bindings.as_ref() {
+                bindings
+                    .lock()
+                    .unwrap()
+                    .function_signature(&proxy_module, &symbol)
+                    .map(|sig| sig.parameter_types.clone())
+                    .unwrap_or_default()
+            } else {
+                vec![]
+            };
+            if parameter_types.len() != args_vm.len() {
+                return Err(format!(
+                    "adapter proxy expects {} arguments, received {}",
+                    parameter_types.len(),
+                    args_vm.len()
+                ));
+            }
+            Ok(crate::orchestrator::future_registry::Activation::Adapter {
                 proxy_module,
                 symbol,
-                args,
+                args: encoded_adapter_args(&parameter_types)?,
                 request_id: None,
-            }
+            })
         } else {
-            crate::orchestrator::future_registry::Activation::GalfusFunction {
-                module_id: target_module_id,
-                func_idx,
-                args,
-                arg_types,
-            }
+            Ok(
+                crate::orchestrator::future_registry::Activation::GalfusFunction {
+                    module_id: target_module_id,
+                    func_idx,
+                    args: args_vm,
+                },
+            )
         }
+    }
+
+    fn provider_surface_contract(
+        &self,
+        alias: &str,
+        operation: &str,
+    ) -> Option<galfus_contract::SurfaceFunctionContract> {
+        let providers = self.vm.as_ref()?.providers()?;
+        let providers = providers.lock().ok()?;
+        let host = providers.get_host(alias)?;
+        let host = host.lock().ok()?;
+        host.descriptor()
+            .modules
+            .into_iter()
+            .find_map(|module| module.surface_contract(operation).cloned())
     }
 }

@@ -1,7 +1,7 @@
 use galfus_contract::builtins::std_time_provider_descriptor;
 use galfus_contract::{
-    BoundaryValue, CancellationOutcome, ExecutionFailure, ExecutionFailureKind, HostProvider,
-    MessageInjector, ProviderDescriptor, TaskAffinity,
+    CancellationOutcome, HostProvider, MessageInjector, ProviderDescriptor, SurfaceValue,
+    TaskAffinity,
 };
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -29,37 +29,26 @@ impl HostProvider for NativeTimeProvider {
         TaskAffinity::Any
     }
 
-    fn dispatch(
+    fn dispatch_surface(
         &mut self,
         thread_id: galfus_core::ThreadId,
         request_lease: galfus_core::RequestLease,
         name: &str,
-        _args: &[BoundaryValue],
+        args: &[SurfaceValue],
         injector: Arc<dyn MessageInjector>,
-    ) {
-        match name {
-            "time_now" => {
-                let ms = match SystemTime::now().duration_since(UNIX_EPOCH) {
-                    Ok(d) => d.as_millis() as i64,
-                    Err(_) => 0,
-                };
-                let _ = injector.inject_system_response(
-                    thread_id,
-                    request_lease,
-                    Ok(BoundaryValue::I64(ms)),
-                );
-            }
-            _ => {
-                let _ = injector.inject_system_response(
-                    thread_id,
-                    request_lease,
-                    Err(ExecutionFailure::new(
-                        ExecutionFailureKind::ProviderFailure,
-                        format!("Function {} not implemented in NativeTimeProvider", name),
-                    )),
-                );
-            }
+    ) -> bool {
+        if name != "time_now" || !args.is_empty() {
+            return false;
         }
+        let milliseconds = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_millis() as i64);
+        let _ = injector.inject_surface_response(
+            thread_id,
+            request_lease,
+            Ok(SurfaceValue::I64(milliseconds)),
+        );
+        true
     }
 
     fn cancel(

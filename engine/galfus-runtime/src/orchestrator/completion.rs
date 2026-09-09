@@ -1,11 +1,11 @@
 use super::*;
 
-use crate::orchestrator::adapter_handles::stamp_adapter_handles;
+use crate::event::FutureResult;
 use crate::orchestrator::pending::{
     LateCompletion, MAX_LATE_COMPLETIONS, PendingContinuation, PendingKey, PendingOperation,
 };
-use crate::task::with_execution_stack;
-use galfus_contract::{BoundaryValue, ExecutionFailure, ExecutionFailureKind};
+use crate::task::{encode_future_value_into_thread_heap, with_execution_stack};
+use galfus_contract::{ExecutionFailure, ExecutionFailureKind};
 
 impl Orchestrator {
     pub(super) fn record_late_completion(
@@ -29,7 +29,7 @@ impl Orchestrator {
         &mut self,
         thread_id: crate::registry::ThreadId,
         key: PendingKey,
-        result: Result<BoundaryValue, ExecutionFailure>,
+        result: crate::event::FutureResult,
     ) {
         let Some(pending) = self.pending_continuations.remove(&key) else {
             self.completion_metrics.unknown_request += 1;
@@ -53,7 +53,7 @@ impl Orchestrator {
         &mut self,
         thread_id: crate::registry::ThreadId,
         pending: PendingContinuation,
-        result: Result<BoundaryValue, ExecutionFailure>,
+        result: FutureResult,
         key: PendingKey,
     ) {
         #[cfg(feature = "metrics")]
@@ -111,7 +111,7 @@ impl Orchestrator {
                     .get(pending.module_id)
                     .expect("asynchronous call module is loaded")
                     .module;
-                let value = match crate::task::encode_into_thread_heap(
+                let value = match encode_future_value_into_thread_heap(
                     &mut thread.heap,
                     value,
                     pending.return_type,
@@ -123,7 +123,7 @@ impl Orchestrator {
                         self.failure = Some(
                             with_pending_id(ExecutionFailure::new(
                                 ExecutionFailureKind::BoundaryCodecFailure,
-                                format!("invalid asynchronous result: {error:?}"),
+                                format!("invalid asynchronous result: {error}"),
                             ))
                             .with_thread_id(thread_id)
                             .with_module_id(pending.module_id.raw().into())
@@ -161,20 +161,35 @@ impl Orchestrator {
         &mut self,
         thread_id: crate::registry::ThreadId,
         future_id: galfus_core::FutureId,
-        mut result: Result<BoundaryValue, ExecutionFailure>,
+        mut result: FutureResult,
     ) {
         let adapter_proxy_module = self
             .future_registry
             .adapter_proxy_module(thread_id, future_id);
         let request_id = self.future_registry.request_id(thread_id, future_id);
 
-        let binding_id = adapter_proxy_module.as_deref().and_then(|proxy_module| {
+        let adapter_binding_id = adapter_proxy_module.as_deref().and_then(|proxy_module| {
             self.adapter_bindings
                 .as_ref()
                 .and_then(|bindings| bindings.lock().ok()?.binding_id(proxy_module))
         });
+
         if result.as_mut().is_ok_and(|value| {
-            !stamp_adapter_handles(value, adapter_proxy_module.as_deref(), binding_id)
+            let crate::event::FutureValue::Surface {
+                value: surface_value,
+                adapter_binding_id: result_binding_id,
+                ..
+            } = value
+            else {
+                return false;
+            };
+            *result_binding_id = adapter_binding_id;
+            adapter_proxy_module.as_deref().is_some_and(|proxy_module| {
+                !crate::orchestrator::adapter_handles::validate_adapter_handles(
+                    surface_value,
+                    proxy_module,
+                )
+            })
         }) {
             result = Err(ExecutionFailure::new(
                 ExecutionFailureKind::BoundaryCodecFailure,
@@ -202,7 +217,7 @@ impl Orchestrator {
                 self.quota.lock().unwrap().limits().clone(),
             ));
             let mut payload_heap = galfus_vm::thread::PrivateHeap::new(thread_quota);
-            if let Err(error) = crate::task::encode_into_thread_heap(
+            if let Err(error) = crate::task::encode_future_value_into_thread_heap(
                 &mut payload_heap,
                 value.clone(),
                 payload_type,
@@ -237,8 +252,14 @@ impl Orchestrator {
                 return;
             }
         };
-        if let (Some(proxy_module), Ok(value)) = (adapter_proxy_module, &result)
-            && let Err(error) = self.register_adapter_handles(&proxy_module, value)
+        if let (
+            Some(proxy_module),
+            Ok(crate::event::FutureValue::Surface {
+                value: surface_value,
+                ..
+            }),
+        ) = (adapter_proxy_module, &result)
+            && let Err(error) = self.register_adapter_handles(&proxy_module, surface_value)
         {
             self.failure = Some(error.with_thread_id(thread_id).with_future_id(future_id));
             self.kernel.cancel(thread_id);

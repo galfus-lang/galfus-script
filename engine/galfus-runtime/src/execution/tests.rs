@@ -3,7 +3,7 @@ use crate::driver::{ExecutionDriver, NativeEventBridge, RuntimeEventSink};
 use crate::orchestrator::Orchestrator;
 use galfus_contract::{
     AdapterBindings, AdapterModuleBinding, AdapterModuleDescriptor, AdapterReleaseError,
-    ExecutorStepResult, HandleReleaseOutcome, KernelDriver, KernelTask,
+    ExecutorStepResult, HandleReleaseOutcome, KernelDriver, KernelTask, SurfaceValue,
 };
 use galfus_core::{HandleId, OpaqueTypeId};
 use std::sync::{
@@ -69,7 +69,7 @@ impl AdapterModuleBinding for ReleaseRecordingAdapter {
         _symbol: &str,
         _thread_id: galfus_core::ThreadId,
         _request_lease: galfus_core::RequestLease,
-        _args: &[BoundaryValue],
+        _args: &[SurfaceValue],
         _injector: Arc<dyn galfus_contract::MessageInjector>,
     ) {
     }
@@ -94,7 +94,7 @@ impl AdapterModuleBinding for FailingReleaseAdapter {
         _symbol: &str,
         _thread_id: galfus_core::ThreadId,
         _request_lease: galfus_core::RequestLease,
-        _args: &[BoundaryValue],
+        _args: &[SurfaceValue],
         _injector: Arc<dyn galfus_contract::MessageInjector>,
     ) {
     }
@@ -127,12 +127,9 @@ fn execution_transitions_from_created_to_running_and_preserves_completion() {
         Ok(ExecutorStepResult::Completed(0))
     ));
     assert_eq!(execution.status(), ExecutionState::Closed);
-    assert_eq!(execution.result(), Some(&Ok(BoundaryValue::I32(0))));
-    assert_eq!(
-        execution.run_sync_to_completion(),
-        Ok(BoundaryValue::I32(0))
-    );
-    assert_eq!(execution.result(), Some(&Ok(BoundaryValue::I32(0))));
+    assert_eq!(execution.result(), Some(&Ok(0)));
+    assert_eq!(execution.run_sync_to_completion(), Ok(0));
+    assert_eq!(execution.result(), Some(&Ok(0)));
 }
 
 #[test]

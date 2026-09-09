@@ -167,7 +167,7 @@ impl Orchestrator {
                         self.process_event(RuntimeEvent::FutureCompleted {
                             thread_id: owner_thread_id,
                             future_lease,
-                            result: result.clone(),
+                            result: result.clone().map(crate::event::FutureValue::I32),
                         });
                     }
                 }
@@ -198,6 +198,7 @@ impl Orchestrator {
             RuntimeEvent::EffectCompleted {
                 thread_id,
                 request_lease,
+                contract,
                 result,
             } => {
                 #[cfg(feature = "metrics")]
@@ -211,7 +212,15 @@ impl Orchestrator {
                         .copied()
                         .unwrap_or(0)
                 {
-                    self.complete_pending(thread_id, PendingKey::Request(request_lease.id), result)
+                    self.complete_pending(
+                        thread_id,
+                        PendingKey::Request(request_lease.id),
+                        result.map(|value| crate::event::FutureValue::Surface {
+                            contract,
+                            value,
+                            adapter_binding_id: None,
+                        }),
+                    )
                 } else {
                     self.completion_metrics.late_after_cancel += 1;
                 }
@@ -259,7 +268,11 @@ impl Orchestrator {
                         .copied()
                         .unwrap_or(0)
                 {
-                    self.complete_future(owner_thread_id, future_lease.id, result);
+                    self.complete_future(
+                        owner_thread_id,
+                        future_lease.id,
+                        result.map(crate::event::FutureValue::I32),
+                    );
                 }
             }
             RuntimeEvent::Tick { delta_ms } => {

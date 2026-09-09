@@ -109,7 +109,7 @@ impl VirtualMachine {
                         index: target_func_idx,
                     })?;
 
-                if arg_count != callee.param_count {
+                if arg_count > callee.param_count {
                     return Err(VmError::TypeMismatch {
                         expected: format!("{} arguments", callee.param_count),
                         found: format!("{} arguments", arg_count),
@@ -130,7 +130,12 @@ impl VirtualMachine {
                     register_count,
                     cached_instructions,
                 )?;
-                thread.setup_args_from_caller(args_start, arg_count as usize, None)?;
+                thread.setup_args_from_caller(
+                    args_start,
+                    arg_count as usize,
+                    callee.param_count as usize,
+                    None,
+                )?;
             }
             Instruction::TailCall {
                 func: func_idx,
@@ -169,7 +174,7 @@ impl VirtualMachine {
                         index: target_func_idx,
                     })?;
 
-                if arg_count != callee.param_count {
+                if arg_count > callee.param_count {
                     return Err(VmError::TypeMismatch {
                         expected: format!("{} arguments", callee.param_count),
                         found: format!("{} arguments", arg_count),
@@ -207,6 +212,10 @@ impl VirtualMachine {
                     for i in 0..count {
                         temp_args.push(*unsafe { &*src_ptr.add(i) });
                     }
+                }
+
+                for i in arg_count as usize..callee.param_count as usize {
+                    thread.registers[caller_base + i] = Value::Null;
                 }
 
                 // Release objects
@@ -254,6 +263,8 @@ impl VirtualMachine {
                 name_const,
                 args_start,
                 arg_count,
+                ref arg_types,
+                return_type,
             } => {
                 // Resolve method name from constant pool.
                 let method_name = match self
@@ -412,6 +423,36 @@ impl VirtualMachine {
                     }
                 })?;
 
+                if let Some(return_type) = return_type {
+                    let mut args = Vec::with_capacity(arg_count as usize);
+                    if arg_count > 0 {
+                        let receiver = thread.read_reg(obj);
+                        thread.retain_anchor_val(&receiver);
+                        args.push(receiver);
+                        for i in 1..arg_count {
+                            let value = thread.read_reg(Reg(args_start.raw() + i as u16));
+                            thread.retain_anchor_val(&value);
+                            args.push(value);
+                        }
+                    }
+                    let module_id = thread
+                        .call_stack
+                        .last()
+                        .ok_or(VmError::EmptyCallStack)?
+                        .module_id;
+                    return Ok(VmStep::Suspend {
+                        effect: VmEffect::CreateFuture {
+                            module_id,
+                            target_module_id,
+                            func_idx: target_func_idx,
+                            args,
+                            arg_types: arg_types.clone(),
+                            return_type,
+                        },
+                        continuation: Continuation::for_future_handle(dest),
+                    });
+                }
+
                 let callee = self.get_function(target_module_id, target_func_idx)?;
 
                 if arg_count > callee.param_count {
@@ -435,7 +476,12 @@ impl VirtualMachine {
                     register_count,
                     cached_instructions,
                 )?;
-                thread.setup_args_from_caller(args_start, arg_count as usize, Some(obj))?;
+                thread.setup_args_from_caller(
+                    args_start,
+                    arg_count as usize,
+                    callee.param_count as usize,
+                    Some(obj),
+                )?;
             }
             Instruction::CallDynamic {
                 dest,
@@ -486,7 +532,7 @@ impl VirtualMachine {
                         index: target_func_idx,
                     })?;
 
-                if arg_count != callee.param_count {
+                if arg_count > callee.param_count {
                     return Err(VmError::TypeMismatch {
                         expected: format!("{} arguments", callee.param_count),
                         found: format!("{} arguments", arg_count),
@@ -507,7 +553,12 @@ impl VirtualMachine {
                     register_count,
                     cached_instructions,
                 )?;
-                thread.setup_args_from_caller(args_start, arg_count as usize, None)?;
+                thread.setup_args_from_caller(
+                    args_start,
+                    arg_count as usize,
+                    callee.param_count as usize,
+                    None,
+                )?;
             }
 
             Instruction::Ret { src } => {

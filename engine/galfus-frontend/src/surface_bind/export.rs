@@ -2,23 +2,28 @@ use crate::{
     ImportedChoiceSurface, ImportedChoiceVariant, ImportedConstraintMember,
     ImportedConstraintSurface, ImportedStructFieldDefault, ImportedType, SymbolKind,
 };
+use galfus_core::DefId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModuleSurfaceExport {
     name: String,
+    pub def_id: DefId,
     kind: SymbolKind,
     ty: Option<ImportedType>,
     members: Vec<ModuleSurfaceMember>,
     generic_parameters: Vec<ImportedType>,
+    satisfied_constraints: Vec<ImportedType>,
+    choice_def_id: Option<DefId>,
 }
 
 impl ModuleSurfaceExport {
-    pub fn new(name: String, kind: SymbolKind, ty: Option<ImportedType>) -> Self {
-        Self::with_members(name, kind, ty, Vec::new(), Vec::new())
+    pub fn new(name: String, def_id: DefId, kind: SymbolKind, ty: Option<ImportedType>) -> Self {
+        Self::with_members(name, def_id, kind, ty, Vec::new(), Vec::new())
     }
 
     pub fn with_members(
         name: String,
+        def_id: DefId,
         kind: SymbolKind,
         ty: Option<ImportedType>,
         members: Vec<ModuleSurfaceMember>,
@@ -26,10 +31,13 @@ impl ModuleSurfaceExport {
     ) -> Self {
         Self {
             name,
+            def_id,
             kind,
             ty,
             members,
             generic_parameters,
+            satisfied_constraints: Vec::new(),
+            choice_def_id: None,
         }
     }
 
@@ -55,6 +63,27 @@ impl ModuleSurfaceExport {
 
     pub fn generic_parameters(&self) -> &[ImportedType] {
         self.generic_parameters.as_slice()
+    }
+
+    pub fn satisfied_constraints(&self) -> &[ImportedType] {
+        self.satisfied_constraints.as_slice()
+    }
+
+    pub(crate) fn with_satisfied_constraints(
+        mut self,
+        satisfied_constraints: Vec<ImportedType>,
+    ) -> Self {
+        self.satisfied_constraints = satisfied_constraints;
+        self
+    }
+
+    pub(crate) fn with_choice_def_id(mut self, def_id: DefId) -> Self {
+        self.choice_def_id = Some(def_id);
+        self
+    }
+
+    pub(crate) fn has_choice_surface(&self) -> bool {
+        self.kind == SymbolKind::Choice || self.choice_def_id.is_some()
     }
 
     pub(super) fn imported_constraint_surface(
@@ -101,6 +130,7 @@ impl ModuleSurfaceExport {
 
         ImportedConstraintSurface::new(
             self.name.clone(),
+            self.def_id,
             self.generic_parameters
                 .iter()
                 .map(|p| {
@@ -147,6 +177,7 @@ impl ModuleSurfaceExport {
 
         ImportedChoiceSurface::new(
             self.name.clone(),
+            self.choice_def_id.unwrap_or(self.def_id),
             variants,
             self.generic_parameters
                 .iter()

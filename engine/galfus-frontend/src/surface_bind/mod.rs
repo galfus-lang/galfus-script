@@ -7,7 +7,8 @@ use crate::{
     ImportedSurfaceTypes, ImportedType, ModuleAst, ResolutionLayer, StringTable, SymbolKind,
     SyntaxNodeKind, TypeCheckResult, TypeKind,
     type_validation::{
-        ImportedChoiceSurface, ImportedConstraintSurface, ImportedFunctionParameterType,
+        IMPLICIT_FUTURE_SYMBOL, ImportedChoiceSurface, ImportedConstraintSurface,
+        ImportedFunctionParameterType,
     },
 };
 pub use export::*;
@@ -222,7 +223,7 @@ impl ModuleSurface {
     ) -> Option<ImportedChoiceSurface> {
         let export = self.export(name)?;
 
-        if export.kind() != SymbolKind::Choice {
+        if !export.has_choice_surface() {
             return None;
         }
 
@@ -231,6 +232,7 @@ impl ModuleSurface {
 }
 
 pub fn build_module_surface(
+    module_id: galfus_core::ModuleId,
     source: &galfus_core::SourceFile,
     graph: &ModuleAst,
     type_result: &TypeCheckResult,
@@ -255,14 +257,15 @@ pub fn build_module_surface(
                     .and_then(|ty| transport_type(resolution, type_result, string_table, ty))
             };
 
-            let members = surface_members_for_export(
+            let mut members = surface_members_for_export(
                 source,
                 graph,
                 type_result,
                 string_table,
                 export.symbol(),
             );
-            let generic_parameters = surface_generic_parameters(
+
+            let mut generic_parameters = surface_generic_parameters(
                 graph,
                 export.symbol(),
                 export.kind(),
@@ -271,13 +274,58 @@ pub fn build_module_surface(
                 string_table,
             );
 
-            ModuleSurfaceExport::with_members(
+            let mut choice_def_id = None;
+            let def_id = if export.kind() == SymbolKind::ImportBinding {
+                if let Some(choice) = type_result.imported_symbol_choices.get(&export.symbol()) {
+                    generic_parameters = choice
+                        .generic_parameters
+                        .iter()
+                        .copied()
+                        .map(|symbol| ImportedType::GenericParameter { symbol })
+                        .collect();
+                    for variant in &choice.variants {
+                        let payload_types = variant
+                            .payload_types
+                            .iter()
+                            .filter_map(|ty| {
+                                transport_type(resolution, type_result, string_table, *ty)
+                            })
+                            .collect();
+                        members.push(ModuleSurfaceMember::with_payload(
+                            variant.name.clone(),
+                            SymbolKind::ChoiceVariant,
+                            payload_types,
+                        ));
+                    }
+                    choice_def_id = Some(choice.def_id);
+                    choice.def_id
+                } else {
+                    galfus_core::DefId::new(module_id, export.symbol())
+                }
+            } else {
+                galfus_core::DefId::new(module_id, export.symbol())
+            };
+
+            let export = ModuleSurfaceExport::with_members(
                 export.name().to_string(),
+                def_id,
                 export.kind(),
                 ty,
                 members,
                 generic_parameters,
             )
+            .with_satisfied_constraints(surface_satisfied_constraints(
+                graph,
+                type_result,
+                string_table,
+                export.symbol(),
+            ));
+
+            if let Some(def_id) = choice_def_id {
+                export.with_choice_def_id(def_id)
+            } else {
+                export
+            }
         })
         .collect();
 
@@ -291,6 +339,14 @@ pub fn imported_surface_types_for_namespace(
     let mut imported_types = ImportedSurfaceTypes::new();
 
     for export in surface.exports() {
+        if export.has_choice_surface() {
+            imported_types.insert_namespace_choice(
+                namespace,
+                export.name().to_string(),
+                export.imported_choice_surface(Some(namespace)),
+            );
+        }
+
         if let Some(ty) = surface.imported_path_type_for_export(namespace, export.name()) {
             imported_types
                 .insert_member_type(ImportedMemberKey::new(namespace, "", export.name()), ty);
@@ -324,6 +380,11 @@ pub fn imported_surface_types_for_named_export(
     };
 
     if let Some(ty) = surface.imported_type_for_export(local_symbol, name) {
+        let ty = if export.kind() == SymbolKind::Function {
+            ty.relocate(local_symbol)
+        } else {
+            ty
+        };
         imported_types.insert_symbol_type(local_symbol, ty);
     }
 
@@ -332,8 +393,9 @@ pub fn imported_surface_types_for_named_export(
             .insert_symbol_constraint(local_symbol, export.imported_constraint_surface(None));
     }
 
-    if export.kind() == SymbolKind::Choice {
-        imported_types.insert_symbol_choice(local_symbol, export.imported_choice_surface(None));
+    if export.has_choice_surface() {
+        let choice = export.imported_choice_surface(None);
+        imported_types.insert_symbol_choice(local_symbol, choice);
     }
     if export.kind() == SymbolKind::Enum {
         imported_types.insert_symbol_enum_values(local_symbol, export.imported_enum_values());
@@ -359,6 +421,57 @@ pub fn imported_surface_types_for_named_export(
                 member.ty().cloned().map(|ty| {
                     ImportedStructFieldSurface::new(
                         member.name().to_string(),
+                        export.def_id,
+                        ty,
+                        member.has_default(),
+                        member.default_value(),
+                    )
+                })
+            })
+            .collect();
+        imported_types.insert_struct_fields(local_symbol, fields);
+        imported_types
+            .insert_struct_constraints(local_symbol, export.satisfied_constraints().to_vec());
+    }
+
+    for struct_export in surface
+        .exports()
+        .iter()
+        .filter(|candidate| candidate.kind() == SymbolKind::Struct)
+    {
+        imported_types.insert_struct_constraints_by_name(
+            struct_export.name().to_string(),
+            struct_export.satisfied_constraints().to_vec(),
+        );
+    }
+
+    if export.kind() == SymbolKind::Function
+        && let Some(struct_name) = imported_function_return_struct_name(export.ty())
+        && let Some(struct_export) = surface.export(struct_name)
+        && struct_export.kind() == SymbolKind::Struct
+    {
+        for member in struct_export.members() {
+            if let Some(ty) = surface.imported_member_path_type_for_named_export(
+                local_symbol,
+                struct_name,
+                member.name(),
+            ) {
+                imported_types.insert_member_type(
+                    ImportedMemberKey::new(local_symbol, struct_name, member.name()),
+                    ty.relocate(local_symbol),
+                );
+            }
+        }
+
+        let fields = struct_export
+            .members()
+            .iter()
+            .filter(|member| member.kind() == SymbolKind::StructField)
+            .filter_map(|member| {
+                member.ty().cloned().map(|ty| {
+                    ImportedStructFieldSurface::new(
+                        member.name().to_string(),
+                        struct_export.def_id,
                         ty,
                         member.has_default(),
                         member.default_value(),
@@ -372,6 +485,61 @@ pub fn imported_surface_types_for_named_export(
     imported_types
 }
 
+fn surface_satisfied_constraints(
+    graph: &ModuleAst,
+    type_result: &TypeCheckResult,
+    string_table: &StringTable,
+    symbol: SymbolId,
+) -> Vec<ImportedType> {
+    let Some(resolution) = graph.resolution() else {
+        return Vec::new();
+    };
+    let Some(member_scope) = resolution.member_scope(symbol) else {
+        return Vec::new();
+    };
+    let Some(scope) = resolution.scope(member_scope) else {
+        return Vec::new();
+    };
+    let Some(item) = scope.owner() else {
+        return Vec::new();
+    };
+    let Some(satisfies) = graph
+        .syntax()
+        .first_child_of_kind(item, SyntaxNodeKind::SatisfiesClause)
+    else {
+        return Vec::new();
+    };
+    let Some(satisfies) = graph.syntax().node(satisfies) else {
+        return Vec::new();
+    };
+
+    satisfies
+        .children()
+        .iter()
+        .filter_map(|constraint| type_result.layer().node_type(*constraint))
+        .filter_map(|constraint| transport_type(resolution, type_result, string_table, constraint))
+        .collect()
+}
+
+fn imported_function_return_struct_name(ty: Option<&ImportedType>) -> Option<&str> {
+    let ImportedType::Function { return_type, .. } = ty? else {
+        return None;
+    };
+
+    match return_type.as_ref() {
+        ImportedType::LocalPath { name } | ImportedType::SurfacePath { name, .. } => {
+            Some(name.as_str())
+        }
+        ImportedType::Union { members } => members.iter().find_map(|member| match member {
+            ImportedType::LocalPath { name } | ImportedType::SurfacePath { name, .. } => {
+                Some(name.as_str())
+            }
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
 fn surface_members_for_export(
     source: &galfus_core::SourceFile,
     graph: &ModuleAst,
@@ -380,6 +548,10 @@ fn surface_members_for_export(
     symbol: SymbolId,
 ) -> Vec<ModuleSurfaceMember> {
     let Some(resolution) = graph.resolution() else {
+        return Vec::new();
+    };
+
+    let Some(symbol_data) = resolution.symbol(symbol) else {
         return Vec::new();
     };
 
@@ -469,6 +641,34 @@ fn surface_members_for_export(
             }
         })
         .collect::<Vec<_>>();
+
+    let owner_name = string_table.resolve(symbol_data.name()).unwrap_or("");
+    let anchor_prefix = format!("{owner_name}::");
+    members.extend(
+        resolution
+            .symbols()
+            .iter()
+            .filter(|member| {
+                member.kind() == SymbolKind::Function
+                    && resolution.export_for_symbol(member.id()).is_some()
+                    && string_table
+                        .resolve(member.name())
+                        .is_some_and(|name| name.starts_with(anchor_prefix.as_str()))
+            })
+            .filter_map(|member| {
+                let name = string_table.resolve(member.name())?;
+                let member_name = name.strip_prefix(anchor_prefix.as_str())?.to_string();
+                let ty = type_result
+                    .layer()
+                    .symbol_type(member.id())
+                    .and_then(|ty| transport_type(resolution, type_result, string_table, ty))?;
+
+                Some((
+                    member.declaration(),
+                    ModuleSurfaceMember::new(member_name, member.kind(), Some(ty)),
+                ))
+            }),
+    );
     members.sort_by_key(|(declaration, _)| declaration.raw());
     if resolution
         .symbol(symbol)
@@ -717,7 +917,10 @@ fn choice_payload_types(
 ) -> Option<Vec<ImportedType>> {
     let root = graph.syntax().root()?;
     let variant = find_parent_choice_variant(graph, root, declaration)?;
-    let payload = find_descendant_of_kind(graph, variant, SyntaxNodeKind::ChoicePayload)?;
+    let Some(payload) = find_descendant_of_kind(graph, variant, SyntaxNodeKind::ChoicePayload)
+    else {
+        return Some(Vec::new());
+    };
     let payload_node = graph.syntax().node(payload)?;
 
     let resolution = graph.resolution()?;
@@ -803,6 +1006,8 @@ fn transport_type(
     ty: TypeId,
 ) -> Option<ImportedType> {
     match result.layer().table().kind(ty).cloned()? {
+        TypeKind::Error => Some(ImportedType::Error),
+
         TypeKind::Primitive(primitive) => Some(ImportedType::Primitive(primitive)),
 
         TypeKind::Array { element } => Some(ImportedType::Array {
@@ -866,6 +1071,12 @@ fn transport_type(
             })
         }
         TypeKind::Named { symbol } => {
+            if symbol.raw() == IMPLICIT_FUTURE_SYMBOL {
+                return Some(ImportedType::LocalPath {
+                    name: "Future".to_string(),
+                });
+            }
+
             let symbol_data = resolution.symbol(symbol)?;
             if matches!(
                 symbol_data.kind(),
@@ -924,7 +1135,6 @@ fn transport_type(
                 .collect::<Option<Vec<_>>>()?;
             Some(ImportedType::GenericInstance { base, arguments })
         }
-        _ => None,
     }
 }
 

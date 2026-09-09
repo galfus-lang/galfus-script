@@ -1,76 +1,9 @@
 use super::function::FunctionBuilder;
-use galfus_core::{NodeId, SymbolId, TypeId};
-use galfus_frontend::{SymbolKind, SyntaxNodeKind, TypeKind};
+use galfus_core::{NodeId, TypeId};
+use galfus_frontend::{SymbolKind, SyntaxNodeKind};
 use galfus_ir::mir::*;
 
 impl<'b, 'a> FunctionBuilder<'b, 'a> {
-    pub(super) fn variant_pattern_symbols(&self, pattern: NodeId) -> Option<(SymbolId, SymbolId)> {
-        let resolution = self.builder.graph.resolution()?;
-        let owner_symbol = resolution.reference_symbol(pattern)?;
-        let variant_symbol = resolution.path_reference_symbol(pattern)?;
-        Some((owner_symbol, variant_symbol))
-    }
-
-    fn get_imported_choice_variant(
-        &self,
-        pattern: NodeId,
-    ) -> Option<(String, String, Vec<TypeId>)> {
-        let resolution = self.builder.graph.resolution()?;
-        let owner_symbol = resolution.reference_symbol(pattern).or_else(|| {
-            self.builder
-                .graph
-                .syntax()
-                .child(pattern, 0)
-                .and_then(|root| resolution.reference_symbol(root))
-        });
-        if let Some(owner_symbol) = owner_symbol
-            && let Some(choice) = self
-                .builder
-                .type_result
-                .imported_symbol_choices
-                .get(&owner_symbol)
-        {
-            let variant_name = self
-                .builder
-                .graph
-                .syntax()
-                .child(pattern, 1)
-                .map(|node| self.builder.node_text(node))?;
-            let variant = choice.variants.iter().find(|v| v.name == variant_name)?;
-            return Some((
-                choice.name.clone(),
-                variant.name.clone(),
-                variant.payload_types.clone(),
-            ));
-        }
-
-        let variant_ty = self.builder.type_result.layer().node_type(pattern)?;
-        let table = self.builder.type_result.layer().table();
-        let (_root, segments) = match table.kind(variant_ty) {
-            Some(TypeKind::Path { root, segments }) => (*root, segments),
-            _ => return None,
-        };
-        if segments.len() != 2 {
-            return None;
-        }
-        let choice_name = &segments[0];
-        let variant_name = &segments[1];
-
-        let choice = self
-            .builder
-            .type_result
-            .imported_path_choices
-            .values()
-            .find(|c| c.name == *choice_name)?;
-        let variant = choice.variants.iter().find(|v| v.name == *variant_name)?;
-
-        Some((
-            choice.name.clone(),
-            variant.name.clone(),
-            variant.payload_types.clone(),
-        ))
-    }
-
     pub(super) fn lower_pattern_check(
         &mut self,
         pattern_node_id: NodeId,
@@ -100,10 +33,11 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                         obj: subject.clone(),
                         args: vec![literal_op],
                         destination: cond_temp,
+                        return_type: bool_ty,
                     },
                     None,
                 ));
-                self.terminate_block(Terminator::Branch {
+                self.close_current_block(Terminator::Branch {
                     cond: Operand::Local(cond_temp),
                     true_block: success_block,
                     true_args: Vec::new(),
@@ -112,7 +46,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 });
             }
             SyntaxNodeKind::WildcardPattern => {
-                self.terminate_block(Terminator::Jump {
+                self.close_current_block(Terminator::Jump {
                     target: success_block,
                     args: Vec::new(),
                 });
@@ -138,7 +72,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                         ));
                     }
                 }
-                self.terminate_block(Terminator::Jump {
+                self.close_current_block(Terminator::Jump {
                     target: success_block,
                     args: Vec::new(),
                 });
@@ -191,7 +125,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                                 ),
                                 None,
                             ));
-                            self.terminate_block(Terminator::Branch {
+                            self.close_current_block(Terminator::Branch {
                                 cond: Operand::Local(cond_temp),
                                 true_block: success_block,
                                 true_args: Vec::new(),
@@ -223,7 +157,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                             ));
 
                             let payload_extract_block = self.builder.next_block();
-                            self.terminate_block(Terminator::Branch {
+                            self.close_current_block(Terminator::Branch {
                                 cond: Operand::Local(cond_temp),
                                 true_block: payload_extract_block,
                                 true_args: Vec::new(),
@@ -231,8 +165,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                                 false_args: Vec::new(),
                             });
 
-                            self.blocks.last_mut().unwrap().id = payload_extract_block;
-                            self.current_block = payload_extract_block;
+                            self.begin_block(payload_extract_block);
 
                             if let Some(payload_node_id) = syntax.first_child_of_kind(
                                 pattern_node_id,
@@ -305,27 +238,25 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                                             );
 
                                             if i < payload_patterns.len() - 1 {
-                                                self.blocks.last_mut().unwrap().id =
-                                                    next_field_block;
-                                                self.current_block = next_field_block;
+                                                self.begin_block(next_field_block);
                                             }
                                         }
                                     }
                                 } else {
-                                    self.terminate_block(Terminator::Jump {
+                                    self.close_current_block(Terminator::Jump {
                                         target: success_block,
                                         args: Vec::new(),
                                     });
                                 }
                             } else {
-                                self.terminate_block(Terminator::Jump {
+                                self.close_current_block(Terminator::Jump {
                                     target: success_block,
                                     args: Vec::new(),
                                 });
                             }
                         }
                         _ => {
-                            self.terminate_block(Terminator::Jump {
+                            self.close_current_block(Terminator::Jump {
                                 target: failure_block,
                                 args: Vec::new(),
                             });
@@ -355,7 +286,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     ));
 
                     let payload_extract_block = self.builder.next_block();
-                    self.terminate_block(Terminator::Branch {
+                    self.close_current_block(Terminator::Branch {
                         cond: Operand::Local(cond_temp),
                         true_block: payload_extract_block,
                         true_args: Vec::new(),
@@ -363,8 +294,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                         false_args: Vec::new(),
                     });
 
-                    self.blocks.last_mut().unwrap().id = payload_extract_block;
-                    self.current_block = payload_extract_block;
+                    self.begin_block(payload_extract_block);
 
                     if let Some(payload_node_id) = syntax
                         .first_child_of_kind(pattern_node_id, SyntaxNodeKind::VariantPatternPayload)
@@ -422,25 +352,24 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                                     );
 
                                     if i < payload_patterns.len() - 1 {
-                                        self.blocks.last_mut().unwrap().id = next_field_block;
-                                        self.current_block = next_field_block;
+                                        self.begin_block(next_field_block);
                                     }
                                 }
                             }
                         } else {
-                            self.terminate_block(Terminator::Jump {
+                            self.close_current_block(Terminator::Jump {
                                 target: success_block,
                                 args: Vec::new(),
                             });
                         }
                     } else {
-                        self.terminate_block(Terminator::Jump {
+                        self.close_current_block(Terminator::Jump {
                             target: success_block,
                             args: Vec::new(),
                         });
                     }
                 } else {
-                    self.terminate_block(Terminator::Jump {
+                    self.close_current_block(Terminator::Jump {
                         target: failure_block,
                         args: Vec::new(),
                     });
@@ -473,7 +402,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 ));
 
                 let type_check_success = self.builder.next_block();
-                self.terminate_block(Terminator::Branch {
+                self.close_current_block(Terminator::Branch {
                     cond: Operand::Local(cond_temp),
                     true_block: type_check_success,
                     true_args: Vec::new(),
@@ -481,8 +410,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     false_args: Vec::new(),
                 });
 
-                self.blocks.last_mut().unwrap().id = type_check_success;
-                self.current_block = type_check_success;
+                self.begin_block(type_check_success);
 
                 if let Some(binding_node_id) = syntax
                     .first_child_of_kind(pattern_node_id, SyntaxNodeKind::TypePatternBinding)
@@ -503,7 +431,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     }
                 }
 
-                self.terminate_block(Terminator::Jump {
+                self.close_current_block(Terminator::Jump {
                     target: success_block,
                     args: Vec::new(),
                 });
@@ -534,7 +462,7 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                 ));
 
                 let struct_check_success = self.builder.next_block();
-                self.terminate_block(Terminator::Branch {
+                self.close_current_block(Terminator::Branch {
                     cond: Operand::Local(cond_temp),
                     true_block: struct_check_success,
                     true_args: Vec::new(),
@@ -542,12 +470,11 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                     false_args: Vec::new(),
                 });
 
-                self.blocks.last_mut().unwrap().id = struct_check_success;
-                self.current_block = struct_check_success;
+                self.begin_block(struct_check_success);
 
                 let fields = &pattern_node.children()[1..];
                 if fields.is_empty() {
-                    self.terminate_block(Terminator::Jump {
+                    self.close_current_block(Terminator::Jump {
                         target: success_block,
                         args: Vec::new(),
                     });
@@ -607,204 +534,23 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                                 ));
                             }
                         }
-                        self.terminate_block(Terminator::Jump {
+                        self.close_current_block(Terminator::Jump {
                             target: next_field_block,
                             args: Vec::new(),
                         });
                     }
 
                     if i < fields.len() - 1 {
-                        self.blocks.last_mut().unwrap().id = next_field_block;
-                        self.current_block = next_field_block;
+                        self.begin_block(next_field_block);
                     }
                 }
             }
             _ => {
-                self.terminate_block(Terminator::Jump {
+                self.close_current_block(Terminator::Jump {
                     target: failure_block,
                     args: Vec::new(),
                 });
             }
         }
-    }
-    pub(super) fn lower_destructuring_binding(
-        &mut self,
-        mut pattern_node_id: NodeId,
-        operand: Operand,
-    ) {
-        let syntax = self.builder.graph.syntax();
-        let mut pattern_node = syntax.node(pattern_node_id).unwrap();
-
-        if pattern_node.kind() == SyntaxNodeKind::ForBinding {
-            pattern_node_id = pattern_node.first_child().unwrap();
-            pattern_node = syntax.node(pattern_node_id).unwrap();
-        }
-
-        if pattern_node.kind() == SyntaxNodeKind::Identifier {
-            let resolution = self.builder.graph.resolution();
-            if let Some(symbol) = resolution.and_then(|res| res.declaration_symbol(pattern_node_id))
-            {
-                let ty = self.symbol_type(symbol).unwrap_or_else(|| TypeId::new(0));
-                let local_id = self.declare_local(Some(symbol), ty);
-                self.current_instructions
-                    .push((Instruction::Assign(local_id, RValue::Use(operand)), None));
-            }
-            return;
-        }
-
-        let child = match pattern_node.first_child() {
-            Some(c) => c,
-            None => return,
-        };
-        let child_node = syntax.node(child).unwrap();
-
-        match child_node.kind() {
-            SyntaxNodeKind::Identifier => {
-                let resolution = self.builder.graph.resolution();
-                if let Some(symbol) = resolution.and_then(|res| res.declaration_symbol(child)) {
-                    let ty = self.symbol_type(symbol).unwrap_or_else(|| TypeId::new(0));
-                    let local_id = self.declare_local(Some(symbol), ty);
-                    self.current_instructions
-                        .push((Instruction::Assign(local_id, RValue::Use(operand)), None));
-                }
-            }
-            SyntaxNodeKind::StructBindingPattern => {
-                for field_id in child_node.children() {
-                    let field = syntax.node(*field_id).unwrap();
-                    let field_name_node = field.first_child().unwrap();
-                    let field_name = self.builder.node_text(field_name_node).to_string();
-                    let value_pattern = field.child(1).unwrap_or(field_name_node);
-
-                    let temp_ty = TypeId::new(0); // we should lookup proper type
-                    let temp_local = self.declare_local(None, temp_ty);
-                    self.current_instructions.push((
-                        Instruction::Assign(
-                            temp_local,
-                            RValue::MemberAccess(operand.clone(), field_name),
-                        ),
-                        None,
-                    ));
-                    self.lower_destructuring_binding(value_pattern, Operand::Local(temp_local));
-                }
-            }
-            SyntaxNodeKind::ArrayBindingPattern | SyntaxNodeKind::TupleBindingPattern => {
-                for (i, element_id) in child_node.children().iter().enumerate() {
-                    let element = syntax.node(*element_id).unwrap();
-                    if element.kind() == SyntaxNodeKind::RestBindingPattern {
-                        let rest_target = element.first_child().unwrap();
-                        self.lower_static_array_rest_binding(rest_target, operand.clone(), i);
-                        break;
-                    } else {
-                        let temp_ty = TypeId::new(0);
-                        let temp_local = self.declare_local(None, temp_ty);
-
-                        let idx_operand = Operand::Constant(Constant::Int32(i as i32));
-                        self.current_instructions.push((
-                            Instruction::Assign(
-                                temp_local,
-                                RValue::ArrayIndex(operand.clone(), idx_operand),
-                            ),
-                            None,
-                        ));
-                        self.lower_destructuring_binding(*element_id, Operand::Local(temp_local));
-                    }
-                }
-            }
-            _ => {
-                // Wildcard or other
-            }
-        }
-    }
-
-    fn lower_static_array_rest_binding(
-        &mut self,
-        rest_target: NodeId,
-        operand: Operand,
-        start: usize,
-    ) {
-        let Some(length) = self.static_array_length_for_operand(&operand) else {
-            return;
-        };
-        let Some(rest_type) = self
-            .node_type(rest_target)
-            .or_else(|| self.binding_symbol_type(rest_target))
-        else {
-            return;
-        };
-        let Some(TypeKind::Array {
-            element: element_type,
-        }) = self.builder.type_result.layer().table().kind(rest_type)
-        else {
-            return;
-        };
-
-        let mut elements = Vec::new();
-        for index in start..length {
-            let element_local = self.declare_local(None, *element_type);
-            self.current_instructions.push((
-                Instruction::Assign(
-                    element_local,
-                    RValue::ArrayIndex(
-                        operand.clone(),
-                        Operand::Constant(Constant::Int32(index as i32)),
-                    ),
-                ),
-                None,
-            ));
-            elements.push(Operand::Local(element_local));
-        }
-
-        let rest_local = self.declare_local(None, rest_type);
-        self.current_instructions.push((
-            Instruction::Assign(rest_local, RValue::NewArray(rest_type, elements)),
-            None,
-        ));
-        self.lower_destructuring_binding(rest_target, Operand::Local(rest_local));
-    }
-
-    fn static_array_length_for_operand(&self, operand: &Operand) -> Option<usize> {
-        let Operand::Local(local) = operand else {
-            return None;
-        };
-        let rvalue = self
-            .current_instructions
-            .iter()
-            .rev()
-            .find_map(|(instruction, _)| {
-                let Instruction::Assign(destination, rvalue) = instruction else {
-                    return None;
-                };
-                (*destination == *local).then_some(rvalue)
-            })?;
-
-        match rvalue {
-            RValue::Use(operand) => self.static_array_length_for_operand(operand),
-            RValue::NewArray(_, elements) => Some(elements.len()),
-            RValue::NewArrayDynamic(_, elements) => {
-                elements.iter().try_fold(0usize, |length, element| {
-                    let element_length = match element {
-                        ArrayLiteralElement::Single(_) => 1,
-                        ArrayLiteralElement::Spread(operand) => {
-                            self.static_array_length_for_operand(operand)?
-                        }
-                    };
-                    length.checked_add(element_length)
-                })
-            }
-            _ => None,
-        }
-    }
-
-    fn binding_symbol_type(&self, node: NodeId) -> Option<TypeId> {
-        let resolution = self.builder.graph.resolution()?;
-        if let Some(symbol) = resolution.declaration_symbol(node) {
-            return self.symbol_type(symbol);
-        }
-
-        let syntax_node = self.builder.graph.syntax().node(node)?;
-        syntax_node
-            .children()
-            .iter()
-            .find_map(|child| self.binding_symbol_type(*child))
     }
 }

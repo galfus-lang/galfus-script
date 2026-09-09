@@ -281,13 +281,15 @@ fn test_instanceof() {
 }
 
 #[test]
-fn test_instanceof_matches_imported_choice_variant_by_layout_name() {
+fn test_instanceof_matches_imported_choice_variant_by_canonical_layout_name() {
     let caller_module_id = galfus_core::ModuleId::new(1);
     let provider_module_id = galfus_core::ModuleId::new(2);
+    let choice_def_id = galfus_core::DefId::new(provider_module_id, galfus_core::SymbolId::new(42));
+    let layout_name = format!("{choice_def_id:?}::ParseResult<i64>#0");
 
     let mut caller = create_test_module(vec![Instruction::RetNull], vec![]);
     caller.choice_layouts[0] = ChoiceLayout {
-        name: "ParseResult".to_string(),
+        name: layout_name.clone(),
         variants: vec![
             ChoiceVariantLayout {
                 name: "Ok".to_string(),
@@ -312,7 +314,7 @@ fn test_instanceof_matches_imported_choice_variant_by_layout_name() {
         },
     );
     provider.choice_layouts[1] = ChoiceLayout {
-        name: "ParseResult".to_string(),
+        name: layout_name,
         variants: vec![
             ChoiceVariantLayout {
                 name: "Ok".to_string(),

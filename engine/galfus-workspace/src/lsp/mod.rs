@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests;
 
+mod anchored;
 pub mod completion;
 pub mod definition;
 pub mod diagnostics;
@@ -69,7 +70,20 @@ impl Workspace {
 
     pub fn handle_lsp_message(&mut self, json: &str) -> Vec<String> {
         let mut responses = Vec::new();
-        let request: JsonRpcRequest = match serde_json::from_str(json) {
+        let Ok(value) = serde_json::from_str::<Value>(json) else {
+            let err_resp = JsonRpcResponse::error(Value::Null, -32700, "Parse error".into());
+            if let Ok(s) = serde_json::to_string(&err_resp) {
+                responses.push(s);
+            }
+            return responses;
+        };
+
+        // Responses to server-initiated requests do not require handling.
+        if value.get("method").is_none() {
+            return responses;
+        }
+
+        let request: JsonRpcRequest = match serde_json::from_value(value) {
             Ok(req) => req,
             Err(_) => {
                 let err_resp = JsonRpcResponse::error(Value::Null, -32700, "Parse error".into());
@@ -117,6 +131,8 @@ impl Workspace {
                                 .canonicalize()
                                 .unwrap_or_else(|_| file_path.clone()),
                         );
+                        #[cfg(not(target_arch = "wasm32"))]
+                        self.load_workspace_sources(file_path.as_path());
                         let manifest_path = file_path.join("galfus.toml");
                         if let Ok(manifest_str) = std::fs::read_to_string(manifest_path)
                             && let Ok(manifest) = toml::from_str(&manifest_str)
@@ -134,7 +150,7 @@ impl Workspace {
                         "definitionProvider": true,
                         "completionProvider": {
                             "resolveProvider": false,
-                            "triggerCharacters": ["."]
+                            "triggerCharacters": [".", ":"]
                         },
                         "semanticTokensProvider": {
                             "legend": {
@@ -363,6 +379,63 @@ impl Workspace {
             if let Ok(s) = serde_json::to_string(&notification) {
                 responses.push(s);
             }
+
+            self.refresh_semantic_tokens(responses);
+        }
+    }
+
+    fn refresh_semantic_tokens(&self, responses: &mut Vec<String>) {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(Value::String("galfus-semantic-tokens-refresh".to_string())),
+            method: "workspace/semanticTokens/refresh".to_string(),
+            params: None,
+        };
+
+        if let Ok(s) = serde_json::to_string(&request) {
+            responses.push(s);
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Workspace {
+    fn load_workspace_sources(&mut self, root: &std::path::Path) {
+        self.load_workspace_sources_in(root, root);
+    }
+
+    fn load_workspace_sources_in(&mut self, root: &std::path::Path, directory: &std::path::Path) {
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            return;
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                self.load_workspace_sources_in(root, path.as_path());
+                continue;
+            }
+            if !file_type.is_file()
+                || !matches!(
+                    path.extension().and_then(|extension| extension.to_str()),
+                    Some("gfs" | "gfp")
+                )
+            {
+                continue;
+            }
+            let Ok(relative_path) = path.strip_prefix(root) else {
+                continue;
+            };
+            let Some(relative_path) = relative_path.to_str() else {
+                continue;
+            };
+            let Ok(source) = std::fs::read(path.as_path()) else {
+                continue;
+            };
+            let _ = self.load_module(&relative_path.replace('\\', "/"), source.as_slice());
         }
     }
 }

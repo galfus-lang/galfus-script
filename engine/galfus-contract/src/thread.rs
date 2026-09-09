@@ -18,7 +18,7 @@ pub trait RunnableTask {
 #[derive(Debug)]
 pub enum ThreadResult {
     /// The thread completed its entry function and returned a result.
-    Completed(Result<crate::BoundaryValue, crate::ExecutionFailure>),
+    Completed(Result<i32, crate::ExecutionFailure>),
 
     /// The thread yielded back to the scheduler, or panicked (and was discarded).
     Discarded,

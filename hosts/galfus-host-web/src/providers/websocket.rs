@@ -1,7 +1,7 @@
 use galfus_contract::builtins::std_websocket_provider_descriptor;
 use galfus_contract::{
-    BoundaryValue, CancellationOutcome, ExecutionFailure, ExecutionFailureKind, HostProvider,
-    MessageInjector, ProviderDescriptor, TaskAffinity,
+    CancellationOutcome, ExecutionFailure, ExecutionFailureKind, HostProvider, MessageInjector,
+    ProviderDescriptor, SurfaceValue, TaskAffinity,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -52,110 +52,96 @@ impl HostProvider for WebWebSocketProvider {
     fn descriptor(&self) -> ProviderDescriptor {
         std_websocket_provider_descriptor()
     }
-
     fn affinity(&self, _name: &str) -> TaskAffinity {
         TaskAffinity::Main
     }
 
-    fn dispatch(
+    fn dispatch_surface(
         &mut self,
         thread_id: galfus_core::ThreadId,
         request_lease: galfus_core::RequestLease,
         name: &str,
-        args: &[BoundaryValue],
+        args: &[SurfaceValue],
         injector: Arc<dyn MessageInjector>,
-    ) {
+    ) -> bool {
         match name {
             "websocket_connect" => {
-                let Some(BoundaryValue::Bytes(url)) = args.first() else {
-                    let _ = injector.inject_system_response(
-                        thread_id,
-                        request_lease,
-                        Err(ExecutionFailure::new(
-                            ExecutionFailureKind::ProviderFailure,
-                            "expected URL bytes".to_string(),
-                        )),
-                    );
-                    return;
+                let [SurfaceValue::Bytes(url)] = args else {
+                    return false;
                 };
                 let Ok(url) = std::str::from_utf8(url) else {
-                    let _ = injector.inject_system_response(
+                    let _ = injector.inject_surface_response(
                         thread_id,
                         request_lease,
                         Err(ExecutionFailure::new(
                             ExecutionFailureKind::ProviderFailure,
-                            "WebSocket URL must be UTF-8".to_string(),
+                            "WebSocket URL must be UTF-8",
                         )),
                     );
-                    return;
+                    return true;
                 };
                 let Ok(socket) = web_sys::WebSocket::new(url) else {
-                    let _ = injector.inject_system_response(
+                    let _ = injector.inject_surface_response(
                         thread_id,
                         request_lease,
-                        Ok(BoundaryValue::Null),
+                        Ok(SurfaceValue::Null),
                     );
-                    return;
+                    return true;
                 };
                 socket.set_binary_type(web_sys::BinaryType::Arraybuffer);
                 let id = self.next_socket_id();
-                let connected = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let completed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let opened = completed.clone();
                 let open_injector = injector.clone();
-                let opened = connected.clone();
                 let onopen = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
                     if !opened.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                        let _ = open_injector.inject_system_response(
+                        let _ = open_injector.inject_surface_response(
                             thread_id,
                             request_lease,
-                            Ok(BoundaryValue::U64(id)),
+                            Ok(SurfaceValue::U64(id)),
                         );
                     }
                 });
                 socket.set_onopen(Some(onopen.as_ref().unchecked_ref()));
                 onopen.forget();
-
+                let failed = completed.clone();
                 let error_injector = injector.clone();
-                let failed = connected.clone();
                 let onerror =
                     wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
                         if !failed.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                            let _ = error_injector.inject_system_response(
+                            let _ = error_injector.inject_surface_response(
                                 thread_id,
                                 request_lease,
-                                Ok(BoundaryValue::Null),
+                                Ok(SurfaceValue::Null),
                             );
                         }
                     });
                 socket.set_onerror(Some(onerror.as_ref().unchecked_ref()));
                 onerror.forget();
-
                 let state = self.state.clone();
                 let onmessage =
                     wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::MessageEvent)>::new(
                         move |event: web_sys::MessageEvent| {
                             let data = event.data();
-                            let bytes = if let Some(text) = data.as_string() {
-                                text.into_bytes()
-                            } else {
-                                js_sys::Uint8Array::new(&data).to_vec()
-                            };
+                            let bytes = data.as_string().map_or_else(
+                                || js_sys::Uint8Array::new(&data).to_vec(),
+                                String::into_bytes,
+                            );
                             let pending = state.lock().ok().and_then(|mut state| {
-                                if let Some(pending) = state.pending_receives.remove(&id) {
-                                    Some(pending)
-                                } else {
+                                state.pending_receives.remove(&id).or_else(|| {
                                     state
                                         .messages
                                         .entry(id)
                                         .or_default()
                                         .push_back(bytes.clone());
                                     None
-                                }
+                                })
                             });
                             if let Some(pending) = pending {
-                                let _ = pending.injector.inject_system_response(
+                                let _ = pending.injector.inject_surface_response(
                                     pending.thread_id,
                                     pending.request_lease,
-                                    Ok(BoundaryValue::Bytes(bytes)),
+                                    Ok(SurfaceValue::Bytes(bytes)),
                                 );
                             }
                         },
@@ -169,10 +155,10 @@ impl HostProvider for WebWebSocketProvider {
                             state.closed.insert(id);
                             state.messages.remove(&id);
                             if let Some(pending) = state.pending_receives.remove(&id) {
-                                let _ = pending.injector.inject_system_response(
+                                let _ = pending.injector.inject_surface_response(
                                     pending.thread_id,
                                     pending.request_lease,
-                                    Ok(BoundaryValue::Null),
+                                    Ok(SurfaceValue::Null),
                                 );
                             }
                         }
@@ -184,26 +170,19 @@ impl HostProvider for WebWebSocketProvider {
                     state.closed.remove(&id);
                 }
                 self.sockets.insert(id, socket);
+                true
             }
             "websocket_receive" => {
-                let Some(BoundaryValue::U64(id)) = args.first() else {
-                    let _ = injector.inject_system_response(
-                        thread_id,
-                        request_lease,
-                        Err(ExecutionFailure::new(
-                            ExecutionFailureKind::ProviderFailure,
-                            "expected socket ID".to_string(),
-                        )),
-                    );
-                    return;
+                let [SurfaceValue::U64(id)] = args else {
+                    return false;
                 };
                 if !self.sockets.contains_key(id) {
-                    let _ = injector.inject_system_response(
+                    let _ = injector.inject_surface_response(
                         thread_id,
                         request_lease,
-                        Ok(BoundaryValue::Null),
+                        Ok(SurfaceValue::Null),
                     );
-                    return;
+                    return true;
                 }
                 let response = self.state.lock().ok().and_then(|mut state| {
                     if state.closed.contains(id) {
@@ -217,22 +196,12 @@ impl HostProvider for WebWebSocketProvider {
                     }
                 });
                 if let Some(bytes) = response {
-                    let _ = injector.inject_system_response(
+                    let _ = injector.inject_surface_response(
                         thread_id,
                         request_lease,
-                        Ok(bytes.map_or(BoundaryValue::Null, BoundaryValue::Bytes)),
+                        Ok(bytes.map_or(SurfaceValue::Null, SurfaceValue::Bytes)),
                     );
-                    return;
-                }
-                if let Ok(mut state) = self.state.lock() {
-                    if state.closed.contains(id) {
-                        let _ = injector.inject_system_response(
-                            thread_id,
-                            request_lease,
-                            Ok(BoundaryValue::Null),
-                        );
-                        return;
-                    }
+                } else if let Ok(mut state) = self.state.lock() {
                     state.pending_receives.insert(
                         *id,
                         PendingReceive {
@@ -242,73 +211,47 @@ impl HostProvider for WebWebSocketProvider {
                         },
                     );
                 }
+                true
             }
-            "websocket_send" => {
-                let result = match (args.first(), args.get(1)) {
-                    (Some(BoundaryValue::U64(id)), Some(BoundaryValue::Bytes(data))) => {
-                        BoundaryValue::Bool(
-                            self.sockets
-                                .get(id)
-                                .is_some_and(|socket| socket.send_with_u8_array(data).is_ok()),
-                        )
+            "websocket_send" => match args {
+                [SurfaceValue::U64(id), SurfaceValue::Bytes(data)] => {
+                    let result = SurfaceValue::Bool(
+                        self.sockets
+                            .get(id)
+                            .is_some_and(|socket| socket.send_with_u8_array(data).is_ok()),
+                    );
+                    let _ = injector.inject_surface_response(thread_id, request_lease, Ok(result));
+                    true
+                }
+                _ => false,
+            },
+            "websocket_close" => match args {
+                [SurfaceValue::U64(id)] => {
+                    let closed = self
+                        .sockets
+                        .remove(id)
+                        .is_some_and(|socket| socket.close().is_ok());
+                    if let Ok(mut state) = self.state.lock() {
+                        state.closed.insert(*id);
+                        state.messages.remove(id);
+                        if let Some(pending) = state.pending_receives.remove(id) {
+                            let _ = pending.injector.inject_surface_response(
+                                pending.thread_id,
+                                pending.request_lease,
+                                Ok(SurfaceValue::Null),
+                            );
+                        }
                     }
-                    _ => {
-                        let _ = injector.inject_system_response(
-                            thread_id,
-                            request_lease,
-                            Err(ExecutionFailure::new(
-                                ExecutionFailureKind::ProviderFailure,
-                                "expected socket ID and bytes".to_string(),
-                            )),
-                        );
-                        return;
-                    }
-                };
-                let _ = injector.inject_system_response(thread_id, request_lease, Ok(result));
-            }
-            "websocket_close" => {
-                let Some(BoundaryValue::U64(id)) = args.first() else {
-                    let _ = injector.inject_system_response(
+                    let _ = injector.inject_surface_response(
                         thread_id,
                         request_lease,
-                        Err(ExecutionFailure::new(
-                            ExecutionFailureKind::ProviderFailure,
-                            "expected socket ID".to_string(),
-                        )),
+                        Ok(SurfaceValue::Bool(closed)),
                     );
-                    return;
-                };
-                let closed = self
-                    .sockets
-                    .remove(id)
-                    .is_some_and(|socket| socket.close().is_ok());
-                if let Ok(mut state) = self.state.lock() {
-                    state.closed.insert(*id);
-                    state.messages.remove(id);
-                    if let Some(pending) = state.pending_receives.remove(id) {
-                        let _ = pending.injector.inject_system_response(
-                            pending.thread_id,
-                            pending.request_lease,
-                            Ok(BoundaryValue::Null),
-                        );
-                    }
+                    true
                 }
-                let _ = injector.inject_system_response(
-                    thread_id,
-                    request_lease,
-                    Ok(BoundaryValue::Bool(closed)),
-                );
-            }
-            _ => {
-                let _ = injector.inject_system_response(
-                    thread_id,
-                    request_lease,
-                    Err(ExecutionFailure::new(
-                        ExecutionFailureKind::ProviderFailure,
-                        format!("function {name} is not implemented in WebWebSocketProvider"),
-                    )),
-                );
-            }
+                _ => false,
+            },
+            _ => false,
         }
     }
 

@@ -1,0 +1,135 @@
+import { ByteBuffer, CollectResult, ReadStreamResult, ReadStream } from "std/stream"
+import { ScriptedStream } from "./mock.gfs"
+import { println } from "std/io"
+import { equals } from "text"
+
+fn toData(bytes: [u8]): ReadStreamResult<[u8]> { return ReadStreamResult::Data(bytes) }
+fn toEnd(): ReadStreamResult<[u8]> { return ReadStreamResult::End }
+fn toError(msg: [u8]): ReadStreamResult<[u8]> { return ReadStreamResult::Error(msg) }
+
+export fn main(_args: [[u8]]): i32 {
+  var status = 0
+  // Test 1: Multiple chunks followed by End
+  const multi_chunks: [ReadStreamResult<[u8]>] = [
+    toData("chunk1"),
+    toData("chunk2"),
+    toEnd()
+  ]
+  const stream1 = ScriptedStream::create(multi_chunks)
+  const buf1 = await ByteBuffer::create()::collect(stream1)
+  match buf1 {
+    CollectResult::Data(bytes) {
+      if !equals(bytes, "chunk1chunk2") { status = 101 }
+    },
+    _ { status = 102 }
+  }
+  if status != 0 { return status }
+
+  // Test 2: Error propagation
+  const error_chunks: [ReadStreamResult<[u8]>] = [
+    toData("chunk1"),
+    toError("stream error")
+  ]
+  const stream2 = ScriptedStream::create(error_chunks)
+  const buf2 = await ByteBuffer::create()::collect(stream2)
+  match buf2 {
+    CollectResult::Error(msg) {
+      if !equals(msg, "stream error") { status = 201 }
+    },
+    _ { status = 202 }
+  }
+  if status != 0 { return status }
+
+  // Test 3: Exact maxBytes boundary
+  const exact_chunks: [ReadStreamResult<[u8]>] = [
+    toData("1234"),
+    toData("5678"),
+    toEnd()
+  ]
+  const stream3 = ScriptedStream::create(exact_chunks)
+  const buf3 = await ByteBuffer::create()::collect(stream3, 8)
+  match buf3 {
+    CollectResult::Data(bytes) {
+      if !equals(bytes, "12345678") { status = 301 }
+    },
+    _ { status = 302 }
+  }
+  if status != 0 { return status }
+
+  // Test 4: One-byte overflow
+  const overflow_chunks: [ReadStreamResult<[u8]>] = [
+    toData("1234"),
+    toData("56789") // Length is 5, total becomes 9, which exceeds limit of 8
+  ]
+  const stream4 = ScriptedStream::create(overflow_chunks)
+  const bb4 = ByteBuffer::create()
+  const buf4 = await bb4::collect(stream4, 8)
+  match buf4 {
+    CollectResult::LimitExceeded { 
+      // Verify ByteBuffer DOES NOT retain the overflowing chunk
+      if bb4.length != 4 { status = 401 }
+      if !equals(bb4::toBytes(), "1234") { status = 402 }
+      
+      // Verify collect automatically invoked stream::cancel()
+      if !stream4.cancelled { status = 403 }
+    },
+    _ { status = 404 }
+  }
+  if status != 0 { return status }
+
+  // Test 5: Zero-length chunks
+  const zero_chunks: [ReadStreamResult<[u8]>] = [
+    toData("12"),
+    toData(""),
+    toData("34"),
+    toEnd()
+  ]
+  const stream5 = ScriptedStream::create(zero_chunks)
+  const buf5 = await ByteBuffer::create()::collect(stream5)
+  match buf5 {
+    CollectResult::Data(bytes) {
+      if !equals(bytes, "1234") { status = 501 }
+    },
+    _ { status = 502 }
+  }
+  if status != 0 { return status }
+
+  // Test 6: Cancel before first read
+  const never_chunks: [ReadStreamResult<[u8]>] = [
+    toData("never")
+  ]
+  const stream6 = ScriptedStream::create(never_chunks)
+  await stream6::cancel()
+  const c_result = await stream6::next()
+  var c_end = false
+  match c_result {
+    ReadStreamResult::End { c_end = true },
+    _ {}
+  }
+  if !c_end { return 601 }
+
+  // Test 7: Cancel mid-stream
+  const mid_chunks: [ReadStreamResult<[u8]>] = [
+    toData("first")
+  ]
+  const stream7 = ScriptedStream::create(mid_chunks)
+  const mid1 = await stream7::next()
+  match mid1 {
+    ReadStreamResult::Data(d) {
+      if !equals(d, "first") { status = 701 }
+    },
+    _ { status = 702 }
+  }
+  if status != 0 { return status }
+  await stream7::cancel()
+  const mid2 = await stream7::next()
+  var mid_end = false
+  match mid2 {
+    ReadStreamResult::End { mid_end = true },
+    _ {}
+  }
+  if !mid_end { return 703 }
+
+  println("ok")
+  return 0
+}

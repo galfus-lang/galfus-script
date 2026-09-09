@@ -175,11 +175,9 @@ pub(super) fn resolve_import_target(
             let target_idx = import_target_index(modules, mod_idx, import.source())?;
             let target_mod = &modules[target_idx];
             let target_resolution = target_mod.graph().resolution()?;
-            if let Some(export) = target_resolution
-                .exports()
-                .iter()
-                .find(|export| export.name() == imported_name)
-            {
+            if let Some(export) = target_resolution.exports().iter().find(|export| {
+                export.kind() == SymbolKind::Function && export.name() == imported_name
+            }) {
                 return Some((target_mod.id(), FunctionId::new(export.symbol().raw())));
             }
         }
@@ -279,6 +277,37 @@ pub(super) fn resolve_import_target(
             let first = candidates.next();
             if first.is_some() && candidates.next().is_none() {
                 return first;
+            }
+        }
+
+        if let Some(syntax_node) = module.graph().syntax().node(node_id)
+            && syntax_node.kind() == SyntaxNodeKind::PathExpression
+            && let Some(member_node) = syntax_node.child(1)
+            && let Some(member_node_data) = module.graph().syntax().node(member_node)
+            && let Some(member_name) = module.source().slice(member_node_data.span())
+            && let Some(receiver) = syntax_node.child(0)
+            && let Some(receiver_ty) = module
+                .type_result()
+                .and_then(|result| result.layer().node_type(receiver))
+            && let Some(TypeKind::Path { segments, .. }) = module
+                .type_result()
+                .and_then(|result| result.layer().table().kind(receiver_ty))
+            && let Some(type_name) = segments.last()
+        {
+            let mut candidates = Vec::new();
+            let anchored_name = format!("{type_name}::{member_name}");
+            for target_module in modules.iter() {
+                if let Some(target_resolution) = target_module.graph().resolution() {
+                    for export in target_resolution.exports() {
+                        if export.kind() == SymbolKind::Function && export.name() == anchored_name {
+                            candidates
+                                .push((target_module.id(), FunctionId::new(export.symbol().raw())));
+                        }
+                    }
+                }
+            }
+            if candidates.len() == 1 {
+                return Some(candidates[0]);
             }
         }
 

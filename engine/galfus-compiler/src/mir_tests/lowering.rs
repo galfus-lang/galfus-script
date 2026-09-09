@@ -147,7 +147,15 @@ fn test_mir_lowering_basic() {
     );
 
     let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
-    let (module_image, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let (module_image, _) = lower_module(
+        galfus_core::ModuleId::new(1),
+        &mir_module,
+        &type_result,
+        &graph,
+        code,
+        "",
+        &string_table,
+    );
 
     // Verify bytecode module metadata
     assert!(!module_image.functions.is_empty());
@@ -202,7 +210,15 @@ fn test_mir_lowering_defaults_integer_constants_to_int32() {
     );
 
     let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
-    let (module_image, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let (module_image, _) = lower_module(
+        galfus_core::ModuleId::new(1),
+        &mir_module,
+        &type_result,
+        &graph,
+        code,
+        "",
+        &string_table,
+    );
 
     assert!(
         module_image
@@ -271,7 +287,15 @@ fn test_mir_lowering_advanced() {
     );
 
     let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
-    let (module_image, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let (module_image, _) = lower_module(
+        galfus_core::ModuleId::new(1),
+        &mir_module,
+        &type_result,
+        &graph,
+        code,
+        "",
+        &string_table,
+    );
 
     // Verify functions
     assert!(!module_image.functions.is_empty());
@@ -306,7 +330,7 @@ fn test_mir_lowering_advanced() {
     // Verify choice layout was compiled
     assert!(!module_image.choice_layouts.is_empty());
     let shape_layout = &module_image.choice_layouts[0];
-    assert_eq!(shape_layout.name, "Shape");
+    assert!(shape_layout.name.ends_with("::Shape"));
     assert_eq!(shape_layout.variants.len(), 2);
     assert_eq!(shape_layout.variants[0].name, "Circle");
     assert_eq!(shape_layout.variants[1].name, "Square");
@@ -402,7 +426,15 @@ fn test_async_call_emits_typed_future_instruction() {
             .any(|(instruction, _)| matches!(instruction, Instruction::Drop(_))),
         "Future handles must be released when their scope ends"
     );
-    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let (module, _) = lower_module(
+        galfus_core::ModuleId::new(1),
+        &mir_module,
+        &type_result,
+        &graph,
+        code,
+        "",
+        &string_table,
+    );
     let main = module
         .functions
         .iter()
@@ -431,7 +463,7 @@ fn test_async_call_emits_typed_future_instruction() {
 }
 
 #[test]
-fn test_direct_await_drops_its_temporary_future_handle() {
+fn test_direct_await_calls_local_async_function_without_a_future_boundary() {
     let source_id = SourceId::new(0);
     let code = r#"
         struct Future<T> { id: i64 }
@@ -462,7 +494,15 @@ fn test_direct_await_drops_its_temporary_future_handle() {
     );
 
     let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
-    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let (module, _) = lower_module(
+        galfus_core::ModuleId::new(1),
+        &mir_module,
+        &type_result,
+        &graph,
+        code,
+        "",
+        &string_table,
+    );
     let main = module
         .functions
         .iter()
@@ -470,12 +510,17 @@ fn test_direct_await_drops_its_temporary_future_handle() {
         .expect("main function should be emitted");
     assert!(
         main.instructions
-            .windows(2)
-            .any(|instructions| matches!(instructions, [
-                galfus_bytecode::Instruction::AwaitFuture { future_id, .. },
-                galfus_bytecode::Instruction::Drop { reg },
-            ] if future_id == reg)),
-        "a direct await must drop its temporary future handle after resuming"
+            .iter()
+            .any(|instruction| matches!(instruction, galfus_bytecode::Instruction::Call { .. })),
+        "a direct await must call a local async function in the caller heap"
+    );
+    assert!(
+        !main.instructions.iter().any(|instruction| matches!(
+            instruction,
+            galfus_bytecode::Instruction::CreateFuture { .. }
+                | galfus_bytecode::Instruction::AwaitFuture { .. }
+        )),
+        "a direct local await must not cross a future boundary"
     );
 }
 
@@ -517,7 +562,15 @@ fn test_indirect_async_call_emits_typed_future_instruction() {
     );
 
     let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
-    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let (module, _) = lower_module(
+        galfus_core::ModuleId::new(1),
+        &mir_module,
+        &type_result,
+        &graph,
+        code,
+        "",
+        &string_table,
+    );
     let main = module
         .functions
         .iter()
@@ -577,7 +630,15 @@ fn test_typed_literals_do_not_emit_redundant_casts() {
     );
 
     let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
-    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let (module, _) = lower_module(
+        galfus_core::ModuleId::new(1),
+        &mir_module,
+        &type_result,
+        &graph,
+        code,
+        "",
+        &string_table,
+    );
     let main = module
         .functions
         .iter()
@@ -625,7 +686,15 @@ fn typed_numeric_operations_emit_exact_width_immediates() {
     );
 
     let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
-    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let (module, _) = lower_module(
+        galfus_core::ModuleId::new(1),
+        &mir_module,
+        &type_result,
+        &graph,
+        code,
+        "",
+        &string_table,
+    );
     let immediates = module
         .functions
         .iter()
@@ -699,7 +768,15 @@ fn direct_single_argument_calls_use_the_local_source_register() {
     );
 
     let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
-    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let (module, _) = lower_module(
+        galfus_core::ModuleId::new(1),
+        &mir_module,
+        &type_result,
+        &graph,
+        code,
+        "",
+        &string_table,
+    );
     let caller = module
         .functions
         .iter()
@@ -751,7 +828,15 @@ fn test_conditional_without_branch_arguments_uses_direct_targets() {
     );
 
     let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
-    let (module, _) = lower_module(&mir_module, &type_result, &graph, code, &string_table);
+    let (module, _) = lower_module(
+        galfus_core::ModuleId::new(1),
+        &mir_module,
+        &type_result,
+        &graph,
+        code,
+        "",
+        &string_table,
+    );
     let choose = module
         .functions
         .iter()
@@ -762,12 +847,185 @@ fn test_conditional_without_branch_arguments_uses_direct_targets() {
         matches!(
             choose.instructions.as_slice(),
             [
-                galfus_bytecode::Instruction::JumpFalse { offset: 3, .. },
+                galfus_bytecode::Instruction::JumpFalse { offset: 2, .. },
                 galfus_bytecode::Instruction::LoadConst { .. },
                 ..
             ],
         ),
         "{:#?}",
         choose.instructions
+    );
+}
+
+#[test]
+fn narrowing_block_returns_yield_to_the_enclosing_expression() {
+    let source_id = SourceId::new(0);
+    let code = r#"
+        struct Future<T> { id: i64 }
+
+        choice Result {
+            Value(i32),
+            Empty,
+        }
+
+        fn(async) ready(): i32 {
+            return 7
+        }
+
+        fn(async) narrow(value: Result): i32 {
+            const result = match value {
+                Result::Value(_) {
+                    const number = await ready()
+                    return number
+                },
+                Result::Empty {
+                    return 0
+                },
+            }
+            return result
+        }
+    "#;
+    let source = SourceFile::new(
+        source_id,
+        "narrowing_await.gfs".to_string(),
+        code.to_string(),
+    );
+    let parse_result = parse(&source);
+    let mut string_table = galfus_frontend::StringTable::new();
+    let graph = resolve(&source, parse_result.into_graph(), &mut string_table).into_graph();
+    let type_result = check_definition_types(
+        &source,
+        &graph,
+        check_declaration_types(&source, &graph, &string_table, false),
+        &string_table,
+        false,
+    );
+    assert!(
+        !type_result.has_errors(),
+        "Typecheck error: {:?}",
+        type_result.diagnostics()
+    );
+
+    let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
+    let narrow = mir_module
+        .functions
+        .iter()
+        .find(|function| function.name == "narrow")
+        .expect("narrow function should be emitted");
+
+    let function_returns = narrow
+        .blocks
+        .iter()
+        .filter(|block| matches!(block.terminator.0, Terminator::Return(Some(_))))
+        .count();
+
+    assert_eq!(
+        function_returns, 1,
+        "only the outer return may end the function"
+    );
+    assert!(
+        !narrow.blocks.iter().any(|block| {
+            matches!(block.terminator.0, Terminator::Return(Some(_)))
+                && block
+                    .instructions
+                    .iter()
+                    .any(|(instruction, _)| matches!(instruction, Instruction::Await { .. }))
+        }),
+        "an arm return must yield to the match expression instead of returning from narrow"
+    );
+    assert!(
+        galfus_ir::validator::validate_module(&mir_module).is_ok(),
+        "the explicit narrowing CFG should validate"
+    );
+}
+
+#[test]
+fn instanceof_and_typeof_block_returns_yield_to_the_enclosing_expression() {
+    let source_id = SourceId::new(0);
+    let code = r#"
+        fn narrowValue(value: i32 | null): i32 {
+            const result = instanceof value {
+                i32 number { return number },
+                null { return 0 },
+            }
+            return result
+        }
+
+        fn narrowType<T: i32 | bool>(): i32 {
+            const result = typeof T {
+                i32 { return 1 },
+                bool { return 0 },
+            }
+            return result
+        }
+
+        fn main(): i32 {
+            return narrowType<i32>()
+        }
+    "#;
+    let source = SourceFile::new(
+        source_id,
+        "narrowing_returns.gfs".to_string(),
+        code.to_string(),
+    );
+    let parse_result = parse(&source);
+    let mut string_table = galfus_frontend::StringTable::new();
+    let graph = resolve(&source, parse_result.into_graph(), &mut string_table).into_graph();
+    let type_result = check_definition_types(
+        &source,
+        &graph,
+        check_declaration_types(&source, &graph, &string_table, false),
+        &string_table,
+        false,
+    );
+    assert!(
+        !type_result.has_errors(),
+        "Typecheck error: {:?}",
+        type_result.diagnostics()
+    );
+
+    let mir_module = MirBuilder::new(&graph, &type_result, code, &string_table).build();
+
+    let narrow_value = mir_module
+        .functions
+        .iter()
+        .find(|function| function.name == "narrowValue")
+        .expect("narrowValue should be emitted");
+    let main = mir_module
+        .functions
+        .iter()
+        .find(|function| function.name == "main")
+        .expect("main should be emitted");
+    let narrow_type_id = main
+        .blocks
+        .iter()
+        .flat_map(|block| block.instructions.iter())
+        .find_map(|(instruction, _)| match instruction {
+            Instruction::Call { func, .. } => Some(*func),
+            _ => None,
+        })
+        .expect("main should call narrowType");
+    let narrow_type = mir_module
+        .functions
+        .iter()
+        .find(|function| function.id == narrow_type_id)
+        .expect("narrowType specialization should be emitted");
+
+    for (name, function) in [("narrowValue", narrow_value), ("narrowType", narrow_type)] {
+        let function_returns = function
+            .blocks
+            .iter()
+            .filter(|block| matches!(block.terminator.0, Terminator::Return(Some(_))))
+            .count();
+
+        assert_eq!(
+            function_returns, 1,
+            "{name} may only return after its narrowing expression completes"
+        );
+    }
+
+    assert!(
+        galfus_ir::validator::validate_module(&mir_module).is_ok(),
+        "the narrowing CFG should validate"
     );
 }

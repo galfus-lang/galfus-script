@@ -1,0 +1,8 @@
+[module]
+name = "stream_test"
+version = "1.0.0"
+target = "app"
+
+[entry]
+path = "src/stream.gfs"
+function = "main"

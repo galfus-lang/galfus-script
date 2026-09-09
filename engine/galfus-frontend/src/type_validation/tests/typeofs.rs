@@ -156,3 +156,28 @@ fn make<T: Scalar>(): T {
             && diagnostic.message().contains("typeof arm body")
     }));
 }
+
+#[test]
+fn check_typeof_block_returns_type_the_enclosing_expression() {
+    let (_source, graph, result, _string_table) = check_source(
+        r#"
+fn select<T: i32 | bool>(): bool {
+  const selected = typeof T {
+    i32 { return 1 },
+    bool { return 0 },
+  }
+  return true
+}
+"#,
+    );
+
+    assert!(!result.has_errors(), "{:?}", result.diagnostics());
+
+    let expression = find_node_by_kind(&graph, SyntaxNodeKind::TypeofExpression).unwrap();
+    let ty = result.layer().node_type(expression).unwrap();
+
+    assert_eq!(
+        result.layer().table().kind(ty),
+        Some(&TypeKind::Primitive(PrimitiveType::Int32))
+    );
+}

@@ -1,12 +1,14 @@
-use super::LowerCtx;
+use super::{LowerCtx, types_choice_layouts::intern_generic_choice_layout};
 use galfus_bytecode::instruction::TypeIdx;
-use galfus_bytecode::{
-    BytecodeType, ChoiceLayout, ChoiceLayoutIdx, ChoiceVariantLayout, FieldLayout, OwnershipKind,
-    StructLayout, StructLayoutIdx,
-};
+use galfus_bytecode::{BytecodeType, ChoiceLayout, ChoiceLayoutIdx, ChoiceVariantLayout};
 use galfus_core::{OpaqueTypeId, SymbolId, TypeId};
 use galfus_frontend::{PrimitiveType, SymbolKind, SyntaxNodeKind, TypeKind};
-use std::collections::HashSet;
+
+pub use super::types_choice_layouts::{
+    canonical_bytecode_type_name, find_imported_choice_for_type, get_choice_variants,
+    get_or_create_generic_imported_choice_layout, get_or_create_imported_choice_layout,
+};
+pub use super::types_structs::{get_or_create_struct_layout, get_struct_fields};
 
 pub fn resolve_type_with_substitutions(ctx: &LowerCtx, ty: TypeId) -> TypeId {
     let mut current = crate::bytecode_emission::types::resolve_alias_type(ctx, ty);
@@ -35,7 +37,13 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: TypeId) -> TypeIdx {
     let ty = resolve_type_with_substitutions(ctx, ty);
 
     if let Some(&idx) = ctx.type_map.get(&ty) {
-        return idx;
+        let is_null_primitive = matches!(
+            ctx.type_result.layer().table().kind(ty),
+            Some(TypeKind::Primitive(PrimitiveType::Null))
+        );
+        if is_null_primitive || !matches!(ctx.types[idx.raw() as usize], BytecodeType::Null) {
+            return idx;
+        }
     }
 
     let next_idx = TypeIdx(ctx.types.len() as u16);
@@ -49,6 +57,15 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: TypeId) -> TypeIdx {
             let resolution = ctx.graph.resolution().unwrap();
             let sym_kind = resolution.symbol(*symbol).map(|s| s.kind());
             match sym_kind {
+                _ if ctx.imported_struct_fields.contains_key(symbol) => {
+                    let layout_idx = get_or_create_struct_layout(ctx, *symbol);
+                    BytecodeType::Struct(layout_idx)
+                }
+                _ if ctx.type_result.imported_symbol_choices.contains_key(symbol) => {
+                    let choice = ctx.type_result.imported_symbol_choices.get(symbol).unwrap();
+                    let layout_idx = get_or_create_imported_choice_layout(ctx, choice);
+                    BytecodeType::Choice(layout_idx)
+                }
                 Some(SymbolKind::Struct) => {
                     if ctx.is_adapter_proxy {
                         let name = ctx
@@ -65,19 +82,6 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: TypeId) -> TypeIdx {
                         let layout_idx = get_or_create_struct_layout(ctx, *symbol);
                         BytecodeType::Struct(layout_idx)
                     }
-                }
-                Some(SymbolKind::ImportBinding)
-                    if ctx.type_result.imported_struct_fields.contains_key(symbol) =>
-                {
-                    let layout_idx = get_or_create_struct_layout(ctx, *symbol);
-                    BytecodeType::Struct(layout_idx)
-                }
-                Some(SymbolKind::ImportBinding)
-                    if ctx.type_result.imported_symbol_choices.contains_key(symbol) =>
-                {
-                    let choice = ctx.type_result.imported_symbol_choices.get(symbol).unwrap();
-                    let layout_idx = get_or_create_imported_choice_layout(ctx, choice);
-                    BytecodeType::Choice(layout_idx)
                 }
                 Some(SymbolKind::Choice) => {
                     let layout_idx =
@@ -135,7 +139,15 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: TypeId) -> TypeIdx {
             }
         }
         Some(TypeKind::Path { root, segments }) => {
-            if *root == SymbolId::new(0)
+            if ctx.imported_struct_fields.contains_key(root) {
+                let layout_idx = get_or_create_struct_layout(ctx, *root);
+                BytecodeType::Struct(layout_idx)
+            } else if let Some(struct_symbol) =
+                imported_struct_symbol_for_path(ctx, segments.as_slice())
+            {
+                let layout_idx = get_or_create_struct_layout(ctx, struct_symbol);
+                BytecodeType::Struct(layout_idx)
+            } else if *root == SymbolId::new(0)
                 && let Some(name) = segments.first()
                 && let Some(name_id) = ctx.string_table.get(name)
                 && let Some(resolution) = ctx.graph.resolution()
@@ -145,35 +157,19 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: TypeId) -> TypeIdx {
                 let layout_idx = get_or_create_struct_layout(ctx, symbol);
                 BytecodeType::Struct(layout_idx)
             } else {
-                let choice_from_symbol = ctx.type_result.imported_symbol_choices.get(root);
-                let imported_choice = choice_from_symbol.or_else(|| {
-                    ctx.type_result
-                        .imported_path_choices
-                        .values()
-                        .find(|choice| {
-                            segments
-                                .iter()
-                                .position(|segment| segment == &choice.name)
-                                .is_some()
-                        })
-                });
-
-                let Some(choice) = imported_choice else {
+                let Some((choice, variant_name)) =
+                    imported_choice_for_path(ctx, *root, segments.as_slice())
+                else {
                     return next_idx;
                 };
 
-                let layout_idx = get_or_create_imported_choice_layout(ctx, choice);
-                let variant_name = segments
-                    .iter()
-                    .position(|segment| segment == &choice.name)
-                    .and_then(|choice_segment| segments.get(choice_segment + 1))
-                    .or_else(|| choice_from_symbol.and_then(|_| segments.first()));
+                let layout_idx = get_or_create_imported_choice_layout(ctx, &choice);
                 match variant_name {
                     None => BytecodeType::Choice(layout_idx),
                     Some(variant_name) => choice
                         .variants
                         .iter()
-                        .position(|variant| variant.name == *variant_name)
+                        .position(|variant| variant.name == variant_name)
                         .map(|variant_idx| {
                             BytecodeType::ChoiceVariant(layout_idx, variant_idx as u16)
                         })
@@ -206,9 +202,22 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: TypeId) -> TypeIdx {
                 .collect();
             BytecodeType::Tuple(elem_idxs)
         }
-        Some(TypeKind::GenericInstance { base, .. }) => {
-            let base_idx = crate::bytecode_emission::types::lower_type(ctx, *base);
-            ctx.types[base_idx.raw() as usize].clone()
+        Some(TypeKind::GenericInstance { base, arguments }) => {
+            if let Some(choice_symbol) = local_choice_symbol_for_type(ctx, *base) {
+                BytecodeType::Choice(get_or_create_generic_choice_layout(
+                    ctx,
+                    ty,
+                    choice_symbol,
+                    arguments,
+                ))
+            } else if let Some(choice) = imported_choice_for_type(ctx, *base) {
+                BytecodeType::Choice(get_or_create_generic_imported_choice_layout(
+                    ctx, ty, &choice, arguments,
+                ))
+            } else {
+                let base_idx = crate::bytecode_emission::types::lower_type(ctx, *base);
+                ctx.types[base_idx.raw() as usize].clone()
+            }
         }
         _ => BytecodeType::Null,
     };
@@ -218,16 +227,107 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: TypeId) -> TypeIdx {
     next_idx
 }
 
-pub(super) fn lower_choice_variant_type(ctx: &mut LowerCtx, variant_symbol: SymbolId) -> TypeIdx {
+fn local_choice_symbol_for_type(ctx: &LowerCtx, ty: TypeId) -> Option<SymbolId> {
+    let TypeKind::Named { symbol } = ctx.type_result.layer().table().kind(ty)? else {
+        return None;
+    };
+    ctx.graph
+        .resolution()?
+        .symbol(*symbol)
+        .filter(|symbol| symbol.kind() == SymbolKind::Choice)
+        .map(|_| *symbol)
+}
+
+pub(super) fn imported_choice_for_type(
+    ctx: &LowerCtx,
+    ty: TypeId,
+) -> Option<galfus_frontend::LoweredImportedChoice> {
+    let mut current = resolve_alias_type(ctx, ty);
+    loop {
+        match ctx.type_result.layer().table().kind(current)? {
+            TypeKind::Named { symbol } => {
+                return ctx.type_result.imported_symbol_choices.get(symbol).cloned();
+            }
+            TypeKind::Path { root, segments } => {
+                return imported_choice_for_path(ctx, *root, segments.as_slice())
+                    .map(|(choice, _)| choice);
+            }
+            TypeKind::GenericInstance { base, .. } => {
+                current = *base;
+            }
+            _ => return None,
+        }
+    }
+}
+
+fn imported_choice_for_path<'a>(
+    ctx: &LowerCtx,
+    root: SymbolId,
+    segments: &'a [String],
+) -> Option<(galfus_frontend::LoweredImportedChoice, Option<&'a str>)> {
+    if let Some(choice) = ctx.type_result.imported_symbol_choices.get(&root) {
+        return Some((choice.clone(), segments.first().map(String::as_str)));
+    }
+
+    let (choice_name, remaining_segments) = segments.split_first()?;
+    let choice = ctx
+        .type_result
+        .imported_namespace_choices
+        .get(&(root, choice_name.clone()))?
+        .clone();
+    Some((choice, remaining_segments.first().map(String::as_str)))
+}
+
+fn imported_struct_symbol_for_path(ctx: &LowerCtx, segments: &[String]) -> Option<SymbolId> {
+    let name = segments.last()?;
+    let table = ctx.type_result.layer().table();
+
+    ctx.imported_struct_fields.keys().copied().find(|symbol| {
+        let Some(function_ty) = ctx.type_result.layer().symbol_type(*symbol) else {
+            return false;
+        };
+        let Some(TypeKind::Function(function)) = table.kind(function_ty) else {
+            return false;
+        };
+        matches!(
+            table.kind(function.return_type()),
+            Some(TypeKind::Path { segments, .. }) if segments.last() == Some(name)
+        )
+    })
+}
+
+pub(super) fn lower_choice_variant_type(
+    ctx: &mut LowerCtx,
+    instance_ty: TypeId,
+    variant_symbol: SymbolId,
+) -> TypeIdx {
     let Some((choice_symbol, variant_index)) =
         crate::bytecode_emission::helpers::find_choice_for_variant(ctx, variant_symbol)
     else {
-        {
-            return TypeIdx(0);
+        unreachable!("choice variant pattern must resolve to its owner choice");
+    };
+
+    let type_idx = crate::bytecode_emission::types::lower_type(ctx, instance_ty);
+    let layout_idx = match &ctx.types[type_idx.raw() as usize] {
+        BytecodeType::Choice(layout_idx) => *layout_idx,
+        _ => {
+            let resolved_ty = resolve_type_with_substitutions(ctx, instance_ty);
+            let generic_arguments = match ctx.type_result.layer().table().kind(resolved_ty) {
+                Some(TypeKind::GenericInstance { base, arguments })
+                    if local_choice_symbol_for_type(ctx, *base) == Some(choice_symbol) =>
+                {
+                    Some(arguments.clone())
+                }
+                _ => None,
+            };
+
+            if let Some(arguments) = generic_arguments {
+                get_or_create_generic_choice_layout(ctx, resolved_ty, choice_symbol, &arguments)
+            } else {
+                get_or_create_choice_layout(ctx, choice_symbol)
+            }
         }
     };
-    let layout_idx =
-        crate::bytecode_emission::types::get_or_create_choice_layout(ctx, choice_symbol);
     let variant_index = variant_index as u16;
 
     if let Some(index) = ctx.types.iter().position(|ty| {
@@ -248,28 +348,37 @@ pub(super) fn lower_choice_variant_type(ctx: &mut LowerCtx, variant_symbol: Symb
 
 pub(super) fn lower_imported_choice_variant_type(
     ctx: &mut LowerCtx,
+    instance_ty: TypeId,
     choice_name: &str,
     variant_name: &str,
 ) -> TypeIdx {
-    let Some(choice) = ctx
-        .type_result
-        .imported_symbol_choices
-        .values()
-        .chain(ctx.type_result.imported_path_choices.values())
-        .find(|choice| choice.name == choice_name)
-        .cloned()
-    else {
-        return TypeIdx(0);
+    let type_idx = crate::bytecode_emission::types::lower_type(ctx, instance_ty);
+    let layout_idx = match &ctx.types[type_idx.raw() as usize] {
+        BytecodeType::Choice(layout_idx) => *layout_idx,
+        _ => {
+            ctx.emission_errors.push(format!(
+                "cannot lower imported choice pattern `{choice_name}::{variant_name}`: operand type {instance_ty:?} is not a choice"
+            ));
+            return type_idx;
+        }
     };
-    let Some(variant_index) = choice
+
+    let Some(layout) = ctx.choice_layouts.get(layout_idx.raw() as usize) else {
+        ctx.emission_errors.push(format!(
+            "cannot lower imported choice pattern `{choice_name}::{variant_name}`: choice layout {layout_idx:?} is unavailable"
+        ));
+        return type_idx;
+    };
+    let Some(variant_index) = layout
         .variants
         .iter()
         .position(|variant| variant.name == variant_name)
     else {
-        return TypeIdx(0);
+        ctx.emission_errors.push(format!(
+            "cannot lower imported choice pattern `{choice_name}::{variant_name}`: variant is unavailable"
+        ));
+        return type_idx;
     };
-
-    let layout_idx = get_or_create_imported_choice_layout(ctx, &choice);
     let variant_index = variant_index as u16;
     if let Some(index) = ctx.types.iter().position(|ty| {
         matches!(
@@ -304,81 +413,6 @@ fn lower_primitive(_ctx: &LowerCtx, prim: PrimitiveType) -> BytecodeType {
     }
 }
 
-pub fn get_or_create_struct_layout(ctx: &mut LowerCtx, struct_symbol: SymbolId) -> StructLayoutIdx {
-    if let Some(&idx) = ctx.struct_map.get(&struct_symbol) {
-        return idx;
-    }
-
-    let next_idx = StructLayoutIdx(ctx.struct_layouts.len() as u16);
-    ctx.struct_map.insert(struct_symbol, next_idx);
-
-    let resolution = ctx.graph.resolution().unwrap();
-    let struct_name = resolution
-        .symbol(struct_symbol)
-        .and_then(|symbol| ctx.string_table.resolve(symbol.name()))
-        .unwrap_or("")
-        .to_string();
-
-    let raw_fields = crate::bytecode_emission::types::get_struct_fields(ctx, struct_symbol);
-    let fields = raw_fields
-        .into_iter()
-        .map(|(name, ty)| {
-            let ty_idx = crate::bytecode_emission::types::lower_type(ctx, ty);
-            FieldLayout {
-                name,
-                ty: ty_idx,
-                offset: 0,
-                ownership: OwnershipKind::Value,
-            }
-        })
-        .collect();
-
-    ctx.struct_layouts.push(StructLayout {
-        name: struct_name,
-        fields,
-        constraints: crate::bytecode_emission::types::get_struct_constraints(ctx, struct_symbol),
-    });
-
-    next_idx
-}
-
-fn get_struct_constraints(ctx: &LowerCtx, struct_symbol: SymbolId) -> Vec<String> {
-    let Some(struct_item) =
-        crate::bytecode_emission::helpers::type_item_for_symbol(ctx, struct_symbol)
-    else {
-        return Vec::new();
-    };
-    let syntax = ctx.graph.syntax();
-    let resolution = ctx.graph.resolution();
-    let Some(satisfies) = syntax.first_child_of_kind(struct_item, SyntaxNodeKind::SatisfiesClause)
-    else {
-        return Vec::new();
-    };
-
-    syntax
-        .node(satisfies)
-        .map(|node| node.children().to_vec())
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|constraint_type| {
-            let base =
-                crate::bytecode_emission::helpers::constraint_type_base_node(ctx, constraint_type)?;
-            resolution
-                .and_then(|res| res.reference_symbol(base))
-                .or_else(|| resolution.and_then(|res| res.type_reference_symbol(base)))
-                .or_else(|| resolution.and_then(|res| res.type_path_reference_symbol(base)))
-                .and_then(|symbol| resolution.and_then(|res| res.symbol(symbol)))
-                .filter(|symbol| symbol.kind() == SymbolKind::Constraint)
-                .map(|symbol| {
-                    ctx.string_table
-                        .resolve(symbol.name())
-                        .unwrap_or("")
-                        .to_string()
-                })
-        })
-        .collect()
-}
-
 pub fn get_or_create_choice_layout(ctx: &mut LowerCtx, choice_symbol: SymbolId) -> ChoiceLayoutIdx {
     if let Some(&idx) = ctx.choice_map.get(&choice_symbol) {
         return idx;
@@ -392,10 +426,12 @@ pub fn get_or_create_choice_layout(ctx: &mut LowerCtx, choice_symbol: SymbolId) 
         .unwrap_or("")
         .to_string();
 
+    let def_id = galfus_core::DefId::new(ctx.module_id, choice_symbol);
+    let canonical_name = format!("{:?}::{}", def_id, choice_name);
     if let Some(pos) = ctx
         .choice_layouts
         .iter()
-        .position(|layout| layout.name == choice_name)
+        .position(|layout| layout.name == canonical_name)
     {
         let idx = ChoiceLayoutIdx(pos as u16);
         ctx.choice_map.insert(choice_symbol, idx);
@@ -419,11 +455,95 @@ pub fn get_or_create_choice_layout(ctx: &mut LowerCtx, choice_symbol: SymbolId) 
         .collect();
 
     ctx.choice_layouts.push(ChoiceLayout {
-        name: choice_name,
+        name: canonical_name,
         variants,
     });
 
     next_idx
+}
+
+fn get_or_create_generic_choice_layout(
+    ctx: &mut LowerCtx,
+    _instance_ty: TypeId,
+    choice_symbol: SymbolId,
+    arguments: &[TypeId],
+) -> ChoiceLayoutIdx {
+    let resolution = ctx.graph.resolution().unwrap();
+    let choice_name = resolution
+        .symbol(choice_symbol)
+        .and_then(|symbol| ctx.string_table.resolve(symbol.name()))
+        .unwrap_or("");
+    let def_id = galfus_core::DefId::new(ctx.module_id, choice_symbol);
+    let full_choice_name = format!("{:?}::{}", def_id, choice_name);
+    let canonical_name = intern_generic_choice_layout(ctx, def_id, full_choice_name, arguments);
+    if let Some(index) = ctx
+        .choice_layouts
+        .iter()
+        .position(|layout| layout.name == canonical_name)
+    {
+        return ChoiceLayoutIdx(index as u16);
+    }
+
+    let next_idx = ChoiceLayoutIdx(ctx.choice_layouts.len() as u16);
+    ctx.choice_layouts.push(ChoiceLayout {
+        name: canonical_name,
+        variants: Vec::new(),
+    });
+
+    let previous_substitutions = std::mem::take(&mut ctx.active_substitutions);
+    ctx.active_substitutions = previous_substitutions.clone();
+    for (parameter, argument) in choice_generic_parameters(ctx, choice_symbol)
+        .into_iter()
+        .zip(arguments.iter().copied())
+    {
+        ctx.active_substitutions.insert(parameter, argument);
+    }
+
+    let variants = get_choice_variants(ctx, choice_symbol)
+        .into_iter()
+        .map(|(name, payload_ty)| ChoiceVariantLayout {
+            name,
+            payload_ty: payload_ty.map(|ty| lower_type(ctx, ty)),
+        })
+        .collect();
+    ctx.active_substitutions = previous_substitutions;
+    ctx.choice_layouts[next_idx.raw() as usize].variants = variants;
+    next_idx
+}
+
+fn choice_generic_parameters(ctx: &LowerCtx, choice_symbol: SymbolId) -> Vec<SymbolId> {
+    let Some(root) = ctx.graph.syntax().root() else {
+        return Vec::new();
+    };
+    let Some(choice_item) =
+        crate::bytecode_emission::helpers::choice_item_node_for_symbol(ctx, root, choice_symbol)
+    else {
+        return Vec::new();
+    };
+    let Some(parameters) = ctx
+        .graph
+        .syntax()
+        .first_child_of_kind(choice_item, SyntaxNodeKind::GenericParameterList)
+    else {
+        return Vec::new();
+    };
+    let Some(node) = ctx.graph.syntax().node(parameters) else {
+        return Vec::new();
+    };
+    let Some(resolution) = ctx.graph.resolution() else {
+        return Vec::new();
+    };
+
+    node.children()
+        .iter()
+        .filter_map(|parameter| {
+            let identifier = ctx
+                .graph
+                .syntax()
+                .first_child_of_kind(*parameter, SyntaxNodeKind::Identifier)?;
+            resolution.declaration_symbol(identifier)
+        })
+        .collect()
 }
 
 pub fn resolve_alias_type(ctx: &LowerCtx, ty: TypeId) -> TypeId {
@@ -460,289 +580,4 @@ pub fn resolve_alias_type_with_visited(
         return ty;
     }
     crate::bytecode_emission::types::resolve_alias_type_with_visited(ctx, underlying_ty, visited)
-}
-
-pub fn get_struct_fields(ctx: &LowerCtx, struct_symbol: SymbolId) -> Vec<(String, TypeId)> {
-    if let Some(fields) = ctx.imported_struct_fields.get(&struct_symbol) {
-        return fields.clone();
-    }
-    let mut visited = HashSet::new();
-    crate::bytecode_emission::types::get_struct_fields_internal(ctx, struct_symbol, &mut visited)
-}
-
-fn get_struct_fields_internal(
-    ctx: &LowerCtx,
-    struct_symbol: SymbolId,
-    visited: &mut HashSet<SymbolId>,
-) -> Vec<(String, TypeId)> {
-    if !visited.insert(struct_symbol) {
-        return Vec::new();
-    }
-    let resolution = match ctx.graph.resolution() {
-        Some(res) => res,
-        None => return Vec::new(),
-    };
-    let struct_symbol_data = match resolution.symbol(struct_symbol) {
-        Some(data) => data,
-        None => return Vec::new(),
-    };
-
-    let mut fields = Vec::new();
-    let root = ctx.graph.syntax().root().unwrap();
-    if let Some(item_node) = crate::bytecode_emission::helpers::find_struct_item_by_name(
-        ctx,
-        root,
-        ctx.string_table
-            .resolve(struct_symbol_data.name())
-            .unwrap_or(""),
-    ) {
-        let syntax = ctx.graph.syntax();
-        let field_children = syntax
-            .first_child_of_kind(item_node, SyntaxNodeKind::StructFieldList)
-            .and_then(|fl| syntax.node(fl))
-            .map(|n| n.children())
-            .unwrap_or(&[]);
-
-        for &field_child in field_children {
-            let node_kind = syntax.node(field_child).map(|n| n.kind());
-            if node_kind == Some(SyntaxNodeKind::StructExpansion) {
-                let target_sym = syntax
-                    .child(field_child, 0)
-                    .and_then(|target| ctx.type_result.layer().node_type(target))
-                    .and_then(|target_ty| {
-                        crate::bytecode_emission::helpers::struct_symbol_for_type(ctx, target_ty)
-                    });
-                if let Some(target_sym) = target_sym {
-                    for (exp_name, exp_ty) in
-                        crate::bytecode_emission::types::get_struct_fields_internal(
-                            ctx, target_sym, visited,
-                        )
-                    {
-                        if !fields.iter().any(|(n, _)| *n == exp_name) {
-                            fields.push((exp_name, exp_ty));
-                        }
-                    }
-                }
-            } else if node_kind == Some(SyntaxNodeKind::StructField)
-                && let Some(ident_node) =
-                    syntax.first_child_of_kind(field_child, SyntaxNodeKind::Identifier)
-            {
-                let name_str =
-                    crate::bytecode_emission::helpers::node_text(ctx, ident_node).to_string();
-                let field_ty = resolution
-                    .declaration_symbol(ident_node)
-                    .and_then(|sym| ctx.type_result.layer().symbol_type(sym))
-                    .or_else(|| ctx.type_result.layer().node_type(field_child));
-                if let Some(ty) = field_ty
-                    && !fields.iter().any(|(n, _)| *n == name_str)
-                {
-                    fields.push((name_str, ty));
-                }
-            }
-        }
-    }
-
-    if let Some(scope) = resolution
-        .member_scope(struct_symbol)
-        .and_then(|ms| resolution.scope(ms))
-    {
-        for (name, &symbol) in scope.symbols() {
-            let field_ty = resolution
-                .symbol(symbol)
-                .filter(|sd| sd.kind() == SymbolKind::StructField)
-                .and_then(|_| ctx.type_result.layer().symbol_type(symbol));
-            if let Some(ty) = field_ty {
-                let name_str = ctx.string_table.resolve(*name).unwrap_or("").to_string();
-                if let Some(existing) = fields.iter_mut().find(|(n, _)| *n == name_str) {
-                    existing.1 = ty;
-                } else {
-                    fields.push((name_str, ty));
-                }
-            }
-        }
-    }
-    fields
-}
-
-pub fn get_choice_variants(
-    ctx: &LowerCtx,
-    choice_symbol: SymbolId,
-) -> Vec<(String, Option<TypeId>)> {
-    let resolution = match ctx.graph.resolution() {
-        Some(res) => res,
-        None => return Vec::new(),
-    };
-    let mut variants = Vec::new();
-    let root = ctx.graph.syntax().root().unwrap();
-    if let Some(choice_node_id) =
-        crate::bytecode_emission::helpers::choice_item_node_for_symbol(ctx, root, choice_symbol)
-    {
-        let syntax = ctx.graph.syntax();
-        let variant_list_node = syntax
-            .first_child_of_kind(choice_node_id, SyntaxNodeKind::ChoiceVariantList)
-            .unwrap_or(choice_node_id);
-        if let Some(choice_node) = syntax.node(variant_list_node) {
-            for &child in choice_node.children() {
-                if let Some(variant_node) = syntax.node(child)
-                    && variant_node.kind() == SyntaxNodeKind::ChoiceVariant
-                    && let Some(ident_node) =
-                        syntax.first_child_of_kind(child, SyntaxNodeKind::Identifier)
-                {
-                    let variant_name =
-                        crate::bytecode_emission::helpers::node_text(ctx, ident_node).to_string();
-                    if let Some(variant_symbol) = resolution.declaration_symbol(ident_node) {
-                        let payload_types =
-                            crate::bytecode_emission::types::choice_variant_payload_types(
-                                ctx,
-                                choice_symbol,
-                                variant_symbol,
-                            );
-                        let payload_ty = if payload_types.is_empty() {
-                            None
-                        } else if payload_types.len() == 1 {
-                            Some(payload_types[0])
-                        } else {
-                            Some(crate::bytecode_emission::helpers::find_tuple_type(
-                                ctx,
-                                &payload_types,
-                            ))
-                        };
-                        variants.push((variant_name, payload_ty));
-                    }
-                }
-            }
-        }
-    }
-    variants
-}
-
-fn choice_variant_payload_types(
-    ctx: &LowerCtx,
-    owner_symbol: SymbolId,
-    variant_symbol: SymbolId,
-) -> Vec<TypeId> {
-    let resolution = match ctx.graph.resolution() {
-        Some(res) => res,
-        None => return Vec::new(),
-    };
-    let variant_data = match resolution.symbol(variant_symbol) {
-        Some(data) => data,
-        None => return Vec::new(),
-    };
-    let root = ctx.graph.syntax().root().unwrap();
-    let choice_item = match crate::bytecode_emission::helpers::choice_item_node_for_symbol(
-        ctx,
-        root,
-        owner_symbol,
-    ) {
-        Some(node) => node,
-        None => return Vec::new(),
-    };
-    let choice_node = match ctx.graph.syntax().node(choice_item) {
-        Some(node) => node,
-        None => return Vec::new(),
-    };
-    let mut variant_node = None;
-    for &child in choice_node.children() {
-        if let Some(node) = crate::bytecode_emission::helpers::find_choice_variant_node_by_name(
-            ctx,
-            child,
-            ctx.string_table.resolve(variant_data.name()).unwrap_or(""),
-        ) {
-            variant_node = Some(node);
-            break;
-        }
-    }
-    let variant_node_id = match variant_node {
-        Some(id) => id,
-        None => return Vec::new(),
-    };
-    let payload = match crate::bytecode_emission::helpers::find_descendant_of_kind(
-        ctx,
-        variant_node_id,
-        SyntaxNodeKind::ChoicePayload,
-    ) {
-        Some(id) => id,
-        None => return Vec::new(),
-    };
-    let payload_node = match ctx.graph.syntax().node(payload) {
-        Some(node) => node,
-        None => return Vec::new(),
-    };
-    payload_node
-        .children()
-        .iter()
-        .filter_map(|child| {
-            let type_node =
-                crate::bytecode_emission::helpers::first_type_child(ctx, *child).unwrap_or(*child);
-            ctx.type_result.layer().node_type(type_node)
-        })
-        .collect()
-}
-
-pub fn find_imported_choice_for_type(
-    ctx: &LowerCtx,
-    ty: TypeId,
-) -> Option<galfus_frontend::LoweredImportedChoice> {
-    let table = ctx.type_result.layer().table();
-    let (_root, segments) = match table.kind(ty) {
-        Some(TypeKind::Path { root, segments }) => (*root, segments),
-        _ => return None,
-    };
-    if segments.len() != 1 {
-        return None;
-    }
-    let choice_name = &segments[0];
-    ctx.type_result
-        .imported_path_choices
-        .values()
-        .find(|c| c.name == *choice_name)
-        .cloned()
-}
-
-pub fn get_or_create_imported_choice_layout(
-    ctx: &mut LowerCtx,
-    choice: &galfus_frontend::LoweredImportedChoice,
-) -> ChoiceLayoutIdx {
-    if let Some(pos) = ctx
-        .choice_layouts
-        .iter()
-        .position(|c| c.name == choice.name)
-    {
-        return ChoiceLayoutIdx(pos as u16);
-    }
-
-    let next_idx = ChoiceLayoutIdx(ctx.choice_layouts.len() as u16);
-
-    ctx.choice_layouts.push(ChoiceLayout {
-        name: choice.name.clone(),
-        variants: Vec::new(),
-    });
-
-    let variants = choice
-        .variants
-        .iter()
-        .map(|v| {
-            let payload_idx = if v.payload_types.is_empty() {
-                None
-            } else if v.payload_types.len() == 1 {
-                Some(crate::bytecode_emission::types::lower_type(
-                    ctx,
-                    v.payload_types[0],
-                ))
-            } else {
-                Some(crate::bytecode_emission::types::lower_type(
-                    ctx,
-                    crate::bytecode_emission::helpers::find_tuple_type(ctx, &v.payload_types),
-                ))
-            };
-            ChoiceVariantLayout {
-                name: v.name.clone(),
-                payload_ty: payload_idx,
-            }
-        })
-        .collect();
-
-    ctx.choice_layouts[next_idx.raw() as usize].variants = variants;
-    next_idx
 }

@@ -6,20 +6,26 @@ use galfus_ir::mir::MirModule;
 use std::collections::HashSet;
 
 pub fn lower_module(
+    module_id: galfus_core::ModuleId,
     mir_module: &MirModule,
     type_result: &TypeCheckResult,
     module_graph: &ModuleGraph,
     source_text: &str,
+    module_path: &str,
     string_table: &galfus_frontend::StringTable,
 ) -> (BytecodeModule, galfus_bytecode::graph::ExecutionMetadata) {
+    let mut generic_choice_layouts = crate::bytecode_emission::GenericChoiceLayoutCache::default();
     let mut ctx = LowerCtx::new(
+        module_id,
         type_result,
         module_graph,
         source_text,
         &mir_module.constant_pool,
         string_table,
+        module_path,
         false,
         None,
+        &mut generic_choice_layouts,
     );
 
     let imported_structs = ctx
@@ -37,6 +43,7 @@ pub fn lower_module(
         ctx.function_return_types.insert(func.id, func.return_type);
         ctx.function_param_types
             .insert(func.id, func.parameter_types.clone());
+        ctx.function_is_async.insert(func.id, func.is_async);
     }
 
     let mut functions = Vec::new();
@@ -97,7 +104,7 @@ pub fn lower_module(
     }
 
     let module = BytecodeModule {
-        name: module_graph.source_id().raw().to_string(),
+        name: module_path.to_string(),
         global_count: 0,
         constants: ctx.constant_pool,
         functions,

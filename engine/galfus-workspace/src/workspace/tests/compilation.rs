@@ -2,6 +2,126 @@ use super::*;
 use crate::state::{CompileBlocked, RunBlocked};
 
 #[test]
+fn server_provider_requirement_matches_the_native_contract() {
+    let mut workspace = Workspace::new();
+    workspace.set_catalog(std::sync::Arc::new(
+        galfus_contract::CapabilityCatalog::new(
+            vec![galfus_contract::BridgeModule::new(
+                "std/server",
+                galfus_contract::STD_SERVER_SOURCE,
+            )],
+            Vec::new(),
+        )
+        .expect("valid server provider catalog"),
+    ));
+    workspace
+        .load_manifest(
+            toml::from_str(
+                r#"
+                [module]
+                name = "server-provider-contract"
+                target = "app"
+                [entry]
+                path = "main.gfs"
+                "#,
+            )
+            .expect("valid configuration"),
+        )
+        .expect("configuration loads");
+    workspace
+        .load_module(
+            "main.gfs",
+            br#"
+            import { Request, Response, Server, WebSocket, WebSocketConfig } from "std/server"
+
+            export fn main(args: [[u8]]): i32 {
+                const server = new(Server) {
+                    port: 8080,
+                    fetch: fn(async) (_req: Request): Response {
+                        return new(Response) {}
+                    },
+                    websocket: new(WebSocketConfig) {
+                        onOpen: fn(_ws: WebSocket, _status: i32): null => null,
+                        onMessage: fn(_ws: WebSocket, _status: i32, _message: [u8]): null => null,
+                        onClose: fn(_ws: WebSocket, _status: i32): null => null,
+                        onError: fn(_ws: WebSocket, _status: i32, _error: [u8]): null => null
+                    }
+                }
+                server::start()
+                return 0
+            }
+            "#,
+        )
+        .expect("valid entry module");
+
+    assert!(workspace.check().is_valid);
+    let package = workspace.compile().expect("workspace compiles").package;
+    let requirement = package
+        .provider_requirements()
+        .iter()
+        .find(|requirement| requirement.module_path == "std/server")
+        .expect("package requires std/server");
+    assert!(
+        galfus_contract::builtins::std_server_provider_descriptor().validates(requirement),
+        "server provider requirement must match the native provider descriptor: {requirement:#?}"
+    );
+}
+
+#[test]
+fn http_provider_requirement_matches_the_native_contract() {
+    let mut workspace = Workspace::new();
+    workspace.set_catalog(std::sync::Arc::new(
+        galfus_contract::CapabilityCatalog::new(
+            vec![galfus_contract::BridgeModule::new(
+                "std/http",
+                galfus_contract::STD_HTTP_SOURCE,
+            )],
+            Vec::new(),
+        )
+        .expect("valid HTTP provider catalog"),
+    ));
+    workspace
+        .load_manifest(
+            toml::from_str(
+                r#"
+                [module]
+                name = "http-provider-contract"
+                target = "app"
+                [entry]
+                path = "main.gfs"
+                "#,
+            )
+            .expect("valid configuration"),
+        )
+        .expect("configuration loads");
+    workspace
+        .load_module(
+            "main.gfs",
+            br#"
+            import { request } from "std/http"
+
+            export fn main(args: [[u8]]): i32 {
+                const _response = await request("GET", "http://localhost")
+                return 0
+            }
+            "#,
+        )
+        .expect("valid entry module");
+
+    assert!(workspace.check().is_valid);
+    let package = workspace.compile().expect("workspace compiles").package;
+    let requirement = package
+        .provider_requirements()
+        .iter()
+        .find(|requirement| requirement.module_path == "std/http")
+        .expect("package requires std/http");
+    assert!(
+        galfus_contract::builtins::std_http_provider_descriptor().validates(requirement),
+        "HTTP provider requirement must match the native provider descriptor: {requirement:#?}"
+    );
+}
+
+#[test]
 fn workspace_package_loader_checks_and_compiles_its_loaded_sources() {
     let mut workspace = Workspace::new();
     workspace
@@ -278,10 +398,10 @@ export fn(async) add(left: i32, right: i32): i32
             name: "add".to_string(),
             is_async: true,
             parameter_types: vec![
-                galfus_contract::BoundaryType::I32,
-                galfus_contract::BoundaryType::I32,
+                galfus_contract::SurfaceSchema::I32,
+                galfus_contract::SurfaceSchema::I32,
             ],
-            return_type: galfus_contract::BoundaryType::I32,
+            return_type: galfus_contract::SurfaceSchema::I32,
         }]
     );
     let report = workspace.compile().expect("proxy compilation succeeds");
@@ -1019,13 +1139,13 @@ export fn(async) add(left: i32 | null, right: i32): i32 | null
             name: "add".to_string(),
             is_async: true,
             parameter_types: vec![
-                galfus_contract::BoundaryType::Nullable(Box::new(
-                    galfus_contract::BoundaryType::I32
+                galfus_contract::SurfaceSchema::Optional(Box::new(
+                    galfus_contract::SurfaceSchema::I32
                 )),
-                galfus_contract::BoundaryType::I32,
+                galfus_contract::SurfaceSchema::I32,
             ],
-            return_type: galfus_contract::BoundaryType::Nullable(Box::new(
-                galfus_contract::BoundaryType::I32
+            return_type: galfus_contract::SurfaceSchema::Optional(Box::new(
+                galfus_contract::SurfaceSchema::I32
             )),
         }]
     );
@@ -1113,14 +1233,14 @@ export fn(async) close(window: Window): null
         &workspace.adapter_descriptors[&ModulePath::new("beta.gfp").unwrap()].exports;
     assert_eq!(
         alpha_exports[0].return_type,
-        galfus_contract::BoundaryType::Handle {
-            type_id: galfus_core::OpaqueTypeId::new("alpha", "Window").unwrap(),
+        galfus_contract::SurfaceSchema::Handle {
+            resource: "alpha::Window".to_string(),
         }
     );
     assert_eq!(
         beta_exports[1].parameter_types,
-        vec![galfus_contract::BoundaryType::Handle {
-            type_id: galfus_core::OpaqueTypeId::new("beta", "Window").unwrap(),
+        vec![galfus_contract::SurfaceSchema::Handle {
+            resource: "beta::Window".to_string(),
         }]
     );
     let report = workspace.compile().expect("workspace compiles");

@@ -300,6 +300,7 @@ impl VirtualMachine {
                     .ok_or(VmError::TypeOutOfBounds { index: type_idx })?;
                 if let BytecodeType::Choice(layout_idx) = ty {
                     let payload_val = thread.read_reg(payload);
+                    thread.retain_edge_val(&payload_val);
                     let obj_ref = thread.heap.alloc(HeapObject::Choice {
                         module_id: thread
                             .call_stack

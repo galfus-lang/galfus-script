@@ -1,4 +1,8 @@
-import { BaseCount, BaseOptionalCount } from "./types.gfs"
+import { BaseCount, BaseOptionalCount, TransitResult, transit } from "./types.gfs"
 
 export type Count = BaseCount
 export type OptionalCount = BaseOptionalCount
+
+export fn reexportTransit(): TransitResult<[u8]> {
+  return transit()
+}

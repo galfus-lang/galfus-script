@@ -1,3 +1,4 @@
+use crate::lsp::anchored::value_anchor_function;
 use crate::workspace::Workspace;
 use galfus_core::ModulePath;
 use galfus_frontend::{SymbolKind, SyntaxNodeKind};
@@ -35,8 +36,8 @@ pub fn semantic_tokens_full(workspace: &Workspace, path: &str) -> Option<Semanti
 
                 while let Some(curr) = current {
                     if let Some(sym) = resolution
-                        .reference_symbol(curr)
-                        .or_else(|| resolution.path_reference_symbol(curr))
+                        .path_reference_symbol(curr)
+                        .or_else(|| resolution.reference_symbol(curr))
                         .or_else(|| resolution.type_reference_symbol(curr))
                         .or_else(|| resolution.type_path_reference_symbol(curr))
                         .or_else(|| resolution.declaration_symbol(curr))
@@ -47,10 +48,20 @@ pub fn semantic_tokens_full(workspace: &Workspace, path: &str) -> Option<Semanti
                     current = parents.get(&curr).copied();
                 }
 
-                if let Some(sym_id) = symbol_id
-                    && let Some(symbol) = resolution.symbol(sym_id)
-                    && let Some((token_type, token_modifiers)) = map_symbol_kind(symbol.kind())
-                {
+                let anchored_function = parents.get(&node_id).and_then(|parent| {
+                    syntax_graph
+                        .node(*parent)
+                        .filter(|node| node.kind() == SyntaxNodeKind::PathExpression)
+                        .filter(|node| node.child(1) == Some(node_id))
+                        .and_then(|_| value_anchor_function(snapshot, semantic_module, *parent))
+                });
+
+                let token_kind = anchored_function.map(|_| SymbolKind::Function).or_else(|| {
+                    symbol_id
+                        .and_then(|symbol| resolution.symbol(symbol).map(|symbol| symbol.kind()))
+                });
+
+                if let Some((token_type, token_modifiers)) = token_kind.and_then(map_symbol_kind) {
                     let span = node.span();
                     if let Some(start_rc) = source.row_col(span.start()) {
                         raw_tokens.push(Token {

@@ -1,5 +1,5 @@
 use galfus_contract::{
-    BoundaryValue, ExecutionFailure, ExecutionFailureKind, MessageInjector, RunnableTask,
+    ExecutionFailure, ExecutionFailureKind, MessageInjector, RunnableTask, SurfaceValue,
     ThreadResult,
 };
 #[cfg(test)]
@@ -35,7 +35,7 @@ pub(crate) struct ProviderDispatchTask {
     pub(crate) request_lease: galfus_core::RequestLease,
     pub(crate) alias: String,
     pub(crate) name: String,
-    pub(crate) args: Vec<BoundaryValue>,
+    pub(crate) args: crate::orchestrator::future_registry::ProviderArguments,
     pub(crate) injector: Arc<dyn MessageInjector>,
     pub(crate) active: Arc<AtomicBool>,
 }
@@ -46,7 +46,7 @@ pub(crate) struct AdapterDispatchTask {
     pub(crate) request_lease: galfus_core::RequestLease,
     pub(crate) module: String,
     pub(crate) symbol: String,
-    pub(crate) args: Vec<BoundaryValue>,
+    pub(crate) args: Vec<SurfaceValue>,
     pub(crate) injector: Arc<dyn MessageInjector>,
     pub(crate) active: Arc<AtomicBool>,
 }
@@ -153,13 +153,23 @@ impl RunnableTask for ProviderDispatchTask {
                 return ThreadResult::Discarded;
             }
         };
-        host.dispatch(
+        let crate::orchestrator::future_registry::ProviderArguments::Surface(args) = self.args;
+        if !host.dispatch_surface(
             self.thread_id,
             self.request_lease,
             &self.name,
-            &self.args,
+            &args,
             self.injector.clone(),
-        );
+        ) {
+            let _ = self.injector.inject_system_response(
+                self.thread_id,
+                self.request_lease,
+                Err(ExecutionFailure::new(
+                    ExecutionFailureKind::ProviderFailure,
+                    "provider does not implement the declared surface contract",
+                )),
+            );
+        }
         ThreadResult::Discarded
     }
 

@@ -109,7 +109,7 @@ impl<'a> DeclarationTypeChecker<'a> {
             .any(|statement| self.statement_guarantees_return(*statement))
     }
 
-    fn statement_guarantees_return(&self, statement: NodeId) -> bool {
+    pub(super) fn statement_guarantees_return(&self, statement: NodeId) -> bool {
         let Some(statement_node) = self.graph.syntax().node(statement) else {
             return false;
         };

@@ -12,8 +12,9 @@ use galfus_bytecode::{
     PackageImage, PackageMetadata,
 };
 use galfus_contract::{
-    AdapterLoadContext, CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget, ProviderModuleRequirement,
-    Providers, RuntimeCapabilities,
+    AdapterLoadContext, CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget, ProviderDescriptor,
+    ProviderModuleDescriptor, ProviderModuleRequirement, Providers, RuntimeCapabilities,
+    SurfaceContract, SurfaceDirection, SurfaceFunctionContract, SurfaceSchema,
 };
 use galfus_core::{ModuleId, ModulePath, SemanticRevision, SourceId, Span};
 
@@ -37,20 +38,39 @@ fn target() -> ExecutionTarget {
 
 impl galfus_contract::HostProvider for StartupProvider {
     fn descriptor(&self) -> galfus_contract::ProviderDescriptor {
-        galfus_contract::ProviderDescriptor::default()
+        let contract = |operation: &str| SurfaceFunctionContract {
+            provider_operation: format!("main_{operation}"),
+            bridge_symbol: format!("__provider_main_{operation}"),
+            parameters: Vec::new(),
+            result: SurfaceContract::new(
+                format!("test::__provider_main_{operation}:return"),
+                1,
+                SurfaceDirection::FromProvider,
+                SurfaceSchema::Null,
+            ),
+        };
+        ProviderDescriptor {
+            modules: vec![ProviderModuleDescriptor {
+                module_path: "test/main".to_string(),
+                schema_fingerprint: 0,
+                boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
+                exports: Vec::new(),
+                surface_contracts: vec![contract("initialize"), contract("entry")],
+            }],
+        }
     }
 
-    fn dispatch(
+    fn dispatch_surface(
         &mut self,
         thread_id: galfus_core::ThreadId,
         request_lease: galfus_core::RequestLease,
         name: &str,
-        _args: &[galfus_contract::BoundaryValue],
+        _args: &[galfus_contract::SurfaceValue],
         injector: sync::Arc<dyn galfus_contract::MessageInjector>,
-    ) {
+    ) -> bool {
         self.calls.lock().unwrap().push(name.to_string());
         if name == "main_initialize" && self.fail_initializer {
-            let _ = injector.inject_system_response(
+            let _ = injector.inject_surface_response(
                 thread_id,
                 request_lease,
                 Err(galfus_contract::ExecutionFailure::new(
@@ -61,12 +81,13 @@ impl galfus_contract::HostProvider for StartupProvider {
         } else if name == "main_initialize" {
             *self.pending.lock().unwrap() = Some((thread_id, request_lease, injector));
         } else {
-            let _ = injector.inject_system_response(
+            let _ = injector.inject_surface_response(
                 thread_id,
                 request_lease,
-                Ok(galfus_contract::BoundaryValue::Null),
+                Ok(galfus_contract::SurfaceValue::Null),
             );
         }
+        true
     }
 }
 
@@ -425,10 +446,10 @@ fn pending_initializer_delays_entry_until_its_completion() {
         .take()
         .expect("initializer is pending");
     assert_eq!(
-        injector.inject_system_response(
+        injector.inject_surface_response(
             galfus_core::ThreadId::new(thread_id.raw() + 1),
             request_lease,
-            Ok(galfus_contract::BoundaryValue::Null),
+            Ok(galfus_contract::SurfaceValue::Null),
         ),
         Err(galfus_contract::MessageInjectionError::HostProtocolViolation)
     );
@@ -440,19 +461,13 @@ fn pending_initializer_delays_entry_until_its_completion() {
         .inject_system_response(
             thread_id,
             request_lease,
-            Ok(galfus_contract::BoundaryValue::Null),
+            Ok(galfus_contract::SurfaceValue::Null),
         )
         .expect("matching completion is accepted");
 
-    assert_eq!(
-        execution.run_sync_to_completion(),
-        Ok(galfus_contract::BoundaryValue::I32(42))
-    );
+    assert_eq!(execution.run_sync_to_completion(), Ok(42));
     assert_eq!(execution.status(), ExecutionState::Closed);
-    assert_eq!(
-        execution.result(),
-        Some(&Ok(galfus_contract::BoundaryValue::I32(42)))
-    );
+    assert_eq!(execution.result(), Some(&Ok(42)));
     assert_eq!(
         *calls.lock().unwrap(),
         vec!["main_initialize", "main_entry"]
@@ -603,21 +618,6 @@ fn run_initializes_dependencies_before_the_entry_module() {
         fn descriptor(&self) -> galfus_contract::ProviderDescriptor {
             galfus_contract::ProviderDescriptor::default()
         }
-
-        fn dispatch(
-            &mut self,
-            thread_id: galfus_core::ThreadId,
-            request_lease: galfus_core::RequestLease,
-            _name: &str,
-            _args: &[galfus_contract::BoundaryValue],
-            injector: sync::Arc<dyn galfus_contract::MessageInjector>,
-        ) {
-            let _ = injector.inject_system_response(
-                thread_id,
-                request_lease,
-                Ok(galfus_contract::BoundaryValue::Null),
-            );
-        }
     }
     impl galfus_contract::KernelDriver for TestExecutor {
         fn on_exit(
@@ -644,13 +644,8 @@ fn run_initializes_dependencies_before_the_entry_module() {
                 galfus_contract::ThreadResult::Discarded => {
                     galfus_contract::ExecutorStepResult::Running
                 }
-                galfus_contract::ThreadResult::Completed(res) => {
-                    let code = if let Ok(galfus_contract::BoundaryValue::I32(c)) = res {
-                        c
-                    } else {
-                        0
-                    };
-                    galfus_contract::ExecutorStepResult::Completed(code)
+                galfus_contract::ThreadResult::Completed(result) => {
+                    galfus_contract::ExecutorStepResult::Completed(result.unwrap_or(0))
                 }
                 galfus_contract::ThreadResult::Blocked { timeout } => {
                     galfus_contract::ExecutorStepResult::Blocked { timeout }
@@ -706,9 +701,8 @@ fn run_initializes_dependencies_before_the_entry_module() {
     .start(&[], executor.clone())
     .expect("entry execution succeeds");
 
-    let exit_code = match task.run_sync_to_completion() {
-        Ok(galfus_contract::BoundaryValue::I32(code)) => code,
-        _ => panic!("Expected i32 exit code"),
-    };
+    let exit_code = task
+        .run_sync_to_completion()
+        .expect("entry execution returns an i32 exit code");
     assert_eq!(exit_code, 42);
 }

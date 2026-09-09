@@ -39,7 +39,7 @@ use galfus_core::{DiagnosticBag, NodeId, SourceFile, SymbolId, TypeId};
 pub use model::*;
 use std::collections::HashMap;
 
-pub(crate) const IMPLICIT_FUTURE_SYMBOL: u32 = u32::MAX;
+pub const IMPLICIT_FUTURE_SYMBOL: u32 = u32::MAX;
 
 struct DeclarationTypeChecker<'a> {
     source: &'a SourceFile,
@@ -49,10 +49,13 @@ struct DeclarationTypeChecker<'a> {
     ownership_metadata: OwnershipMetadata,
     imported_member_types: HashMap<ImportedMemberKey, TypeId>,
     imported_struct_fields: HashMap<SymbolId, Vec<ImportedStructField>>,
+    imported_struct_constraints: HashMap<SymbolId, Vec<TypeId>>,
+    imported_struct_constraints_by_name: HashMap<String, Vec<TypeId>>,
     imported_symbol_constraints: HashMap<SymbolId, LoweredImportedConstraint>,
     imported_path_constraints: HashMap<NodeId, LoweredImportedConstraint>,
     imported_symbol_choices: HashMap<SymbolId, LoweredImportedChoice>,
     imported_path_choices: HashMap<NodeId, LoweredImportedChoice>,
+    imported_namespace_choices: HashMap<(SymbolId, String), LoweredImportedChoice>,
     imported_symbol_enum_values: HashMap<SymbolId, Vec<(String, i64)>>,
     active_type_substitutions: Vec<HashMap<SymbolId, TypeId>>,
     imported_generic_params: HashMap<SymbolId, SymbolId>,
@@ -93,10 +96,13 @@ impl<'a> DeclarationTypeChecker<'a> {
             ownership_metadata: OwnershipMetadata::default(),
             imported_member_types: HashMap::new(),
             imported_struct_fields: HashMap::new(),
+            imported_struct_constraints: HashMap::new(),
+            imported_struct_constraints_by_name: HashMap::new(),
             imported_symbol_constraints: HashMap::new(),
             imported_path_constraints: HashMap::new(),
             imported_symbol_choices: HashMap::new(),
             imported_path_choices: HashMap::new(),
+            imported_namespace_choices: HashMap::new(),
             imported_symbol_enum_values: HashMap::new(),
             active_type_substitutions: Vec::new(),
             imported_generic_params: HashMap::new(),
@@ -123,10 +129,13 @@ impl<'a> DeclarationTypeChecker<'a> {
             ownership_metadata: previous_result.ownership_metadata,
             imported_member_types: HashMap::new(),
             imported_struct_fields: previous_result.imported_struct_fields,
+            imported_struct_constraints: HashMap::new(),
+            imported_struct_constraints_by_name: HashMap::new(),
             imported_symbol_constraints: HashMap::new(),
             imported_path_constraints: HashMap::new(),
             imported_symbol_choices: previous_result.imported_symbol_choices,
             imported_path_choices: previous_result.imported_path_choices,
+            imported_namespace_choices: previous_result.imported_namespace_choices,
             imported_symbol_enum_values: previous_result.imported_symbol_enum_values,
             active_type_substitutions: Vec::new(),
             imported_generic_params: HashMap::new(),
@@ -146,6 +155,7 @@ impl<'a> DeclarationTypeChecker<'a> {
             TypeCheckSupplementalData {
                 imported_symbol_choices: self.imported_symbol_choices,
                 imported_path_choices: self.imported_path_choices,
+                imported_namespace_choices: self.imported_namespace_choices,
                 imported_struct_fields: self.imported_struct_fields,
                 imported_symbol_enum_values: self.imported_symbol_enum_values,
                 range_desugars: self.range_desugars,
@@ -278,6 +288,34 @@ impl<'a> DeclarationTypeChecker<'a> {
         }
     }
 
+    fn bind_imported_struct_constraints(
+        &mut self,
+        imported_constraints: &HashMap<SymbolId, Vec<ImportedType>>,
+    ) {
+        for (symbol, constraints) in imported_constraints {
+            let constraints = constraints
+                .iter()
+                .map(|constraint| self.lower_imported_type(constraint))
+                .collect();
+            self.imported_struct_constraints
+                .insert(*symbol, constraints);
+        }
+    }
+
+    fn bind_imported_struct_constraints_by_name(
+        &mut self,
+        imported_constraints: &HashMap<String, Vec<ImportedType>>,
+    ) {
+        for (name, constraints) in imported_constraints {
+            let constraints = constraints
+                .iter()
+                .map(|constraint| self.lower_imported_type(constraint))
+                .collect();
+            self.imported_struct_constraints_by_name
+                .insert(name.clone(), constraints);
+        }
+    }
+
     fn bind_imported_symbol_constraints(
         &mut self,
         imported_constraints: &HashMap<SymbolId, ImportedConstraintSurface>,
@@ -348,6 +386,17 @@ impl<'a> DeclarationTypeChecker<'a> {
         }
     }
 
+    fn bind_imported_namespace_choices(
+        &mut self,
+        imported_choices: &HashMap<(SymbolId, String), ImportedChoiceSurface>,
+    ) {
+        for ((namespace, name), imported_choice) in imported_choices {
+            let choice = self.lower_imported_choice(imported_choice);
+            self.imported_namespace_choices
+                .insert((*namespace, name.clone()), choice);
+        }
+    }
+
     fn bind_imported_symbol_enum_values(
         &mut self,
         imported_values: &HashMap<SymbolId, Vec<(String, i64)>>,
@@ -368,6 +417,7 @@ impl<'a> DeclarationTypeChecker<'a> {
 
         LoweredImportedChoice {
             name: imported_choice.name().to_string(),
+            def_id: imported_choice.def_id(),
             generic_parameters,
             variants: imported_choice
                 .variants()
@@ -403,14 +453,32 @@ impl<'a> DeclarationTypeChecker<'a> {
 
     fn lower_imported_type(&mut self, imported_type: &ImportedType) -> TypeId {
         match imported_type {
+            ImportedType::Error => self.layer.table_mut().error(),
+
             ImportedType::Primitive(primitive) => self.layer.table().primitive(*primitive),
 
             ImportedType::NamedLocal { symbol } => self.layer.table_mut().intern_named(*symbol),
 
-            ImportedType::SurfacePath { namespace, name } => self
-                .layer
-                .table_mut()
-                .intern_path(*namespace, name.split("::").map(str::to_string).collect()),
+            ImportedType::SurfacePath { namespace, name } => {
+                let imported_symbol = self.graph.resolution().and_then(|resolution| {
+                    resolution
+                        .symbols()
+                        .iter()
+                        .find(|symbol| {
+                            self.string_table.resolve(symbol.name()) == Some(name.as_str())
+                                && symbol.kind() == SymbolKind::ImportBinding
+                        })
+                        .map(|symbol| symbol.id())
+                });
+
+                if let Some(symbol) = imported_symbol {
+                    self.layer.table_mut().intern_named(symbol)
+                } else {
+                    self.layer
+                        .table_mut()
+                        .intern_path(*namespace, name.split("::").map(str::to_string).collect())
+                }
+            }
 
             ImportedType::Array { element } => {
                 let element = self.lower_imported_type(element);
@@ -590,10 +658,13 @@ pub fn check_definition_types_with_surfaces(
     checker.bind_imported_path_types(imported_types.path_types());
     checker.bind_imported_member_types(imported_types.member_types());
     checker.bind_imported_struct_fields(imported_types.struct_fields());
+    checker.bind_imported_struct_constraints(imported_types.struct_constraints());
+    checker.bind_imported_struct_constraints_by_name(imported_types.struct_constraints_by_name());
     checker.bind_imported_symbol_constraints(imported_types.symbol_constraints());
     checker.bind_imported_path_constraints(imported_types.path_constraints());
     checker.bind_imported_symbol_choices(imported_types.symbol_choices());
     checker.bind_imported_path_choices(imported_types.path_choices());
+    checker.bind_imported_namespace_choices(imported_types.namespace_choices());
     checker.bind_imported_symbol_enum_values(imported_types.symbol_enum_values());
     checker.check_definitions();
     checker.into_result()

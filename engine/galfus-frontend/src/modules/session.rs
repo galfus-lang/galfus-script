@@ -574,7 +574,13 @@ impl FrontendSession {
             .iter()
             .zip(baseline_results.iter())
             .map(|(module, result)| {
-                build_module_surface(module.source(), module.graph(), result, &self.string_table)
+                build_module_surface(
+                    module.id(),
+                    module.source(),
+                    module.graph(),
+                    result,
+                    &self.string_table,
+                )
             })
             .collect::<Vec<_>>();
 
@@ -614,6 +620,7 @@ impl FrontendSession {
                 .zip(results.iter())
                 .map(|(module, result)| {
                     build_module_surface(
+                        module.id(),
                         module.source(),
                         module.graph(),
                         result,

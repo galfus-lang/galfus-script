@@ -126,6 +126,10 @@ impl CapabilityCatalog {
         self.provider_modules.get(path).map(String::as_str)
     }
 
+    pub fn provider_module_paths(&self) -> impl Iterator<Item = &str> {
+        self.provider_modules.keys().map(String::as_str)
+    }
+
     pub fn provider_schema_fingerprint(&self, path: &str) -> Option<u64> {
         self.provider_source(path).map(provider_schema_fingerprint)
     }

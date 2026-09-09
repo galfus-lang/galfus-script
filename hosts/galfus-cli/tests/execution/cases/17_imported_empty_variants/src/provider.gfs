@@ -1,0 +1,9 @@
+import { ReadStreamResult } from "./stream.gfs"
+
+export fn produce_data(): ReadStreamResult<[u8]> {
+    return ReadStreamResult::Data("Hello, Data!")
+}
+
+export fn produce_end(): ReadStreamResult<[u8]> {
+    return ReadStreamResult::End
+}

@@ -92,18 +92,7 @@ impl ExecutionHost {
             )
         })?;
 
-        let result = execution.run_sync_to_completion().map_err(|e| {
-            ExecutionFailure::new(
-                galfus_contract::ExecutionFailureKind::InternalRuntimeFailure,
-                e.to_string(),
-            )
-        })?;
-
-        if let galfus_contract::BoundaryValue::I32(code) = result {
-            Ok(code)
-        } else {
-            Ok(0)
-        }
+        execution.run_sync_to_completion()
     }
 }
 
@@ -262,11 +251,7 @@ pub async fn start(options: GalfusWebOptions) -> Result<JsValue, JsValue> {
                     }
                 });
 
-                if let galfus_contract::BoundaryValue::I32(code) = result {
-                    return Ok(JsValue::from(code));
-                } else {
-                    return Ok(JsValue::from(0));
-                }
+                return Ok(JsValue::from(result));
             }
             galfus_contract::ExecutorStepResult::Blocked { .. } => {
                 yield_macro_task().await;

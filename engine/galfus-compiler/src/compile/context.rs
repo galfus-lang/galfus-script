@@ -5,20 +5,18 @@ use crate::CompilerState;
 use crate::input::CompiledModule;
 use crate::semantic_to_mir::WorkspaceContext;
 use galfus_core::{FunctionId, NodeId, SymbolId, TypeId};
-use galfus_frontend::{
-    FunctionParameterType, FunctionType, SymbolKind, SyntaxNodeKind, TypeKind, TypeTable,
-};
+use galfus_frontend::{SymbolKind, SyntaxNodeKind, TypeKind};
 use std::collections::HashMap;
 
 pub(super) struct MyWorkspaceContext<'a> {
-    modules: &'a [CompiledModule],
+    pub(super) modules: &'a mut [CompiledModule],
     pub(super) state: &'a mut CompilerState,
     pub(super) string_table: &'a galfus_frontend::StringTable,
 }
 
 impl<'a> MyWorkspaceContext<'a> {
     pub(super) fn new(
-        modules: &'a [CompiledModule],
+        modules: &'a mut [CompiledModule],
         state: &'a mut CompilerState,
         string_table: &'a galfus_frontend::StringTable,
     ) -> Self {
@@ -29,218 +27,8 @@ impl<'a> MyWorkspaceContext<'a> {
         }
     }
 
-    fn translate_symbol(
-        &self,
-        caller_mod_idx: usize,
-        target_mod_idx: usize,
-        sym: SymbolId,
-    ) -> SymbolId {
-        let caller_res = match self.modules[caller_mod_idx].graph().resolution() {
-            Some(res) => res,
-            None => return sym,
-        };
-        let caller_sym_data = match caller_res.symbol(sym) {
-            Some(s) => s,
-            None => return sym,
-        };
-        let sym_name_id = caller_sym_data.name();
-        let sym_name = self.string_table.resolve(sym_name_id).unwrap_or("");
-
-        let target_res = match self.modules[target_mod_idx].graph().resolution() {
-            Some(res) => res,
-            None => return sym,
-        };
-
-        for target_sym in target_res.symbols() {
-            if self.string_table.resolve(target_sym.name()).unwrap_or("") == sym_name {
-                return target_sym.id();
-            }
-        }
-
-        for import in target_res.imports() {
-            if import.local_name() == sym_name {
-                return import.local_symbol();
-            }
-        }
-
-        sym
-    }
-
-    fn translate_type(&self, caller_mod_idx: usize, target_mod_idx: usize, ty: TypeId) -> TypeId {
-        let caller_module = &self.modules[caller_mod_idx];
-        let caller_table = caller_module.type_result().unwrap().layer().table();
-
-        let modules_ptr = self.modules.as_ptr() as usize as *mut CompiledModule;
-        let target_module_mut = unsafe { &mut *modules_ptr.add(target_mod_idx) };
-        let target_table = target_module_mut
-            .type_result_mut()
-            .unwrap()
-            .layer_mut()
-            .table_mut();
-
-        self.translate_type_helper(
-            caller_mod_idx,
-            target_mod_idx,
-            caller_table,
-            target_table,
-            ty,
-        )
-    }
-
-    fn translate_type_helper(
-        &self,
-        caller_mod_idx: usize,
-        target_mod_idx: usize,
-        caller_table: &TypeTable,
-        target_table: &mut TypeTable,
-        ty: TypeId,
-    ) -> TypeId {
-        let kind = match caller_table.kind(ty) {
-            Some(k) => k,
-            None => return ty,
-        };
-
-        let translated_kind = match kind {
-            TypeKind::Primitive(prim) => TypeKind::Primitive(*prim),
-            TypeKind::Named { symbol } => {
-                let target_symbol = self.translate_symbol(caller_mod_idx, target_mod_idx, *symbol);
-                TypeKind::Named {
-                    symbol: target_symbol,
-                }
-            }
-            TypeKind::GenericParameter { symbol } => {
-                let target_symbol = self.translate_symbol(caller_mod_idx, target_mod_idx, *symbol);
-                TypeKind::GenericParameter {
-                    symbol: target_symbol,
-                }
-            }
-            TypeKind::Array { element } => {
-                let target_element = self.translate_type_helper(
-                    caller_mod_idx,
-                    target_mod_idx,
-                    caller_table,
-                    target_table,
-                    *element,
-                );
-                TypeKind::Array {
-                    element: target_element,
-                }
-            }
-            TypeKind::Range { element } => {
-                let target_element = self.translate_type_helper(
-                    caller_mod_idx,
-                    target_mod_idx,
-                    caller_table,
-                    target_table,
-                    *element,
-                );
-                TypeKind::Range {
-                    element: target_element,
-                }
-            }
-            TypeKind::Tuple { elements } => {
-                let target_elements = elements
-                    .iter()
-                    .map(|&e| {
-                        self.translate_type_helper(
-                            caller_mod_idx,
-                            target_mod_idx,
-                            caller_table,
-                            target_table,
-                            e,
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                TypeKind::Tuple {
-                    elements: target_elements,
-                }
-            }
-            TypeKind::Union { members } => {
-                let target_members = members
-                    .iter()
-                    .map(|&e| {
-                        self.translate_type_helper(
-                            caller_mod_idx,
-                            target_mod_idx,
-                            caller_table,
-                            target_table,
-                            e,
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                TypeKind::Union {
-                    members: target_members,
-                }
-            }
-            TypeKind::Function(func) => {
-                let target_return_type = self.translate_type_helper(
-                    caller_mod_idx,
-                    target_mod_idx,
-                    caller_table,
-                    target_table,
-                    func.return_type(),
-                );
-                let target_parameters = func
-                    .parameters()
-                    .iter()
-                    .map(|param| {
-                        let target_ty = self.translate_type_helper(
-                            caller_mod_idx,
-                            target_mod_idx,
-                            caller_table,
-                            target_table,
-                            param.ty(),
-                        );
-                        if param.is_rest() {
-                            FunctionParameterType::rest(target_ty)
-                        } else if param.has_default() {
-                            FunctionParameterType::with_default(target_ty, None)
-                        } else {
-                            FunctionParameterType::new(target_ty)
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                TypeKind::Function(FunctionType::new(
-                    target_parameters,
-                    target_return_type,
-                    func.is_external(),
-                ))
-            }
-            TypeKind::GenericInstance { base, arguments } => {
-                let target_base = self.translate_type_helper(
-                    caller_mod_idx,
-                    target_mod_idx,
-                    caller_table,
-                    target_table,
-                    *base,
-                );
-                let target_arguments = arguments
-                    .iter()
-                    .map(|&arg| {
-                        self.translate_type_helper(
-                            caller_mod_idx,
-                            target_mod_idx,
-                            caller_table,
-                            target_table,
-                            arg,
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                TypeKind::GenericInstance {
-                    base: target_base,
-                    arguments: target_arguments,
-                }
-            }
-            TypeKind::Path { root, segments } => {
-                let target_root = self.translate_symbol(caller_mod_idx, target_mod_idx, *root);
-                TypeKind::Path {
-                    root: target_root,
-                    segments: segments.clone(),
-                }
-            }
-            TypeKind::Error => TypeKind::Error,
-        };
-        target_table.intern(translated_kind)
+    pub(super) fn modules(&self) -> &[CompiledModule] {
+        self.modules
     }
 }
 
@@ -387,15 +175,25 @@ impl<'a> WorkspaceContext for MyWorkspaceContext<'a> {
             .specialised_id_to_target
             .insert(specialized_id, (target_module_id, specialized_id));
 
-        let target_module = &self.modules[target_mod_idx];
-        let type_res = target_module.type_result().unwrap();
+        // The builder can recursively ask this context to specialize another
+        // function. Snapshot the target inputs so the nested mutable context
+        // borrow never aliases `self.modules`.
+        let (target_module_id, graph, type_res, source_text) = {
+            let target_module = &self.modules[target_mod_idx];
+            (
+                target_module.id(),
+                target_module.graph().clone(),
+                target_module.type_result().cloned().unwrap(),
+                target_module.source().text().to_owned(),
+            )
+        };
         let mut builder = crate::semantic_to_mir::MirBuilder::new(
-            target_module.graph(),
-            type_res,
-            target_module.source().text(),
+            &graph,
+            &type_res,
+            &source_text,
             self.string_table,
         )
-        .with_workspace_module_id(target_module.id());
+        .with_workspace_module_id(target_module_id);
         builder = builder.with_workspace_ctx(self);
 
         if let Some(function_item) = builder.function_item_for_symbol(target_symbol)
@@ -415,6 +213,7 @@ impl<'a> WorkspaceContext for MyWorkspaceContext<'a> {
                 .entry(target_module_id)
                 .or_default()
                 .push(function);
+            self.state.mark_specialised_module(target_module_id);
 
             for (method_item, method_types, method_substitutions) in anchored_specializations {
                 self.specialize_anchored_function(
@@ -487,19 +286,25 @@ impl<'a> MyWorkspaceContext<'a> {
         concrete_types: Vec<TypeId>,
         substitutions: HashMap<SymbolId, TypeId>,
     ) {
-        let target_module = &self.modules[target_mod_idx];
-        let type_res = target_module.type_result().unwrap();
+        let (target_module_id, graph, type_res, source_text) = {
+            let target_module = &self.modules[target_mod_idx];
+            (
+                target_module.id(),
+                target_module.graph().clone(),
+                target_module.type_result().cloned().unwrap(),
+                target_module.source().text().to_owned(),
+            )
+        };
         let mut builder = crate::semantic_to_mir::MirBuilder::new(
-            target_module.graph(),
-            type_res,
-            target_module.source().text(),
+            &graph,
+            &type_res,
+            &source_text,
             self.string_table,
         )
-        .with_workspace_module_id(target_module.id());
+        .with_workspace_module_id(target_module_id);
         let Some(target_symbol) = builder.function_symbol_for_item(function_item) else {
             return;
         };
-        let target_module_id = target_module.id();
         let key = (target_module_id, target_symbol, concrete_types);
         if self.state.specialisations.contains_key(&key) {
             return;
@@ -524,6 +329,7 @@ impl<'a> MyWorkspaceContext<'a> {
                 .entry(target_module_id)
                 .or_default()
                 .push(function);
+            self.state.mark_specialised_module(target_module_id);
         }
     }
 

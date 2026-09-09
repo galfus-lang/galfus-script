@@ -88,6 +88,8 @@ impl<'a> Resolver<'a> {
         };
 
         match node.kind() {
+            SyntaxNodeKind::ImportItem => self.export_import_bindings(export_node, item),
+
             SyntaxNodeKind::FunctionItem => {
                 if let Some(name) = self.function_name(item) {
                     self.export_function_declaration(export_node, item, name);
@@ -117,6 +119,37 @@ impl<'a> Resolver<'a> {
             }
 
             _ => {}
+        }
+    }
+
+    fn export_import_bindings(&mut self, export_node: NodeId, item: NodeId) {
+        let imports = self
+            .resolution
+            .imports()
+            .iter()
+            .filter(|import| import.import_node() == item)
+            .map(|import| {
+                (
+                    import.local_name().to_string(),
+                    import.declaration(),
+                    import.local_symbol(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        for (name, declaration, symbol) in imports {
+            let Some(symbol_data) = self.resolution.symbol(symbol) else {
+                continue;
+            };
+
+            self.resolution.add_export(
+                name,
+                symbol_data.kind(),
+                export_node,
+                item,
+                declaration,
+                symbol,
+            );
         }
     }
 

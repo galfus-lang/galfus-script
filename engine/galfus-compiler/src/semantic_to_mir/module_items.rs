@@ -1,7 +1,6 @@
 use std::collections;
 
 use super::*;
-use galfus_frontend::ImportedStructFieldDefault;
 use std::collections::HashMap;
 
 impl<'a> MirBuilder<'a> {
@@ -89,7 +88,7 @@ impl<'a> MirBuilder<'a> {
             }
             _ => func_type,
         };
-        let return_type = if is_async {
+        let inferred_return_type = if is_async {
             match self.type_result.layer().table().kind(callable_return_type) {
                 Some(TypeKind::GenericInstance { arguments, .. }) => {
                     arguments.first().copied().unwrap_or(callable_return_type)
@@ -99,6 +98,18 @@ impl<'a> MirBuilder<'a> {
         } else {
             callable_return_type
         };
+        let return_type = syntax
+            .node(item)
+            .and_then(|function| {
+                function.children().iter().rev().copied().find(|child| {
+                    syntax
+                        .node(*child)
+                        .is_some_and(|node| node.kind().is_type())
+                })
+            })
+            .and_then(|annotation| self.type_result.layer().node_type(annotation))
+            .map(|annotation| self.substitute_type(annotation, &type_substitutions))
+            .unwrap_or(inferred_return_type);
 
         // Reset the local ID counter for this function
         self.next_local_id = 0;
@@ -120,6 +131,7 @@ impl<'a> MirBuilder<'a> {
             return_type,
             type_substitutions: type_substitutions.clone(),
             loop_targets: Vec::new(),
+            narrowing_return_targets: Vec::new(),
         };
 
         // Declare parameters as locals
@@ -187,9 +199,11 @@ impl<'a> MirBuilder<'a> {
             .is_some_and(|node| node.kind().is_expression())
         {
             let operand = builder_ctx.lower_expression(last_node);
-            builder_ctx.terminate_block(Terminator::Return(Some(operand)));
+            if !builder_ctx.is_terminated() {
+                builder_ctx.close_current_block(Terminator::Return(Some(operand)));
+            }
         } else {
-            builder_ctx.terminate_block(Terminator::Return(None));
+            builder_ctx.close_current_block(Terminator::Return(None));
         }
         builder_ctx.flush_current_instructions();
 
@@ -284,6 +298,7 @@ impl<'a> MirBuilder<'a> {
             return_type,
             type_substitutions: collections::HashMap::new(),
             loop_targets: Vec::new(),
+            narrowing_return_targets: Vec::new(),
         };
 
         for (sym, ty) in param_symbols {
@@ -302,7 +317,9 @@ impl<'a> MirBuilder<'a> {
             builder_ctx.lower_block(body);
         } else {
             let op = builder_ctx.lower_expression(body);
-            builder_ctx.terminate_block(Terminator::Return(Some(op)));
+            if !builder_ctx.is_terminated() {
+                builder_ctx.close_current_block(Terminator::Return(Some(op)));
+            }
         }
 
         let mut func = MirFunction {
@@ -346,7 +363,7 @@ impl<'a> MirBuilder<'a> {
         None
     }
 
-    fn function_name_node(&self, item: NodeId) -> Option<NodeId> {
+    pub(super) fn function_name_node(&self, item: NodeId) -> Option<NodeId> {
         let resolution = self.graph.resolution()?;
         self.find_function_name_node(item, resolution)
     }
@@ -371,163 +388,6 @@ impl<'a> MirBuilder<'a> {
             }
         }
         None
-    }
-
-    pub fn generic_parameters_for_function_item(&self, item: NodeId) -> Vec<SymbolId> {
-        let syntax = self.graph.syntax();
-        let Some(generic_list) =
-            syntax.first_child_of_kind(item, SyntaxNodeKind::GenericParameterList)
-        else {
-            return Vec::new();
-        };
-
-        let Some(generic_node) = syntax.node(generic_list) else {
-            return Vec::new();
-        };
-
-        generic_node
-            .children()
-            .iter()
-            .filter_map(|parameter| {
-                let identifier =
-                    syntax.first_child_of_kind(*parameter, SyntaxNodeKind::Identifier)?;
-                self.graph
-                    .resolution()
-                    .and_then(|res| res.declaration_symbol(identifier))
-            })
-            .collect()
-    }
-
-    pub(super) fn requires_specialization(&self, item: NodeId) -> bool {
-        !self.generic_parameters_for_function_item(item).is_empty()
-            || !self
-                .generic_parameters_for_anchored_function_item(item)
-                .is_empty()
-    }
-
-    pub fn anchored_function_specializations_for_type(
-        &self,
-        ty: TypeId,
-        substitutions: &HashMap<SymbolId, TypeId>,
-    ) -> Vec<(NodeId, Vec<TypeId>, HashMap<SymbolId, TypeId>)> {
-        let ty = self.resolve_alias_type(ty);
-        let Some(TypeKind::GenericInstance { base, arguments }) =
-            self.type_result.layer().table().kind(ty).cloned()
-        else {
-            return Vec::new();
-        };
-
-        let mut functions = Vec::new();
-        let Some(root) = self.graph.syntax().root() else {
-            return functions;
-        };
-        let arguments = arguments
-            .iter()
-            .map(|argument| self.substitute_type(*argument, substitutions))
-            .collect::<Vec<_>>();
-        self.collect_anchored_function_specializations(root, base, &arguments, &mut functions);
-        functions
-    }
-
-    pub fn function_symbol_for_item(&self, item: NodeId) -> Option<SymbolId> {
-        let name = self.function_name_node(item)?;
-        self.graph.resolution()?.declaration_symbol(name)
-    }
-
-    fn collect_anchored_function_specializations(
-        &self,
-        node: NodeId,
-        base: TypeId,
-        arguments: &[TypeId],
-        functions: &mut Vec<(NodeId, Vec<TypeId>, HashMap<SymbolId, TypeId>)>,
-    ) {
-        let syntax = self.graph.syntax();
-        let Some(syntax_node) = syntax.node(node) else {
-            return;
-        };
-
-        if syntax_node.kind() == SyntaxNodeKind::FunctionItem {
-            let generic_params = self.generic_parameters_for_anchored_function_item(node);
-            if generic_params.len() == arguments.len()
-                && !generic_params.is_empty()
-                && let Some(anchor) = syntax.first_child_of_kind(node, SyntaxNodeKind::FunctionAnchor)
-                && let Some(anchor_type) = syntax.first_child(anchor)
-                && self.type_result.layer().node_type(anchor_type).is_some_and(|anchor_ty| {
-                    matches!(
-                        self.type_result.layer().table().kind(self.resolve_alias_type(anchor_ty)),
-                        Some(TypeKind::GenericInstance { base: anchor_base, .. }) if *anchor_base == base
-                    )
-                })
-            {
-                let substitutions = generic_params
-                    .into_iter()
-                    .zip(arguments.iter().copied())
-                    .collect::<HashMap<_, _>>();
-                functions.push((node, arguments.to_vec(), substitutions));
-            }
-        }
-
-        for &child in syntax_node.children() {
-            self.collect_anchored_function_specializations(child, base, arguments, functions);
-        }
-    }
-
-    fn generic_parameters_for_anchored_function_item(&self, item: NodeId) -> Vec<SymbolId> {
-        let Some(symbol) = self.function_symbol_for_item(item) else {
-            return Vec::new();
-        };
-        let Some(function_type) = self.type_result.layer().symbol_type(symbol) else {
-            return Vec::new();
-        };
-        let mut parameters = Vec::new();
-        self.collect_generic_parameters_from_type(function_type, &mut parameters);
-        parameters
-    }
-
-    fn collect_generic_parameters_from_type(&self, ty: TypeId, parameters: &mut Vec<SymbolId>) {
-        match self.type_result.layer().table().kind(ty) {
-            Some(TypeKind::GenericParameter { symbol }) => {
-                if !parameters.contains(symbol) {
-                    parameters.push(*symbol);
-                }
-            }
-            Some(TypeKind::Array { element }) | Some(TypeKind::Range { element }) => {
-                self.collect_generic_parameters_from_type(*element, parameters);
-            }
-            Some(TypeKind::Tuple { elements }) | Some(TypeKind::Union { members: elements }) => {
-                for element in elements {
-                    self.collect_generic_parameters_from_type(*element, parameters);
-                }
-            }
-            Some(TypeKind::Function(function)) => {
-                for parameter in function.parameters() {
-                    self.collect_generic_parameters_from_type(parameter.ty(), parameters);
-                }
-                self.collect_generic_parameters_from_type(function.return_type(), parameters);
-            }
-            Some(TypeKind::GenericInstance { base, arguments }) => {
-                self.collect_generic_parameters_from_type(*base, parameters);
-                for argument in arguments {
-                    self.collect_generic_parameters_from_type(*argument, parameters);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    pub(super) fn substitute_type(
-        &self,
-        ty: TypeId,
-        substitutions: &collections::HashMap<SymbolId, TypeId>,
-    ) -> TypeId {
-        let ty = self.resolve_alias_type(ty);
-
-        match self.type_result.layer().table().kind(ty) {
-            Some(TypeKind::GenericParameter { symbol }) => {
-                substitutions.get(symbol).copied().unwrap_or(ty)
-            }
-            _ => ty,
-        }
     }
 
     pub(super) fn next_specialized_function_id(&mut self) -> FunctionId {
@@ -556,217 +416,6 @@ impl<'a> MirBuilder<'a> {
             }
         }
         ""
-    }
-
-    pub(super) fn get_struct_fields(&self, struct_symbol: SymbolId) -> Vec<(String, TypeId)> {
-        if let Some(fields) = self.type_result.imported_struct_fields.get(&struct_symbol) {
-            return fields
-                .iter()
-                .map(|field| (field.name.clone(), field.ty))
-                .collect();
-        }
-        let mut visited = collections::HashSet::new();
-        self.get_struct_fields_internal(struct_symbol, &mut visited)
-    }
-
-    pub(super) fn imported_struct_field_default(
-        &self,
-        struct_symbol: SymbolId,
-        field_name: &str,
-    ) -> Option<ImportedStructFieldDefault> {
-        self.type_result
-            .imported_struct_fields
-            .get(&struct_symbol)?
-            .iter()
-            .find(|field| field.name == field_name)
-            .and_then(|field| field.default_value)
-    }
-
-    pub(super) fn get_struct_fields_internal(
-        &self,
-        struct_symbol: SymbolId,
-        visited: &mut collections::HashSet<SymbolId>,
-    ) -> Vec<(String, TypeId)> {
-        if !visited.insert(struct_symbol) {
-            return Vec::new();
-        }
-
-        let resolution = match self.graph.resolution() {
-            Some(res) => res,
-            None => return Vec::new(),
-        };
-
-        let struct_symbol_data = match resolution.symbol(struct_symbol) {
-            Some(data) => data,
-            None => return Vec::new(),
-        };
-
-        let mut fields = Vec::new();
-        let root = self.graph.syntax().root().unwrap();
-        if let Some(item_node) = self.find_struct_item_by_name(
-            root,
-            self.string_table
-                .resolve(struct_symbol_data.name())
-                .unwrap_or(""),
-        ) {
-            let syntax = self.graph.syntax();
-            let field_children = syntax
-                .first_child_of_kind(item_node, SyntaxNodeKind::StructFieldList)
-                .and_then(|fl| syntax.node(fl))
-                .map(|n| n.children())
-                .unwrap_or(&[]);
-
-            for &field_child in field_children {
-                let node_kind = syntax.node(field_child).map(|n| n.kind());
-                if node_kind == Some(SyntaxNodeKind::StructExpansion) {
-                    let target_sym = syntax
-                        .child(field_child, 0)
-                        .and_then(|target| self.type_result.layer().node_type(target))
-                        .and_then(|target_ty| self.struct_symbol_for_type(target_ty));
-                    if let Some(target_sym) = target_sym {
-                        for (exp_name, exp_ty) in
-                            self.get_struct_fields_internal(target_sym, visited)
-                        {
-                            if !fields.iter().any(|(n, _)| *n == exp_name) {
-                                fields.push((exp_name, exp_ty));
-                            }
-                        }
-                    }
-                } else if node_kind == Some(SyntaxNodeKind::StructField)
-                    && let Some(ident_node) =
-                        syntax.first_child_of_kind(field_child, SyntaxNodeKind::Identifier)
-                {
-                    let name_str = self.node_text(ident_node).to_string();
-                    let field_ty = resolution
-                        .declaration_symbol(ident_node)
-                        .and_then(|sym| self.type_result.layer().symbol_type(sym))
-                        .or_else(|| self.type_result.layer().node_type(field_child));
-                    if let Some(ty) = field_ty
-                        && !fields.iter().any(|(n, _)| *n == name_str)
-                    {
-                        fields.push((name_str, ty));
-                    }
-                }
-            }
-        }
-        fields
-    }
-
-    pub(super) fn find_struct_item_by_name(
-        &self,
-        node: NodeId,
-        struct_name: &str,
-    ) -> Option<NodeId> {
-        let syntax = self.graph.syntax();
-        let syntax_node = syntax.node(node)?;
-        if syntax_node.kind() == SyntaxNodeKind::StructItem {
-            let has_matching_identifier = syntax
-                .first_child_of_kind(node, SyntaxNodeKind::Identifier)
-                .is_some_and(|id| self.node_text(id) == struct_name);
-            if has_matching_identifier {
-                return Some(node);
-            }
-        }
-        for &child in syntax_node.children() {
-            if let Some(found) = self.find_struct_item_by_name(child, struct_name) {
-                return Some(found);
-            }
-        }
-        None
-    }
-
-    pub(super) fn struct_symbol_for_type(&self, ty: TypeId) -> Option<SymbolId> {
-        let layer = self.type_result.layer();
-        let table = layer.table();
-        let mut current = ty;
-        loop {
-            match table.kind(current) {
-                Some(TypeKind::Named { symbol }) => {
-                    let resolution = self.graph.resolution()?;
-                    let is_struct = resolution
-                        .symbol(*symbol)
-                        .is_some_and(|sd| sd.kind() == SymbolKind::Struct)
-                        || self.type_result.imported_struct_fields.contains_key(symbol);
-                    if is_struct {
-                        return Some(*symbol);
-                    }
-                    break;
-                }
-                Some(TypeKind::GenericInstance { base, .. }) => {
-                    current = *base;
-                }
-                _ => break,
-            }
-        }
-        None
-    }
-
-    pub(super) fn find_struct_field_default_expr(
-        &self,
-        struct_symbol: SymbolId,
-        field_name: &str,
-    ) -> Option<NodeId> {
-        let resolution = self.graph.resolution()?;
-        let struct_symbol_data = resolution.symbol(struct_symbol)?;
-        let root = self.graph.syntax().root().unwrap();
-        let struct_item = self.find_struct_item_by_name(
-            root,
-            self.string_table
-                .resolve(struct_symbol_data.name())
-                .unwrap_or(""),
-        )?;
-
-        let field_node = self.find_struct_field_node_by_name(struct_item, field_name)?;
-        let syntax = self.graph.syntax();
-        let default_node =
-            self.find_descendant_of_kind(field_node, SyntaxNodeKind::StructFieldDefault)?;
-        syntax.child(default_node, 0)
-    }
-
-    pub(super) fn find_struct_field_node_by_name(
-        &self,
-        node: NodeId,
-        field_name: &str,
-    ) -> Option<NodeId> {
-        let syntax = self.graph.syntax();
-        let syntax_node = syntax.node(node)?;
-        if matches!(
-            syntax_node.kind(),
-            SyntaxNodeKind::StructField | SyntaxNodeKind::WeakStructField
-        ) {
-            let matches_name = syntax
-                .first_child_of_kind(node, SyntaxNodeKind::Identifier)
-                .is_some_and(|identifier| self.node_text(identifier) == field_name);
-            if matches_name {
-                return Some(node);
-            }
-        }
-        for &child in syntax_node.children() {
-            if let Some(found) = self.find_struct_field_node_by_name(child, field_name) {
-                return Some(found);
-            }
-        }
-        None
-    }
-
-    pub(super) fn find_descendant_of_kind(
-        &self,
-        node: NodeId,
-        kind: SyntaxNodeKind,
-    ) -> Option<NodeId> {
-        let syntax = self.graph.syntax();
-        let syntax_node = syntax.node(node)?;
-        for &child in syntax_node.children() {
-            if let Some(child_node) = syntax.node(child) {
-                if child_node.kind() == kind {
-                    return Some(child);
-                }
-                if let Some(found) = self.find_descendant_of_kind(child, kind) {
-                    return Some(found);
-                }
-            }
-        }
-        None
     }
 
     pub(super) fn find_tuple_type(&self, elements: &[TypeId]) -> TypeId {

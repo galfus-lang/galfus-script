@@ -20,12 +20,11 @@ use galfus_contract::{
     AdapterFunctionSignature, AdapterModuleDescriptor, ExecutionTarget, Providers,
     RuntimeCapabilities,
 };
-use galfus_core::{DiagnosticBag, ModulePath, OpaqueTypeId, SourceFile};
+use galfus_core::{DiagnosticBag, ModulePath, SourceFile};
 use galfus_frontend::modules::{
     FrontendModuleKind, FrontendSession, FrontendSnapshot, FrontendSource, FrontendUpdate,
     SemanticRoot, SemanticRootKind,
 };
-use galfus_frontend::{ResolutionLayer, StringTable, TypeTable};
 use std::collections::HashMap;
 use std::sync::Arc;
 

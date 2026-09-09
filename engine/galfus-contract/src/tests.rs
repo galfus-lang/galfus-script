@@ -26,7 +26,7 @@ impl AdapterModuleBinding for DummyAdapter {
         _symbol: &str,
         _thread_id: galfus_core::ThreadId,
         _request_lease: galfus_core::RequestLease,
-        _args: &[BoundaryValue],
+        _args: &[SurfaceValue],
         _injector: Arc<dyn MessageInjector>,
     ) {
     }
@@ -51,7 +51,7 @@ impl AdapterModuleBinding for RetriableReleaseAdapter {
         _symbol: &str,
         _thread_id: galfus_core::ThreadId,
         _request_lease: galfus_core::RequestLease,
-        _args: &[BoundaryValue],
+        _args: &[SurfaceValue],
         _injector: Arc<dyn MessageInjector>,
     ) {
     }
@@ -83,7 +83,7 @@ impl AdapterModuleBinding for RecordingReleaseAdapter {
         _symbol: &str,
         _thread_id: galfus_core::ThreadId,
         _request_lease: galfus_core::RequestLease,
-        _args: &[BoundaryValue],
+        _args: &[SurfaceValue],
         _injector: Arc<dyn MessageInjector>,
     ) {
     }
@@ -102,32 +102,11 @@ impl HostProvider for DummyHost {
     fn descriptor(&self) -> ProviderDescriptor {
         ProviderDescriptor::default()
     }
-
-    fn dispatch(
-        &mut self,
-        _thread_id: galfus_core::ThreadId,
-        _request_lease: galfus_core::RequestLease,
-        _method: &str,
-        _args: &[BoundaryValue],
-        _injector: Arc<dyn MessageInjector>,
-    ) {
-        // dummy
-    }
 }
 
 impl HostProvider for IoHost {
     fn descriptor(&self) -> ProviderDescriptor {
         std_io_provider_descriptor()
-    }
-
-    fn dispatch(
-        &mut self,
-        _thread_id: galfus_core::ThreadId,
-        _request_lease: galfus_core::RequestLease,
-        _method: &str,
-        _args: &[BoundaryValue],
-        _injector: Arc<dyn MessageInjector>,
-    ) {
     }
 }
 
@@ -561,7 +540,7 @@ impl AdapterModuleBinding for CancellationRecordingAdapter {
         _symbol: &str,
         _thread_id: galfus_core::ThreadId,
         _request_lease: galfus_core::RequestLease,
-        _args: &[BoundaryValue],
+        _args: &[SurfaceValue],
         _injector: std::sync::Arc<dyn MessageInjector>,
     ) {
     }
@@ -609,7 +588,7 @@ struct MainThreadOnlyTask(Rc<()>);
 impl RunnableTask for MainThreadOnlyTask {
     fn run(self: Box<Self>, _budget: usize) -> ThreadResult {
         assert_eq!(Rc::strong_count(&self.0), 1);
-        ThreadResult::Completed(Ok(BoundaryValue::I32(0)))
+        ThreadResult::Completed(Ok(0))
     }
 }
 
@@ -620,10 +599,7 @@ fn main_kernel_tasks_accept_non_send_state() {
     let KernelTask::Main(task) = task else {
         panic!("main task must preserve its affinity");
     };
-    assert!(matches!(
-        task.run(1),
-        ThreadResult::Completed(Ok(BoundaryValue::I32(0)))
-    ));
+    assert!(matches!(task.run(1), ThreadResult::Completed(Ok(0))));
 }
 
 fn assert_builtin_checks(name: &str, source: &str) {
@@ -697,6 +673,34 @@ fn test_log_source_checks() {
     assert!(LOG_SOURCE.contains("log"));
     assert!(LOG_SOURCE.contains("info"));
     assert!(LOG_SOURCE.contains("debug"));
+}
+
+#[test]
+fn test_std_stream_source_checks() {
+    use crate::STREAM_SOURCE;
+    assert_builtin_checks("std/stream", STREAM_SOURCE);
+    assert!(STREAM_SOURCE.contains("fromBytes"));
+    assert!(STREAM_SOURCE.contains("collect"));
+    assert!(STREAM_SOURCE.contains("ReadStream"));
+    assert!(STREAM_SOURCE.contains("WriteStream"));
+}
+
+#[test]
+fn test_std_net_source_checks() {
+    assert_builtin_checks("std/net", STD_NET_SOURCE);
+    assert!(STD_NET_SOURCE.contains("TcpStream"));
+}
+
+#[test]
+fn test_std_websocket_source_checks() {
+    assert_builtin_checks("std/websocket", STD_WEBSOCKET_SOURCE);
+    assert!(STD_WEBSOCKET_SOURCE.contains("WebSocketMessage"));
+}
+
+#[test]
+fn test_std_http_source_checks() {
+    assert_builtin_checks("std/http", STD_HTTP_SOURCE);
+    assert!(STD_HTTP_SOURCE.contains("HttpBody"));
 }
 
 #[test]

@@ -302,6 +302,7 @@ pub fn validate_bytecode_module(
                     name_const,
                     args_start,
                     arg_count,
+                    ..
                 } => {
                     check_reg(dest, &mut errors);
                     check_reg(obj, &mut errors);

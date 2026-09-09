@@ -5,17 +5,24 @@ use crate::source_store::ModuleOrigin;
 use crate::state::*;
 use galfus_bytecode::PackageImage;
 use galfus_bytecode::{BytecodeGraph, ImportEdge, PackageMetadata};
-use galfus_contract::BoundaryType;
 use galfus_contract::{
     AdapterModuleRequirement, CURRENT_BOUNDARY_ABI_VERSION, ProviderFunctionSignature,
-    ProviderModuleRequirement,
+    ProviderModuleRequirement, SurfaceField, SurfaceSchema, SurfaceVariant,
 };
-use galfus_core::ModulePath;
-use galfus_core::{Diagnostic, DiagnosticBag, Span, TypeId};
+use galfus_core::{Diagnostic, DiagnosticBag, ModulePath, Span, TypeId};
 use galfus_frontend::modules::FrontendRoots;
-use galfus_frontend::{PrimitiveType, SymbolKind, TypeKind};
+use galfus_frontend::{
+    ModuleAst, PrimitiveType, ResolutionLayer, StringTable, SymbolKind, SyntaxNodeKind,
+    TypeCheckResult, TypeKind, TypeTable,
+};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+
+#[derive(Clone, Copy)]
+enum BoundarySchemaKind {
+    Adapter,
+    ProviderBridge,
+}
 
 impl Workspace {
     pub fn check(&mut self) -> CheckReport<'_> {
@@ -111,7 +118,7 @@ impl Workspace {
                         revision: report.source_revision,
                         diagnostics: report.diagnostics,
                     };
-                    self.frontend_snapshot = None;
+                    self.frontend_snapshot = Some(self.frontend.snapshot(report.semantic_revision));
                 } else {
                     self.frontend_snapshot = Some(self.frontend.snapshot(report.semantic_revision));
                     self.semantic_state.check_state = CheckState::Passed {
@@ -196,7 +203,9 @@ impl Workspace {
                     .parameters()
                     .iter()
                     .map(|parameter| {
-                        Self::boundary_type(
+                        Self::surface_schema(
+                            module.graph(),
+                            type_result,
                             type_result.layer().table(),
                             resolution,
                             self.frontend.string_table(),
@@ -205,7 +214,9 @@ impl Workspace {
                         )
                     })
                     .collect::<Result<Vec<_>, _>>();
-                let return_type = Self::boundary_type(
+                let return_type = Self::surface_schema(
+                    module.graph(),
+                    type_result,
                     type_result.layer().table(),
                     resolution,
                     self.frontend.string_table(),
@@ -236,55 +247,170 @@ impl Workspace {
         }
     }
 
-    pub(crate) fn boundary_type(
+    pub(crate) fn surface_schema(
+        graph: &ModuleAst,
+        type_result: &TypeCheckResult,
         table: &TypeTable,
         resolution: &ResolutionLayer,
         string_table: &StringTable,
         proxy_name: &str,
         ty: TypeId,
-    ) -> Result<BoundaryType, String> {
+    ) -> Result<SurfaceSchema, String> {
+        Self::surface_schema_for(
+            graph,
+            type_result,
+            table,
+            resolution,
+            string_table,
+            proxy_name,
+            ty,
+            BoundarySchemaKind::Adapter,
+        )
+    }
+
+    fn provider_surface_schema(
+        graph: &ModuleAst,
+        type_result: &TypeCheckResult,
+        table: &TypeTable,
+        resolution: &ResolutionLayer,
+        string_table: &StringTable,
+        proxy_name: &str,
+        ty: TypeId,
+    ) -> Result<SurfaceSchema, String> {
+        Self::surface_schema_for(
+            graph,
+            type_result,
+            table,
+            resolution,
+            string_table,
+            proxy_name,
+            ty,
+            BoundarySchemaKind::ProviderBridge,
+        )
+    }
+
+    fn surface_schema_for(
+        graph: &ModuleAst,
+        type_result: &TypeCheckResult,
+        table: &TypeTable,
+        resolution: &ResolutionLayer,
+        string_table: &StringTable,
+        proxy_name: &str,
+        ty: TypeId,
+        kind: BoundarySchemaKind,
+    ) -> Result<SurfaceSchema, String> {
         match table.kind(ty) {
             Some(TypeKind::Primitive(primitive)) => match primitive {
-                PrimitiveType::Null => Ok(BoundaryType::Null),
-                PrimitiveType::Bool => Ok(BoundaryType::Bool),
-                PrimitiveType::Int8 => Ok(BoundaryType::I8),
-                PrimitiveType::Int16 => Ok(BoundaryType::I16),
-                PrimitiveType::Int32 => Ok(BoundaryType::I32),
-                PrimitiveType::Int64 => Ok(BoundaryType::I64),
-                PrimitiveType::Uint8 => Ok(BoundaryType::U8),
-                PrimitiveType::Uint16 => Ok(BoundaryType::U16),
-                PrimitiveType::Uint32 => Ok(BoundaryType::U32),
-                PrimitiveType::Uint64 => Ok(BoundaryType::U64),
-                PrimitiveType::Float32 => Ok(BoundaryType::F32),
-                PrimitiveType::Float64 => Ok(BoundaryType::F64),
+                PrimitiveType::Null => Ok(SurfaceSchema::Null),
+                PrimitiveType::Bool => Ok(SurfaceSchema::Bool),
+                PrimitiveType::Int32 => Ok(SurfaceSchema::I32),
+                PrimitiveType::Int64 => Ok(SurfaceSchema::I64),
+                PrimitiveType::Uint16 => Ok(SurfaceSchema::U16),
+                PrimitiveType::Uint32 => Ok(SurfaceSchema::U32),
+                PrimitiveType::Uint64 => Ok(SurfaceSchema::U64),
+                PrimitiveType::Float32 => Ok(SurfaceSchema::F32),
+                PrimitiveType::Float64 => Ok(SurfaceSchema::F64),
+                _ => Err("primitive type is not supported by the surface contract".to_string()),
             },
             Some(TypeKind::Named { symbol }) => {
-                if let Some(symbol_data) = resolution.symbol(*symbol)
-                    && symbol_data.kind() == SymbolKind::Struct
-                {
-                    let name = string_table.resolve(symbol_data.name()).ok_or_else(|| {
-                        "struct name is missing from the string table".to_string()
-                    })?;
-                    return Ok(BoundaryType::Handle {
-                        type_id: OpaqueTypeId::new(proxy_name, name)
-                            .expect("adapter proxy types have a module path and name"),
-                    });
+                let Some(symbol_data) = resolution.symbol(*symbol) else {
+                    return Err(
+                        "named type symbol is missing from the resolution layer".to_string()
+                    );
+                };
+                if symbol_data.kind() != SymbolKind::Struct {
+                    if symbol_data.kind() == SymbolKind::Choice {
+                        return Self::choice_surface_schema_for(
+                            graph,
+                            type_result,
+                            table,
+                            resolution,
+                            string_table,
+                            proxy_name,
+                            *symbol,
+                            kind,
+                        );
+                    }
+                    if symbol_data.kind() == SymbolKind::TypeAlias {
+                        return Self::type_alias_surface_schema(
+                            graph,
+                            type_result,
+                            table,
+                            resolution,
+                            string_table,
+                            proxy_name,
+                            symbol_data.declaration(),
+                            kind,
+                        );
+                    }
+                    return Err("named type is not supported by the surface contract".to_string());
                 }
-                Err("named type is not supported by the boundary ABI".to_string())
+                let name = string_table
+                    .resolve(symbol_data.name())
+                    .ok_or_else(|| "struct name is missing from the string table".to_string())?;
+                match kind {
+                    BoundarySchemaKind::Adapter => Ok(SurfaceSchema::Handle {
+                        resource: format!("{proxy_name}::{name}"),
+                    }),
+                    BoundarySchemaKind::ProviderBridge => Self::struct_surface_schema(
+                        graph,
+                        type_result,
+                        table,
+                        resolution,
+                        string_table,
+                        proxy_name,
+                        *symbol,
+                        kind,
+                    ),
+                }
             }
-            Some(TypeKind::Array { element }) => Ok(BoundaryType::Array(Box::new(
-                Self::boundary_type(table, resolution, string_table, proxy_name, *element)?,
-            ))),
+            Some(TypeKind::Array { element })
+                if matches!(
+                    table.kind(*element),
+                    Some(TypeKind::Primitive(PrimitiveType::Uint8))
+                ) =>
+            {
+                Ok(SurfaceSchema::Bytes)
+            }
+            Some(TypeKind::Array { element }) => {
+                Ok(SurfaceSchema::List(Box::new(Self::surface_schema_for(
+                    graph,
+                    type_result,
+                    table,
+                    resolution,
+                    string_table,
+                    proxy_name,
+                    *element,
+                    kind,
+                )?)))
+            }
             Some(TypeKind::Tuple { elements }) => elements
                 .iter()
                 .map(|element| {
-                    Self::boundary_type(table, resolution, string_table, proxy_name, *element)
+                    Self::surface_schema_for(
+                        graph,
+                        type_result,
+                        table,
+                        resolution,
+                        string_table,
+                        proxy_name,
+                        *element,
+                        kind,
+                    )
                 })
                 .collect::<Result<Vec<_>, _>>()
-                .map(BoundaryType::Tuple),
-            Some(TypeKind::Function(_)) => Ok(BoundaryType::Function),
+                .map(SurfaceSchema::Tuple),
             Some(TypeKind::GenericInstance { arguments, .. }) if arguments.len() == 1 => {
-                Self::boundary_type(table, resolution, string_table, proxy_name, arguments[0])
+                Self::surface_schema_for(
+                    graph,
+                    type_result,
+                    table,
+                    resolution,
+                    string_table,
+                    proxy_name,
+                    arguments[0],
+                    kind,
+                )
             }
             Some(TypeKind::Union { members }) => {
                 let non_null = members
@@ -298,19 +424,339 @@ impl Workspace {
                     .copied()
                     .collect::<Vec<_>>();
                 if non_null.len() == 1 && non_null.len() + 1 == members.len() {
-                    Ok(BoundaryType::Nullable(Box::new(Self::boundary_type(
+                    Ok(SurfaceSchema::Optional(Box::new(Self::surface_schema_for(
+                        graph,
+                        type_result,
                         table,
                         resolution,
                         string_table,
                         proxy_name,
                         non_null[0],
+                        kind,
                     )?)))
                 } else {
-                    Err("only nullable unions are supported by the boundary ABI".to_string())
+                    Err("only nullable unions are supported by the surface contract".to_string())
                 }
             }
-            _ => Err("type is not supported by the boundary ABI".to_string()),
+            _ => Err("type is not supported by the surface contract".to_string()),
         }
+    }
+
+    fn choice_surface_schema_for(
+        graph: &ModuleAst,
+        type_result: &TypeCheckResult,
+        table: &TypeTable,
+        resolution: &ResolutionLayer,
+        string_table: &StringTable,
+        proxy_name: &str,
+        choice_symbol: galfus_core::SymbolId,
+        kind: BoundarySchemaKind,
+    ) -> Result<SurfaceSchema, String> {
+        let choice = resolution
+            .symbol(choice_symbol)
+            .ok_or_else(|| "choice symbol is missing from the resolution layer".to_string())?;
+        let choice_name = string_table
+            .resolve(choice.name())
+            .ok_or_else(|| "choice name is missing from the string table".to_string())?;
+        let member_scope = resolution.member_scope(choice_symbol).ok_or_else(|| {
+            "choice member scope is missing from the resolution layer".to_string()
+        })?;
+        let scope = resolution
+            .scope(member_scope)
+            .ok_or_else(|| "choice member scope is invalid".to_string())?;
+
+        let mut variants = scope
+            .symbols()
+            .iter()
+            .filter_map(|(name, symbol)| {
+                let variant = resolution.symbol(*symbol)?;
+                (variant.kind() == SymbolKind::ChoiceVariant).then_some((
+                    string_table.resolve(*name)?.to_string(),
+                    variant.declaration(),
+                ))
+            })
+            .map(|(name, declaration)| {
+                Ok(SurfaceVariant {
+                    name,
+                    payload: Self::choice_variant_payload_schema(
+                        graph,
+                        type_result,
+                        table,
+                        resolution,
+                        string_table,
+                        proxy_name,
+                        declaration,
+                        kind,
+                    )?,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        variants.sort_by(|left, right| left.name.cmp(&right.name));
+
+        Ok(SurfaceSchema::Choice {
+            name: choice_name.to_string(),
+            variants,
+        })
+    }
+
+    fn choice_variant_payload_schema(
+        graph: &ModuleAst,
+        type_result: &TypeCheckResult,
+        table: &TypeTable,
+        resolution: &ResolutionLayer,
+        string_table: &StringTable,
+        proxy_name: &str,
+        declaration: galfus_core::NodeId,
+        kind: BoundarySchemaKind,
+    ) -> Result<Option<SurfaceSchema>, String> {
+        let root = graph
+            .syntax()
+            .root()
+            .ok_or_else(|| "choice syntax root is missing".to_string())?;
+        let variant = Self::find_choice_variant(graph, root, declaration)
+            .ok_or_else(|| "choice variant syntax is missing".to_string())?;
+        let Some(payload) = graph
+            .syntax()
+            .first_child_of_kind(variant, SyntaxNodeKind::ChoicePayload)
+        else {
+            return Ok(None);
+        };
+        let payload_node = graph
+            .syntax()
+            .node(payload)
+            .ok_or_else(|| "choice payload syntax is missing".to_string())?;
+        let schemas = payload_node
+            .children()
+            .iter()
+            .map(|item| {
+                let type_node = graph
+                    .syntax()
+                    .node(*item)
+                    .and_then(|item| {
+                        item.children().iter().copied().find(|child| {
+                            graph
+                                .syntax()
+                                .node(*child)
+                                .is_some_and(|node| node.kind().is_type())
+                        })
+                    })
+                    .ok_or_else(|| "choice payload type syntax is missing".to_string())?;
+                let ty = type_result
+                    .layer()
+                    .node_type(type_node)
+                    .ok_or_else(|| "choice payload type is missing".to_string())?;
+                Self::surface_schema_for(
+                    graph,
+                    type_result,
+                    table,
+                    resolution,
+                    string_table,
+                    proxy_name,
+                    ty,
+                    kind,
+                )
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+
+        Ok(match schemas.as_slice() {
+            [] => None,
+            [schema] => Some(schema.clone()),
+            _ => Some(SurfaceSchema::Tuple(schemas)),
+        })
+    }
+
+    fn struct_surface_schema(
+        graph: &ModuleAst,
+        type_result: &TypeCheckResult,
+        table: &TypeTable,
+        resolution: &ResolutionLayer,
+        string_table: &StringTable,
+        proxy_name: &str,
+        struct_symbol: galfus_core::SymbolId,
+        kind: BoundarySchemaKind,
+    ) -> Result<SurfaceSchema, String> {
+        let symbol = resolution
+            .symbol(struct_symbol)
+            .ok_or_else(|| "struct symbol is missing from the resolution layer".to_string())?;
+        let name = string_table
+            .resolve(symbol.name())
+            .ok_or_else(|| "struct name is missing from the string table".to_string())?;
+        let root = graph
+            .syntax()
+            .root()
+            .ok_or_else(|| "struct syntax root is missing".to_string())?;
+        let struct_item = Self::find_struct_item(graph, root, symbol.declaration())
+            .ok_or_else(|| "struct syntax is missing".to_string())?;
+        let field_list = graph
+            .syntax()
+            .first_child_of_kind(struct_item, SyntaxNodeKind::StructFieldList)
+            .ok_or_else(|| "struct field list is missing".to_string())?;
+        let field_list = graph
+            .syntax()
+            .node(field_list)
+            .ok_or_else(|| "struct field list is invalid".to_string())?;
+
+        let fields = field_list
+            .children()
+            .iter()
+            .filter_map(|field| {
+                graph.syntax().node(*field).and_then(|node| {
+                    matches!(
+                        node.kind(),
+                        SyntaxNodeKind::StructField | SyntaxNodeKind::WeakStructField
+                    )
+                    .then_some(*field)
+                })
+            })
+            .map(|field| {
+                let field_name = graph
+                    .syntax()
+                    .first_child_of_kind(field, SyntaxNodeKind::Identifier)
+                    .and_then(|name| resolution.declaration_symbol(name))
+                    .and_then(|symbol| resolution.symbol(symbol))
+                    .and_then(|symbol| string_table.resolve(symbol.name()))
+                    .ok_or_else(|| "struct field name is missing".to_string())?;
+                let type_node = graph
+                    .syntax()
+                    .node(field)
+                    .and_then(|field| {
+                        field.children().iter().copied().find(|child| {
+                            graph
+                                .syntax()
+                                .node(*child)
+                                .is_some_and(|node| node.kind().is_type())
+                        })
+                    })
+                    .ok_or_else(|| "struct field type is missing".to_string())?;
+                let ty = type_result
+                    .layer()
+                    .node_type(type_node)
+                    .ok_or_else(|| "struct field type is unresolved".to_string())?;
+                Ok(SurfaceField {
+                    name: field_name.to_string(),
+                    schema: Self::surface_schema_for(
+                        graph,
+                        type_result,
+                        table,
+                        resolution,
+                        string_table,
+                        proxy_name,
+                        ty,
+                        kind,
+                    )?,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+
+        Ok(SurfaceSchema::Struct {
+            name: name.to_string(),
+            fields,
+        })
+    }
+
+    fn type_alias_surface_schema(
+        graph: &ModuleAst,
+        type_result: &TypeCheckResult,
+        table: &TypeTable,
+        resolution: &ResolutionLayer,
+        string_table: &StringTable,
+        proxy_name: &str,
+        declaration: galfus_core::NodeId,
+        kind: BoundarySchemaKind,
+    ) -> Result<SurfaceSchema, String> {
+        let root = graph
+            .syntax()
+            .root()
+            .ok_or_else(|| "type alias syntax root is missing".to_string())?;
+        let alias = Self::find_type_alias_item(graph, root, declaration)
+            .ok_or_else(|| "type alias syntax is missing".to_string())?;
+        let aliased_type = graph
+            .syntax()
+            .node(alias)
+            .and_then(|alias| {
+                alias.children().iter().copied().find(|child| {
+                    graph
+                        .syntax()
+                        .node(*child)
+                        .is_some_and(|node| node.kind().is_type())
+                })
+            })
+            .ok_or_else(|| "type alias target is missing".to_string())?;
+        let ty = type_result
+            .layer()
+            .node_type(aliased_type)
+            .ok_or_else(|| "type alias target is unresolved".to_string())?;
+        Self::surface_schema_for(
+            graph,
+            type_result,
+            table,
+            resolution,
+            string_table,
+            proxy_name,
+            ty,
+            kind,
+        )
+    }
+
+    fn find_struct_item(
+        graph: &ModuleAst,
+        node: galfus_core::NodeId,
+        declaration: galfus_core::NodeId,
+    ) -> Option<galfus_core::NodeId> {
+        let syntax_node = graph.syntax().node(node)?;
+        if syntax_node.kind() == SyntaxNodeKind::StructItem
+            && graph
+                .syntax()
+                .first_child_of_kind(node, SyntaxNodeKind::Identifier)
+                == Some(declaration)
+        {
+            return Some(node);
+        }
+        syntax_node
+            .children()
+            .iter()
+            .find_map(|child| Self::find_struct_item(graph, *child, declaration))
+    }
+
+    fn find_type_alias_item(
+        graph: &ModuleAst,
+        node: galfus_core::NodeId,
+        declaration: galfus_core::NodeId,
+    ) -> Option<galfus_core::NodeId> {
+        let syntax_node = graph.syntax().node(node)?;
+        if syntax_node.kind() == SyntaxNodeKind::TypeAliasItem
+            && graph
+                .syntax()
+                .first_child_of_kind(node, SyntaxNodeKind::Identifier)
+                == Some(declaration)
+        {
+            return Some(node);
+        }
+        syntax_node
+            .children()
+            .iter()
+            .find_map(|child| Self::find_type_alias_item(graph, *child, declaration))
+    }
+
+    fn find_choice_variant(
+        graph: &ModuleAst,
+        node: galfus_core::NodeId,
+        declaration: galfus_core::NodeId,
+    ) -> Option<galfus_core::NodeId> {
+        let syntax_node = graph.syntax().node(node)?;
+        if syntax_node.kind() == SyntaxNodeKind::ChoiceVariant
+            && graph
+                .syntax()
+                .first_child_of_kind(node, SyntaxNodeKind::Identifier)
+                == Some(declaration)
+        {
+            return Some(node);
+        }
+
+        syntax_node
+            .children()
+            .iter()
+            .find_map(|child| Self::find_choice_variant(graph, *child, declaration))
     }
 
     pub(crate) fn frontend_roots(&self) -> FrontendRoots {
@@ -685,7 +1131,9 @@ impl Workspace {
                     .parameters()
                     .iter()
                     .map(|parameter| {
-                        Self::boundary_type(
+                        Self::provider_surface_schema(
+                            module.graph(),
+                            type_result,
                             table,
                             resolution,
                             self.frontend.string_table(),
@@ -696,7 +1144,9 @@ impl Workspace {
                     .collect::<Result<Vec<_>, _>>()
                     .ok()?;
 
-                let return_type = Self::boundary_type(
+                let return_type = Self::provider_surface_schema(
+                    module.graph(),
+                    type_result,
                     table,
                     resolution,
                     self.frontend.string_table(),

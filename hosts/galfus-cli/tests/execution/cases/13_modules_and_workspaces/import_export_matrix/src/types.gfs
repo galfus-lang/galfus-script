@@ -1,6 +1,12 @@
 export type BaseCount = i32
 export type BaseOptionalCount = BaseCount | null
 
+export choice TransitResult<T> { Data(T), End }
+
+export fn transit(): TransitResult<[u8]> {
+  return TransitResult::Data("transit")
+}
+
 export constraint Measurable {
   fn measure(self): BaseCount
 }

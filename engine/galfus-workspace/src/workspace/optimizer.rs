@@ -33,19 +33,10 @@ pub(crate) fn optimize_package(
         let mut new_node = node.clone();
         let mut changed = false;
         if needs_pruning {
-            #[cfg(debug_assertions)]
-            let counts_before = module_counts(&new_node.module);
             let function_remap = prune_module(&mut new_node.module, &method_names);
             if let Some(metadata) = &mut new_node.metadata {
                 metadata.remap_functions(&function_remap);
             }
-            #[cfg(debug_assertions)]
-            emit_prune_telemetry(
-                node.path(),
-                "initial",
-                counts_before,
-                module_counts(&new_node.module),
-            );
             changed = true;
         }
 
@@ -89,19 +80,10 @@ pub(crate) fn optimize_package(
                 continue;
             }
             let mut pruned = current.clone();
-            #[cfg(debug_assertions)]
-            let counts_before = module_counts(&pruned.module);
             let function_remap = prune_module(&mut pruned.module, &post_optimization_names);
             if let Some(metadata) = &mut pruned.metadata {
                 metadata.remap_functions(&function_remap);
             }
-            #[cfg(debug_assertions)]
-            emit_prune_telemetry(
-                node.path(),
-                "post-call-graph",
-                counts_before,
-                module_counts(&pruned.module),
-            );
             changed_nodes.insert(node.id(), pruned);
         }
     }
@@ -150,31 +132,6 @@ pub(crate) fn optimize_package(
     )
     .map(Arc::new)
     .map_err(|e| e.to_string())
-}
-
-#[cfg(debug_assertions)]
-fn module_counts(module: &BytecodeModule) -> (usize, usize) {
-    (module.functions.len(), module.constants.constants.len())
-}
-
-#[cfg(debug_assertions)]
-fn emit_prune_telemetry(
-    path: &galfus_core::ModulePath,
-    stage: &str,
-    before: (usize, usize),
-    after: (usize, usize),
-) {
-    if std::env::var_os("GALFUS_FINALIZATION_TELEMETRY").is_some() {
-        eprintln!(
-            "finalization module={} stage={} functions retained={} removed={} constants retained={} removed={}",
-            path.as_str(),
-            stage,
-            after.0,
-            before.0.saturating_sub(after.0),
-            after.1,
-            before.1.saturating_sub(after.1),
-        );
-    }
 }
 
 fn global_method_names<'a>(modules: impl Iterator<Item = &'a BytecodeModule>) -> HashSet<String> {

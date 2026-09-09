@@ -303,7 +303,17 @@ impl<'a> DeclarationTypeChecker<'a> {
         };
 
         if signature_node.kind() == SyntaxNodeKind::ConstraintFunctionSignature {
-            return self.layer.table_mut().error();
+            let Some(constraint_item) = self.constraint_item_for_signature(signature) else {
+                return self.layer.table_mut().error();
+            };
+            let self_symbol = self
+                .declaration_symbols_in_node(constraint_item, &[SymbolKind::GenericParameter])
+                .into_iter()
+                .find(|symbol| self.symbol_name(*symbol).as_deref() == Some("Self"));
+
+            return self_symbol
+                .and_then(|symbol| self.layer.symbol_type(symbol))
+                .unwrap_or_else(|| self.layer.table_mut().error());
         }
 
         let Some(anchor) = self
@@ -350,6 +360,39 @@ impl<'a> DeclarationTypeChecker<'a> {
         self.layer
             .table_mut()
             .intern_generic_instance(base_type, arguments)
+    }
+
+    fn constraint_item_for_signature(&self, signature: NodeId) -> Option<NodeId> {
+        let root = self.graph.syntax().root()?;
+        self.find_constraint_item_for_signature(root, signature, None)
+    }
+
+    fn find_constraint_item_for_signature(
+        &self,
+        node: NodeId,
+        signature: NodeId,
+        enclosing_constraint: Option<NodeId>,
+    ) -> Option<NodeId> {
+        let syntax_node = self.graph.syntax().node(node)?;
+        let enclosing_constraint = if syntax_node.kind() == SyntaxNodeKind::ConstraintItem {
+            Some(node)
+        } else {
+            enclosing_constraint
+        };
+
+        if node == signature {
+            return enclosing_constraint;
+        }
+
+        for child in syntax_node.children() {
+            if let Some(constraint_item) =
+                self.find_constraint_item_for_signature(*child, signature, enclosing_constraint)
+            {
+                return Some(constraint_item);
+            }
+        }
+
+        None
     }
 
     fn anchor_struct_generic_parameters(&self, anchor_type: NodeId) -> Vec<galfus_core::SymbolId> {
