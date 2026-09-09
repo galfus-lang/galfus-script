@@ -17,6 +17,7 @@ mod generic_specialization;
 pub mod helpers;
 mod literal_lowering;
 mod match_lowering;
+mod module_generics;
 mod module_items;
 mod name_lowering;
 mod narrowing;
