@@ -3,6 +3,7 @@ mod expression;
 mod expression_fields;
 mod expression_immediates;
 mod expression_operands;
+mod expression_types;
 pub mod function;
 mod function_calls;
 mod function_terminators;
