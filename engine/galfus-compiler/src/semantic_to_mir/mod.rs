@@ -5,14 +5,19 @@ mod call_resolution;
 pub mod complex_literals;
 pub mod expression;
 pub mod function;
+mod function_expressions;
 mod function_helpers;
 mod generic_specialization;
 pub mod helpers;
+mod literal_lowering;
 mod match_lowering;
 mod module_items;
+mod name_lowering;
 mod narrowing;
+mod operation_lowering;
 pub mod pattern;
 mod typeof_lowering;
+mod value_access;
 
 use std::collections;
 
