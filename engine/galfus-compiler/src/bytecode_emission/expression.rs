@@ -18,7 +18,7 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
         crate::bytecode_emission::types::lower_type(self.ctx, byte_array_type.unwrap_or(u8_type));
     }
 
-    fn load_constant(&mut self, dest: Reg, constant: &MirConstant) {
+    pub(super) fn load_constant(&mut self, dest: Reg, constant: &MirConstant) {
         if matches!(constant, MirConstant::String(_)) {
             self.ensure_string_constant_type();
         }
@@ -1300,61 +1300,6 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
         };
 
         FieldIdx(field_idx)
-    }
-
-    pub fn operand_reg(&mut self, operand: &Operand) -> Reg {
-        match operand {
-            Operand::Local(local_id) => Reg(local_id.raw() as u16),
-            Operand::ConstRef(idx) => {
-                let constant = &self.ctx.mir_constants[*idx];
-                let temp = self.alloc_temp();
-                match constant {
-                    MirConstant::Null => {
-                        self.instructions.push(Instruction::LoadNull { dest: temp })
-                    }
-                    _ => self.load_constant(temp, constant),
-                }
-                temp
-            }
-            Operand::Constant(constant) => {
-                let temp = self.alloc_temp();
-                match constant {
-                    MirConstant::Null => {
-                        self.instructions.push(Instruction::LoadNull { dest: temp })
-                    }
-                    _ => self.load_constant(temp, constant),
-                }
-                temp
-            }
-        }
-    }
-
-    pub fn load_operand_to(&mut self, operand: &Operand, dest: Reg) {
-        match operand {
-            Operand::Local(local_id) => {
-                let src = Reg(local_id.raw() as u16);
-                if src != dest {
-                    self.instructions.push(Instruction::Move { dest, src });
-                }
-            }
-            Operand::ConstRef(idx) => {
-                let constant = &self.ctx.mir_constants[*idx];
-                match constant {
-                    MirConstant::Null => self.instructions.push(Instruction::LoadNull { dest }),
-                    _ => self.load_constant(dest, constant),
-                }
-            }
-            Operand::Constant(constant) => match constant {
-                MirConstant::Null => self.instructions.push(Instruction::LoadNull { dest }),
-                _ => self.load_constant(dest, constant),
-            },
-        }
-    }
-
-    pub fn free_temp_if_operand(&mut self, operand: &Operand) {
-        if matches!(operand, Operand::Constant(_)) {
-            self.free_temps(1);
-        }
     }
 
     fn future_payload_type_index(

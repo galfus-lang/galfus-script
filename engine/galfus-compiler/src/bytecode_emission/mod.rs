@@ -1,6 +1,7 @@
 pub mod constants;
 mod expression;
 mod expression_immediates;
+mod expression_operands;
 pub mod function;
 mod function_calls;
 mod function_terminators;
