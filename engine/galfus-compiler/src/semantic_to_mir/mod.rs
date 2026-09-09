@@ -3,6 +3,7 @@ mod call_arguments;
 mod call_lowering;
 mod call_resolution;
 pub mod complex_literals;
+mod destructuring;
 pub mod expression;
 pub mod function;
 mod function_expressions;
@@ -16,6 +17,7 @@ mod name_lowering;
 mod narrowing;
 mod operation_lowering;
 pub mod pattern;
+mod pattern_symbols;
 mod typeof_lowering;
 mod value_access;
 
