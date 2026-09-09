@@ -1,6 +1,7 @@
 pub mod constants;
 mod expression;
 mod expression_allocations;
+mod expression_constants;
 mod expression_fields;
 mod expression_immediates;
 mod expression_operands;
