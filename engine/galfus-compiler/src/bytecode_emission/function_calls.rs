@@ -1,7 +1,7 @@
 use super::function::FnEmitter;
 use galfus_bytecode::Instruction;
 use galfus_bytecode::instruction::Reg;
-use galfus_core::FunctionId;
+use galfus_core::{FunctionId, SymbolId};
 use galfus_ir::mir::{self, LocalId, Operand};
 
 impl<'a, 'b> FnEmitter<'a, 'b> {
@@ -16,7 +16,15 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
             .ctx
             .function_names
             .get(func)
-            .map(|name| name.to_string());
+            .map(|name| name.to_string())
+            .or_else(|| {
+                self.ctx
+                    .graph
+                    .resolution()
+                    .and_then(|resolution| resolution.symbol(SymbolId::new(func.raw())))
+                    .and_then(|symbol| self.ctx.string_table.resolve(symbol.name()))
+                    .map(str::to_string)
+            });
         let is_async_target = self
             .ctx
             .function_is_async
@@ -115,6 +123,23 @@ impl<'a, 'b> FnEmitter<'a, 'b> {
                     .unwrap_or_else(|| {
                         crate::bytecode_emission::types::lower_type(self.ctx, return_type)
                     });
+                if matches!(
+                    native_async_name,
+                    Some("__internal_thread_create" | "__internal_thread_spawn")
+                ) {
+                    self.instructions.push(Instruction::CreateFuture {
+                        dest: Reg(destination.raw() as u16),
+                        func: galfus_bytecode::instruction::FuncIdx(u16::MAX),
+                        args_start: start_reg,
+                        arg_count: args.len() as u8,
+                        arg_types,
+                        return_type,
+                    });
+                    self.direct_await_candidates
+                        .insert(Reg(destination.raw() as u16), name.into());
+                    self.free_call_arguments(args);
+                    return true;
+                }
                 self.instructions.push(Instruction::CreateFuture {
                     dest: Reg(destination.raw() as u16),
                     func: self.function_index(func),

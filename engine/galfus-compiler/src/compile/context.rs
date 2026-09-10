@@ -376,6 +376,30 @@ impl<'a, 'index> MyWorkspaceContext<'a, 'index> {
                     }
                 }
             }
+            Some(TypeKind::Function(parameter_function)) => {
+                if let Some(TypeKind::Function(argument_function)) = table.kind(argument_type) {
+                    for (parameter, argument) in parameter_function
+                        .parameters()
+                        .iter()
+                        .zip(argument_function.parameters())
+                    {
+                        self.infer_generic_argument_from_types(
+                            module_idx,
+                            generic_params,
+                            parameter.ty(),
+                            argument.ty(),
+                            substitutions,
+                        );
+                    }
+                    self.infer_generic_argument_from_types(
+                        module_idx,
+                        generic_params,
+                        parameter_function.return_type(),
+                        argument_function.return_type(),
+                        substitutions,
+                    );
+                }
+            }
             Some(TypeKind::GenericInstance { arguments, .. }) => {
                 if let Some(TypeKind::GenericInstance {
                     arguments: argument_arguments,

@@ -1,7 +1,7 @@
-fn(async) __internal_thread_create(func: fn([[u8]]): i32, key: [u8] | null): i64
+fn(async) __internal_thread_create<Context>(func: fn(Context): i32, context: Context, key: [u8] | null): i64
 fn __internal_thread_get(key: [u8]): i64
 fn __internal_thread_get_self_id(): i64
-fn(async) __internal_thread_spawn(id: i64, args: [[u8]] | null): bool
+fn(async) __internal_thread_spawn(id: i64): bool
 fn __internal_thread_is_running(id: i64): bool
 fn __internal_thread_is_exited(id: i64): bool
 fn __internal_thread_exit_reason(id: i64): i32 | null
@@ -19,10 +19,10 @@ export struct Thread {
     key: [u8] | null
 }
 
-export fn createThread(func: fn([[u8]]): i32, key: [u8] | null = null): Thread {
-    return new(Thread) { 
-        id: await __internal_thread_create(func, key), 
-        key: key 
+export fn createThread<Context>(func: fn(Context): i32, context: Context, key: [u8] | null = null): Thread {
+    return new(Thread) {
+        id: await __internal_thread_create(func, context, key),
+        key: key
     }
 }
 
@@ -46,8 +46,8 @@ export fn getMessage(): [u8] | null {
     return __internal_thread_get_message()
 }
 
-export fn Thread::spawn(self, args: [[u8]] | null = null): bool {
-    return await __internal_thread_spawn(self.id, args)
+export fn Thread::spawn(self): bool {
+    return await __internal_thread_spawn(self.id)
 }
 
 export fn Thread::isRunning(self): bool {

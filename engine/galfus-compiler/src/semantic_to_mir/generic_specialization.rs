@@ -11,6 +11,18 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
         arg_types: &[TypeId],
     ) -> Option<FunctionId> {
         let original_id = FunctionId::new(symbol.raw());
+        let function_name = self
+            .builder
+            .graph
+            .resolution()
+            .and_then(|resolution| resolution.symbol(symbol))
+            .and_then(|function| self.builder.string_table.resolve(function.name()));
+        if matches!(
+            function_name,
+            Some("__internal_thread_create" | "__internal_thread_spawn")
+        ) {
+            return Some(original_id);
+        }
         let function_item = self.builder.function_item_for_symbol(symbol);
 
         if let Some(function_item) = function_item {
@@ -219,6 +231,30 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                             substitutions,
                         );
                     }
+                }
+            }
+            Some(TypeKind::Function(parameter_function)) => {
+                if let Some(TypeKind::Function(argument_function)) =
+                    self.builder.type_result.layer().table().kind(argument_ty)
+                {
+                    for (parameter, argument) in parameter_function
+                        .parameters()
+                        .iter()
+                        .zip(argument_function.parameters())
+                    {
+                        self.infer_generic_argument_from_types(
+                            generic_params,
+                            parameter.ty(),
+                            argument.ty(),
+                            substitutions,
+                        );
+                    }
+                    self.infer_generic_argument_from_types(
+                        generic_params,
+                        parameter_function.return_type(),
+                        argument_function.return_type(),
+                        substitutions,
+                    );
                 }
             }
             _ => {}

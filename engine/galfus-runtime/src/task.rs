@@ -6,9 +6,46 @@ use crate::registry;
 use galfus_contract::{
     ExecutionFailure, ExecutionFailureKind, ExecutionFrame, RunnableTask, ThreadResult,
 };
-use galfus_vm::VirtualMachine;
+use galfus_vm::{HeapObject, VirtualMachine, VmValue};
 
 use std::sync::Arc;
+
+#[derive(Debug, Clone)]
+pub(crate) enum ThreadContextValue {
+    Null,
+    Bool(bool),
+    Int8(i8),
+    Int16(i16),
+    Int32(i32),
+    Int64(i64),
+    Uint8(u8),
+    Uint16(u16),
+    Uint32(u32),
+    Uint64(u64),
+    Float32(f32),
+    Float64(f64),
+    Function {
+        module_id: galfus_core::ModuleId,
+        func_idx: galfus_bytecode::instruction::FuncIdx,
+    },
+    Array {
+        module_id: galfus_core::ModuleId,
+        element_ty: galfus_bytecode::instruction::TypeIdx,
+        elements: Vec<Self>,
+    },
+    Tuple(Vec<Self>),
+    Struct {
+        module_id: galfus_core::ModuleId,
+        layout_idx: galfus_bytecode::StructLayoutIdx,
+        fields: Vec<Self>,
+    },
+    Choice {
+        module_id: galfus_core::ModuleId,
+        layout_idx: galfus_bytecode::ChoiceLayoutIdx,
+        variant_idx: u16,
+        payload: Box<Self>,
+    },
+}
 
 pub(crate) fn decode_surface_from_thread_heap(
     heap: &galfus_vm::thread::PrivateHeap,
@@ -275,6 +312,183 @@ pub(crate) fn encode_future_value_into_thread_heap(
                 _ => expected,
             };
             encode_non_null_future_value_into_thread_heap(heap, value, expected, module_id, module)
+        }
+    }
+}
+
+pub(crate) fn transfer_thread_context_from_heap(
+    heap: &galfus_vm::thread::PrivateHeap,
+    value: VmValue,
+) -> Result<ThreadContextValue, String> {
+    match value {
+        VmValue::Null => Ok(ThreadContextValue::Null),
+        VmValue::Bool(value) => Ok(ThreadContextValue::Bool(value)),
+        VmValue::Int8(value) => Ok(ThreadContextValue::Int8(value)),
+        VmValue::Int16(value) => Ok(ThreadContextValue::Int16(value)),
+        VmValue::Int32(value) => Ok(ThreadContextValue::Int32(value)),
+        VmValue::Int64(value) => Ok(ThreadContextValue::Int64(value)),
+        VmValue::Uint8(value) => Ok(ThreadContextValue::Uint8(value)),
+        VmValue::Uint16(value) => Ok(ThreadContextValue::Uint16(value)),
+        VmValue::Uint32(value) => Ok(ThreadContextValue::Uint32(value)),
+        VmValue::Uint64(value) => Ok(ThreadContextValue::Uint64(value)),
+        VmValue::Float32(value) => Ok(ThreadContextValue::Float32(value)),
+        VmValue::Float64(value) => Ok(ThreadContextValue::Float64(value)),
+        VmValue::Function {
+            module_id,
+            func_idx,
+        } => Ok(ThreadContextValue::Function {
+            module_id,
+            func_idx,
+        }),
+        VmValue::Future(_) => Err("thread context cannot contain a Future".to_string()),
+        VmValue::Object(reference) => match heap
+            .get_object(reference)
+            .map_err(|_| "thread context object reference is invalid".to_string())?
+        {
+            HeapObject::Array {
+                module_id,
+                element_ty,
+                elements,
+            } => Ok(ThreadContextValue::Array {
+                module_id: *module_id,
+                element_ty: *element_ty,
+                elements: elements
+                    .iter()
+                    .copied()
+                    .map(|value| transfer_thread_context_from_heap(heap, value))
+                    .collect::<Result<Vec<_>, _>>()?,
+            }),
+            HeapObject::Tuple { elements } => Ok(ThreadContextValue::Tuple(
+                elements
+                    .iter()
+                    .copied()
+                    .map(|value| transfer_thread_context_from_heap(heap, value))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            HeapObject::Struct {
+                module_id,
+                layout_idx,
+                fields,
+            } => Ok(ThreadContextValue::Struct {
+                module_id: *module_id,
+                layout_idx: *layout_idx,
+                fields: fields
+                    .iter()
+                    .copied()
+                    .map(|value| transfer_thread_context_from_heap(heap, value))
+                    .collect::<Result<Vec<_>, _>>()?,
+            }),
+            HeapObject::Choice {
+                module_id,
+                layout_idx,
+                variant_idx,
+                payload,
+            } => Ok(ThreadContextValue::Choice {
+                module_id: *module_id,
+                layout_idx: *layout_idx,
+                variant_idx: *variant_idx,
+                payload: Box::new(transfer_thread_context_from_heap(heap, *payload)?),
+            }),
+            HeapObject::AdapterHandle { .. } => {
+                Err("thread context cannot contain an adapter handle".to_string())
+            }
+        },
+    }
+}
+
+pub(crate) fn rehydrate_thread_context_into_heap(
+    heap: &mut galfus_vm::thread::PrivateHeap,
+    value: ThreadContextValue,
+) -> Result<VmValue, String> {
+    match value {
+        ThreadContextValue::Null => Ok(VmValue::Null),
+        ThreadContextValue::Bool(value) => Ok(VmValue::Bool(value)),
+        ThreadContextValue::Int8(value) => Ok(VmValue::Int8(value)),
+        ThreadContextValue::Int16(value) => Ok(VmValue::Int16(value)),
+        ThreadContextValue::Int32(value) => Ok(VmValue::Int32(value)),
+        ThreadContextValue::Int64(value) => Ok(VmValue::Int64(value)),
+        ThreadContextValue::Uint8(value) => Ok(VmValue::Uint8(value)),
+        ThreadContextValue::Uint16(value) => Ok(VmValue::Uint16(value)),
+        ThreadContextValue::Uint32(value) => Ok(VmValue::Uint32(value)),
+        ThreadContextValue::Uint64(value) => Ok(VmValue::Uint64(value)),
+        ThreadContextValue::Float32(value) => Ok(VmValue::Float32(value)),
+        ThreadContextValue::Float64(value) => Ok(VmValue::Float64(value)),
+        ThreadContextValue::Function {
+            module_id,
+            func_idx,
+        } => Ok(VmValue::Function {
+            module_id,
+            func_idx,
+        }),
+        ThreadContextValue::Array {
+            module_id,
+            element_ty,
+            elements,
+        } => {
+            let elements = elements
+                .into_iter()
+                .map(|value| rehydrate_thread_context_into_heap(heap, value))
+                .collect::<Result<Vec<_>, _>>()?;
+            let edge_values = elements.clone();
+            let reference = heap
+                .alloc(HeapObject::Array {
+                    module_id,
+                    element_ty,
+                    elements,
+                })
+                .map_err(|_| "thread context array exceeds heap quota".to_string())?;
+            transfer_values_to_heap_edges(heap, edge_values)?;
+            Ok(VmValue::Object(reference))
+        }
+        ThreadContextValue::Tuple(values) => {
+            let elements = values
+                .into_iter()
+                .map(|value| rehydrate_thread_context_into_heap(heap, value))
+                .collect::<Result<Vec<_>, _>>()?;
+            let edge_values = elements.clone();
+            let reference = heap
+                .alloc(HeapObject::Tuple { elements })
+                .map_err(|_| "thread context tuple exceeds heap quota".to_string())?;
+            transfer_values_to_heap_edges(heap, edge_values)?;
+            Ok(VmValue::Object(reference))
+        }
+        ThreadContextValue::Struct {
+            module_id,
+            layout_idx,
+            fields,
+        } => {
+            let fields = fields
+                .into_iter()
+                .map(|value| rehydrate_thread_context_into_heap(heap, value))
+                .collect::<Result<Vec<_>, _>>()?;
+            let edge_values = fields.clone();
+            let reference = heap
+                .alloc(HeapObject::Struct {
+                    module_id,
+                    layout_idx,
+                    fields,
+                })
+                .map_err(|_| "thread context struct exceeds heap quota".to_string())?;
+            transfer_values_to_heap_edges(heap, edge_values)?;
+            Ok(VmValue::Object(reference))
+        }
+        ThreadContextValue::Choice {
+            module_id,
+            layout_idx,
+            variant_idx,
+            payload,
+        } => {
+            let payload = rehydrate_thread_context_into_heap(heap, *payload)?;
+            let reference = heap
+                .alloc(HeapObject::Choice {
+                    module_id,
+                    layout_idx,
+                    variant_idx,
+                    payload,
+                })
+                .map_err(|_| "thread context choice exceeds heap quota".to_string())?;
+            transfer_values_to_heap_edges(heap, [payload])?;
+            Ok(VmValue::Object(reference))
         }
     }
 }

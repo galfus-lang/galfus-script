@@ -468,7 +468,7 @@ impl Orchestrator {
                 Some(Ok(FutureValue::F64(galfus_core::normalize_f64(f.log10()))))
             }
             "__internal_thread_create" => {
-                let key = internal_bytes_arg(&thread.heap, args.get(1))
+                let key = internal_bytes_arg(&thread.heap, args.get(2))
                     .and_then(|key| String::from_utf8(key).ok());
                 let id = match args.first() {
                     Some(galfus_vm::VmValue::Function {
@@ -481,14 +481,38 @@ impl Orchestrator {
                                 self.quota.lock().unwrap().limits().clone(),
                             )),
                         );
-                        new_thread.entry_func = Some(galfus_vm::VmValue::Function {
-                            module_id: *module_id,
-                            func_idx: *func_idx,
-                        });
-                        match self.kernel.spawn_child(new_thread, key, thread_id) {
-                            Ok(id) => id.raw() as i64,
-                            Err(e) => {
-                                self.failure = Some(
+                        let prepared = args
+                            .get(1)
+                            .copied()
+                            .ok_or_else(|| "missing thread context".to_string())
+                            .and_then(|value| {
+                                crate::task::transfer_thread_context_from_heap(&thread.heap, value)
+                            })
+                            .and_then(|value| {
+                                crate::task::rehydrate_thread_context_into_heap(
+                                    &mut new_thread.heap,
+                                    value,
+                                )
+                            })
+                            .and_then(|context| {
+                                self.vm
+                                    .as_ref()
+                                    .expect("VM is configured before execution")
+                                    .prepare_function(
+                                        &mut new_thread,
+                                        *module_id,
+                                        *func_idx,
+                                        vec![context],
+                                    )
+                                    .map_err(|error| format!("prepare thread entry: {error}"))
+                            });
+                        if prepared.is_err() {
+                            -1
+                        } else {
+                            match self.kernel.spawn_child(new_thread, key, thread_id) {
+                                Ok(id) => id.raw() as i64,
+                                Err(e) => {
+                                    self.failure = Some(
                                     galfus_contract::ExecutionFailure::new(
                                         galfus_contract::ExecutionFailureKind::BoundaryCodecFailure,
                                         e.to_string(),
@@ -496,8 +520,9 @@ impl Orchestrator {
                                     .with_thread_id(thread_id)
                                     .with_stack(crate::task::execution_stack(&thread)),
                                 );
-                                self.kernel.cancel(thread_id);
-                                return None;
+                                    self.kernel.cancel(thread_id);
+                                    return None;
+                                }
                             }
                         }
                     }
@@ -515,129 +540,31 @@ impl Orchestrator {
                     let Some(mut target_thread) = self.kernel.take_created_thread(target_id) else {
                         return false;
                     };
-                    let prepared = match target_thread.entry_func {
-                        Some(galfus_vm::VmValue::Function {
-                            module_id,
-                            func_idx,
-                        }) => {
-                            let module = &self
-                                .vm
-                                .as_ref()
-                                .expect("VM is configured before execution")
-                                .graph
-                                .get(module_id)
-                                .expect("thread entry module is loaded")
-                                .module;
-
-                            let argument = match args.get(1) {
-                                Some(galfus_vm::VmValue::Null) | None => Ok(galfus_vm::VmValue::Null),
-                                Some(galfus_vm::VmValue::Object(reference)) => {
-                                    if let Ok(galfus_vm::HeapObject::Array { elements, .. }) = thread.heap.get_object(*reference) {
-                                        let byte_type = module
-                                            .types
-                                            .iter()
-                                            .position(|ty| {
-                                                matches!(ty, galfus_bytecode::BytecodeType::Uint8)
-                                            })
-                                            .map(|index| TypeIdx(index as u16));
-                                        let bytes_type = byte_type.and_then(|byte_type| {
-                                            module
-                                                .types
-                                                .iter()
-                                                .position(|ty| {
-                                                    matches!(
-                                                        ty,
-                                                        galfus_bytecode::BytecodeType::Array(element)
-                                                            if *element == byte_type
-                                                    )
-                                                })
-                                                .map(|index| TypeIdx(index as u16))
-                                        });
-                                        byte_type.zip(bytes_type).ok_or(()).and_then(
-                                            |(byte_type, bytes_type)| {
-                                                let arrays = elements
-                                                    .iter()
-                                                    .map(|value| {
-                                                        let bytes = internal_bytes_arg(&thread.heap, Some(value)).ok_or(())?;
-                                                        Ok(
-                                                            galfus_vm::VmValue::Object(
-                                                                target_thread.heap.alloc(
-                                                                    galfus_vm::HeapObject::Array {
-                                                                        module_id: target_thread.call_stack.last().expect("spawned thread has an entry frame").module_id,
-                                                                        element_ty: byte_type,
-                                                                        elements: bytes
-                                                                            .iter()
-                                                                            .copied()
-                                                                            .map(galfus_vm::VmValue::Uint8)
-                                                                            .collect(),
-                                                                    },
-                                                                ).map_err(|_| ())?,
-                                                            ),
-                                                        )
-                                                    })
-                                                    .collect::<Result<Vec<_>, _>>()?;
-                                                Ok(galfus_vm::VmValue::Object(
-                                                    target_thread
-                                                        .heap
-                                                        .alloc(galfus_vm::HeapObject::Array {
-                                                            module_id: target_thread.call_stack.last().expect("spawned thread has an entry frame").module_id,
-                                                            element_ty: bytes_type,
-                                                            elements: arrays,
-                                                        })
-                                                        .map_err(|_| ())?,
-                                                ))
-                                            },
-                                        )
-                                    } else {
-                                        Err(())
-                                    }
-                                }
-                                _ => Err(()),
-                            };
-                            argument.map_err(|_| ()).and_then(|argument| {
-                                self.vm
-                                    .as_ref()
-                                    .expect("VM is configured before execution")
-                                    .prepare_function(
-                                        &mut target_thread,
-                                        module_id,
-                                        func_idx,
-                                        vec![argument],
-                                    )
-                                    .map_err(|_| ())
-                            })
-                        }
-                        _ => Err(()),
-                    };
-                    if prepared.is_ok() {
-                        if let Err(e) = self.kernel.mark_spawned(target_id) {
-                            self.kernel.park_running(target_id, target_thread);
+                    if let Err(e) = target_thread.mark_spawned() {
+                        self.kernel.park_running(target_id, target_thread);
+                        self.failure = Some(
+                            galfus_contract::ExecutionFailure::new(
+                                e,
+                                "failed to mark thread as spawned",
+                            )
+                            .with_thread_id(thread_id),
+                        );
+                        false
+                    } else {
+                        if let Err(e) = self.kernel.enqueue_runnable(target_id, target_thread) {
+                            self.kernel.cancel(target_id);
                             self.failure = Some(
                                 galfus_contract::ExecutionFailure::new(
                                     e,
-                                    "failed to mark thread as spawned",
+                                    "runnable threads limit exceeded",
                                 )
                                 .with_thread_id(thread_id),
                             );
                             false
                         } else {
-                            if let Err(e) = self.kernel.enqueue_runnable(target_id, target_thread) {
-                                self.failure = Some(
-                                    galfus_contract::ExecutionFailure::new(
-                                        e,
-                                        "runnable threads limit exceeded",
-                                    )
-                                    .with_thread_id(thread_id),
-                                );
-                                false
-                            } else {
-                                self.kernel.mark_running(target_id);
-                                true
-                            }
+                            self.kernel.mark_running(target_id);
+                            true
                         }
-                    } else {
-                        self.kernel.park_running(target_id, target_thread);
-                        false
                     }
                 });
                 Some(Ok(FutureValue::Bool(success)))

@@ -41,7 +41,7 @@ impl VirtualKernel {
         key: Option<String>,
         parent_id: ThreadId,
     ) -> Result<ThreadId, ExecutionFailure> {
-        self.spawn_with_parent(thread, key, Some(parent_id))
+        self.create_with_parent(thread, key, Some(parent_id))
     }
 
     fn spawn_with_parent(
@@ -53,6 +53,24 @@ impl VirtualKernel {
         thread
             .mark_spawned()
             .map_err(|kind| ExecutionFailure::new(kind, "max threads limit exceeded"))?;
+        self.register_created(thread, key, parent_id)
+    }
+
+    fn create_with_parent(
+        &mut self,
+        thread: VmThreadState,
+        key: Option<String>,
+        parent_id: Option<ThreadId>,
+    ) -> Result<ThreadId, ExecutionFailure> {
+        self.register_created(thread, key, parent_id)
+    }
+
+    fn register_created(
+        &mut self,
+        thread: VmThreadState,
+        key: Option<String>,
+        parent_id: Option<ThreadId>,
+    ) -> Result<ThreadId, ExecutionFailure> {
         if !self.registry.key_is_available(key.as_deref()) {
             return Err(ExecutionFailure::new(
                 ExecutionFailureKind::DuplicateThreadKey,
@@ -263,13 +281,6 @@ impl VirtualKernel {
 
     pub fn state(&self, id: ThreadId) -> Option<crate::registry::ThreadState> {
         self.registry.state(id)
-    }
-
-    pub fn mark_spawned(
-        &mut self,
-        id: ThreadId,
-    ) -> Result<(), galfus_contract::ExecutionFailureKind> {
-        self.registry.mark_spawned(id)
     }
 
     pub fn is_running(&self, id: ThreadId) -> bool {
