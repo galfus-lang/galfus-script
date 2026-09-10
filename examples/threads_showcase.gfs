@@ -1,7 +1,7 @@
 import { println } from "std/io"
 import { createThread, getMessage, getThread, hasMessages } from "std/thread"
 
-fn worker(args: [[u8]]): i32 {
+fn worker(_context: null): i32 {
   println("Runing on thread")
 
   if hasMessages() {
@@ -20,7 +20,7 @@ export fn main(_args: [[u8]]): i32 {
     return 1
   }
 
-  const thread = createThread(worker, "showcase-worker")
+  const thread = createThread(worker, null, "showcase-worker")
   if thread::isRunning() || thread::isExited() || thread::exitReason() != null {
     return 2
   }
@@ -31,7 +31,8 @@ export fn main(_args: [[u8]]): i32 {
   }
 
   println("starting thread")
-  if !thread::spawn() {
+  const started = thread::spawn()
+  if !started {
     return 4
   }
 
@@ -54,7 +55,8 @@ export fn main(_args: [[u8]]): i32 {
     return 5
   }
 
-  if thread::spawn() {
+  const startedAgain = thread::spawn()
+  if startedAgain {
     println("an exited thread can be spawned again")
     return 6
   }

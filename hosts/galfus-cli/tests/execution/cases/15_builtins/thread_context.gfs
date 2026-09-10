@@ -1,0 +1,49 @@
+import { createThread, getMessage, sendToParent } from "std/thread"
+import { println } from "std/io"
+
+struct WorkerContext {
+  value: i32,
+  label: [u8],
+  transform: fn(i32): i32
+}
+
+fn double(value: i32): i32 => value * 2
+
+fn worker(context: WorkerContext): i32 {
+  const transform = context.transform
+  if transform(context.value) != 42 {
+    return 1
+  }
+  if context.label.length != 7 {
+    return 2
+  }
+  if !sendToParent("ready") {
+    return 3
+  }
+  return 0
+}
+
+export fn main(_args: [[u8]]): i32 {
+  const context = new(WorkerContext) {
+    value: 21,
+    label: "context",
+    transform: double
+  }
+  const thread = createThread(worker, context)
+  const started = thread::spawn()
+  if !started {
+    return 4
+  }
+  if thread::wait() != 0 {
+    return 5
+  }
+  const responseLength = instanceof getMessage() {
+    [u8] message => <i32> message.length,
+    null => 0
+  }
+  if responseLength != 5 {
+    return 6
+  }
+  println("ok")
+  return 0
+}

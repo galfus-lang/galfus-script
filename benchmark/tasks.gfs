@@ -30,21 +30,24 @@ fn worker(previous_key: [u8], next_key: [u8]): i32 {
   return state
 }
 
-fn first_worker(_args: [[u8]]): i32 => worker("task-4", "task-2")
-fn second_worker(_args: [[u8]]): i32 => worker("task-1", "task-3")
-fn third_worker(_args: [[u8]]): i32 => worker("task-2", "task-4")
-fn fourth_worker(_args: [[u8]]): i32 => worker("task-3", "task-1")
+fn first_worker(_context: null): i32 => worker("task-4", "task-2")
+fn second_worker(_context: null): i32 => worker("task-1", "task-3")
+fn third_worker(_context: null): i32 => worker("task-2", "task-4")
+fn fourth_worker(_context: null): i32 => worker("task-3", "task-1")
 
 export fn main(_args: [[u8]]): i32 {
   const start = now()
-  const first = createThread(first_worker, "task-1")
-  const second = createThread(second_worker, "task-2")
-  const third = createThread(third_worker, "task-3")
-  const fourth = createThread(fourth_worker, "task-4")
-  first::spawn()
-  second::spawn()
-  third::spawn()
-  fourth::spawn()
+  const first = createThread(first_worker, null, "task-1")
+  const second = createThread(second_worker, null, "task-2")
+  const third = createThread(third_worker, null, "task-3")
+  const fourth = createThread(fourth_worker, null, "task-4")
+  const firstSpawned = first::spawn()
+  const secondSpawned = second::spawn()
+  const thirdSpawned = third::spawn()
+  const fourthSpawned = fourth::spawn()
+  if !firstSpawned || !secondSpawned || !thirdSpawned || !fourthSpawned {
+    return 0
+  }
   const first_result = first::wait()
   const second_result = second::wait()
   const third_result = third::wait()

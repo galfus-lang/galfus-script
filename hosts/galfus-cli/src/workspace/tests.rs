@@ -146,7 +146,7 @@ fn run_project_initializes_imported_string_globals() {
 }
 
 #[test]
-fn run_project_spawns_a_thread_with_the_anchored_api() {
+fn run_project_spawns_a_thread_with_a_context() {
     let source_path = env::current_dir()
         .expect("current directory")
         .join(".tmp")
@@ -161,7 +161,7 @@ fn run_project_spawns_a_thread_with_the_anchored_api() {
         r#"
             import { createThread, getThread, Thread } from 'std/thread'
 
-            fn worker(args: [[u8]]): i32 {
+            fn worker(_context: null): i32 {
                 var sum = 0
                 for i in 0..10000 {
                     sum = sum + 1
@@ -170,11 +170,12 @@ fn run_project_spawns_a_thread_with_the_anchored_api() {
             }
 
             export fn main(args: [[u8]]): i32 {
-                const thread = createThread(worker, "worker")
+                const thread = createThread(worker, null, "worker")
                 if getThread("worker") == null {
                     return 1
                 }
-                if !thread::spawn() {
+                const started = thread::spawn()
+                if !started {
                     return 2
                 }
                 if !thread::isRunning() {

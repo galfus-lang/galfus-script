@@ -176,6 +176,13 @@ exit_code = 0
 stdout = "ok\n"
 
 [[case]]
+name = "thread contexts rehydrate data and functions"
+path = "cases/15_builtins/thread_context.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
 name = "net builtin exposes stream contracts"
 path = "cases/15_builtins/net.gfs"
 command = "run"

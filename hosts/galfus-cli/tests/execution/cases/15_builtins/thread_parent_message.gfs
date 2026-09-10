@@ -1,7 +1,7 @@
 import { createThread, getMessage, getSelfId, getThread, sendToParent } from "std/thread"
 import { println } from "std/io"
 
-fn handler(_args: [[u8]]): i32 {
+fn handler(_context: null): i32 {
   const parent = getThread("parent")
   if parent == null {
     return 1
@@ -24,12 +24,13 @@ fn handler(_args: [[u8]]): i32 {
   return 0
 }
 
-fn parentWorker(_args: [[u8]]): i32 {
+fn parentWorker(_context: null): i32 {
   if getSelfId() <= 0 {
     return 5
   }
-  const child = createThread(handler)
-  if !child::spawn() {
+  const child = createThread(handler, null)
+  const childSpawned = child::spawn()
+  if !childSpawned {
     return 6
   }
   if !child::send("request") {
@@ -53,8 +54,9 @@ export fn main(_args: [[u8]]): i32 {
   if getSelfId() <= 0 {
     return 10
   }
-  const parent = createThread(parentWorker, "parent")
-  if !parent::spawn() {
+  const parent = createThread(parentWorker, null, "parent")
+  const parentSpawned = parent::spawn()
+  if !parentSpawned {
     return 11
   }
   const parentResult = parent::wait()
