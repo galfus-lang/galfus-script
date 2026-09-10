@@ -25,11 +25,23 @@ struct Case {
     http_request: Option<HttpRequest>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct HttpRequest {
     address: String,
     path: String,
     expected_status: u16,
+    #[serde(default = "default_http_concurrency")]
+    concurrency: usize,
+    #[serde(default = "default_http_rounds")]
+    rounds: usize,
+}
+
+const fn default_http_concurrency() -> usize {
+    1
+}
+
+const fn default_http_rounds() -> usize {
+    1
 }
 
 fn fixture_root() -> PathBuf {
@@ -101,12 +113,19 @@ fn run_http_case(
     let stderr = collect_stream(child.stderr.take().expect("CLI stderr must be piped"));
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut last_error = None;
-    let mut observed_status = None;
+    let mut server_ready = false;
 
     while Instant::now() < deadline {
         match request_status(request) {
             Ok(status) => {
-                observed_status = Some(status);
+                if status != request.expected_status {
+                    last_error = Some(format!(
+                        "expected HTTP status {}, got {status}",
+                        request.expected_status
+                    ));
+                } else {
+                    server_ready = true;
+                }
                 break;
             }
             Err(error) => last_error = Some(error),
@@ -120,6 +139,28 @@ fn run_http_case(
         }
         std::thread::sleep(Duration::from_millis(100));
     }
+
+    let concurrent_error = server_ready
+        .then(|| {
+            (0..request.rounds).find_map(|_| {
+                (0..request.concurrency)
+                    .map(|_| {
+                        let request = request.clone();
+                        std::thread::spawn(move || request_status(&request))
+                    })
+                    .find_map(|result| {
+                        match result.join().expect("HTTP request worker must finish") {
+                            Ok(status) if status == request.expected_status => None,
+                            Ok(status) => Some(format!(
+                                "expected HTTP status {}, got {status}",
+                                request.expected_status
+                            )),
+                            Err(error) => Some(error),
+                        }
+                    })
+            })
+        })
+        .flatten();
 
     if child
         .try_wait()
@@ -138,11 +179,11 @@ fn run_http_case(
     let stdout = String::from_utf8_lossy(&stdout_bytes);
     let stderr = String::from_utf8_lossy(&stderr_bytes);
 
-    match observed_status {
-        Some(status) if status == request.expected_status => Ok(()),
-        Some(status) => Err(format!(
-            "{}: expected HTTP status {}, got {status}\nCLI exit: {exit_status}\nstdout:\n{stdout}\nstderr:\n{stderr}",
-            case.name, request.expected_status,
+    match concurrent_error {
+        None if server_ready => Ok(()),
+        Some(error) => Err(format!(
+            "{}: concurrent request failed ({error})\nCLI exit: {exit_status}\nstdout:\n{stdout}\nstderr:\n{stderr}",
+            case.name,
         )),
         None => Err(format!(
             "{}: server did not return HTTP status {} ({})\nCLI exit: {exit_status}\nstdout:\n{stdout}\nstderr:\n{stderr}",

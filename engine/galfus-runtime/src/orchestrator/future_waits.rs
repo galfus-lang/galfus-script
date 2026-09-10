@@ -121,6 +121,10 @@ impl Orchestrator {
             let Some(message) = message else {
                 return;
             };
+            if let Some(quota) = self.kernel.get_thread_quota(target_thread_id) {
+                quota.release_mailbox_messages(1);
+                quota.release_mailbox_bytes(message.data.len());
+            }
             self.pop_mailbox_wait(target_thread_id, wait);
             self.mailbox_future_wait_targets
                 .remove(&(wait.waiting_thread_id, wait.future_lease.id));

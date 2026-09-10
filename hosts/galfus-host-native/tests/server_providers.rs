@@ -56,7 +56,11 @@ fn websocket_lifecycle_is_validated() {
     let mut provider = NativeServerProvider::new();
     let port: i32 = 45678;
 
-    let server_id = match dispatch(&mut provider, "server_bind", vec![SurfaceValue::I32(port)]) {
+    let server_id = match dispatch(
+        &mut provider,
+        "server_bind",
+        vec![SurfaceValue::I32(port), SurfaceValue::U32(32)],
+    ) {
         SurfaceValue::U64(id) => id,
         value => panic!("unexpected bind result: {value:?}"),
     };
@@ -79,23 +83,23 @@ fn websocket_lifecycle_is_validated() {
         socket.close(None).unwrap();
     });
 
-    let request = match dispatch(
+    let request_id = match dispatch(
         &mut provider,
         "server_accept",
         vec![SurfaceValue::U64(server_id)],
     ) {
-        SurfaceValue::Struct(fields) => fields,
+        SurfaceValue::U64(id) => id,
         value => panic!("unexpected accept result: {value:?}"),
     };
+    let _request = match dispatch(
+        &mut provider,
+        "server_request_get",
+        vec![SurfaceValue::U64(request_id)],
+    ) {
+        SurfaceValue::Struct(fields) => fields,
+        value => panic!("unexpected request result: {value:?}"),
+    };
 
-    let mut request_id = 0;
-    for (k, v) in request {
-        if k == "id"
-            && let SurfaceValue::U64(id) = v
-        {
-            request_id = id;
-        }
-    }
     assert!(request_id > 0);
 
     // Accept websocket upgrade
@@ -250,7 +254,11 @@ fn websocket_transport_error_is_validated() {
     let mut provider = NativeServerProvider::new();
     let port: i32 = 45679;
 
-    let server_id = match dispatch(&mut provider, "server_bind", vec![SurfaceValue::I32(port)]) {
+    let server_id = match dispatch(
+        &mut provider,
+        "server_bind",
+        vec![SurfaceValue::I32(port), SurfaceValue::U32(32)],
+    ) {
         SurfaceValue::U64(id) => id,
         value => panic!("unexpected bind result: {value:?}"),
     };
@@ -268,23 +276,22 @@ fn websocket_transport_error_is_validated() {
         }
     });
 
-    let request = match dispatch(
+    let request_id = match dispatch(
         &mut provider,
         "server_accept",
         vec![SurfaceValue::U64(server_id)],
     ) {
-        SurfaceValue::Struct(fields) => fields,
+        SurfaceValue::U64(id) => id,
         _ => panic!("unexpected accept result"),
     };
-
-    let mut request_id = 0;
-    for (k, v) in request {
-        if k == "id"
-            && let SurfaceValue::U64(id) = v
-        {
-            request_id = id;
-        }
-    }
+    let _request = match dispatch(
+        &mut provider,
+        "server_request_get",
+        vec![SurfaceValue::U64(request_id)],
+    ) {
+        SurfaceValue::Struct(fields) => fields,
+        _ => panic!("unexpected request result"),
+    };
 
     dispatch(
         &mut provider,
@@ -337,7 +344,11 @@ fn provider_waiters_are_removed_on_cancellation() {
     let mut provider = NativeServerProvider::new();
     let port: i32 = 45680;
 
-    let server_id = match dispatch(&mut provider, "server_bind", vec![SurfaceValue::I32(port)]) {
+    let server_id = match dispatch(
+        &mut provider,
+        "server_bind",
+        vec![SurfaceValue::I32(port), SurfaceValue::U32(32)],
+    ) {
         SurfaceValue::U64(id) => id,
         value => panic!("unexpected bind result: {value:?}"),
     };

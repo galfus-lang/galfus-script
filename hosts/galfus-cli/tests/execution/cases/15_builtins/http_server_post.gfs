@@ -15,6 +15,7 @@ fn serverPort(args: [[u8]]): i32 {
 export fn main(args: [[u8]]): i32 {
   const server = new(Server) {
       port: serverPort(args),
+      handlers: 2,
       fetch: fn(async) (req: Request): Response {
         var body = new([u8], 0)
         loop {

@@ -163,13 +163,6 @@ impl Orchestrator {
             .lock()
             .unwrap()
             .push_back(crate::registry::MailboxMessage { sender_id, data });
-        if let Err(error) = self.kernel.unblock(target_id) {
-            self.failure = Some(
-                ExecutionFailure::new(error, "runnable threads limit exceeded")
-                    .with_thread_id(target_id),
-            );
-            self.kernel.cancel(target_id);
-        }
         self.complete_mailbox_future_waits(target_id, sender_id);
         true
     }

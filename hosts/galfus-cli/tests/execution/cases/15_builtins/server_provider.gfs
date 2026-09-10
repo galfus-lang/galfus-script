@@ -3,6 +3,7 @@ import { Request, Response, Server, WebSocket, WebSocketConfig, fromBytes } from
 export fn main(_args: [[u8]]): i32 {
   const server = new(Server) {
     port: 18981,
+    handlers: 32,
     fetch: fn(async) (_request: Request): Response {
       return fromBytes("response body")
     },

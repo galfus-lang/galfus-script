@@ -183,6 +183,13 @@ exit_code = 0
 stdout = "ok\n"
 
 [[case]]
+name = "threads await messages from any sender"
+path = "cases/15_builtins/thread_receive_message.gfs"
+command = "run"
+exit_code = 0
+stdout = "ok\n"
+
+[[case]]
 name = "net builtin exposes stream contracts"
 path = "cases/15_builtins/net.gfs"
 command = "run"
@@ -226,6 +233,8 @@ command = "run"
 address = "127.0.0.1:18981"
 path = "/"
 expected_status = 200
+concurrency = 8
+rounds = 129
 [[case]]
 name = "narrowing block returns produce the enclosing expression value"
 path = "cases/15_builtins/narrowing_block_returns.gfs"
@@ -306,3 +315,4 @@ args = ["18982"]
 address = "127.0.0.1:18982"
 path = "/"
 expected_status = 200
+concurrency = 8

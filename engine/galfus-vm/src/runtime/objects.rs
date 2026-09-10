@@ -24,6 +24,11 @@ impl VirtualMachine {
                         .get(layout_idx.raw() as usize)
                         .ok_or(VmError::TypeOutOfBounds { index: type_idx })?;
                     let fields = vec![Value::Null; layout.fields.len()];
+                    let strong_fields = layout
+                        .fields
+                        .iter()
+                        .map(|field| field.ownership != OwnershipKind::Weak)
+                        .collect();
                     let obj_ref = thread.heap.alloc(HeapObject::Struct {
                         module_id: thread
                             .call_stack
@@ -32,6 +37,7 @@ impl VirtualMachine {
                             .module_id,
                         layout_idx: *layout_idx,
                         fields,
+                        strong_fields,
                     })?;
                     thread.write_reg(dest, Value::Object(obj_ref));
                 } else {
@@ -75,24 +81,48 @@ impl VirtualMachine {
             Instruction::StoreField { obj, field, val } => {
                 let obj_val = thread.read_reg(obj);
                 let val_to_store = thread.read_reg(val);
-                thread.retain_edge_val(&val_to_store);
                 if let Value::Object(obj_ref) = obj_val {
-                    let heap_obj = thread.heap.get_object_mut(obj_ref)?;
-                    if let HeapObject::Struct { fields, .. } = heap_obj {
-                        if (field.raw() as usize) < fields.len() {
-                            let old_val =
-                                std::mem::replace(&mut fields[field.raw() as usize], val_to_store);
-                            if let Value::Object(old_ref) = old_val {
-                                let _ = thread.heap.release_edge(old_ref);
+                    {
+                        let heap_obj = thread.heap.get_object(obj_ref)?;
+                        match heap_obj {
+                            HeapObject::Struct {
+                                fields,
+                                strong_fields,
+                                ..
+                            } => {
+                                if (field.raw() as usize) >= fields.len() {
+                                    return Err(VmError::FieldOutOfBounds { index: field });
+                                }
+                                if strong_fields.len() != fields.len() {
+                                    return Err(VmError::InvalidModule);
+                                }
                             }
-                        } else {
-                            panic!("Corrupted bytecode: Out of bounds");
+                            heap_obj => {
+                                return Err(VmError::TypeMismatch {
+                                    expected: "Struct object".to_string(),
+                                    found: format!("{:?}", heap_obj),
+                                });
+                            }
                         }
-                    } else {
-                        return Err(VmError::TypeMismatch {
-                            expected: "Struct object".to_string(),
-                            found: format!("{:?}", heap_obj),
-                        });
+                    }
+                    let is_strong = match thread.heap.get_object(obj_ref)? {
+                        HeapObject::Struct { strong_fields, .. } => {
+                            strong_fields[field.raw() as usize]
+                        }
+                        _ => unreachable!("validated struct object changed during the instruction"),
+                    };
+                    if is_strong && let Value::Object(child_ref) = val_to_store {
+                        thread.heap.retain_edge_from(obj_ref, child_ref)?;
+                    }
+                    let old_val = {
+                        let heap_obj = thread.heap.get_object_mut(obj_ref)?;
+                        let HeapObject::Struct { fields, .. } = heap_obj else {
+                            unreachable!("validated struct object changed during the instruction")
+                        };
+                        std::mem::replace(&mut fields[field.raw() as usize], val_to_store)
+                    };
+                    if is_strong && let Value::Object(old_ref) = old_val {
+                        thread.heap.release_edge(old_ref)?;
                     }
                 } else {
                     return Err(VmError::TypeMismatch {
@@ -189,7 +219,6 @@ impl VirtualMachine {
                 let idx_val = thread.read_reg(idx);
                 let raw_index = self.to_raw_array_index(idx_val)?;
                 let val_to_store = thread.read_reg(val);
-                thread.retain_edge_val(&val_to_store);
 
                 if let Value::Object(obj_ref) = arr_val {
                     let (index, val_to_store) = {
@@ -231,21 +260,25 @@ impl VirtualMachine {
                         }
                     };
 
-                    let heap_obj = thread.heap.get_object_mut(obj_ref)?;
+                    if let Value::Object(child_ref) = val_to_store {
+                        thread.heap.retain_edge_from(obj_ref, child_ref)?;
+                    }
 
-                    match heap_obj {
-                        HeapObject::Array { elements, .. } | HeapObject::Tuple { elements } => {
-                            let old_val = std::mem::replace(&mut elements[index], val_to_store);
-                            if let Value::Object(old_ref) = old_val {
-                                let _ = thread.heap.release_edge(old_ref);
+                    let old_val = {
+                        let heap_obj = thread.heap.get_object_mut(obj_ref)?;
+                        match heap_obj {
+                            HeapObject::Array { elements, .. } | HeapObject::Tuple { elements } => {
+                                std::mem::replace(&mut elements[index], val_to_store)
+                            }
+                            _ => {
+                                unreachable!(
+                                    "validated array or tuple object changed during the instruction"
+                                )
                             }
                         }
-                        heap_obj => {
-                            return Err(VmError::TypeMismatch {
-                                expected: "Array or Tuple object".to_string(),
-                                found: format!("{:?}", heap_obj),
-                            });
-                        }
+                    };
+                    if let Value::Object(old_ref) = old_val {
+                        thread.heap.release_edge(old_ref)?;
                     }
                 } else {
                     return Err(VmError::TypeMismatch {
@@ -363,6 +396,12 @@ impl VirtualMachine {
         let copied = self.allocate_copy_placeholders(thread, &strong_closure)?;
         self.fill_copy_placeholders(thread, &strong_closure, &copied)?;
 
+        for (&source_ref, &copied_ref) in &copied {
+            if source_ref != *obj_ref {
+                thread.heap.release_anchor(copied_ref)?;
+            }
+        }
+
         copied
             .get(obj_ref)
             .copied()
@@ -392,6 +431,7 @@ impl VirtualMachine {
                     module_id,
                     layout_idx,
                     fields,
+                    ..
                 } => {
                     let layout = self
                         .get_module(*module_id)?
@@ -460,6 +500,7 @@ impl VirtualMachine {
                     module_id,
                     layout_idx,
                     fields,
+                    strong_fields,
                 } => {
                     let layout = self
                         .get_module(module_id)?
@@ -481,6 +522,7 @@ impl VirtualMachine {
                         module_id,
                         layout_idx,
                         fields: vec![Value::Null; fields.len()],
+                        strong_fields,
                     }
                 }
                 HeapObject::Array {
@@ -542,6 +584,7 @@ impl VirtualMachine {
                     module_id,
                     layout_idx,
                     fields,
+                    ..
                 } => {
                     let layout = self
                         .get_module(module_id)?
@@ -581,12 +624,26 @@ impl VirtualMachine {
                             });
                         }
                     }
+                    let strong_values = match thread.heap.get_object(copied_ref)? {
+                        HeapObject::Struct {
+                            fields,
+                            strong_fields,
+                            ..
+                        } => fields
+                            .iter()
+                            .zip(strong_fields)
+                            .filter_map(|(field, is_strong)| is_strong.then_some(*field))
+                            .collect::<Vec<_>>(),
+                        _ => unreachable!("copied placeholder remains a struct"),
+                    };
+                    self.retain_copied_edges(thread, copied_ref, strong_values)?;
                 }
                 HeapObject::Array { elements, .. } => {
                     let copied_elements = elements
                         .iter()
                         .map(|element| self.copy_strong_value(element, copied))
                         .collect::<Result<Vec<_>, _>>()?;
+                    let edge_values = copied_elements.clone();
 
                     match thread.heap.get_object_mut(copied_ref)? {
                         HeapObject::Array { elements, .. } => {
@@ -599,12 +656,14 @@ impl VirtualMachine {
                             });
                         }
                     }
+                    self.retain_copied_edges(thread, copied_ref, edge_values)?;
                 }
                 HeapObject::Tuple { elements } => {
                     let copied_elements = elements
                         .iter()
                         .map(|element| self.copy_strong_value(element, copied))
                         .collect::<Result<Vec<_>, _>>()?;
+                    let edge_values = copied_elements.clone();
 
                     match thread.heap.get_object_mut(copied_ref)? {
                         HeapObject::Tuple { elements } => {
@@ -617,6 +676,7 @@ impl VirtualMachine {
                             });
                         }
                     }
+                    self.retain_copied_edges(thread, copied_ref, edge_values)?;
                 }
                 HeapObject::Choice { payload, .. } => {
                     let copied_payload = self.copy_strong_value(&payload, copied)?;
@@ -632,11 +692,26 @@ impl VirtualMachine {
                             });
                         }
                     }
+                    self.retain_copied_edges(thread, copied_ref, [copied_payload])?;
                 }
                 HeapObject::AdapterHandle { .. } => {}
             }
         }
 
+        Ok(())
+    }
+
+    fn retain_copied_edges(
+        &self,
+        thread: &mut thread::VmThreadState,
+        parent: ObjectRef,
+        values: impl IntoIterator<Item = Value>,
+    ) -> Result<(), VmError> {
+        for value in values {
+            if let Value::Object(child) = value {
+                thread.heap.retain_edge_from(parent, child)?;
+            }
+        }
         Ok(())
     }
 

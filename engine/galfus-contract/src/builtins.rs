@@ -1040,13 +1040,18 @@ pub fn std_server_provider_descriptor() -> ProviderDescriptor {
             exports: vec![
                 ProviderFunctionSignature {
                     name: "server_bind".to_string(),
-                    parameter_types: vec![SurfaceSchema::I32],
+                    parameter_types: vec![SurfaceSchema::I32, SurfaceSchema::U32],
                     return_type: SurfaceSchema::U64,
                 },
                 ProviderFunctionSignature {
                     name: "server_accept".to_string(),
                     parameter_types: vec![SurfaceSchema::U64],
-                    return_type: request,
+                    return_type: SurfaceSchema::U64,
+                },
+                ProviderFunctionSignature {
+                    name: "server_request_get".to_string(),
+                    parameter_types: vec![SurfaceSchema::U64],
+                    return_type: SurfaceSchema::Optional(Box::new(request)),
                 },
                 ProviderFunctionSignature {
                     name: "server_response_start".to_string(),
@@ -1129,12 +1134,20 @@ fn server_surface_contracts() -> Vec<SurfaceFunctionContract> {
         SurfaceFunctionContract {
             provider_operation: "server_bind".to_string(),
             bridge_symbol: "__provider_server_bind".to_string(),
-            parameters: vec![SurfaceContract::new(
-                "std/server::__provider_server_bind:port",
-                1,
-                SurfaceDirection::ToProvider,
-                SurfaceSchema::I32,
-            )],
+            parameters: vec![
+                SurfaceContract::new(
+                    "std/server::__provider_server_bind:port",
+                    1,
+                    SurfaceDirection::ToProvider,
+                    SurfaceSchema::I32,
+                ),
+                SurfaceContract::new(
+                    "std/server::__provider_server_bind:max_pending_requests",
+                    1,
+                    SurfaceDirection::ToProvider,
+                    SurfaceSchema::U32,
+                ),
+            ],
             result: SurfaceContract::new(
                 "std/server::__provider_server_bind:return",
                 1,
@@ -1155,7 +1168,23 @@ fn server_surface_contracts() -> Vec<SurfaceFunctionContract> {
                 "std/server::__provider_server_accept:return",
                 1,
                 SurfaceDirection::FromProvider,
-                request,
+                SurfaceSchema::U64,
+            ),
+        },
+        SurfaceFunctionContract {
+            provider_operation: "server_request_get".to_string(),
+            bridge_symbol: "__provider_server_request_get".to_string(),
+            parameters: vec![SurfaceContract::new(
+                "std/server::__provider_server_request_get:request_id",
+                1,
+                SurfaceDirection::ToProvider,
+                SurfaceSchema::U64,
+            )],
+            result: SurfaceContract::new(
+                "std/server::__provider_server_request_get:return",
+                1,
+                SurfaceDirection::FromProvider,
+                SurfaceSchema::Optional(Box::new(request)),
             ),
         },
         SurfaceFunctionContract {

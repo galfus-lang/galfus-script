@@ -38,6 +38,7 @@ pub(crate) enum ThreadContextValue {
         module_id: galfus_core::ModuleId,
         layout_idx: galfus_bytecode::StructLayoutIdx,
         fields: Vec<Self>,
+        strong_fields: Vec<bool>,
     },
     Choice {
         module_id: galfus_core::ModuleId,
@@ -369,6 +370,7 @@ pub(crate) fn transfer_thread_context_from_heap(
                 module_id,
                 layout_idx,
                 fields,
+                strong_fields,
             } => Ok(ThreadContextValue::Struct {
                 module_id: *module_id,
                 layout_idx: *layout_idx,
@@ -377,6 +379,7 @@ pub(crate) fn transfer_thread_context_from_heap(
                     .copied()
                     .map(|value| transfer_thread_context_from_heap(heap, value))
                     .collect::<Result<Vec<_>, _>>()?,
+                strong_fields: strong_fields.clone(),
             }),
             HeapObject::Choice {
                 module_id,
@@ -456,17 +459,26 @@ pub(crate) fn rehydrate_thread_context_into_heap(
             module_id,
             layout_idx,
             fields,
+            strong_fields,
         } => {
             let fields = fields
                 .into_iter()
                 .map(|value| rehydrate_thread_context_into_heap(heap, value))
                 .collect::<Result<Vec<_>, _>>()?;
-            let edge_values = fields.clone();
+            if strong_fields.len() != fields.len() {
+                return Err("thread context struct has invalid ownership metadata".to_string());
+            }
+            let edge_values = fields
+                .iter()
+                .zip(&strong_fields)
+                .filter_map(|(field, is_strong)| is_strong.then_some(*field))
+                .collect::<Vec<_>>();
             let reference = heap
                 .alloc(HeapObject::Struct {
                     module_id,
                     layout_idx,
                     fields,
+                    strong_fields,
                 })
                 .map_err(|_| "thread context struct exceeds heap quota".to_string())?;
             transfer_values_to_heap_edges(heap, edge_values)?;
@@ -650,12 +662,22 @@ fn encode_non_null_future_value_into_thread_heap(
                     encode_future_value_into_thread_heap(heap, value, field.ty, module_id, module)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let edge_values = fields.clone();
+            let strong_fields = layout
+                .fields
+                .iter()
+                .map(|field| field.ownership != galfus_bytecode::OwnershipKind::Weak)
+                .collect::<Vec<_>>();
+            let edge_values = fields
+                .iter()
+                .zip(&strong_fields)
+                .filter_map(|(field, is_strong)| is_strong.then_some(*field))
+                .collect::<Vec<_>>();
             let reference = heap
                 .alloc(galfus_vm::HeapObject::Struct {
                     module_id,
                     layout_idx: *layout_idx,
                     fields,
+                    strong_fields,
                 })
                 .map_err(|_| "future struct exceeds heap quota".to_string())?;
             transfer_values_to_heap_edges(heap, edge_values)?;
@@ -891,12 +913,22 @@ pub(crate) fn encode_surface_into_thread_heap(
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let edge_values = fields.clone();
+            let strong_fields = layout
+                .fields
+                .iter()
+                .map(|field| field.ownership != galfus_bytecode::OwnershipKind::Weak)
+                .collect::<Vec<_>>();
+            let edge_values = fields
+                .iter()
+                .zip(&strong_fields)
+                .filter_map(|(field, is_strong)| is_strong.then_some(*field))
+                .collect::<Vec<_>>();
             let reference = heap
                 .alloc(galfus_vm::HeapObject::Struct {
                     module_id,
                     layout_idx: *layout_idx,
                     fields,
+                    strong_fields,
                 })
                 .map_err(|_| "surface struct exceeds heap quota".to_string())?;
             transfer_values_to_heap_edges(heap, edge_values)?;

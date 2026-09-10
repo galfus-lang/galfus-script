@@ -1,6 +1,7 @@
-import { createThread } from "std/thread"
+import { Thread, createThread, getSelfId, receiveMessage, sendToParent, sendTo } from "std/thread"
 import { Future } from "std/async"
 import { ReadStream, ReadStreamResult, BytesStream } from "std/stream"
+import { parse, ParseResult, stringify } from "format"
 
 export struct URL {
     href: [u8],
@@ -101,8 +102,9 @@ export struct WsMessage {
     msg: [u8] | null
 }
 
-fn(async) __provider_server_bind(port: i32): u64
-fn(async) __provider_server_accept(server_id: u64): ProviderRequest
+fn(async) __provider_server_bind(port: i32, max_pending_requests: u32): u64
+fn(async) __provider_server_accept(server_id: u64): u64
+fn(async) __provider_server_request_get(request_id: u64): ProviderRequest | null
 fn(async) __provider_server_response_start(req_id: u64, status: i32, headers: [([u8], [u8])], is_upgrade: bool): bool
 fn(async) __provider_server_response_write(req_id: u64, chunk: [u8]): bool
 fn(async) __provider_server_response_finish(req_id: u64): bool
@@ -165,113 +167,282 @@ export fn createWebSocketConfig(
 
 export struct Server {
     port: i32,
+    handlers: i32 = 32,
     fetch: fn(Request): Future<Response>,
     websocket: WebSocketConfig
 }
 
-export fn createServer(port: i32, fetch: fn(Request): Future<Response>, websocket: WebSocketConfig): Server {
+export fn createServer(port: i32, fetch: fn(Request): Future<Response>, websocket: WebSocketConfig, handlers: i32 = 32): Server {
     return new(Server) {
         port: port,
+        handlers: handlers,
         fetch: fetch,
         websocket: websocket
     }
 }
 
-export fn Server::start(server: Server): null {
-    const server_id = await __provider_server_bind(server.port)
+struct HttpHandlerContext {
+    fetch: fn(Request): Future<Response>,
+    websocket: WebSocketConfig
+}
+
+struct WebSocketHandlerContext {
+    socket: WebSocket,
+    status: i32,
+    config: WebSocketConfig
+}
+
+struct HttpHandlerPool {
+    available: [i64],
+    availableCount: i32,
+    busy: [i64],
+    busyCount: i32
+}
+
+fn HttpHandlerPool::create(capacity: i32): HttpHandlerPool {
+    return new(HttpHandlerPool) {
+        available: new([i64], capacity),
+        availableCount: 0,
+        busy: new([i64], capacity),
+        busyCount: 0
+    }
+}
+
+fn HttpHandlerPool::addAvailable(self, handlerId: i64): bool {
+    if self.availableCount >= self.available.length {
+        return false
+    }
+    self.available[self.availableCount] = handlerId
+    self.availableCount += 1
+    return true
+}
+
+fn HttpHandlerPool::takeAvailable(self): i64 | null {
+    if self.availableCount <= 0 {
+        return null
+    }
+    self.availableCount -= 1
+    return self.available[self.availableCount]
+}
+
+fn HttpHandlerPool::addBusy(self, handlerId: i64): bool {
+    if self.busyCount >= self.busy.length {
+        return false
+    }
+    self.busy[self.busyCount] = handlerId
+    self.busyCount += 1
+    return true
+}
+
+fn HttpHandlerPool::release(self, handlerId: i64): bool {
+    var index: i32 = 0
     loop {
-        const raw_req = await __provider_server_accept(server_id)
-        const req = new(Request) {
-            id: raw_req.id,
-            url: raw_req.url,
-            method: raw_req.method,
-            headers: raw_req.headers,
-            body: new(RequestBody) { id: raw_req.body, closed: false }
+        if index >= self.busyCount {
+            return false
         }
-        const req_id = req.id
-        
-        const fetchCb = (copy server).fetch
-        const fetch_req = copy req
-        const res = await fetchCb(fetch_req)
-        
-        const res_status = res.status
-        const is_upgrade = res_status == 101
-        const res_headers = copy res.headers
-        const res_body = copy res.body
-        
-        await __provider_server_response_start(copy req_id, copy res_status, res_headers, is_upgrade)
-        
-        instanceof res_body {
-            null {
-                await __provider_server_response_finish(copy req_id)
+        if self.busy[index] == handlerId {
+            self.busyCount -= 1
+            self.busy[index] = self.busy[self.busyCount]
+            return self::addAvailable(handlerId)
+        }
+        index += 1
+    }
+    return false
+}
+
+fn HttpHandlerPool::drainCompleted(self): null {
+    var index: i32 = 0
+    loop {
+        if index >= self.busyCount {
+            break
+        }
+        instanceof self.busy[index] {
+            i64 handlerId {
+                const handler = new(Thread) { id: handlerId, key: null }
+                const completed = handler::tryReceiveMessage()
+                instanceof completed {
+                    [u8] data { self::release(handlerId) },
+                    null { index += 1 }
+                }
             },
-            ReadStream<[u8]> stream {
-                var stream_aborted = false
-                loop {
-                    const chunk_res = await stream::next()
-                    match chunk_res {
-                        ReadStreamResult::Data(chunk) {
-                            const ok = await __provider_server_response_write(copy req_id, chunk)
-                            if !ok {
-                                stream_aborted = true
-                                break
-                            }
-                        },
-                        ReadStreamResult::End { break },
-                        ReadStreamResult::Error(_) {
-                            stream_aborted = true
+            null { index += 1 }
+        }
+    }
+    return null
+}
+
+fn(async) writeResponse(requestId: u64, response: Response): bool {
+    const status = response.status
+    const isUpgrade = status == 101
+    const headers = copy response.headers
+    const body = copy response.body
+
+    if !(await __provider_server_response_start(requestId, status, headers, isUpgrade)) {
+        return false
+    }
+
+    instanceof body {
+        null { return await __provider_server_response_finish(requestId) },
+        ReadStream<[u8]> stream {
+            var aborted = false
+            loop {
+                const chunkResult = await stream::next()
+                match chunkResult {
+                    ReadStreamResult::Data(chunk) {
+                        if !(await __provider_server_response_write(requestId, chunk)) {
+                            aborted = true
                             break
                         }
+                    },
+                    ReadStreamResult::End { break },
+                    ReadStreamResult::Error(_) {
+                        aborted = true
+                        break
                     }
                 }
-                if stream_aborted {
-                    await __provider_server_response_abort(copy req_id)
-                } else {
-                    await __provider_server_response_finish(copy req_id)
+            }
+            if aborted {
+                return await __provider_server_response_abort(requestId)
+            }
+            return await __provider_server_response_finish(requestId)
+        }
+    }
+    return false
+}
+
+fn webSocketHandler(context: WebSocketHandlerContext): i32 {
+    const socket = copy context.socket
+    const config = copy context.config
+    const onOpen = config.onOpen
+    onOpen(copy socket, context.status)
+
+    loop {
+        const payload = await __provider_server_ws_receive(socket.id)
+        instanceof payload {
+            null { break },
+            WsMessage message {
+                const status = message.status
+                instanceof message.msg {
+                    [u8] data {
+                        if status < 0 {
+                            const onError = config.onError
+                            onError(copy socket, status, data)
+                            break
+                        }
+                        const onMessage = config.onMessage
+                        onMessage(copy socket, status, data)
+                    },
+                    null {
+                        const onClose = config.onClose
+                        onClose(copy socket, status)
+                        break
+                    }
                 }
             }
         }
-        
-        if is_upgrade {
-            const ws = new(WebSocket) { id: req_id }
-            const ws_config1 = copy server.websocket
-            const onOpen = ws_config1.onOpen
-            onOpen(copy ws, res_status)
-            
-            loop {
-                const payload = await __provider_server_ws_receive(copy req_id)
-                instanceof payload {
-                    null { break },
-                    WsMessage p {
-                        const p_status = p.status
-                        const p_msg = p.msg
-                        if p_status < 0 {
-                            instanceof p_msg {
-                                [u8] err {
-                                    const ws_config2 = copy server.websocket
-                                    const onError = ws_config2.onError
-                                    onError(copy ws, p_status, err)
-                                },
-                                null {
-                                    const ws_config2 = copy server.websocket
-                                    const onError = ws_config2.onError
-                                    onError(copy ws, p_status, "WebSocket error without detail")
-                                }
-                            }
-                            break
-                        }
-                        instanceof p_msg {
-                            null {
-                                const ws_config3 = copy server.websocket
-                                const onClose = ws_config3.onClose
-                                onClose(copy ws, p_status)
-                                break
-                            },
-                            [u8] msg {
-                                const ws_config4 = copy server.websocket
-                                const onMessage = ws_config4.onMessage
-                                onMessage(copy ws, p_status, msg)
-                            }
+    }
+    return 0
+}
+
+fn(async) handleRequest(context: HttpHandlerContext, requestId: u64): null {
+    const rawRequest = await __provider_server_request_get(requestId)
+    instanceof rawRequest {
+        null { return null },
+        ProviderRequest raw {
+            const request = new(Request) {
+                id: raw.id,
+                url: raw.url,
+                method: raw.method,
+                headers: raw.headers,
+                body: new(RequestBody) { id: raw.body, closed: false }
+            }
+            const fetch = context.fetch
+            const response = await fetch(copy request)
+            const status = response.status
+            const completed = await writeResponse(request.id, response)
+            if status == 101 && completed {
+                const socket = new(WebSocket) { id: request.id }
+                const websocketContext = new(WebSocketHandlerContext) {
+                    socket: socket,
+                    status: status,
+                    config: copy context.websocket
+                }
+                const websocketThread = createThread(webSocketHandler, websocketContext)
+                if !websocketThread::spawn() {
+                    await socket::close()
+                }
+            }
+        }
+    }
+    return null
+}
+
+fn httpHandler(context: HttpHandlerContext): i32 {
+    loop {
+        const ticket = await receiveMessage()
+        instanceof ticket {
+            null {},
+            [u8] ticketBytes {
+                match parse<u64>(ticketBytes) {
+                    ParseResult<u64>::Ok(requestId) {
+                        await handleRequest(copy context, requestId)
+                    },
+                    ParseResult<u64>::Err(_) {}
+                }
+            }
+        }
+        if !sendToParent(stringify(getSelfId())) {
+            return 1
+        }
+    }
+    return 0
+}
+
+export fn Server::start(server: Server): null {
+    if server.handlers <= 0 {
+        return null
+    }
+    const server_id = await __provider_server_bind(server.port, <u32> server.handlers)
+    const context = new(HttpHandlerContext) {
+        fetch: server.fetch,
+        websocket: server.websocket
+    }
+    const handlers = HttpHandlerPool::create(server.handlers)
+    var createdHandlers: i32 = 0
+    loop {
+        if createdHandlers >= server.handlers {
+            break
+        }
+        const handler = createThread(httpHandler, copy context)
+        if !handler::spawn() {
+            return null
+        }
+        if !handlers::addAvailable(handler.id) {
+            return null
+        }
+        createdHandlers += 1
+    }
+
+    loop {
+        handlers::drainCompleted()
+        instanceof handlers::takeAvailable() {
+            i64 handlerId {
+                if !handlers::addBusy(handlerId) {
+                    return null
+                }
+                const requestId = await __provider_server_accept(server_id)
+                if !sendTo(handlerId, stringify(requestId)) {
+                    return null
+                }
+            },
+            null {
+                const completed = await receiveMessage()
+                instanceof completed {
+                    null {},
+                    [u8] workerId {
+                        match parse<i64>(workerId) {
+                            ParseResult<i64>::Ok(id) { handlers::release(id) },
+                            ParseResult<i64>::Err(_) {}
                         }
                     }
                 }

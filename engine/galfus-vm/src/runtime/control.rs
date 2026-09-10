@@ -664,6 +664,7 @@ impl VirtualMachine {
                 module_id,
                 layout_idx,
                 fields,
+                ..
             } => {
                 let Some(layout) = self
                     .get_module(*module_id)?

@@ -12,9 +12,29 @@ fn serverPort(args: [[u8]]): i32 {
   }
 }
 
+fn serverHandlers(args: [[u8]]): i32 {
+  var result = 32
+  const rawHandlers = args[-2]
+  instanceof rawHandlers {
+    [u8] value {
+      match parse<i32>(value) {
+        ParseResult::Ok(handlers) {
+          if handlers > 0 {
+            result = handlers
+          }
+        },
+        ParseResult::Err(_) {}
+      }
+    },
+    null {}
+  }
+  return result
+}
+
 export fn main(args: [[u8]]): i32 {
   const server = new(Server) {
       port: serverPort(args),
+      handlers: serverHandlers(args),
       fetch: fn(async) (req: Request): Response {
         var body = new([u8], 0)
         loop {

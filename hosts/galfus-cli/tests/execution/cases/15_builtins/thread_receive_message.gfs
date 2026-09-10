@@ -1,0 +1,50 @@
+import { createThread, receiveMessage, sendToParent } from "std/thread"
+import { println } from "std/io"
+
+fn worker(_context: null): i32 {
+  if !sendToParent("ready") {
+    return 1
+  }
+  const message = await receiveMessage()
+  var messageIsValid = true
+  instanceof message {
+    [u8] data {
+      if data.length != 2 {
+        messageIsValid = false
+      }
+    },
+    null { messageIsValid = false }
+  }
+  if !messageIsValid {
+    return 2
+  }
+  return 0
+}
+
+export fn main(_args: [[u8]]): i32 {
+  const thread = createThread(worker, null)
+  if !thread::spawn() {
+    return 4
+  }
+  const ready = await receiveMessage()
+  var readyIsValid = true
+  instanceof ready {
+    [u8] data {
+      if data.length != 5 {
+        readyIsValid = false
+      }
+    },
+    null { readyIsValid = false }
+  }
+  if !readyIsValid {
+    return 5
+  }
+  if !thread::send("go") {
+    return 7
+  }
+  if thread::wait() != 0 {
+    return 8
+  }
+  println("ok")
+  return 0
+}

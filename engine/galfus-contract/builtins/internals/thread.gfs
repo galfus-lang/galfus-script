@@ -46,6 +46,10 @@ export fn getMessage(): [u8] | null {
     return __internal_thread_get_message()
 }
 
+export fn(async) receiveMessage(timeout: i32 = -1): [u8] | null {
+    return await __internal_thread_receive(0, timeout)
+}
+
 export fn Thread::spawn(self): bool {
     return await __internal_thread_spawn(self.id)
 }
@@ -64,6 +68,10 @@ export fn Thread::exitReason(self): i32 | null {
 
 export fn Thread::send(self, data: [u8]): bool {
     return __internal_thread_send(self.id, data)
+}
+
+export fn sendTo(id: i64, data: [u8]): bool {
+    return __internal_thread_send(id, data)
 }
 
 export fn sendToParent(data: [u8]): bool {

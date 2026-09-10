@@ -2,27 +2,17 @@ use crate::error::VmError;
 use crate::runtime::{HeapObject, VmObjectRef, VmValue};
 use std::collections::HashSet;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum GcColor {
-    Black,
-    Gray,
-    White,
-    Purple,
-}
-
 pub struct HeapSlot {
     pub generation: u32,
     pub anchors: u32,
     pub edges: u32,
-    pub color: GcColor,
+    pub heap_bytes: usize,
     pub object: Option<HeapObject>,
 }
 
 pub struct PrivateHeap {
     objects: Vec<HeapSlot>,
     free_slots: Vec<usize>,
-    roots: HashSet<usize>,
-    allocations_since_release: usize,
     pub pending_adapter_handle_drops: Vec<(
         galfus_core::BindingId,
         galfus_core::OpaqueTypeId,
@@ -41,46 +31,37 @@ impl PrivateHeap {
         Self {
             objects: Vec::new(),
             free_slots: Vec::new(),
-            roots: HashSet::new(),
-            allocations_since_release: 0,
             pending_adapter_handle_drops: Vec::new(),
             quota,
         }
     }
 
     pub fn alloc(&mut self, obj: HeapObject) -> Result<VmObjectRef, VmError> {
-        self.quota
-            .try_reserve_heap(1, obj.heap_bytes())
-            .map_err(VmError::ResourceLimitExceeded)?;
-
-        self.allocations_since_release += 1;
-        if self.allocations_since_release >= 500 {
-            self.collect_cycles();
-            self.allocations_since_release = 0;
+        if self.free_slots.is_empty() && self.objects.len() >= u32::MAX as usize {
+            return Err(VmError::IdCounterExhausted);
         }
 
-        // When allocating, an object initially has 0 anchors and 0 edges.
-        // It's the caller's responsibility to call retain_anchor or retain_edge.
-        // For backwards compatibility and safety, we start anchors at 1 (as it is usually placed in a register).
+        let heap_bytes = obj.heap_bytes();
+        self.quota
+            .try_reserve_heap(1, heap_bytes)
+            .map_err(VmError::ResourceLimitExceeded)?;
+
         let (idx, generation) = if let Some(idx) = self.free_slots.pop() {
             let slot = &mut self.objects[idx];
             slot.generation += 1;
             slot.anchors = 1;
             slot.edges = 0;
-            slot.color = GcColor::Black;
+            slot.heap_bytes = heap_bytes;
             slot.object = Some(obj);
             (idx, slot.generation)
         } else {
             let idx = self.objects.len();
-            if idx >= u32::MAX as usize {
-                return Err(VmError::IdCounterExhausted);
-            }
             let generation = 1;
             self.objects.push(HeapSlot {
                 generation,
                 anchors: 1,
                 edges: 0,
-                color: GcColor::Black,
+                heap_bytes,
                 object: Some(obj),
             });
             (idx, generation)
@@ -130,27 +111,7 @@ impl PrivateHeap {
             return Err(VmError::InvalidObjectReference);
         }
 
-        self.roots.remove(&idx);
-
-        if let Some(obj) = slot.object.take() {
-            self.quota.release_heap(1, obj.heap_bytes());
-
-            if let HeapObject::AdapterHandle {
-                binding_id,
-                type_id,
-                id,
-            } = obj
-            {
-                self.pending_adapter_handle_drops
-                    .push((binding_id, type_id, id));
-            }
-        }
-
-        slot.anchors = 0;
-        slot.edges = 0;
-        slot.color = GcColor::Black;
-        self.free_slots.push(idx);
-        Ok(())
+        self.destroy_slot(idx)
     }
 
     // Anchor Management (Registers, Stack, Globals)
@@ -160,9 +121,10 @@ impl PrivateHeap {
             .get_mut(obj_ref.index as usize)
             .ok_or(VmError::InvalidObjectReference)?;
         if slot.generation == obj_ref.generation && slot.object.is_some() {
-            slot.anchors = slot.anchors.saturating_add(1);
-            slot.color = GcColor::Black;
-            self.roots.remove(&(obj_ref.index as usize));
+            slot.anchors = slot
+                .anchors
+                .checked_add(1)
+                .ok_or(VmError::ReferenceCountOverflow)?;
             Ok(())
         } else {
             Err(VmError::InvalidObjectReference)
@@ -180,14 +142,12 @@ impl PrivateHeap {
             return Err(VmError::InvalidObjectReference);
         }
 
-        slot.anchors = slot.anchors.saturating_sub(1);
-        if slot.anchors == 0 {
-            if slot.edges == 0 {
-                self.release_internal(idx);
-            } else if slot.color != GcColor::Purple {
-                slot.color = GcColor::Purple;
-                self.roots.insert(idx);
-            }
+        slot.anchors = slot
+            .anchors
+            .checked_sub(1)
+            .ok_or(VmError::ReferenceCountUnderflow)?;
+        if slot.anchors == 0 && slot.edges == 0 {
+            self.destroy_slot(idx)?;
         }
         Ok(())
     }
@@ -199,9 +159,10 @@ impl PrivateHeap {
             .get_mut(obj_ref.index as usize)
             .ok_or(VmError::InvalidObjectReference)?;
         if slot.generation == obj_ref.generation && slot.object.is_some() {
-            slot.edges = slot.edges.saturating_add(1);
-            slot.color = GcColor::Black;
-            self.roots.remove(&(obj_ref.index as usize));
+            slot.edges = slot
+                .edges
+                .checked_add(1)
+                .ok_or(VmError::ReferenceCountOverflow)?;
             Ok(())
         } else {
             Err(VmError::InvalidObjectReference)
@@ -219,49 +180,71 @@ impl PrivateHeap {
             return Err(VmError::InvalidObjectReference);
         }
 
-        slot.edges = slot.edges.saturating_sub(1);
+        slot.edges = slot
+            .edges
+            .checked_sub(1)
+            .ok_or(VmError::ReferenceCountUnderflow)?;
         if slot.anchors == 0 && slot.edges == 0 {
-            self.release_internal(idx);
-        } else if slot.anchors == 0 && slot.edges > 0 && slot.color != GcColor::Purple {
-            slot.color = GcColor::Purple;
-            self.roots.insert(idx);
+            self.destroy_slot(idx)?;
         }
         Ok(())
     }
 
-    fn release_internal(&mut self, idx: usize) {
-        let slot = &mut self.objects[idx];
-        slot.color = GcColor::Black;
-        self.roots.remove(&idx);
-
-        if let Some(obj) = slot.object.take() {
-            self.quota.release_heap(1, obj.heap_bytes());
-
-            self.free_slots.push(idx);
-
-            let children = Self::get_children(&obj);
-            if let HeapObject::AdapterHandle {
-                binding_id,
-                type_id,
-                id,
-            } = obj
-            {
-                self.pending_adapter_handle_drops
-                    .push((binding_id, type_id, id));
-            }
-
-            for child in children {
-                let _ = self.release_edge(child);
-            }
+    pub fn retain_edge_from(
+        &mut self,
+        parent: VmObjectRef,
+        child: VmObjectRef,
+    ) -> Result<(), VmError> {
+        self.get_object(parent)?;
+        if self.reaches(child, parent, &mut HashSet::new())? {
+            return Err(VmError::OwnershipCycle);
         }
+        self.retain_edge(child)
+    }
+
+    fn destroy_slot(&mut self, idx: usize) -> Result<(), VmError> {
+        let (obj, heap_bytes) = {
+            let slot = self
+                .objects
+                .get_mut(idx)
+                .ok_or(VmError::InvalidObjectReference)?;
+            let obj = slot.object.take().ok_or(VmError::InvalidObjectReference)?;
+            let heap_bytes = std::mem::take(&mut slot.heap_bytes);
+            slot.anchors = 0;
+            slot.edges = 0;
+            (obj, heap_bytes)
+        };
+
+        self.quota.release_heap(1, heap_bytes);
+        self.free_slots.push(idx);
+
+        let children = Self::get_children(&obj);
+        if let HeapObject::AdapterHandle {
+            binding_id,
+            type_id,
+            id,
+        } = obj
+        {
+            self.pending_adapter_handle_drops
+                .push((binding_id, type_id, id));
+        }
+
+        for child in children {
+            self.release_edge(child)?;
+        }
+        Ok(())
     }
 
     fn get_children(obj: &HeapObject) -> Vec<VmObjectRef> {
         let mut children = Vec::new();
         match obj {
-            HeapObject::Struct { fields, .. } => {
-                for field in fields {
-                    if let VmValue::Object(child_ref) = field {
+            HeapObject::Struct {
+                fields,
+                strong_fields,
+                ..
+            } => {
+                for (field, is_strong) in fields.iter().zip(strong_fields) {
+                    if *is_strong && let VmValue::Object(child_ref) = field {
                         children.push(*child_ref);
                     }
                 }
@@ -290,158 +273,25 @@ impl PrivateHeap {
         children
     }
 
-    // State Machine Cycle Collector (Bacon & Rajan Algorithm)
-    pub fn collect_cycles(&mut self) {
-        if self.roots.is_empty() {
-            return;
+    fn reaches(
+        &self,
+        current: VmObjectRef,
+        target: VmObjectRef,
+        visited: &mut HashSet<VmObjectRef>,
+    ) -> Result<bool, VmError> {
+        if current == target {
+            return Ok(true);
         }
-        self.mark_roots();
-        self.scan_roots();
-        self.collect_roots();
-    }
-
-    fn mark_roots(&mut self) {
-        let roots: Vec<usize> = self.roots.drain().collect();
-        for idx in roots {
-            let (color, anchors, edges) = {
-                let slot = &self.objects[idx];
-                (slot.color, slot.anchors, slot.edges)
-            };
-            if color == GcColor::Purple && anchors == 0 && edges > 0 {
-                self.mark_gray(idx);
-                self.roots.insert(idx);
-            } else {
-                self.objects[idx].color = GcColor::Black;
-                if anchors == 0 && edges == 0 {
-                    self.release_internal(idx);
-                }
+        if !visited.insert(current) {
+            return Ok(false);
+        }
+        let object = self.get_object(current)?;
+        for child in Self::get_children(object) {
+            if self.reaches(child, target, visited)? {
+                return Ok(true);
             }
         }
-    }
-
-    fn mark_gray(&mut self, idx: usize) {
-        let (color, children) = {
-            let slot = &self.objects[idx];
-            if let Some(obj) = &slot.object {
-                (slot.color, Self::get_children(obj))
-            } else {
-                (slot.color, Vec::new())
-            }
-        };
-
-        if color != GcColor::Gray {
-            self.objects[idx].color = GcColor::Gray;
-            for child in children {
-                let child_idx = child.index as usize;
-                if self.objects[child_idx].generation == child.generation {
-                    self.objects[child_idx].edges = self.objects[child_idx].edges.saturating_sub(1);
-                    self.mark_gray(child_idx);
-                }
-            }
-        }
-    }
-
-    fn scan_roots(&mut self) {
-        let roots: Vec<usize> = self.roots.iter().copied().collect();
-        for idx in roots {
-            self.scan(idx);
-        }
-    }
-
-    fn scan(&mut self, idx: usize) {
-        let (color, anchors, edges, children) = {
-            let slot = &self.objects[idx];
-            let children = if let Some(obj) = &slot.object {
-                Self::get_children(obj)
-            } else {
-                Vec::new()
-            };
-            (slot.color, slot.anchors, slot.edges, children)
-        };
-
-        if color == GcColor::Gray {
-            if anchors > 0 || edges > 0 {
-                self.scan_black(idx);
-            } else {
-                self.objects[idx].color = GcColor::White;
-                for child in children {
-                    let child_idx = child.index as usize;
-                    if self.objects[child_idx].generation == child.generation {
-                        self.scan(child_idx);
-                    }
-                }
-            }
-        }
-    }
-
-    fn scan_black(&mut self, idx: usize) {
-        let children = {
-            let slot = &self.objects[idx];
-            if let Some(obj) = &slot.object {
-                Self::get_children(obj)
-            } else {
-                Vec::new()
-            }
-        };
-
-        self.objects[idx].color = GcColor::Black;
-        for child in children {
-            let child_idx = child.index as usize;
-            if self.objects[child_idx].generation == child.generation {
-                self.objects[child_idx].edges = self.objects[child_idx].edges.saturating_add(1);
-                if self.objects[child_idx].color != GcColor::Black {
-                    self.scan_black(child_idx);
-                }
-            }
-        }
-    }
-
-    fn collect_roots(&mut self) {
-        let roots: Vec<usize> = self.roots.drain().collect();
-        for idx in roots {
-            self.objects[idx].color = GcColor::Black;
-            self.collect_white(idx);
-        }
-    }
-
-    fn collect_white(&mut self, idx: usize) {
-        let slot = &mut self.objects[idx];
-        if slot.color == GcColor::White && slot.object.is_some() {
-            slot.color = GcColor::Black;
-
-            let obj = slot.object.take().unwrap();
-
-            self.quota.release_heap(1, obj.heap_bytes());
-
-            self.free_slots.push(idx);
-
-            let children = Self::get_children(&obj);
-            if let HeapObject::AdapterHandle {
-                binding_id,
-                type_id,
-                id,
-            } = obj
-            {
-                self.pending_adapter_handle_drops
-                    .push((binding_id, type_id, id));
-            }
-
-            for child in children {
-                let child_idx = child.index as usize;
-                if self.objects[child_idx].generation == child.generation {
-                    self.collect_white(child_idx);
-                }
-            }
-        }
-    }
-
-    // Existing helpers
-    pub fn allocations_since_release(&self) -> usize {
-        self.allocations_since_release
-    }
-
-    pub fn reset_allocations_since_release(&mut self) {
-        self.allocations_since_release = 0;
+        Ok(false)
     }
 
     pub fn iter_live_objects(
@@ -491,7 +341,8 @@ impl PrivateHeap {
         }
 
         for obj_ref in to_free {
-            let _ = self.free_object(obj_ref);
+            self.free_object(obj_ref)
+                .expect("adapter handle references are valid while extracting them");
         }
 
         extracted
@@ -501,8 +352,9 @@ impl PrivateHeap {
 impl Drop for PrivateHeap {
     fn drop(&mut self) {
         for slot in &mut self.objects {
-            if let Some(obj) = slot.object.take() {
-                self.quota.release_heap(1, obj.heap_bytes());
+            if slot.object.take().is_some() {
+                self.quota.release_heap(1, slot.heap_bytes);
+                slot.heap_bytes = 0;
             }
         }
     }

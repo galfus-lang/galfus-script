@@ -250,6 +250,10 @@ impl ThreadQuota {
         self.heap_objects.load(Ordering::Relaxed)
     }
 
+    pub fn heap_bytes(&self) -> usize {
+        self.heap_bytes.load(Ordering::Relaxed)
+    }
+
     pub fn try_reserve_heap_objects(&self, amount: usize) -> Result<(), ExecutionFailureKind> {
         let current = self.heap_objects.fetch_add(amount, Ordering::Relaxed);
         let limit = self.limits.max_heap_objects;

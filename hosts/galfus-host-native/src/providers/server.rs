@@ -14,7 +14,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 use url::Url;
 
 type BoxedServerBody = BoxBody<hyper::body::Bytes, String>;
@@ -151,6 +151,7 @@ struct PendingRequest {
     body: Option<IncomingRequestBody>,
     upgrade: Option<hyper::upgrade::OnUpgrade>,
     websocket_key: Option<String>,
+    permit: Option<OwnedSemaphorePermit>,
 }
 
 struct IncomingRequestBody {
@@ -161,10 +162,15 @@ struct IncomingRequestBody {
 enum ServerCommand {
     Bind {
         port: i32,
+        max_pending_requests: u32,
         completion: Completion,
     },
     Accept {
         _server_id: u64,
+        completion: Completion,
+    },
+    RequestGet {
+        request_id: u64,
         completion: Completion,
     },
     ResponseStart {
@@ -260,7 +266,8 @@ impl NativeServerProvider {
         let mut next_request_id = 1;
 
         let mut accept_waiters: VecDeque<AcceptWaiter> = VecDeque::new();
-        let mut pending_requests: VecDeque<PendingRequest> = VecDeque::new();
+        let mut pending_requests: VecDeque<u64> = VecDeque::new();
+        let mut request_metadata: HashMap<u64, PendingRequest> = HashMap::new();
         let mut request_bodies: HashMap<u64, IncomingRequestBody> = HashMap::new();
         let mut pending_request_reads: std::collections::HashSet<u64> =
             std::collections::HashSet::new();
@@ -271,12 +278,16 @@ impl NativeServerProvider {
                 oneshot::Sender<(Response<BoxedServerBody>, bool)>,
                 Option<hyper::upgrade::OnUpgrade>,
                 Option<String>,
+                OwnedSemaphorePermit,
             ),
         > = HashMap::new();
 
         let mut active_response_bodies: HashMap<
             u64,
-            mpsc::Sender<Result<hyper::body::Frame<Bytes>, String>>,
+            (
+                mpsc::Sender<Result<hyper::body::Frame<Bytes>, String>>,
+                OwnedSemaphorePermit,
+            ),
         > = HashMap::new();
 
         type WsStream = tokio_tungstenite::WebSocketStream<TokioIo<hyper::upgrade::Upgraded>>;
@@ -295,12 +306,18 @@ impl NativeServerProvider {
 
         while let Some(cmd) = async_rx.recv().await {
             match cmd {
-                ServerCommand::Bind { port, completion } => {
+                ServerCommand::Bind {
+                    port,
+                    max_pending_requests,
+                    completion,
+                } => {
                     let addr = SocketAddr::from(([0, 0, 0, 0], port as u16));
                     match TcpListener::bind(addr).await {
                         Ok(listener) => {
                             let server_id = next_server_id;
                             next_server_id += 1;
+                            let request_slots =
+                                Arc::new(Semaphore::new(max_pending_requests.max(1) as usize));
 
                             let itx = internal_tx.clone();
                             tokio::spawn(async move {
@@ -308,11 +325,28 @@ impl NativeServerProvider {
                                     if let Ok((stream, _)) = listener.accept().await {
                                         let io = TokioIo::new(stream);
                                         let itx = itx.clone();
+                                        let request_slots = request_slots.clone();
                                         tokio::spawn(async move {
                                             let service = service_fn(
                                                 move |mut req: Request<hyper::body::Incoming>| {
                                                     let itx = itx.clone();
+                                                    let request_slots = request_slots.clone();
                                                     async move {
+                                                        let Ok(permit) =
+                                                            request_slots.acquire_owned().await
+                                                        else {
+                                                            return Ok::<_, hyper::Error>(
+                                                                Response::builder()
+                                                                    .status(503)
+                                                                    .body(BoxBody::new(
+                                                                        Full::new(Bytes::new())
+                                                                            .map_err(
+                                                                                |e| match e {},
+                                                                            ),
+                                                                    ))
+                                                                    .unwrap(),
+                                                            );
+                                                        };
                                                         let websocket_key = req
                                                             .headers()
                                                             .get(hyper::header::SEC_WEBSOCKET_KEY)
@@ -361,6 +395,7 @@ impl NativeServerProvider {
                                                             }),
                                                             upgrade,
                                                             websocket_key,
+                                                            permit: Some(permit),
                                                         };
 
                                                         let _ = itx.send(ServerCommand::InternalRequestReceived {
@@ -415,29 +450,46 @@ impl NativeServerProvider {
                 } => {
                     req.request_id = next_request_id;
                     next_request_id += 1;
+                    let request_id = req.request_id;
                     let upgrade = req.upgrade.take();
                     let websocket_key = req.websocket_key.take();
+                    let permit = req
+                        .permit
+                        .take()
+                        .expect("server request must reserve a queue slot");
 
                     let body = req
                         .body
                         .take()
                         .expect("server request body must be present");
-                    request_bodies.insert(req.request_id, body);
+                    request_bodies.insert(request_id, body);
 
-                    response_channels.insert(req.request_id, (response_tx, upgrade, websocket_key));
+                    response_channels
+                        .insert(request_id, (response_tx, upgrade, websocket_key, permit));
+
+                    request_metadata.insert(request_id, req);
 
                     if let Some(waiter) = accept_waiters.pop_front() {
-                        Self::inject_request(waiter, req);
+                        Self::inject_request_ticket(waiter, request_id);
                     } else {
-                        pending_requests.push_back(req);
+                        pending_requests.push_back(request_id);
                     }
                 }
                 ServerCommand::Accept { completion, .. } => {
-                    if let Some(req) = pending_requests.pop_front() {
-                        Self::inject_request(AcceptWaiter { completion }, req);
+                    if let Some(request_id) = pending_requests.pop_front() {
+                        Self::inject_request_ticket(AcceptWaiter { completion }, request_id);
                     } else {
                         accept_waiters.push_back(AcceptWaiter { completion });
                     }
+                }
+                ServerCommand::RequestGet {
+                    request_id,
+                    completion,
+                } => {
+                    completion.inject_surface(Ok(request_metadata
+                        .remove(&request_id)
+                        .map(Self::request_surface)
+                        .unwrap_or(SurfaceValue::Null)));
                 }
                 ServerCommand::ResponseStart {
                     request_id,
@@ -447,9 +499,10 @@ impl NativeServerProvider {
                     completion,
                 } => {
                     request_bodies.remove(&request_id);
+                    request_metadata.remove(&request_id);
                     pending_request_reads.remove(&request_id);
 
-                    if let Some((tx, upgrade, websocket_key)) =
+                    if let Some((tx, upgrade, websocket_key, permit)) =
                         response_channels.remove(&request_id)
                     {
                         let mut builder = Response::builder().status(status as u16);
@@ -475,7 +528,7 @@ impl NativeServerProvider {
                         }
 
                         let (body_tx, body_rx) = mpsc::channel(16);
-                        active_response_bodies.insert(request_id, body_tx);
+                        active_response_bodies.insert(request_id, (body_tx, permit));
 
                         let channel_body = ChannelBody { rx: body_rx };
                         let response = builder.body(BoxBody::new(channel_body)).unwrap();
@@ -509,7 +562,7 @@ impl NativeServerProvider {
                     chunk,
                     completion,
                 } => {
-                    if let Some(tx) = active_response_bodies.get(&request_id) {
+                    if let Some((tx, _permit)) = active_response_bodies.get(&request_id) {
                         let ok = tx
                             .try_send(Ok(hyper::body::Frame::data(Bytes::from(chunk))))
                             .is_ok();
@@ -529,7 +582,7 @@ impl NativeServerProvider {
                     request_id,
                     completion,
                 } => {
-                    if let Some(tx) = active_response_bodies.remove(&request_id) {
+                    if let Some((tx, _permit)) = active_response_bodies.remove(&request_id) {
                         let _ = tx.try_send(Err("aborted".to_string()));
                     }
                     completion.inject_bool(true);
@@ -573,6 +626,7 @@ impl NativeServerProvider {
                     completion,
                 } => {
                     request_bodies.remove(&request_id);
+                    request_metadata.remove(&request_id);
                     pending_request_reads.remove(&request_id);
                     completion.inject_bool(true);
                 }
@@ -660,7 +714,13 @@ impl NativeServerProvider {
         }
     }
 
-    fn inject_request(waiter: AcceptWaiter, req: PendingRequest) {
+    fn inject_request_ticket(waiter: AcceptWaiter, request_id: u64) {
+        waiter
+            .completion
+            .inject_surface(Ok(SurfaceValue::U64(request_id)));
+    }
+
+    fn request_surface(req: PendingRequest) -> SurfaceValue {
         let href = req.url.as_str().as_bytes().to_vec();
         let protocol = req.url.scheme().as_bytes().to_vec();
         let host = req.url.host_str().unwrap_or("").as_bytes().to_vec();
@@ -680,30 +740,28 @@ impl NativeServerProvider {
                 ])
             })
             .collect();
-        waiter
-            .completion
-            .inject_surface(Ok(SurfaceValue::Struct(vec![
-                ("id".to_string(), SurfaceValue::U64(req.request_id)),
-                (
-                    "url".to_string(),
-                    SurfaceValue::Struct(vec![
-                        ("href".to_string(), SurfaceValue::Bytes(href)),
-                        ("protocol".to_string(), SurfaceValue::Bytes(protocol)),
-                        ("host".to_string(), SurfaceValue::Bytes(host)),
-                        ("hostname".to_string(), SurfaceValue::Bytes(hostname)),
-                        ("pathname".to_string(), SurfaceValue::Bytes(path)),
-                        ("search".to_string(), SurfaceValue::Bytes(search)),
-                        ("hash".to_string(), SurfaceValue::Bytes(hash)),
-                        ("origin".to_string(), SurfaceValue::Bytes(origin)),
-                    ]),
-                ),
-                (
-                    "method".to_string(),
-                    SurfaceValue::Bytes(req.method.into_bytes()),
-                ),
-                ("headers".to_string(), SurfaceValue::List(headers)),
-                ("body".to_string(), SurfaceValue::U64(req.request_id)),
-            ])));
+        SurfaceValue::Struct(vec![
+            ("id".to_string(), SurfaceValue::U64(req.request_id)),
+            (
+                "url".to_string(),
+                SurfaceValue::Struct(vec![
+                    ("href".to_string(), SurfaceValue::Bytes(href)),
+                    ("protocol".to_string(), SurfaceValue::Bytes(protocol)),
+                    ("host".to_string(), SurfaceValue::Bytes(host)),
+                    ("hostname".to_string(), SurfaceValue::Bytes(hostname)),
+                    ("pathname".to_string(), SurfaceValue::Bytes(path)),
+                    ("search".to_string(), SurfaceValue::Bytes(search)),
+                    ("hash".to_string(), SurfaceValue::Bytes(hash)),
+                    ("origin".to_string(), SurfaceValue::Bytes(origin)),
+                ]),
+            ),
+            (
+                "method".to_string(),
+                SurfaceValue::Bytes(req.method.into_bytes()),
+            ),
+            ("headers".to_string(), SurfaceValue::List(headers)),
+            ("body".to_string(), SurfaceValue::U64(req.request_id)),
+        ])
     }
 
     async fn read_request_body(
@@ -835,10 +893,15 @@ impl HostProvider for NativeServerProvider {
             match name {
                 "server_bind" => Ok(ServerCommand::Bind {
                     port: surface_i32(args.first(), "port")?,
+                    max_pending_requests: surface_u32(args.get(1), "maximum pending requests")?,
                     completion,
                 }),
                 "server_accept" => Ok(ServerCommand::Accept {
                     _server_id: surface_u64(args.first(), "server ID")?,
+                    completion,
+                }),
+                "server_request_get" => Ok(ServerCommand::RequestGet {
+                    request_id: surface_u64(args.first(), "request ID")?,
                     completion,
                 }),
                 "server_response_start" => {

@@ -179,6 +179,7 @@ pub enum HeapObject {
         module_id: galfus_core::ModuleId,
         layout_idx: StructLayoutIdx,
         fields: Vec<Value>,
+        strong_fields: Vec<bool>,
     },
     Array {
         module_id: ModuleId,
@@ -204,8 +205,14 @@ pub enum HeapObject {
 impl HeapObject {
     pub fn heap_bytes(&self) -> usize {
         match self {
-            Self::Struct { fields, .. } => {
-                std::mem::size_of::<Self>() + fields.capacity() * std::mem::size_of::<Value>()
+            Self::Struct {
+                fields,
+                strong_fields,
+                ..
+            } => {
+                std::mem::size_of::<Self>()
+                    + fields.capacity() * std::mem::size_of::<Value>()
+                    + strong_fields.capacity() * std::mem::size_of::<bool>()
             }
             Self::Array { elements, .. } => {
                 std::mem::size_of::<Self>() + elements.capacity() * std::mem::size_of::<Value>()
@@ -347,6 +354,7 @@ impl VirtualMachine {
                     module_id: value_module,
                     layout_idx: actual_layout,
                     fields,
+                    ..
                 }) = thread.heap.get_object(reference)
                 else {
                     return false;

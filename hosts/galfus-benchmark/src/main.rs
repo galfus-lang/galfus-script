@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use cli_table::{Cell, Style, Table, format::Justify};
 use regex::Regex;
 use serde::Serialize;
@@ -15,10 +18,12 @@ const MEMORY_POLL_INTERVAL: Duration = Duration::from_millis(1);
 const JAVA_OUTPUT_DIR: &str = "./target/release/benchmark-java";
 const SERVER_REQUEST_COUNT: usize = 10_000;
 const SERVER_CONCURRENCY: usize = 32;
+const SERVER_HANDLER_COUNTS: &[usize] = &[1, 8, 32];
 const SERVER_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const SERVER_START_ATTEMPTS: usize = 3;
 const SERVER_PORT_MIN: u16 = 18_080;
 const SERVER_PORT_MAX: u16 = 18_180;
+const POST_UPLOAD_PAYLOAD: &[u8] = &[b'G'; 4 * 1024];
 
 struct BenchmarkCase {
     name: &'static str,
@@ -27,6 +32,37 @@ struct BenchmarkCase {
     java_class: &'static str,
     targets: &'static [(&'static str, &'static [&'static str])],
 }
+
+#[derive(Clone, Copy)]
+struct HttpWorkload {
+    request_count: usize,
+    concurrency: usize,
+    payload: Option<&'static [u8]>,
+}
+
+struct ServerBenchmark {
+    name: &'static str,
+    case: &'static BenchmarkCase,
+    workload: HttpWorkload,
+}
+
+const SERVER_GET_WORKLOAD: HttpWorkload = HttpWorkload {
+    request_count: SERVER_REQUEST_COUNT,
+    concurrency: SERVER_CONCURRENCY,
+    payload: None,
+};
+
+const SERVER_POST_SMALL_WORKLOAD: HttpWorkload = HttpWorkload {
+    request_count: SERVER_REQUEST_COUNT,
+    concurrency: SERVER_CONCURRENCY,
+    payload: Some(b"Hello World"),
+};
+
+const SERVER_POST_UPLOAD_WORKLOAD: HttpWorkload = HttpWorkload {
+    request_count: 2_000,
+    concurrency: SERVER_CONCURRENCY,
+    payload: Some(POST_UPLOAD_PAYLOAD),
+};
 
 const BENCHMARK_CASES: &[BenchmarkCase] = &[
     BenchmarkCase {
@@ -85,8 +121,8 @@ const BENCHMARK_CASES: &[BenchmarkCase] = &[
     },
 ];
 
-const SERVER_BENCHMARK: BenchmarkCase = BenchmarkCase {
-    name: "HTTP/1.1 Request Overload",
+const SERVER_GET_CASE: BenchmarkCase = BenchmarkCase {
+    name: "HTTP/1.1 Empty Response",
     galfus_source: "benchmark/server.gfs",
     standalone_output: "./target/release/server_standalone",
     java_class: "Server",
@@ -98,7 +134,7 @@ const SERVER_BENCHMARK: BenchmarkCase = BenchmarkCase {
     ],
 };
 
-const SERVER_POST_BENCHMARK: BenchmarkCase = BenchmarkCase {
+const SERVER_POST_CASE: BenchmarkCase = BenchmarkCase {
     name: "HTTP/1.1 POST Echo",
     galfus_source: "benchmark/server_post.gfs",
     standalone_output: "./target/release/server_post_standalone",
@@ -113,6 +149,24 @@ const SERVER_POST_BENCHMARK: BenchmarkCase = BenchmarkCase {
         ("Perl", &["perl", "benchmark/server_post.pl", "{port}"]),
     ],
 };
+
+const SERVER_BENCHMARKS: &[ServerBenchmark] = &[
+    ServerBenchmark {
+        name: "HTTP/1.1 Empty Response",
+        case: &SERVER_GET_CASE,
+        workload: SERVER_GET_WORKLOAD,
+    },
+    ServerBenchmark {
+        name: "HTTP/1.1 POST Echo (11 B)",
+        case: &SERVER_POST_CASE,
+        workload: SERVER_POST_SMALL_WORKLOAD,
+    },
+    ServerBenchmark {
+        name: "HTTP/1.1 POST Echo (4 KiB upload)",
+        case: &SERVER_POST_CASE,
+        workload: SERVER_POST_UPLOAD_WORKLOAD,
+    },
+];
 
 #[derive(Debug, Serialize)]
 struct BenchmarkResult {
@@ -221,10 +275,10 @@ fn main() -> ExitCode {
             }
         }
     }
-    if !compile_standalone(&SERVER_BENCHMARK, reuse_release) {
+    if !compile_standalone(&SERVER_GET_CASE, reuse_release) {
         return ExitCode::FAILURE;
     }
-    if !compile_standalone(&SERVER_POST_BENCHMARK, reuse_release) {
+    if !compile_standalone(&SERVER_POST_CASE, reuse_release) {
         return ExitCode::FAILURE;
     }
 
@@ -333,24 +387,16 @@ fn main() -> ExitCode {
         }
     }
 
-    run_server_benchmark(
-        &SERVER_BENCHMARK,
-        reuse_release,
-        &bun_bin,
-        java_available,
-        false,
-        &mut results,
-        &mut raw_runs,
-    );
-    run_server_benchmark(
-        &SERVER_POST_BENCHMARK,
-        reuse_release,
-        &bun_bin,
-        java_available,
-        true,
-        &mut results,
-        &mut raw_runs,
-    );
+    for benchmark in SERVER_BENCHMARKS {
+        run_server_benchmark(
+            benchmark,
+            reuse_release,
+            &bun_bin,
+            java_available,
+            &mut results,
+            &mut raw_runs,
+        );
+    }
 
     results.sort_by(|left, right| {
         left.benchmark
@@ -551,36 +597,37 @@ fn run_sample(
 }
 
 fn run_server_benchmark(
-    benchmark: &BenchmarkCase,
+    benchmark: &ServerBenchmark,
     reuse_release: bool,
     bun_bin: &str,
     java_available: bool,
-    is_post: bool,
     results: &mut Vec<BenchmarkResult>,
     raw_runs: &mut Vec<RawBenchmarkRun>,
 ) {
+    let case = benchmark.case;
     let mut targets = vec![
         (
             "Galfus (Workspace)",
             vec![
                 "./target/release/galfus-cli".to_string(),
                 "run".to_string(),
-                benchmark.galfus_source.to_string(),
+                case.galfus_source.to_string(),
                 "--".to_string(),
+                "{handlers}".to_string(),
                 "{port}".to_string(),
             ],
         ),
         (
             "Galfus (Host)",
             vec![
-                benchmark.standalone_output.to_string(),
+                case.standalone_output.to_string(),
+                "{handlers}".to_string(),
                 "{port}".to_string(),
             ],
         ),
     ];
     targets.extend(
-        benchmark
-            .targets
+        case.targets
             .iter()
             .map(|(name, command)| {
                 let mut command = command
@@ -603,81 +650,142 @@ fn run_server_benchmark(
                 "jdk.httpserver".to_string(),
                 "-cp".to_string(),
                 JAVA_OUTPUT_DIR.to_string(),
-                benchmark.java_class.to_string(),
+                case.java_class.to_string(),
                 "{port}".to_string(),
             ],
         ));
     }
 
     for (name, command) in targets {
-        print!("Testing {} / {name}... ", benchmark.name);
-        std::io::stdout().flush().unwrap();
-
-        let mut samples = Vec::with_capacity(SAMPLE_COUNT);
-        let mut failure = None;
-        for _ in 0..SAMPLE_COUNT {
-            match run_server_sample(&command, is_post) {
-                Ok(sample) => {
-                    samples.push(sample);
-                    print!(".");
-                }
-                Err(error) => {
-                    println!(" Failed: {error}");
-                    failure = Some(error);
-                    break;
-                }
+        if name.starts_with("Galfus") {
+            for handler_count in SERVER_HANDLER_COUNTS {
+                run_server_target(
+                    benchmark,
+                    reuse_release,
+                    name,
+                    &command,
+                    Some(*handler_count),
+                    results,
+                    raw_runs,
+                );
             }
-            std::io::stdout().flush().unwrap();
-        }
-
-        raw_runs.push(RawBenchmarkRun {
-            benchmark: benchmark.name.to_string(),
-            language: name.to_string(),
-            command: command.clone(),
-            samples: samples.clone(),
-            error: failure,
-        });
-        if let Err(error) = write_reports(reuse_release, raw_runs.as_slice(), results.as_slice()) {
-            eprintln!("Could not persist benchmark reports: {error}");
-        }
-
-        let Some(result) = summarize(benchmark.name, name, samples) else {
-            println!(" Skipped");
-            continue;
-        };
-        println!(
-            " {}ms median (total {}ms)",
-            result.script_time_ms, result.total_time_ms
-        );
-        results.push(result);
-        if let Err(error) = write_reports(reuse_release, raw_runs.as_slice(), results.as_slice()) {
-            eprintln!("Could not persist benchmark reports: {error}");
+        } else {
+            run_server_target(
+                benchmark,
+                reuse_release,
+                name,
+                &command,
+                None,
+                results,
+                raw_runs,
+            );
         }
     }
 }
 
-fn run_server_sample(command: &[String], is_post: bool) -> Result<BenchmarkSample, String> {
-    let (port, server) = start_server_with_retry(command)?;
+fn run_server_target(
+    benchmark: &ServerBenchmark,
+    reuse_release: bool,
+    name: &str,
+    command: &[String],
+    handler_count: Option<usize>,
+    results: &mut Vec<BenchmarkResult>,
+    raw_runs: &mut Vec<RawBenchmarkRun>,
+) {
+    let language = handler_count.map_or_else(
+        || name.to_string(),
+        |handler_count| format!("{name} ({handler_count} handlers)"),
+    );
+    print!("Testing {} / {language}... ", benchmark.name);
+    std::io::stdout().flush().unwrap();
+
+    let mut samples = Vec::with_capacity(SAMPLE_COUNT);
+    let mut failure = None;
+    for _ in 0..SAMPLE_COUNT {
+        match run_server_sample(command, benchmark.workload, handler_count) {
+            Ok(sample) => {
+                samples.push(sample);
+                print!(".");
+            }
+            Err(error) => {
+                println!(" Failed: {error}");
+                failure = Some(error);
+                break;
+            }
+        }
+        std::io::stdout().flush().unwrap();
+    }
+
+    raw_runs.push(RawBenchmarkRun {
+        benchmark: benchmark.name.to_string(),
+        language: language.clone(),
+        command: command.to_vec(),
+        samples: samples.clone(),
+        error: failure,
+    });
+    if let Err(error) = write_reports(reuse_release, raw_runs.as_slice(), results.as_slice()) {
+        eprintln!("Could not persist benchmark reports: {error}");
+    }
+
+    let Some(result) = summarize(benchmark.name, &language, samples) else {
+        println!(" Skipped");
+        return;
+    };
+    println!(
+        " {}ms median (total {}ms)",
+        result.script_time_ms, result.total_time_ms
+    );
+    results.push(result);
+    if let Err(error) = write_reports(reuse_release, raw_runs.as_slice(), results.as_slice()) {
+        eprintln!("Could not persist benchmark reports: {error}");
+    }
+}
+
+fn run_server_sample(
+    command: &[String],
+    workload: HttpWorkload,
+    handler_count: Option<usize>,
+) -> Result<BenchmarkSample, String> {
+    let (port, server) = start_server_with_retry(command, handler_count)?;
     let load_started = Instant::now();
-    let result = run_http_load(port, is_post);
+    let result = run_http_load(port, workload);
     let script_time_ms = load_started.elapsed().as_millis() as u64;
     let metrics = server.stop()?;
-    result?;
+    if let Err(error) = result {
+        if metrics.stderr.is_empty() {
+            return Err(error);
+        }
+        return Err(format!(
+            "{error}\nserver stderr:\n{}",
+            metrics.stderr.trim()
+        ));
+    }
 
     Ok(BenchmarkSample {
         script_time_ms,
         total_time_ms: metrics.total_time_ms,
-        result: format!("{SERVER_REQUEST_COUNT} requests at {SERVER_CONCURRENCY} concurrency"),
+        result: format!(
+            "{} requests at {} concurrency{}",
+            workload.request_count,
+            workload.concurrency,
+            workload.payload.map_or_else(String::new, |payload| format!(
+                ", {} B upload",
+                payload.len()
+            ))
+        ),
         peak_rss_bytes: metrics.peak_rss_bytes,
         peak_virtual_bytes: metrics.peak_virtual_bytes,
     })
 }
 
-fn start_server_with_retry(command: &[String]) -> Result<(u16, RunningServer), String> {
+fn start_server_with_retry(
+    command: &[String],
+    handler_count: Option<usize>,
+) -> Result<(u16, RunningServer), String> {
     let mut errors = Vec::with_capacity(SERVER_START_ATTEMPTS);
     for _ in 0..SERVER_START_ATTEMPTS {
         let port = available_server_port()?;
-        match start_server(command, port) {
+        match start_server(command, port, handler_count) {
             Ok(server) => return Ok((port, server)),
             Err(error) => errors.push(error),
         }
@@ -688,11 +796,19 @@ fn start_server_with_retry(command: &[String]) -> Result<(u16, RunningServer), S
     ))
 }
 
-fn start_server(command: &[String], port: u16) -> Result<RunningServer, String> {
+fn start_server(
+    command: &[String],
+    port: u16,
+    handler_count: Option<usize>,
+) -> Result<RunningServer, String> {
     let started = Instant::now();
     let command = command
         .iter()
-        .map(|argument| argument.replace("{port}", &port.to_string()))
+        .map(|argument| {
+            argument
+                .replace("{handlers}", &handler_count.unwrap_or_default().to_string())
+                .replace("{port}", &port.to_string())
+        })
         .collect::<Vec<_>>();
     let mut child = Command::new(&command[0])
         .args(&command[1..])
@@ -774,7 +890,7 @@ fn available_server_port() -> Result<u16, String> {
 fn wait_for_server(port: u16) -> Result<(), String> {
     let deadline = Instant::now() + SERVER_READY_TIMEOUT;
     loop {
-        if send_http_request(port, false).is_ok() {
+        if send_http_request(port, SERVER_GET_WORKLOAD).is_ok() {
             return Ok(());
         }
         if Instant::now() >= deadline {
@@ -786,20 +902,20 @@ fn wait_for_server(port: u16) -> Result<(), String> {
     }
 }
 
-fn run_http_load(port: u16, is_post: bool) -> Result<(), String> {
+fn run_http_load(port: u16, workload: HttpWorkload) -> Result<(), String> {
     let next_request = Arc::new(AtomicUsize::new(0));
     let (error_tx, error_rx) = mpsc::channel();
-    let mut workers = Vec::with_capacity(SERVER_CONCURRENCY);
+    let mut workers = Vec::with_capacity(workload.concurrency);
 
-    for _ in 0..SERVER_CONCURRENCY {
+    for _ in 0..workload.concurrency {
         let next_request = Arc::clone(&next_request);
         let error_tx = error_tx.clone();
         workers.push(thread::spawn(move || {
             loop {
-                if next_request.fetch_add(1, Ordering::Relaxed) >= SERVER_REQUEST_COUNT {
+                if next_request.fetch_add(1, Ordering::Relaxed) >= workload.request_count {
                     return;
                 }
-                if let Err(error) = send_http_request(port, is_post) {
+                if let Err(error) = send_http_request(port, workload) {
                     let _ = error_tx.send(error);
                     return;
                 }
@@ -816,7 +932,7 @@ fn run_http_load(port: u16, is_post: bool) -> Result<(), String> {
     error_rx.try_recv().map_or(Ok(()), Err)
 }
 
-fn send_http_request(port: u16, is_post: bool) -> Result<(), String> {
+fn send_http_request(port: u16, workload: HttpWorkload) -> Result<(), String> {
     let mut stream =
         TcpStream::connect(("127.0.0.1", port)).map_err(|error| format!("connect: {error}"))?;
     stream
@@ -826,8 +942,7 @@ fn send_http_request(port: u16, is_post: bool) -> Result<(), String> {
         .set_read_timeout(Some(Duration::from_secs(5)))
         .map_err(|error| format!("set read timeout: {error}"))?;
 
-    if is_post {
-        let payload = b"Hello World";
+    if let Some(payload) = workload.payload {
         let request = format!(
             "POST / HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             payload.len()
@@ -835,9 +950,11 @@ fn send_http_request(port: u16, is_post: bool) -> Result<(), String> {
         stream
             .write_all(request.as_bytes())
             .map_err(|error| format!("write request: {error}"))?;
-        stream
-            .write_all(payload)
-            .map_err(|error| format!("write request body: {error}"))?;
+        for chunk in payload.chunks(1024) {
+            stream
+                .write_all(chunk)
+                .map_err(|error| format!("write request body: {error}"))?;
+        }
     } else {
         stream
             .write_all(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
@@ -848,15 +965,57 @@ fn send_http_request(port: u16, is_post: bool) -> Result<(), String> {
     stream
         .read_to_end(&mut response)
         .map_err(|error| format!("read response: {error}"))?;
-    let response = String::from_utf8_lossy(&response);
-    let status_line = response.lines().next().unwrap_or("empty response");
+    let response_text = String::from_utf8_lossy(&response);
+    let status_line = response_text.lines().next().unwrap_or("empty response");
     if !status_line.starts_with("HTTP/") || status_line.split_whitespace().nth(1) != Some("200") {
         return Err(format!("expected HTTP 200, got {}", status_line));
     }
-    if is_post && !response.contains("Hello World") {
-        return Err("POST response did not contain the payload".to_string());
+    if let Some(payload) = workload.payload
+        && http_response_body(response.as_slice())? != payload
+    {
+        return Err("POST response body did not match the payload".to_string());
     }
     Ok(())
+}
+
+fn http_response_body(response: &[u8]) -> Result<Vec<u8>, String> {
+    let Some(header_end) = response.windows(4).position(|window| window == b"\r\n\r\n") else {
+        return Err("response has no header terminator".to_string());
+    };
+    let headers = String::from_utf8_lossy(&response[..header_end]);
+    let body = &response[header_end + 4..];
+    if headers
+        .lines()
+        .any(|line| line.eq_ignore_ascii_case("transfer-encoding: chunked"))
+    {
+        return decode_chunked_body(body);
+    }
+    Ok(body.to_vec())
+}
+
+fn decode_chunked_body(mut body: &[u8]) -> Result<Vec<u8>, String> {
+    let mut decoded = Vec::new();
+    loop {
+        let Some(size_end) = body.windows(2).position(|window| window == b"\r\n") else {
+            return Err("chunked response has no chunk size terminator".to_string());
+        };
+        let size = std::str::from_utf8(&body[..size_end])
+            .map_err(|error| format!("chunk size is not UTF-8: {error}"))?
+            .split(';')
+            .next()
+            .expect("split always returns an item");
+        let size = usize::from_str_radix(size, 16)
+            .map_err(|error| format!("invalid chunk size: {error}"))?;
+        body = &body[size_end + 2..];
+        if size == 0 {
+            return Ok(decoded);
+        }
+        if body.len() < size + 2 || &body[size..size + 2] != b"\r\n" {
+            return Err("chunked response ended before the complete chunk".to_string());
+        }
+        decoded.extend_from_slice(&body[..size]);
+        body = &body[size + 2..];
+    }
 }
 
 fn monitor_memory(pid: Pid, stop_rx: std::sync::mpsc::Receiver<()>) -> (u64, u64) {
@@ -932,7 +1091,7 @@ fn print_results(results: &[BenchmarkResult]) {
     for benchmark_name in BENCHMARK_CASES
         .iter()
         .map(|benchmark| benchmark.name)
-        .chain(std::iter::once(SERVER_BENCHMARK.name))
+        .chain(SERVER_BENCHMARKS.iter().map(|benchmark| benchmark.name))
     {
         let rows = results
             .iter()

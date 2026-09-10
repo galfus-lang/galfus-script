@@ -49,6 +49,15 @@ pub enum VmError {
     #[error("Invalid object reference")]
     InvalidObjectReference,
 
+    #[error("Object reference count underflow")]
+    ReferenceCountUnderflow,
+
+    #[error("Object reference count overflow")]
+    ReferenceCountOverflow,
+
+    #[error("Heap ownership graph cannot contain cycles")]
+    OwnershipCycle,
+
     #[error("Invalid jump target: pc {pc}")]
     InvalidJumpTarget { pc: usize },
 

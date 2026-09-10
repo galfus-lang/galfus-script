@@ -112,7 +112,7 @@ fn test_ownership_deterministic_release() {
 }
 
 #[test]
-fn test_ownership_cycle_release() {
+fn strong_ownership_cycles_are_rejected() {
     let image = BytecodeModule {
         name: "test".to_string(),
         global_count: 0,
@@ -184,37 +184,48 @@ fn test_ownership_cycle_release() {
     });
     let vm = VirtualMachine::new(sync::Arc::new(graph.clone()));
     let mut thread = thread::VmThreadState::test_new();
-    let res = vm
+    let error = vm
         .run_function(
             &mut thread,
             galfus_core::ModuleId::new(0),
             FuncIdx(0),
             vec![],
         )
-        .unwrap();
-    let tuple_ref = match res {
-        Value::Object(r) => r,
-        other => panic!("expected object, got {:?}", other),
-    };
+        .unwrap_err();
 
-    let (node1_ref, node2_ref) = match thread.heap.get_object(tuple_ref).unwrap() {
-        HeapObject::Tuple { elements } => {
-            let n1 = match &elements[0] {
-                Value::Object(r) => *r,
-                other => panic!("expected object, got {:?}", other),
-            };
-            let n2 = match &elements[1] {
-                Value::Object(r) => *r,
-                other => panic!("expected object, got {:?}", other),
-            };
-            (n1, n2)
-        }
-        other => panic!("expected tuple, got {:?}", other),
-    };
+    assert_eq!(error.error, VmError::OwnershipCycle);
+}
 
-    assert!(thread.heap.get_object(node1_ref).is_ok());
-    assert!(thread.heap.get_object(node2_ref).is_ok());
-    assert!(thread.heap.get_object(tuple_ref).is_ok());
+#[test]
+fn releases_are_immediate_after_many_allocations() {
+    let mut thread = thread::VmThreadState::test_new();
+
+    for _ in 0..1_000 {
+        let reference = thread
+            .heap
+            .alloc(HeapObject::Tuple { elements: vec![] })
+            .unwrap();
+        thread.heap.release_anchor(reference).unwrap();
+    }
+
+    assert_eq!(thread.heap.iter_live_objects().count(), 0);
+    assert_eq!(thread.thread_quota().heap_objects(), 0);
+    assert_eq!(thread.thread_quota().heap_bytes(), 0);
+}
+
+#[test]
+fn heap_quota_releases_the_bytes_charged_at_allocation() {
+    let mut thread = thread::VmThreadState::test_new();
+    let mut elements = Vec::with_capacity(16);
+    elements.push(Value::Int64(1));
+    let object = HeapObject::Tuple { elements };
+    let charged_bytes = object.heap_bytes();
+
+    let reference = thread.heap.alloc(object).unwrap();
+    assert_eq!(thread.thread_quota().heap_bytes(), charged_bytes);
+
+    thread.heap.release_anchor(reference).unwrap();
+    assert_eq!(thread.thread_quota().heap_bytes(), 0);
 }
 
 #[test]
