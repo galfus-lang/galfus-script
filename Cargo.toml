@@ -35,7 +35,7 @@ sha2 = "0.10"
 indexmap = "2.14"
 
 # Allocation / small-data optimization
-smallvec = "1.15"
+smallvec = "1.16"
 
 # Error handling
 thiserror = "2.0"
@@ -48,7 +48,7 @@ tracing = "0.1"
 notify = "8.2"
 
 # WASM / playground
-wasm-bindgen = "0.2.122"
+wasm-bindgen = "0.2.128"
 js-sys = "0.3"
 serde_json = "1.0"
 
@@ -58,10 +58,10 @@ tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 url = "2.5"
 
 # HTTP/2 Server and Async I/O (Restricted to native network isolation)
-hyper = "1.0"
+hyper = "1.11"
 hyper-util = { version = "0.1", features = ["full"] }
 http-body-util = "0.1"
-tokio = { version = "1.0", features = ["rt", "net", "sync", "macros"] }
+tokio = { version = "1.53", features = ["rt", "net", "sync", "macros"] }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
 

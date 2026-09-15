@@ -146,6 +146,41 @@ fn run_project_initializes_imported_string_globals() {
 }
 
 #[test]
+fn run_project_initializes_imported_numeric_struct_defaults_with_the_field_type() {
+    let workspace_root = env::current_dir()
+        .expect("current directory")
+        .join(".tmp")
+        .join(format!(
+            "runner-imported-numeric-struct-default-{}",
+            NEXT_WORKSPACE_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+    fs::create_dir_all(workspace_root.join("src")).expect("temporary workspace");
+    fs::write(
+        workspace_root.join("galfus.toml"),
+        "[module]\nname = \"runner-test\"\ntarget = \"app\"\n[entry]\npath = \"src/main.gfs\"\n",
+    )
+    .expect("configuration");
+    fs::write(
+        workspace_root.join("src/counter.gfs"),
+        "export struct Counter { value: i64 = 0 }\nexport fn Counter::increment(self): i64 {\n  self.value += 1\n  return self.value\n}",
+    )
+    .expect("dependency source");
+    fs::write(
+        workspace_root.join("src/main.gfs"),
+        "import { Counter } from \"./counter\"\nexport fn main(args: [[u8]]): i32 {\n  const counter = new(Counter) {}\n  return <i32> counter::increment()\n}",
+    )
+    .expect("entry source");
+
+    assert_eq!(
+        run_project(workspace_root.to_str().expect("UTF-8 workspace path"), &[])
+            .expect("runs imported numeric struct default"),
+        1
+    );
+
+    fs::remove_dir_all(workspace_root).expect("remove temporary workspace");
+}
+
+#[test]
 fn run_project_spawns_a_thread_with_a_context() {
     let source_path = env::current_dir()
         .expect("current directory")

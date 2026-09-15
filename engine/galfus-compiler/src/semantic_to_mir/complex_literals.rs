@@ -2,7 +2,9 @@ use std::collections;
 
 use super::function::FunctionBuilder;
 use galfus_core::{NodeId, TypeId};
-use galfus_frontend::{ImportedStructFieldDefault, SyntaxNode, SyntaxNodeKind, TypeKind};
+use galfus_frontend::{
+    ImportedStructFieldDefault, PrimitiveType, SyntaxNode, SyntaxNodeKind, TypeKind,
+};
 use galfus_ir::mir::*;
 
 impl<'b, 'a> FunctionBuilder<'b, 'a> {
@@ -112,7 +114,18 @@ impl<'b, 'a> FunctionBuilder<'b, 'a> {
                                     fields.push(Operand::Local(temp_id));
                                 }
                                 ImportedStructFieldDefault::Integer(value) => {
-                                    fields.push(Operand::Constant(Constant::Int32(value as i32)));
+                                    let int64_ty = self
+                                        .builder
+                                        .type_result
+                                        .layer()
+                                        .table()
+                                        .primitive(PrimitiveType::Int64);
+                                    let value = self.insert_cast_if_needed(
+                                        Operand::Constant(Constant::Int64(value)),
+                                        int64_ty,
+                                        field_ty,
+                                    );
+                                    fields.push(value);
                                 }
                             }
                         } else if let Some(default_expr) =
