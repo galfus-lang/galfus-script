@@ -1,0 +1,7 @@
+[module]
+name = "resolver-stdlib"
+target = "app"
+
+[entry]
+path = "src/main.gfs"
+function = "main"

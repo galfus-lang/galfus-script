@@ -9,3 +9,8 @@ cli-table = "0.4"
 regex = "1.13"
 serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
+galfus-contract = { path = "../../engine/galfus-contract" }
+galfus-host-native = { path = "../galfus-host-native" }
+galfus-runtime = { path = "../../engine/galfus-runtime" }
+galfus-workspace = { path = "../../engine/galfus-workspace" }

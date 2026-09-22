@@ -1,0 +1,8 @@
+import { score } from "./feature"
+
+export fn main(_args: [[u8]]): i32 {
+  if score() != 42 {
+    return 1
+  }
+  return 0
+}

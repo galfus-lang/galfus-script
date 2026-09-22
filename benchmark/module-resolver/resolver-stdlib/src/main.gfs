@@ -1,0 +1,6 @@
+import { stringify } from "format"
+import { log } from "log"
+
+export fn main(_args: [[u8]]): i32 {
+  return 0
+}

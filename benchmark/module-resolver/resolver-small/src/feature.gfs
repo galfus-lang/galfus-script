@@ -1,0 +1,7 @@
+import { BASE } from "./config"
+import { add } from "./math/add"
+import { multiply } from "./math/multiply"
+
+export fn score(): i32 {
+  return add(BASE, multiply(1, 2))
+}

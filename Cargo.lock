@@ -541,10 +541,15 @@ name = "galfus-benchmark"
 version = "0.0.0"
 dependencies = [
  "cli-table",
+ "galfus-contract",
+ "galfus-host-native",
+ "galfus-runtime",
+ "galfus-workspace",
  "regex",
  "serde",
  "serde_json",
  "sysinfo",
+ "toml",
 ]
 
 [[package]]
