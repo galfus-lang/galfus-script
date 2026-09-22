@@ -8,15 +8,17 @@ use super::*;
 use galfus_bytecode::instruction::{ConstIdx, FuncIdx, GlobalIdx, Instruction, Reg, TypeIdx};
 use galfus_bytecode::{
     BytecodeFunction, BytecodeGraph, BytecodeModule, BytecodeNode, BytecodeType, Constant,
-    ConstantPool, ExecutionMetadata, ExportSlot, ImportEdge, ImportSlot, PackageEntryPoint,
-    PackageImage, PackageMetadata,
+    ConstantPool, ExecutionMetadata, ExportSlot, ImportEdge, ImportSlot, ModuleCatalog,
+    ModuleDescriptor, PackageEntryPoint, PackageImage, PackageMetadata,
 };
 use galfus_contract::{
-    AdapterLoadContext, CURRENT_BOUNDARY_ABI_VERSION, ExecutionTarget, ProviderDescriptor,
-    ProviderModuleDescriptor, ProviderModuleRequirement, Providers, RuntimeCapabilities,
-    SurfaceContract, SurfaceDirection, SurfaceFunctionContract, SurfaceSchema,
+    AdapterLoadContext, CURRENT_BOUNDARY_ABI_VERSION, ContentHash, ExecutionTarget,
+    ProviderDescriptor, ProviderModuleDescriptor, ProviderModuleRequirement, Providers,
+    RuntimeCapabilities, SurfaceContract, SurfaceDirection, SurfaceFunctionContract, SurfaceSchema,
 };
-use galfus_core::{ModuleId, ModulePath, SemanticRevision, SourceId, Span};
+use galfus_core::{
+    ModuleId, ModulePath, RuntimeExportId, RuntimeExportKind, SemanticRevision, SourceId, Span,
+};
 
 struct StartupProvider {
     calls: sync::Arc<sync::Mutex<Vec<String>>>,
@@ -212,6 +214,7 @@ fn package_with_entry(
     sync::Arc::new(
         PackageImage::try_new(
             (*graph).clone(),
+            galfus_bytecode::derive_module_catalog(graph.as_ref()).expect("catalog derives"),
             target(),
             Some(PackageEntryPoint::new(module_path, "main")),
             galfus_bytecode::PackageMetadata {
@@ -229,6 +232,60 @@ fn package_with_entry(
     )
 }
 
+fn package_with_entry_abi(param_count: u8, return_type: BytecodeType) -> sync::Arc<PackageImage> {
+    let module_id = ModuleId::new(1);
+    let returns_int32 = return_type == BytecodeType::Int32;
+    let module = BytecodeModule {
+        name: "main.gfs".to_string(),
+        global_count: 0,
+        constants: if returns_int32 {
+            ConstantPool {
+                constants: vec![Constant::Int32(0)],
+            }
+        } else {
+            ConstantPool::default()
+        },
+        functions: vec![BytecodeFunction {
+            name: "main".to_string(),
+            param_count,
+            local_count: 0,
+            temp_count: u16::from(returns_int32),
+            return_ty: TypeIdx(0),
+            adapter_proxy_metadata: None,
+            instructions: if returns_int32 {
+                vec![
+                    Instruction::LoadConst {
+                        dest: Reg(u16::from(param_count)),
+                        const_idx: ConstIdx(0),
+                    },
+                    Instruction::Ret {
+                        src: Reg(u16::from(param_count)),
+                    },
+                ]
+            } else {
+                vec![Instruction::RetNull]
+            },
+        }],
+        types: vec![return_type],
+        struct_layouts: vec![],
+        choice_layouts: vec![],
+        imports: vec![],
+        exports: vec![ExportSlot {
+            symbol_name: "main".to_string(),
+            kind: galfus_bytecode::ExportKind::Function(FuncIdx(0)),
+        }],
+        init_func_idx: None,
+    };
+    let graph = BytecodeGraph::from_modules(
+        SemanticRevision::new(0),
+        vec![node(module_id, "main.gfs", module)],
+        vec![],
+    )
+    .expect("valid entry ABI graph");
+
+    package_with_entry(sync::Arc::new(graph), module_id)
+}
+
 fn package_with_required_provider(
     graph: sync::Arc<BytecodeGraph>,
     module_id: ModuleId,
@@ -241,6 +298,7 @@ fn package_with_required_provider(
     sync::Arc::new(
         PackageImage::try_new(
             (*graph).clone(),
+            galfus_bytecode::derive_module_catalog(graph.as_ref()).expect("catalog derives"),
             target(),
             Some(PackageEntryPoint::new(module_path, "main")),
             galfus_bytecode::PackageMetadata {
@@ -280,10 +338,12 @@ fn start_with_provider(provider: StartupProvider) -> Execution {
 fn runtime_rejects_an_unsupported_bytecode_format_before_loading_the_entry_module() {
     let graph =
         BytecodeGraph::with_format_version(galfus_bytecode::BytecodeFormatVersion::new(1, 0, 0));
+    let catalog = galfus_bytecode::derive_module_catalog(&graph).expect("catalog derives");
 
     let package = sync::Arc::new(
         PackageImage::try_new(
             graph,
+            catalog,
             target(),
             None,
             PackageMetadata {
@@ -311,6 +371,69 @@ fn runtime_rejects_an_unsupported_bytecode_format_before_loading_the_entry_modul
             supported: galfus_bytecode::CURRENT_BYTECODE_FORMAT_VERSION,
             actual,
         }) if actual == galfus_bytecode::BytecodeFormatVersion::new(1, 0, 0)
+    ));
+}
+
+#[test]
+fn eager_resolver_preserves_the_missing_module_id() {
+    let module_id = ModuleId::new(7);
+    let catalog = sync::Arc::new(
+        ModuleCatalog::new(vec![
+            ModuleDescriptor::new(
+                module_id,
+                ModulePath::new("missing.gfs").expect("valid module path"),
+                Vec::new(),
+                Vec::new(),
+                false,
+                ContentHash::of(b"interface"),
+                ContentHash::of(b"chunk"),
+            )
+            .expect("valid module descriptor"),
+        ])
+        .expect("valid module catalog"),
+    );
+
+    let error = match create_eager_module_resolver(sync::Arc::new(BytecodeGraph::new()), catalog) {
+        Ok(_) => panic!("missing eager graph node is rejected"),
+        Err(error) => error,
+    };
+
+    assert!(matches!(
+        error,
+        RuntimeError::EagerModuleResolution(error)
+            if error.module_id() == module_id
+    ));
+}
+
+#[test]
+fn eager_startup_preserves_entry_arity_validation() {
+    let result = Runtime::new(
+        package_with_entry_abi(0, BytecodeType::Int32),
+        RuntimeCapabilities::builder().build(),
+    )
+    .start(&[], std::rc::Rc::new(CooperativeDriver::new()));
+
+    assert!(matches!(
+        result,
+        Err(RuntimeError::EntryArityMismatch {
+            expected: 1,
+            found: 0,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn eager_startup_preserves_entry_return_type_validation() {
+    let result = Runtime::new(
+        package_with_entry_abi(1, BytecodeType::Null),
+        RuntimeCapabilities::builder().build(),
+    )
+    .start(&[], std::rc::Rc::new(CooperativeDriver::new()));
+
+    assert!(matches!(
+        result,
+        Err(RuntimeError::EntryReturnTypeMismatch { .. })
     ));
 }
 
@@ -589,6 +712,12 @@ fn run_initializes_dependencies_before_the_entry_module() {
             symbol_name: "marker".to_string(),
             ty: TypeIdx(3),
             kind: galfus_bytecode::ImportKind::Function,
+            target_module_id: Some(dependency_id),
+            target_export_id: Some(RuntimeExportId::new(
+                dependency_id,
+                RuntimeExportKind::Function,
+                "marker",
+            )),
         }],
         exports: vec![ExportSlot {
             symbol_name: "main".to_string(),
@@ -670,10 +799,12 @@ fn run_initializes_dependencies_before_the_entry_module() {
         queue: sync::Mutex::new(collections::VecDeque::new()),
         events: sync::Arc::new(crate::driver::NativeEventBridge::new()),
     });
+    let catalog = galfus_bytecode::derive_module_catalog(&graph).expect("catalog derives");
 
     let package = sync::Arc::new(
         PackageImage::try_new(
             graph,
+            catalog,
             target(),
             Some(PackageEntryPoint::new(
                 ModulePath::new("main.gfs").expect("valid module path"),

@@ -21,6 +21,7 @@ use std::sync::{
 /// The future `ExecutionHost` is responsible for owning this execution lane.
 pub struct Execution {
     orchestrator: Option<crate::orchestrator::Orchestrator>,
+    _module_resolver: Option<Arc<crate::module_resolver::ModuleResolver>>,
     driver: Rc<dyn ExecutionDriver>,
     event_sink: std::sync::Arc<dyn RuntimeEventSink>,
     result: Option<Result<i32, ExecutionFailure>>,
@@ -134,6 +135,7 @@ impl Execution {
         orchestrator.set_driver(driver.clone());
         Self {
             orchestrator: Some(orchestrator),
+            _module_resolver: None,
             driver,
             event_sink,
             result: None,
@@ -147,6 +149,14 @@ impl Execution {
             exit_notified: false,
             _single_owner: PhantomData,
         }
+    }
+
+    pub(crate) fn with_module_resolver(
+        mut self,
+        module_resolver: Arc<crate::module_resolver::ModuleResolver>,
+    ) -> Self {
+        self._module_resolver = Some(module_resolver);
+        self
     }
 
     pub fn handle(&self) -> ExecutionHandle {

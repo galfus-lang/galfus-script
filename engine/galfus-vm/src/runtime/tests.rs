@@ -1,4 +1,5 @@
 mod arithmetic_and_control;
+mod frame_lifetime;
 mod io_and_arrays;
 mod module_state;
 mod objects_and_types;
@@ -161,9 +162,14 @@ fn await_future_suspends_and_resumes_through_a_vm_owned_continuation() {
         metadata: None,
     });
     let vm = VirtualMachine::new(std::sync::Arc::new(graph));
+    let code = vm
+        .graph
+        .node_handle(module_id)
+        .expect("graph retains the suspended module");
     let mut thread = thread::VmThreadState::test_new();
     vm.prepare_function(&mut thread, module_id, FuncIdx(0), vec![])
         .unwrap();
+    assert!(std::sync::Arc::ptr_eq(&thread.call_stack[0].code, &code));
     thread.write_reg(Reg(0), Value::Future(galfus_core::FutureId::new(42)));
 
     let VmStep::Suspend {
@@ -183,6 +189,7 @@ fn await_future_suspends_and_resumes_through_a_vm_owned_continuation() {
     assert_eq!(future_id, galfus_core::FutureId::new(42));
     assert_eq!(effect_module_id, module_id);
     assert_eq!(return_type, TypeIdx(0));
+    assert!(std::sync::Arc::ptr_eq(&thread.call_stack[0].code, &code));
 
     vm.resume(
         galfus_core::ThreadId::new(1),
@@ -191,6 +198,7 @@ fn await_future_suspends_and_resumes_through_a_vm_owned_continuation() {
         Value::Int64(7),
     )
     .unwrap();
+    assert!(std::sync::Arc::ptr_eq(&thread.call_stack[0].code, &code));
     assert!(matches!(
         vm.execute_with_budget(&mut thread, 1),
         Ok(VmStep::Return {

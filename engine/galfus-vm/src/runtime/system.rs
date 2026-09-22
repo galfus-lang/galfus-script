@@ -213,21 +213,7 @@ impl VirtualMachine {
                         (module_id, func_idx)
                     } else {
                         let import_idx = (func_idx.raw() as usize) - current_image.functions.len();
-                        let link = self
-                            .graph
-                            .resolve_imports(module_id)
-                            .map_err(|_| VmError::FunctionOutOfBounds { index: func_idx })?;
-                        let import = link
-                            .imports
-                            .get(import_idx)
-                            .ok_or(VmError::FunctionOutOfBounds { index: func_idx })?;
-                        let target_func_idx = match &import.kind {
-                            galfus_bytecode::graph_resolver::ResolvedImportKind::Function(
-                                index,
-                            ) => *index,
-                            _ => panic!("Corrupted bytecode: Out of bounds"),
-                        };
-                        (import.module_id, target_func_idx)
+                        self.resolve_import_function(module_id, import_idx, func_idx)?
                     };
                 return Ok(VmStep::Suspend {
                     effect: VmEffect::CreateFuture {

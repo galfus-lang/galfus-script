@@ -86,19 +86,7 @@ impl VirtualMachine {
                         (current_module_id, func_idx)
                     } else {
                         let import_idx = (func_idx.raw() as usize) - current_image.functions.len();
-                        let link = self
-                            .graph
-                            .resolve_imports(current_module_id)
-                            .map_err(|_| VmError::FunctionOutOfBounds { index: func_idx })?;
-                        let import = link
-                            .imports
-                            .get(import_idx)
-                            .ok_or(VmError::FunctionOutOfBounds { index: func_idx })?;
-                        let func = match &import.kind {
-                            galfus_bytecode::graph_resolver::ResolvedImportKind::Function(f) => *f,
-                            _ => panic!("Corrupted bytecode: Out of bounds"),
-                        };
-                        (import.module_id, func)
+                        self.resolve_import_function(current_module_id, import_idx, func_idx)?
                     };
 
                 let target_image = self.get_module(target_module_id)?;
@@ -120,16 +108,8 @@ impl VirtualMachine {
                     + callee.local_count as usize
                     + callee.temp_count as usize;
 
-                let target_func = self.get_function(target_module_id, target_func_idx)?;
-                let cached_instructions = target_func.instructions.as_slice() as *const _;
-                thread.push_frame(
-                    target_module_id,
-                    target_func_idx,
-                    0,
-                    Some(dest),
-                    register_count,
-                    cached_instructions,
-                )?;
+                let target_code = self.get_module_node(target_module_id)?;
+                thread.push_frame(target_code, target_func_idx, 0, Some(dest), register_count)?;
                 thread.setup_args_from_caller(
                     args_start,
                     arg_count as usize,
@@ -151,19 +131,7 @@ impl VirtualMachine {
                         (current_module_id, func_idx)
                     } else {
                         let import_idx = (func_idx.raw() as usize) - current_image.functions.len();
-                        let link = self
-                            .graph
-                            .resolve_imports(current_module_id)
-                            .map_err(|_| VmError::FunctionOutOfBounds { index: func_idx })?;
-                        let import = link
-                            .imports
-                            .get(import_idx)
-                            .ok_or(VmError::FunctionOutOfBounds { index: func_idx })?;
-                        let func = match &import.kind {
-                            galfus_bytecode::graph_resolver::ResolvedImportKind::Function(f) => *f,
-                            _ => panic!("Corrupted bytecode: Out of bounds"),
-                        };
-                        (import.module_id, func)
+                        self.resolve_import_function(current_module_id, import_idx, func_idx)?
                     };
 
                 let target_image = self.get_module(target_module_id)?;
@@ -185,8 +153,7 @@ impl VirtualMachine {
                     + callee.local_count as usize
                     + callee.temp_count as usize;
 
-                let target_func = self.get_function(target_module_id, target_func_idx)?;
-                let cached_instructions = target_func.instructions.as_slice() as *const _;
+                let target_code = self.get_module_node(target_module_id)?;
 
                 // For TailCall, we REUSE the current frame.
                 // We MUST setup args first into a temporary buffer (or correctly handle overlap if we do it in place)
@@ -251,10 +218,8 @@ impl VirtualMachine {
                 thread.current_register_top = new_top;
 
                 let frame = thread.call_stack.last_mut().unwrap();
-                frame.module_id = target_module_id;
-                frame.func_idx = target_func_idx;
+                frame.replace_code(target_code, target_func_idx)?;
                 frame.pc = 0;
-                frame.cached_instructions = cached_instructions;
                 frame.has_objects = thread.current_frame_has_objects;
             }
             Instruction::CallMethod {
@@ -371,7 +336,10 @@ impl VirtualMachine {
 
                 // 2. Search in imports
                 if resolved_target.is_none()
-                    && let Ok(link) = self.graph.resolve_imports(resolution_module_id)
+                    && let Ok(link) = self.graph.resolve_imports_with_mode(
+                        resolution_module_id,
+                        self.import_resolution_mode,
+                    )
                 {
                     for imp in &link.imports {
                         let target_func_idx = match &imp.kind {
@@ -399,10 +367,9 @@ impl VirtualMachine {
                     && let Some(qualified_name) = &qualified_name
                 {
                     let matches = self
-                        .fast_modules
-                        .iter()
+                        .module_registry
+                        .modules()
                         .flat_map(|(module_id, module)| {
-                            let module = unsafe { &**module };
                             module
                                 .functions
                                 .iter()
@@ -410,7 +377,7 @@ impl VirtualMachine {
                                 .filter(move |(_, function)| {
                                     check_name(&function.name, qualified_name, true)
                                 })
-                                .map(move |(index, _)| (*module_id, FuncIdx(index as u16)))
+                                .map(move |(index, _)| (module_id, FuncIdx(index as u16)))
                         })
                         .collect::<Vec<_>>();
                     if matches.len() == 1 {
@@ -424,7 +391,10 @@ impl VirtualMachine {
                         .iter()
                         .map(|f| f.name.clone())
                         .collect::<Vec<_>>();
-                    if let Ok(link) = self.graph.resolve_imports(resolution_module_id) {
+                    if let Ok(link) = self.graph.resolve_imports_with_mode(
+                        resolution_module_id,
+                        self.import_resolution_mode,
+                    ) {
                         for imp in &link.imports {
                             let target_func_idx = match &imp.kind {
                                 galfus_bytecode::graph_resolver::ResolvedImportKind::Function(
@@ -493,16 +463,8 @@ impl VirtualMachine {
                     + callee.local_count as usize
                     + callee.temp_count as usize;
 
-                let target_func = self.get_function(target_module_id, target_func_idx)?;
-                let cached_instructions = target_func.instructions.as_slice() as *const _;
-                thread.push_frame(
-                    target_module_id,
-                    target_func_idx,
-                    0,
-                    Some(dest),
-                    register_count,
-                    cached_instructions,
-                )?;
+                let target_code = self.get_module_node(target_module_id)?;
+                thread.push_frame(target_code, target_func_idx, 0, Some(dest), register_count)?;
                 thread.setup_args_from_caller(
                     args_start,
                     arg_count as usize,
@@ -536,19 +498,7 @@ impl VirtualMachine {
                         (target_module_id, func_idx)
                     } else {
                         let import_idx = (func_idx.raw() as usize) - current_image.functions.len();
-                        let link = self
-                            .graph
-                            .resolve_imports(target_module_id)
-                            .map_err(|_| VmError::FunctionOutOfBounds { index: func_idx })?;
-                        let import = link
-                            .imports
-                            .get(import_idx)
-                            .ok_or(VmError::FunctionOutOfBounds { index: func_idx })?;
-                        let func = match &import.kind {
-                            galfus_bytecode::graph_resolver::ResolvedImportKind::Function(f) => *f,
-                            _ => panic!("Corrupted bytecode: Out of bounds"),
-                        };
-                        (import.module_id, func)
+                        self.resolve_import_function(target_module_id, import_idx, func_idx)?
                     };
 
                 let target_image = self.get_module(target_module_id)?;
@@ -570,16 +520,8 @@ impl VirtualMachine {
                     + callee.local_count as usize
                     + callee.temp_count as usize;
 
-                let target_func = self.get_function(target_module_id, target_func_idx)?;
-                let cached_instructions = target_func.instructions.as_slice() as *const _;
-                thread.push_frame(
-                    target_module_id,
-                    target_func_idx,
-                    0,
-                    Some(dest),
-                    register_count,
-                    cached_instructions,
-                )?;
+                let target_code = self.get_module_node(target_module_id)?;
+                thread.push_frame(target_code, target_func_idx, 0, Some(dest), register_count)?;
                 thread.setup_args_from_caller(
                     args_start,
                     arg_count as usize,
@@ -598,8 +540,14 @@ impl VirtualMachine {
                         thread.write_reg(dest, val);
                     }
                     None => {
-                        let return_type = self
-                            .get_function(completed_frame.module_id, completed_frame.func_idx)?
+                        let return_type = completed_frame
+                            .code
+                            .module
+                            .functions
+                            .get(completed_frame.func_idx.raw() as usize)
+                            .ok_or(VmError::FunctionOutOfBounds {
+                                index: completed_frame.func_idx,
+                            })?
                             .return_ty;
                         return Ok(VmStep::Return {
                             value: val,
@@ -617,8 +565,14 @@ impl VirtualMachine {
                         thread.write_reg(dest, Value::Null);
                     }
                     None => {
-                        let return_type = self
-                            .get_function(completed_frame.module_id, completed_frame.func_idx)?
+                        let return_type = completed_frame
+                            .code
+                            .module
+                            .functions
+                            .get(completed_frame.func_idx.raw() as usize)
+                            .ok_or(VmError::FunctionOutOfBounds {
+                                index: completed_frame.func_idx,
+                            })?
                             .return_ty;
                         return Ok(VmStep::Return {
                             value: Value::Null,

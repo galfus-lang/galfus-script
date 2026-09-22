@@ -8,6 +8,7 @@ use galfus_bytecode::BytecodeFormatError;
 use galfus_bytecode::instruction::{
     ChoiceLayoutIdx, ConstIdx, FieldIdx, FuncIdx, GlobalIdx, Reg, StructLayoutIdx, TypeIdx,
 };
+use galfus_core::RuntimeExportKind;
 use thiserror::Error;
 
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
@@ -76,8 +77,18 @@ pub enum VmError {
     #[error("Invalid bytecode module")]
     InvalidModule,
 
-    #[error("Module {module_id:?} not found in graph")]
-    ModuleNotFound { module_id: galfus_core::ModuleId },
+    #[error("Module {module_id:?} is not ready in the VM module registry")]
+    ModuleNotReady { module_id: galfus_core::ModuleId },
+
+    #[error(
+        "import slot {slot} in module {module_id:?} resolves to {actual:?}, expected {expected:?}"
+    )]
+    ImportKindMismatch {
+        module_id: galfus_core::ModuleId,
+        slot: usize,
+        expected: RuntimeExportKind,
+        actual: RuntimeExportKind,
+    },
 
     #[error("Global index {index:?} is out of bounds")]
     GlobalOutOfBounds { index: GlobalIdx },

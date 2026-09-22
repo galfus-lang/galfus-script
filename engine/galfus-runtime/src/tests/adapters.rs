@@ -302,6 +302,7 @@ fn adapter_package(graph: Arc<BytecodeGraph>) -> Arc<PackageImage> {
     Arc::new(
         PackageImage::try_new(
             (*graph).clone(),
+            galfus_bytecode::derive_module_catalog(graph.as_ref()).expect("catalog derives"),
             ExecutionTarget::new("test").expect("valid target"),
             Some(PackageEntryPoint::new(
                 ModulePath::new("main.gfs").expect("valid module path"),
@@ -335,6 +336,7 @@ fn adapter_package_with_provider(graph: Arc<BytecodeGraph>) -> Arc<PackageImage>
     Arc::new(
         PackageImage::try_new(
             (*graph).clone(),
+            galfus_bytecode::derive_module_catalog(graph.as_ref()).expect("catalog derives"),
             ExecutionTarget::new("test").expect("valid target"),
             Some(PackageEntryPoint::new(
                 ModulePath::new("main.gfs").expect("valid module path"),

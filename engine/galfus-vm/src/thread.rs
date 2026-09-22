@@ -1,9 +1,10 @@
 use crate::error::VmError;
 use crate::runtime::Value;
 use crate::runtime::{CallFrame, HeapObject, RuntimeModuleState};
-use galfus_bytecode::instruction::Reg;
+use galfus_bytecode::{BytecodeNode, instruction::Reg};
 use galfus_core::ModuleId;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 pub use crate::heap::PrivateHeap;
 
@@ -61,12 +62,11 @@ impl VmThreadState {
 
     pub fn push_frame(
         &mut self,
-        module_id: ModuleId,
+        code: Arc<BytecodeNode>,
         func_idx: galfus_bytecode::instruction::FuncIdx,
         pc: usize,
         return_dest: Option<Reg>,
         register_count: usize,
-        cached_instructions: *const [galfus_bytecode::instruction::Instruction],
     ) -> Result<(), crate::error::VmError> {
         if self.call_stack.len() >= self.thread_quota().limits().max_call_depth {
             return Err(crate::error::VmError::ResourceLimitExceeded(
@@ -87,15 +87,14 @@ impl VmThreadState {
         self.current_register_base = register_base;
         self.current_register_top = new_top;
 
-        self.call_stack.push(CallFrame {
-            module_id,
+        self.call_stack.push(CallFrame::new(
+            code,
             func_idx,
-            register_base,
             pc,
+            register_base,
             return_dest,
-            cached_instructions,
-            has_objects: self.current_frame_has_objects,
-        });
+            self.current_frame_has_objects,
+        )?);
         self.current_frame_has_objects = false;
         Ok(())
     }

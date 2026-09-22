@@ -113,9 +113,16 @@ impl Orchestrator {
             }) = inline_activation
             {
                 // Execute inline!
-                let target_func = match self.vm.as_ref().unwrap().get_function(module_id, func_idx)
-                {
-                    Ok(f) => f,
+                let vm = self
+                    .vm
+                    .as_ref()
+                    .expect("orchestrator retains the virtual machine");
+                let register_count = match vm.get_function(module_id, func_idx) {
+                    Ok(function) => {
+                        function.param_count as usize
+                            + function.local_count as usize
+                            + function.temp_count as usize
+                    }
                     Err(error) => {
                         self.failure = Some(
                             ExecutionFailure::new(ExecutionFailureKind::VmPanic, error.to_string())
@@ -126,17 +133,24 @@ impl Orchestrator {
                         return;
                     }
                 };
-                let register_count = target_func.param_count as usize
-                    + target_func.local_count as usize
-                    + target_func.temp_count as usize;
-                let cached_instructions = target_func.instructions.as_slice() as *const _;
+                let target_code = match vm.get_module_node(module_id) {
+                    Ok(code) => code,
+                    Err(error) => {
+                        self.failure = Some(
+                            ExecutionFailure::new(ExecutionFailureKind::VmPanic, error.to_string())
+                                .with_thread_id(thread_id)
+                                .with_stack(execution_stack(&thread)),
+                        );
+                        self.kernel.cancel(thread_id);
+                        return;
+                    }
+                };
                 if let Err(error) = thread.push_frame(
-                    module_id,
+                    target_code,
                     func_idx,
                     0,
                     waiter.continuation.continuation.dest(),
                     register_count,
-                    cached_instructions,
                 ) {
                     self.failure = Some(
                         ExecutionFailure::new(ExecutionFailureKind::VmPanic, error.to_string())

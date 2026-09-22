@@ -2,6 +2,35 @@ use std::sync;
 
 use super::*;
 
+fn frame_code(module_id: galfus_core::ModuleId) -> sync::Arc<galfus_bytecode::BytecodeNode> {
+    sync::Arc::new(galfus_bytecode::BytecodeNode {
+        id: module_id,
+        path: galfus_core::ModulePath::new("frame.gfs").expect("valid module path"),
+        semantic_revision: galfus_core::SemanticRevision::new(0),
+        module: galfus_bytecode::BytecodeModule {
+            name: "frame".to_string(),
+            global_count: 0,
+            constants: galfus_bytecode::ConstantPool::default(),
+            functions: vec![galfus_bytecode::BytecodeFunction {
+                name: "frame".to_string(),
+                param_count: 0,
+                local_count: 0,
+                temp_count: 0,
+                return_ty: galfus_bytecode::TypeIdx(0),
+                adapter_proxy_metadata: None,
+                instructions: vec![galfus_bytecode::Instruction::RetNull],
+            }],
+            types: vec![galfus_bytecode::BytecodeType::Null],
+            struct_layouts: Vec::new(),
+            choice_layouts: Vec::new(),
+            imports: Vec::new(),
+            exports: Vec::new(),
+            init_func_idx: None,
+        },
+        metadata: None,
+    })
+}
+
 #[test]
 fn thread_execution_storage_is_allocated_on_demand() {
     let mut thread = thread::VmThreadState::test_new();
@@ -11,12 +40,11 @@ fn thread_execution_storage_is_allocated_on_demand() {
 
     thread
         .push_frame(
-            galfus_core::ModuleId::new(0),
+            frame_code(galfus_core::ModuleId::new(0)),
             galfus_bytecode::FuncIdx(0),
             0,
             None,
             1,
-            &[] as *const [galfus_bytecode::Instruction],
         )
         .expect("a frame within the quota must allocate its registers");
 

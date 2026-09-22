@@ -124,10 +124,8 @@ impl VirtualMachine {
             .last()
             .ok_or(VmError::EmptyCallStack)?
             .module_id;
-        self.uint8_type_indexes
-            .binary_search_by_key(&module_id, |&(id, _)| id)
-            .ok()
-            .and_then(|idx| self.uint8_type_indexes[idx].1)
+        self.module_registry
+            .uint8_type_idx(module_id)
             .ok_or(VmError::InvalidModule)
     }
 }

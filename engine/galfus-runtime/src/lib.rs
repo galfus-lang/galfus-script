@@ -13,6 +13,7 @@ pub mod event;
 pub mod execution;
 pub mod execution_host;
 mod kernel;
+mod module_resolver;
 mod orchestrator;
 pub mod preflight;
 pub mod queue;
@@ -26,6 +27,12 @@ use std::rc::Rc;
 use std::sync;
 
 use crate::driver::ExecutionDriver;
+use crate::module_resolver::{
+    GraphModuleProducer, ModuleInitializationPlanError, ModuleProducer, ModuleResolver,
+};
+use galfus_bytecode::{
+    ModuleCatalog, ModuleCatalogDerivationError, ModuleResolveContext, ModuleResolveError,
+};
 use galfus_contract::{
     AdapterBindings, Providers, RuntimeCapabilities, validate_numeric_semantics,
 };
@@ -67,6 +74,12 @@ pub enum RuntimeError {
     AdapterRequirementUnsatisfied { proxy_module: String },
     #[error("package numeric semantics are incompatible: {0}")]
     NumericSemantics(galfus_contract::PackageCompatibilityError),
+    #[error("could not derive the eager module catalog from the bytecode graph: {0}")]
+    EagerResolverSetup(#[from] ModuleCatalogDerivationError),
+    #[error(transparent)]
+    EagerModuleResolution(#[from] ModuleResolveError),
+    #[error("module initialization dependency cycle: {cycle:?}")]
+    InitializationDependencyCycle { cycle: Vec<galfus_core::ModuleId> },
     #[error(transparent)]
     BytecodeFormat(#[from] galfus_bytecode::BytecodeFormatError),
     #[error(transparent)]
@@ -157,10 +170,12 @@ impl Runtime {
             package.limits().clone(),
         )));
         let mut orchestrator = crate::orchestrator::Orchestrator::new(quota.clone());
+        let graph = package.graph_handle();
+        let module_resolver =
+            create_eager_module_resolver(graph.clone(), sync::Arc::new(package.catalog().clone()))?;
         let entry = package
             .entry_point()
             .ok_or(RuntimeError::MissingPackageEntry)?;
-        let graph = package.graph_handle();
         let module_id = graph
             .modules()
             .find(|module| module.path() == entry.module_path())
@@ -202,16 +217,31 @@ impl Runtime {
         let thread_quota =
             std::sync::Arc::new(galfus_vm::quota::ThreadQuota::new(package.limits().clone()));
         let mut thread = galfus_vm::thread::VmThreadState::new(quota.clone(), thread_quota);
-        let vm = VirtualMachine::new(graph.clone()).with_provider_handle(providers);
+        let vm =
+            VirtualMachine::from_ready_modules(graph.clone(), module_resolver.ready_modules()?)
+                .with_import_resolution_mode(package.import_resolution_mode())
+                .with_provider_handle(providers);
 
         let mut initializers = VecDeque::new();
-        for initialized_module_id in graph.initialization_order(module_id)? {
+        let initialization_plan =
+            module_resolver
+                .initialization_plan(module_id)
+                .map_err(|error| match error {
+                    ModuleInitializationPlanError::UnknownModule { module_id } => {
+                        RuntimeError::EagerModuleResolution(ModuleResolveError::UnknownModule {
+                            context: ModuleResolveContext::new(module_id),
+                        })
+                    }
+                    ModuleInitializationPlanError::DependencyCycle { cycle } => {
+                        RuntimeError::InitializationDependencyCycle { cycle }
+                    }
+                })?;
+        for initialized_module_id in initialization_plan {
             if thread.is_module_initialized(initialized_module_id) {
                 continue;
             }
-            if let Some(init_idx) = graph
-                .get(initialized_module_id)
-                .expect("initialization order only contains loaded modules")
+            if let Some(init_idx) = module_resolver
+                .ensure_module(initialized_module_id)?
                 .module
                 .init_func_idx
             {
@@ -272,8 +302,20 @@ impl Runtime {
             driver,
             initialization_complete,
             is_initializing,
-        ))
+        )
+        .with_module_resolver(module_resolver))
     }
+}
+
+fn create_eager_module_resolver(
+    graph: sync::Arc<galfus_bytecode::BytecodeGraph>,
+    catalog: sync::Arc<ModuleCatalog>,
+) -> Result<sync::Arc<ModuleResolver>, RuntimeError> {
+    let producer: sync::Arc<dyn ModuleProducer> =
+        sync::Arc::new(GraphModuleProducer::new(graph, catalog.clone())?);
+    let resolver = sync::Arc::new(ModuleResolver::new(catalog.as_ref(), producer));
+    resolver.preload_all()?;
+    Ok(resolver)
 }
 
 fn preflight_capabilities(

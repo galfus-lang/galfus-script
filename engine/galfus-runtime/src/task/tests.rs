@@ -5,37 +5,67 @@ use super::{
 use crate::event::FutureValue;
 use galfus_bytecode::instruction::{ChoiceLayoutIdx, FuncIdx, StructLayoutIdx, TypeIdx};
 use galfus_bytecode::{
-    BytecodeModule, BytecodeType, ChoiceLayout, ChoiceVariantLayout, ConstantPool, FieldLayout,
-    OwnershipKind, StructLayout,
+    BytecodeFunction, BytecodeModule, BytecodeNode, BytecodeType, ChoiceLayout,
+    ChoiceVariantLayout, ConstantPool, FieldLayout, OwnershipKind, StructLayout,
 };
 use galfus_contract::{
     SurfaceContract, SurfaceDirection, SurfaceHandle, SurfaceSchema, SurfaceValue,
 };
 use galfus_vm::{HeapObject, VmValue};
 
+fn frame_code(module_id: galfus_core::ModuleId, func_idx: FuncIdx) -> std::sync::Arc<BytecodeNode> {
+    std::sync::Arc::new(BytecodeNode {
+        id: module_id,
+        path: galfus_core::ModulePath::new(format!("module-{}.gfs", module_id.raw()).as_str())
+            .expect("valid module path"),
+        semantic_revision: galfus_core::SemanticRevision::new(0),
+        module: BytecodeModule {
+            name: format!("module-{}", module_id.raw()),
+            global_count: 0,
+            constants: ConstantPool::default(),
+            functions: (0..=func_idx.raw())
+                .map(|index| BytecodeFunction {
+                    name: format!("function-{index}"),
+                    param_count: 0,
+                    local_count: 0,
+                    temp_count: 0,
+                    return_ty: TypeIdx(0),
+                    adapter_proxy_metadata: None,
+                    instructions: vec![galfus_bytecode::Instruction::RetNull],
+                })
+                .collect(),
+            types: vec![BytecodeType::Null],
+            struct_layouts: Vec::new(),
+            choice_layouts: Vec::new(),
+            imports: Vec::new(),
+            exports: Vec::new(),
+            init_func_idx: None,
+        },
+        metadata: None,
+    })
+}
+
 #[test]
 fn execution_stack_preserves_the_suspended_call_chain() {
     let mut thread = galfus_vm::thread::VmThreadState::test_new();
-    thread.call_stack = vec![
-        galfus_vm::runtime::CallFrame {
-            module_id: galfus_core::ModuleId::new(1),
-            func_idx: FuncIdx(2),
-            pc: 4,
-            register_base: 0,
-            return_dest: None,
-            cached_instructions: &[] as *const [galfus_bytecode::Instruction],
-            has_objects: false,
-        },
-        galfus_vm::runtime::CallFrame {
-            module_id: galfus_core::ModuleId::new(3),
-            func_idx: FuncIdx(5),
-            pc: 0,
-            register_base: 0,
-            return_dest: None,
-            cached_instructions: &[] as *const [galfus_bytecode::Instruction],
-            has_objects: false,
-        },
-    ];
+    thread
+        .push_frame(
+            frame_code(galfus_core::ModuleId::new(1), FuncIdx(2)),
+            FuncIdx(2),
+            4,
+            None,
+            0,
+        )
+        .expect("first frame is valid");
+    thread
+        .push_frame(
+            frame_code(galfus_core::ModuleId::new(3), FuncIdx(5)),
+            FuncIdx(5),
+            0,
+            None,
+            0,
+        )
+        .expect("second frame is valid");
 
     assert_eq!(
         execution_stack(&thread),

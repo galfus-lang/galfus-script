@@ -3,6 +3,7 @@ mod control;
 mod data;
 
 mod heap;
+mod module_registry;
 pub mod objects;
 mod operators;
 mod system;
@@ -12,13 +13,17 @@ mod tests;
 use crate::thread;
 
 use crate::error::{StackFrameInfo, VmError, VmPanic};
+use crate::runtime::module_registry::VmModuleRegistry;
 use galfus_bytecode::instruction::{
     ChoiceLayoutIdx, FuncIdx, ImmediateBinaryOp, ImmediateValue, Instruction, Reg, StructLayoutIdx,
     TypeIdx,
 };
-use galfus_bytecode::{BytecodeGraph, BytecodeType, Constant, OwnershipKind};
+use galfus_bytecode::{
+    BytecodeGraph, BytecodeNode, BytecodeType, Constant, ImportResolutionMode, OwnershipKind,
+    ResolvedImportKind,
+};
 use galfus_contract::Providers;
-use galfus_core::{BindingId, HandleId, ModuleId, OpaqueTypeId};
+use galfus_core::{BindingId, HandleId, ModuleId, OpaqueTypeId, RuntimeExportKind};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -250,22 +255,68 @@ pub struct CallFrame {
     pub pc: usize,
     pub register_base: usize,
     pub return_dest: Option<Reg>,
-    pub cached_instructions: *const [galfus_bytecode::Instruction],
+    pub(crate) code: Arc<BytecodeNode>,
+    pub(crate) cached_instructions: *const [galfus_bytecode::Instruction],
     pub has_objects: bool,
 }
 
+impl CallFrame {
+    pub(crate) fn new(
+        code: Arc<BytecodeNode>,
+        func_idx: FuncIdx,
+        pc: usize,
+        register_base: usize,
+        return_dest: Option<Reg>,
+        has_objects: bool,
+    ) -> Result<Self, VmError> {
+        let cached_instructions = Self::cached_instructions(&code, func_idx)?;
+        Ok(Self {
+            module_id: code.id(),
+            func_idx,
+            pc,
+            register_base,
+            return_dest,
+            code,
+            cached_instructions,
+            has_objects,
+        })
+    }
+
+    pub(crate) fn replace_code(
+        &mut self,
+        code: Arc<BytecodeNode>,
+        func_idx: FuncIdx,
+    ) -> Result<(), VmError> {
+        self.cached_instructions = Self::cached_instructions(&code, func_idx)?;
+        self.module_id = code.id();
+        self.func_idx = func_idx;
+        self.code = code;
+        Ok(())
+    }
+
+    fn cached_instructions(
+        code: &BytecodeNode,
+        func_idx: FuncIdx,
+    ) -> Result<*const [galfus_bytecode::Instruction], VmError> {
+        code.module
+            .functions
+            .get(func_idx.raw() as usize)
+            .map(|function| function.instructions.as_slice() as *const _)
+            .ok_or(VmError::FunctionOutOfBounds { index: func_idx })
+    }
+}
+
+// Safety: `cached_instructions` always points into the immutable `code` Arc held by this frame.
 unsafe impl Send for CallFrame {}
+// Safety: `cached_instructions` always points into the immutable `code` Arc held by this frame.
 unsafe impl Sync for CallFrame {}
 
 #[derive(Clone)]
 pub struct VirtualMachine {
     pub graph: Arc<BytecodeGraph>,
     pub context: VmContext,
-    pub fast_modules: Vec<(
-        galfus_core::ModuleId,
-        *const galfus_bytecode::BytecodeModule,
-    )>,
-    uint8_type_indexes: Vec<(galfus_core::ModuleId, Option<TypeIdx>)>,
+    module_registry: VmModuleRegistry,
+    import_resolution_mode: ImportResolutionMode,
 }
 
 impl VirtualMachine {
@@ -311,7 +362,7 @@ impl VirtualMachine {
         module_id: ModuleId,
         type_idx: TypeIdx,
     ) -> bool {
-        let Some(module) = self.graph.get(module_id).map(|node| &node.module) else {
+        let Ok(module) = self.get_module(module_id) else {
             return false;
         };
         let Some(expected) = module.types.get(type_idx.raw() as usize) else {
@@ -425,28 +476,32 @@ impl VirtualMachine {
     }
 
     pub fn new(graph: Arc<BytecodeGraph>) -> Self {
-        let mut fast_modules = Vec::new();
-        let mut uint8_type_indexes = Vec::new();
-        for module in graph.modules() {
-            fast_modules.push((module.id, &module.module as *const _));
-            uint8_type_indexes.push((
-                module.id,
-                module
-                    .module
-                    .types
-                    .iter()
-                    .position(|ty| matches!(ty, BytecodeType::Uint8))
-                    .map(|idx| TypeIdx(idx as u16)),
-            ));
-        }
-        fast_modules.sort_unstable_by_key(|&(id, _)| id);
-        uint8_type_indexes.sort_unstable_by_key(|&(id, _)| id);
+        let module_registry = VmModuleRegistry::from_graph(graph.as_ref());
         Self {
             graph,
             context: VmContext::new(None),
-            fast_modules,
-            uint8_type_indexes,
+            module_registry,
+            import_resolution_mode: ImportResolutionMode::Legacy,
         }
+    }
+
+    /// Creates a VM whose module lookup is restricted to eager-ready nodes.
+    pub fn from_ready_modules(
+        graph: Arc<BytecodeGraph>,
+        modules: impl IntoIterator<Item = Arc<BytecodeNode>>,
+    ) -> Self {
+        Self {
+            graph,
+            context: VmContext::new(None),
+            module_registry: VmModuleRegistry::from_ready_modules(modules),
+            import_resolution_mode: ImportResolutionMode::Legacy,
+        }
+    }
+
+    /// Selects the import identity contract declared by the package image.
+    pub fn with_import_resolution_mode(mut self, mode: ImportResolutionMode) -> Self {
+        self.import_resolution_mode = mode;
+        self
     }
 
     pub fn with_context(mut self, context: VmContext) -> Self {
@@ -468,9 +523,37 @@ impl VirtualMachine {
         &self,
         id: galfus_core::ModuleId,
     ) -> Result<&galfus_bytecode::BytecodeModule, VmError> {
-        match self.fast_modules.binary_search_by_key(&id, |&(k, _)| k) {
-            Ok(idx) => Ok(unsafe { &*self.fast_modules[idx].1 }),
-            Err(_) => Err(VmError::ModuleNotFound { module_id: id }),
+        self.module_registry.get_module(id)
+    }
+
+    pub fn get_module_node(&self, id: galfus_core::ModuleId) -> Result<Arc<BytecodeNode>, VmError> {
+        self.module_registry.get_node(id)
+    }
+
+    pub(super) fn resolve_import_function(
+        &self,
+        importer: ModuleId,
+        slot: usize,
+        func_idx: FuncIdx,
+    ) -> Result<(ModuleId, FuncIdx), VmError> {
+        let import = self
+            .graph
+            .resolve_imports_with_mode(importer, self.import_resolution_mode)
+            .map_err(|_| VmError::FunctionOutOfBounds { index: func_idx })?
+            .imports
+            .into_iter()
+            .find(|import| import.slot == slot)
+            .ok_or(VmError::FunctionOutOfBounds { index: func_idx })?;
+        match import.kind {
+            ResolvedImportKind::Function(target_func_idx) => {
+                Ok((import.module_id, target_func_idx))
+            }
+            ResolvedImportKind::Global(_) => Err(VmError::ImportKindMismatch {
+                module_id: importer,
+                slot,
+                expected: RuntimeExportKind::Function,
+                actual: RuntimeExportKind::Global,
+            }),
         }
     }
 
@@ -506,10 +589,16 @@ impl VirtualMachine {
             stack_trace: vec![],
         })?;
 
-        let func = self
-            .get_function(module_id, func_idx)
-            .map_err(|error| VmPanic {
-                error,
+        let code = self.get_module_node(module_id).map_err(|error| VmPanic {
+            error,
+            stack_trace: vec![],
+        })?;
+        let func = code
+            .module
+            .functions
+            .get(func_idx.raw() as usize)
+            .ok_or_else(|| VmPanic {
+                error: VmError::FunctionOutOfBounds { index: func_idx },
                 stack_trace: vec![],
             })?;
 
@@ -523,26 +612,18 @@ impl VirtualMachine {
             });
         }
 
+        let total_regs =
+            func.param_count as usize + func.local_count as usize + func.temp_count as usize;
         thread.call_stack.clear();
         thread.registers.clear();
         thread.current_register_base = 0;
-        let total_regs =
-            func.param_count as usize + func.local_count as usize + func.temp_count as usize;
         let mut registers = vec![Value::Null; total_regs];
         for (i, val) in args.into_iter().enumerate() {
             registers[i] = val;
         }
 
-        let cached_instructions = func.instructions.as_slice() as *const _;
         thread
-            .push_frame(
-                module_id,
-                func_idx,
-                0,
-                None,
-                registers.len(),
-                cached_instructions,
-            )
+            .push_frame(code, func_idx, 0, None, registers.len())
             .map_err(|error| VmPanic {
                 error,
                 stack_trace: vec![],
@@ -569,10 +650,16 @@ impl VirtualMachine {
             stack_trace: vec![],
         })?;
 
-        let func = self
-            .get_function(module_id, func_idx)
-            .map_err(|error| VmPanic {
-                error,
+        let code = self.get_module_node(module_id).map_err(|error| VmPanic {
+            error,
+            stack_trace: vec![],
+        })?;
+        let func = code
+            .module
+            .functions
+            .get(func_idx.raw() as usize)
+            .ok_or_else(|| VmPanic {
+                error: VmError::FunctionOutOfBounds { index: func_idx },
                 stack_trace: vec![],
             })?;
 
@@ -586,26 +673,18 @@ impl VirtualMachine {
             });
         }
 
+        let total_regs =
+            func.param_count as usize + func.local_count as usize + func.temp_count as usize;
         thread.call_stack.clear();
         thread.registers.clear();
         thread.current_register_base = 0;
-        let total_regs =
-            func.param_count as usize + func.local_count as usize + func.temp_count as usize;
         let mut registers = vec![Value::Null; total_regs];
         for (i, val) in args.into_iter().enumerate() {
             registers[i] = val;
         }
 
-        let cached_instructions = func.instructions.as_slice() as *const _;
         thread
-            .push_frame(
-                module_id,
-                func_idx,
-                0,
-                None,
-                registers.len(),
-                cached_instructions,
-            )
+            .push_frame(code, func_idx, 0, None, registers.len())
             .map_err(|error| VmPanic {
                 error,
                 stack_trace: vec![],
@@ -653,7 +732,7 @@ impl VirtualMachine {
             });
         }
 
-        let Some(frame) = thread.call_stack.last_mut() else {
+        let Some(frame) = thread.call_stack.last() else {
             return Err(VmPanic {
                 error: VmError::EmptyCallStack,
                 stack_trace: vec![],
@@ -664,8 +743,7 @@ impl VirtualMachine {
         let mut pc = frame.pc;
         let mut instructions: *const [Instruction] = frame.cached_instructions;
         let mut register_base = frame.register_base;
-        let mut current_module_id = frame.module_id;
-        let mut current_image = self.get_module(current_module_id).unwrap();
+        let mut current_code = frame.code.clone();
 
         // Macro to sync local state back to the call frame
         macro_rules! sync_frame {
@@ -688,10 +766,7 @@ impl VirtualMachine {
                     pc = f.pc;
                     instructions = f.cached_instructions;
                     register_base = f.register_base;
-                    if current_module_id != f.module_id {
-                        current_module_id = f.module_id;
-                        current_image = self.get_module(current_module_id).unwrap();
-                    }
+                    current_code = f.code.clone();
                 }
             };
         }
@@ -1424,16 +1499,16 @@ impl VirtualMachine {
                     arg_count,
                 } => {
                     // Fast path: local function call (no import resolution)
-                    if (func_idx.raw() as usize) < current_image.functions.len() {
+                    if (func_idx.raw() as usize) < current_code.module.functions.len() {
                         let callee = unsafe {
-                            current_image
+                            current_code
+                                .module
                                 .functions
                                 .get_unchecked(func_idx.raw() as usize)
                         };
                         let register_count = callee.param_count as usize
                             + callee.local_count as usize
                             + callee.temp_count as usize;
-                        let cached_instr = callee.instructions.as_slice() as *const _;
 
                         // Sync pc before pushing new frame
                         sync_frame!(thread);
@@ -1464,15 +1539,17 @@ impl VirtualMachine {
                             registers_ptr = thread.registers.as_mut_ptr();
                         }
 
-                        thread.call_stack.push(CallFrame {
-                            module_id: current_module_id,
-                            func_idx: *func_idx,
-                            pc: 0,
-                            register_base: callee_base,
-                            return_dest: Some(*dest),
-                            cached_instructions: cached_instr,
-                            has_objects: false,
-                        });
+                        let callee_frame = CallFrame::new(
+                            current_code.clone(),
+                            *func_idx,
+                            0,
+                            callee_base,
+                            Some(*dest),
+                            false,
+                        )
+                        .map_err(|error| self.make_panic(thread, error))?;
+                        let cached_instr = callee_frame.cached_instructions;
+                        thread.call_stack.push(callee_frame);
 
                         thread.current_register_base = callee_base;
                         thread.current_register_top = new_top;
@@ -1520,16 +1597,16 @@ impl VirtualMachine {
                     args_start,
                     arg_count,
                 } => {
-                    if (func_idx.raw() as usize) < current_image.functions.len() {
+                    if (func_idx.raw() as usize) < current_code.module.functions.len() {
                         let callee = unsafe {
-                            current_image
+                            current_code
+                                .module
                                 .functions
                                 .get_unchecked(func_idx.raw() as usize)
                         };
                         let register_count = callee.param_count as usize
                             + callee.local_count as usize
                             + callee.temp_count as usize;
-                        let cached_instr = callee.instructions.as_slice() as *const _;
 
                         let caller_base = register_base;
                         let new_top = caller_base + register_count;
@@ -1589,12 +1666,17 @@ impl VirtualMachine {
                         // Update current frame
                         thread.current_register_top = new_top;
 
+                        let replaced = {
+                            let frame = unsafe { thread.call_stack.last_mut().unwrap_unchecked() };
+                            frame.replace_code(current_code.clone(), *func_idx)
+                        };
+                        if let Err(error) = replaced {
+                            return Err(self.make_panic(thread, error));
+                        }
                         let frame = unsafe { thread.call_stack.last_mut().unwrap_unchecked() };
-                        frame.module_id = current_module_id;
-                        frame.func_idx = *func_idx;
                         frame.pc = 0;
-                        frame.cached_instructions = cached_instr;
                         frame.has_objects = thread.current_frame_has_objects;
+                        let cached_instr = frame.cached_instructions;
 
                         // Sync local cache
                         pc = 0;
@@ -1648,9 +1730,19 @@ impl VirtualMachine {
                             budget -= 1;
                         }
                         None => {
-                            let return_type = self
-                                .get_function(completed_frame.module_id, completed_frame.func_idx)
-                                .map_err(|e| self.make_panic(thread, e))?
+                            let return_type = completed_frame
+                                .code
+                                .module
+                                .functions
+                                .get(completed_frame.func_idx.raw() as usize)
+                                .ok_or_else(|| {
+                                    self.make_panic(
+                                        thread,
+                                        VmError::FunctionOutOfBounds {
+                                            index: completed_frame.func_idx,
+                                        },
+                                    )
+                                })?
                                 .return_ty;
                             return Ok(VmStep::Return {
                                 value: val,
@@ -1673,9 +1765,19 @@ impl VirtualMachine {
                             budget -= 1;
                         }
                         None => {
-                            let return_type = self
-                                .get_function(completed_frame.module_id, completed_frame.func_idx)
-                                .map_err(|e| self.make_panic(thread, e))?
+                            let return_type = completed_frame
+                                .code
+                                .module
+                                .functions
+                                .get(completed_frame.func_idx.raw() as usize)
+                                .ok_or_else(|| {
+                                    self.make_panic(
+                                        thread,
+                                        VmError::FunctionOutOfBounds {
+                                            index: completed_frame.func_idx,
+                                        },
+                                    )
+                                })?
                                 .return_ty;
                             return Ok(VmStep::Return {
                                 value: Value::Null,
