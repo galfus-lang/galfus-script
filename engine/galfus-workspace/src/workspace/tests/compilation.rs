@@ -1,5 +1,7 @@
 use super::*;
 use crate::state::{CompileBlocked, RunBlocked};
+use galfus_bytecode::{ImportKind, derive_module_catalog};
+use galfus_core::{RuntimeExportId, RuntimeExportKind};
 
 #[test]
 fn server_provider_requirement_matches_the_native_contract() {
@@ -270,10 +272,10 @@ fn compile_emits_one_module_per_source_module_with_import_slots() {
         .load_module(
             "main.gfs",
             br#"
-            import { add } from "./math"
+            import { add as sum } from "./math"
 
             export fn main(args: [[u8]]): i32 {
-                return add(20, 22)
+                return sum(20, 22)
             }
             "#,
         )
@@ -301,9 +303,72 @@ fn compile_emits_one_module_per_source_module_with_import_slots() {
         .modules()
         .find(|image| image.path().as_str() == "main.gfs")
         .expect("main image");
+    let math = report
+        .package
+        .graph()
+        .modules()
+        .find(|image| image.path().as_str() == "math.gfs")
+        .expect("math image");
     assert_eq!(main.module().imports.len(), 1);
     assert_eq!(main.module().imports[0].module_name, "math.gfs");
     assert_eq!(main.module().imports[0].symbol_name, "add");
+    assert_eq!(main.module().imports[0].target_module_id, Some(math.id()));
+    assert_eq!(
+        main.module().imports[0].target_export_id,
+        Some(RuntimeExportId::new(
+            math.id(),
+            RuntimeExportKind::Function,
+            "add",
+        ))
+    );
+    let catalog = derive_module_catalog(report.package.graph()).expect("catalog derives");
+    assert_eq!(catalog.len(), report.package.graph().len());
+    for node in report.package.graph().modules() {
+        let descriptor = catalog.get(node.id()).expect("catalog descriptor");
+        assert_eq!(descriptor.module_path(), node.path());
+        assert_eq!(
+            descriptor.has_initializer(),
+            node.module().init_func_idx.is_some()
+        );
+        assert_eq!(
+            descriptor
+                .dependencies()
+                .iter()
+                .map(|dependency| dependency.module_id())
+                .collect::<Vec<_>>(),
+            node.module()
+                .imports
+                .iter()
+                .map(|import| import.target_module_id.expect("compiled direct target"))
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            descriptor
+                .exports()
+                .iter()
+                .map(|export| (export.runtime_export_id(), export.name(), export.kind()))
+                .collect::<Vec<_>>(),
+            {
+                let mut exports = node
+                    .module()
+                    .exports
+                    .iter()
+                    .map(|export| {
+                        let kind = export.kind.runtime_export_kind();
+                        (
+                            RuntimeExportId::new(node.id(), kind, export.symbol_name.as_str()),
+                            export.symbol_name.as_str(),
+                            kind,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                exports.sort_unstable();
+                exports
+            }
+        );
+    }
     assert!(
         main.module()
             .functions
@@ -694,7 +759,10 @@ fn compile_removes_unreachable_modules() {
         LoadResult::Success
     ));
     workspace
-        .load_module("main.gfs", b"import { x } from \"./a\"\nconst y = x;")
+        .load_module(
+            "main.gfs",
+            b"import { x as value } from \"./a\"\nconst y = value;",
+        )
         .unwrap();
     workspace
         .load_module("a.gfs", b"export const x = 1;")
@@ -704,7 +772,29 @@ fn compile_removes_unreachable_modules() {
     assert!(report1.is_valid, "{:?}", report1.diagnostics);
     let package1 = workspace.compile().unwrap().package;
     let graph1 = package1.graph();
-    assert!(graph1.modules().any(|m| m.path().as_str() == "a.gfs"));
+    let dependency = graph1
+        .modules()
+        .find(|module| module.path().as_str() == "a.gfs")
+        .expect("dependency module");
+    let main = graph1
+        .modules()
+        .find(|module| module.path().as_str() == "main.gfs")
+        .expect("main module");
+    assert_eq!(main.module().imports.len(), 1);
+    assert_eq!(main.module().imports[0].kind, ImportKind::Global);
+    assert_eq!(main.module().imports[0].symbol_name, "x");
+    assert_eq!(
+        main.module().imports[0].target_module_id,
+        Some(dependency.id())
+    );
+    assert_eq!(
+        main.module().imports[0].target_export_id,
+        Some(RuntimeExportId::new(
+            dependency.id(),
+            RuntimeExportKind::Global,
+            "x",
+        ))
+    );
 
     // Remove import
     workspace

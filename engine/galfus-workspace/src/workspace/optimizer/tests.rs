@@ -173,9 +173,12 @@ fn transform_contract_preserves_loop_and_branch_validity() {
 
 #[test]
 fn finalizing_an_already_canonical_package_reuses_its_allocation() {
+    let graph = galfus_bytecode::BytecodeGraph::new();
+    let catalog = galfus_bytecode::derive_module_catalog(&graph).expect("catalog derives");
     let package = Arc::new(
         PackageImage::try_new(
-            galfus_bytecode::BytecodeGraph::new(),
+            graph,
+            catalog,
             ExecutionTarget::new("test").expect("valid target"),
             None,
             galfus_bytecode::PackageMetadata {
@@ -255,9 +258,11 @@ fn finalization_prunes_targets_reachable_only_from_removed_calls() {
         Vec::new(),
     )
     .expect("valid graph");
+    let catalog = galfus_bytecode::derive_module_catalog(&graph).expect("catalog derives");
     let package = Arc::new(
         PackageImage::try_new(
             graph,
+            catalog,
             ExecutionTarget::new("test").expect("valid target"),
             None,
             galfus_bytecode::PackageMetadata {
@@ -347,9 +352,11 @@ fn finalization_restores_dynamic_dispatch_candidates_from_the_unfinalized_graph(
             Vec::new(),
         )
         .expect("valid graph");
+        let catalog = galfus_bytecode::derive_module_catalog(&graph).expect("catalog derives");
         Arc::new(
             PackageImage::try_new(
                 graph,
+                catalog,
                 ExecutionTarget::new("test").expect("valid target"),
                 None,
                 galfus_bytecode::PackageMetadata {

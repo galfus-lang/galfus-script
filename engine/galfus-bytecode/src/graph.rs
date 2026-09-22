@@ -9,7 +9,9 @@ use crate::{
     BytecodeFormatError, BytecodeFormatVersion, BytecodeModule, BytecodeValidationError,
     CURRENT_BYTECODE_FORMAT_VERSION, validate_bytecode_format, validate_bytecode_module,
 };
-use galfus_core::{ModuleId, ModulePath, SemanticRevision, Span};
+use galfus_core::{
+    ModuleId, ModulePath, RuntimeExportId, RuntimeExportKind, SemanticRevision, Span,
+};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// A source location materialized for a bytecode package.
@@ -204,6 +206,40 @@ pub enum BytecodeGraphValidationError {
         importer: ModuleId,
         module_path: String,
         symbol_name: String,
+    },
+    #[error(
+        "module {importer:?} import `{symbol_name}` from `{module_path}` has only one direct target ID"
+    )]
+    IncompleteDirectImportTarget {
+        importer: ModuleId,
+        module_path: String,
+        symbol_name: String,
+    },
+    #[error(
+        "module {importer:?} import `{symbol_name}` references absent direct target module {target:?}"
+    )]
+    MissingDirectImportModule {
+        importer: ModuleId,
+        symbol_name: String,
+        target: ModuleId,
+    },
+    #[error(
+        "module {importer:?} import `{symbol_name}` references absent direct target export {target:?} in module {module_id:?}"
+    )]
+    MissingDirectImportExport {
+        importer: ModuleId,
+        symbol_name: String,
+        module_id: ModuleId,
+        target: RuntimeExportId,
+    },
+    #[error(
+        "module {importer:?} import `{symbol_name}` has kind {import_kind:?}, but direct target has kind {target_kind:?}"
+    )]
+    DirectImportKindMismatch {
+        importer: ModuleId,
+        symbol_name: String,
+        import_kind: RuntimeExportKind,
+        target_kind: RuntimeExportKind,
     },
 }
 
@@ -462,6 +498,13 @@ impl BytecodeGraph {
                     .cmp(&(&right.module_name, &right.symbol_name))
             });
             for import in imports {
+                if import.target_module_id.is_some() != import.target_export_id.is_some() {
+                    errors.push(BytecodeGraphValidationError::IncompleteDirectImportTarget {
+                        importer: node.id,
+                        module_path: import.module_name.clone(),
+                        symbol_name: import.symbol_name.clone(),
+                    });
+                }
                 let Some(path) = ModulePath::new(import.module_name.as_str()) else {
                     errors.push(BytecodeGraphValidationError::InvalidImportPath {
                         importer: node.id,
@@ -495,6 +538,42 @@ impl BytecodeGraph {
                         module_path: import.module_name.clone(),
                         symbol_name: import.symbol_name.clone(),
                     });
+                }
+
+                if let (Some(target_module_id), Some(target_export_id)) =
+                    (import.target_module_id, import.target_export_id)
+                {
+                    let Some(target_node) = self.modules.get(&target_module_id) else {
+                        errors.push(BytecodeGraphValidationError::MissingDirectImportModule {
+                            importer: node.id,
+                            symbol_name: import.symbol_name.clone(),
+                            target: target_module_id,
+                        });
+                        continue;
+                    };
+                    let target_kind = target_node.module.exports.iter().find_map(|export| {
+                        let kind = export.kind.runtime_export_kind();
+                        let id = RuntimeExportId::new(target_module_id, kind, &export.symbol_name);
+                        (id == target_export_id).then_some(kind)
+                    });
+                    let Some(target_kind) = target_kind else {
+                        errors.push(BytecodeGraphValidationError::MissingDirectImportExport {
+                            importer: node.id,
+                            symbol_name: import.symbol_name.clone(),
+                            module_id: target_module_id,
+                            target: target_export_id,
+                        });
+                        continue;
+                    };
+                    let import_kind = import.kind.runtime_export_kind();
+                    if import_kind != target_kind {
+                        errors.push(BytecodeGraphValidationError::DirectImportKindMismatch {
+                            importer: node.id,
+                            symbol_name: import.symbol_name.clone(),
+                            import_kind,
+                            target_kind,
+                        });
+                    }
                 }
             }
         }
@@ -608,6 +687,11 @@ impl BytecodeGraph {
 
     pub fn get(&self, id: ModuleId) -> Option<&BytecodeNode> {
         self.modules.get(&id).map(std::sync::Arc::as_ref)
+    }
+
+    /// Returns the immutable owner for one module node.
+    pub fn node_handle(&self, id: ModuleId) -> Option<std::sync::Arc<BytecodeNode>> {
+        self.modules.get(&id).cloned()
     }
 
     /// Iterate modules in canonical `ModuleId` order.

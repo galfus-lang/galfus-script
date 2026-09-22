@@ -5,6 +5,7 @@ use super::*;
 use crate::{
     BytecodeFunction, BytecodeModule, ConstantPool, DebugLocation, ExportSlot, ImportSlot,
 };
+use galfus_core::{RuntimeExportId, RuntimeExportKind};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
@@ -305,6 +306,8 @@ fn apply_rejects_invalid_imports_without_changing_the_snapshot() {
         symbol_name: "missing".to_string(),
         ty: instruction::TypeIdx(0),
         kind: ImportKind::Function,
+        target_module_id: None,
+        target_export_id: None,
     });
 
     let error = graph
@@ -326,6 +329,126 @@ fn apply_rejects_invalid_imports_without_changing_the_snapshot() {
     ));
     assert_eq!(graph.version(), 0);
     assert!(graph.is_empty());
+}
+
+#[test]
+fn import_slot_without_direct_target_ids_round_trips() {
+    let slot = ImportSlot {
+        module_name: "src/dependency.gfs".to_string(),
+        symbol_name: "marker".to_string(),
+        ty: instruction::TypeIdx(0),
+        kind: ImportKind::Function,
+        target_module_id: None,
+        target_export_id: None,
+    };
+
+    let encoded = postcard::to_stdvec(&slot).expect("legacy slot encodes");
+    let decoded: ImportSlot = postcard::from_bytes(encoded.as_slice()).expect("slot decodes");
+
+    assert_eq!(decoded, slot);
+}
+
+#[test]
+fn direct_import_slot_round_trips_with_target_ids() {
+    let target_module_id = ModuleId::new(37);
+    let target_export_id =
+        RuntimeExportId::new(target_module_id, RuntimeExportKind::Function, "marker");
+    let slot = ImportSlot {
+        module_name: "src/dependency.gfs".to_string(),
+        symbol_name: "marker".to_string(),
+        ty: instruction::TypeIdx(0),
+        kind: ImportKind::Function,
+        target_module_id: Some(target_module_id),
+        target_export_id: Some(target_export_id),
+    };
+
+    let encoded = postcard::to_stdvec(&slot).expect("direct slot encodes");
+    let decoded: ImportSlot = postcard::from_bytes(encoded.as_slice()).expect("slot decodes");
+
+    assert_eq!(decoded, slot);
+}
+
+#[test]
+fn graph_rejects_half_populated_direct_import_target() {
+    let importer = ModuleId::new(1);
+    let dependency = ModuleId::new(7);
+    let revision = SemanticRevision::new(1);
+    let mut importer_node = compiled_module(importer, revision);
+    importer_node.module.imports.push(ImportSlot {
+        module_name: "src/7.gfs".to_string(),
+        symbol_name: "value".to_string(),
+        ty: instruction::TypeIdx(0),
+        kind: ImportKind::Global,
+        target_module_id: Some(dependency),
+        target_export_id: None,
+    });
+    let mut dependency_node = compiled_module(dependency, revision);
+    dependency_node.module.global_count = 1;
+    dependency_node.module.exports.push(ExportSlot {
+        symbol_name: "value".to_string(),
+        kind: ExportKind::Global(instruction::GlobalIdx(0)),
+    });
+
+    let error =
+        BytecodeGraph::from_modules(revision, vec![importer_node, dependency_node], Vec::new())
+            .expect_err("half-populated direct target must fail");
+    let BytecodeGraphTransactionError::InvalidGraph(errors) = error else {
+        panic!("direct target validation must fail");
+    };
+
+    assert!(matches!(
+        errors.errors(),
+        [BytecodeGraphValidationError::IncompleteDirectImportTarget {
+            importer: found_importer,
+            module_path,
+            symbol_name,
+        }] if *found_importer == importer
+            && module_path == "src/7.gfs"
+            && symbol_name == "value"
+    ));
+}
+
+#[test]
+fn graph_rejects_direct_target_with_a_different_kind() {
+    let importer = ModuleId::new(1);
+    let dependency = ModuleId::new(7);
+    let revision = SemanticRevision::new(1);
+    let mut importer_node = compiled_module(importer, revision);
+    importer_node.module.imports.push(ImportSlot {
+        module_name: "src/7.gfs".to_string(),
+        symbol_name: "value".to_string(),
+        ty: instruction::TypeIdx(0),
+        kind: ImportKind::Function,
+        target_module_id: Some(dependency),
+        target_export_id: Some(RuntimeExportId::new(
+            dependency,
+            RuntimeExportKind::Global,
+            "value",
+        )),
+    });
+    let mut dependency_node = compiled_module(dependency, revision);
+    dependency_node.module.global_count = 1;
+    dependency_node.module.exports.push(ExportSlot {
+        symbol_name: "value".to_string(),
+        kind: ExportKind::Global(instruction::GlobalIdx(0)),
+    });
+
+    let error =
+        BytecodeGraph::from_modules(revision, vec![importer_node, dependency_node], Vec::new())
+            .expect_err("kind mismatch must fail");
+    let BytecodeGraphTransactionError::InvalidGraph(errors) = error else {
+        panic!("direct target kind validation must fail");
+    };
+
+    assert!(matches!(
+        errors.errors(),
+        [BytecodeGraphValidationError::DirectImportKindMismatch {
+            importer: found_importer,
+            symbol_name,
+            import_kind: RuntimeExportKind::Function,
+            target_kind: RuntimeExportKind::Global,
+        }] if *found_importer == importer && symbol_name == "value"
+    ));
 }
 
 #[test]
@@ -411,6 +534,8 @@ fn validation_collects_all_errors_in_canonical_module_order() {
         symbol_name: "value".to_string(),
         ty: instruction::TypeIdx(0),
         kind: ImportKind::Function,
+        target_module_id: None,
+        target_export_id: None,
     });
     let mut second_node = compiled_module(second, revision);
     second_node.module.imports.push(ImportSlot {
@@ -418,6 +543,8 @@ fn validation_collects_all_errors_in_canonical_module_order() {
         symbol_name: "value".to_string(),
         ty: instruction::TypeIdx(0),
         kind: ImportKind::Function,
+        target_module_id: None,
+        target_export_id: None,
     });
 
     let forward = BytecodeGraph {

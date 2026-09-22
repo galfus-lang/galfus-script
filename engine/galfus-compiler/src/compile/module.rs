@@ -30,6 +30,9 @@ use galfus_bytecode::{
     ImportEdge, ImportSlot,
     instruction::{FuncIdx, TypeIdx},
 };
+use galfus_core::{
+    RuntimeExportId, RuntimeExportIdRegistry, RuntimeExportIdentity, RuntimeExportKind,
+};
 use galfus_frontend::SymbolKind;
 use std::collections::{HashMap, HashSet};
 
@@ -148,6 +151,7 @@ pub fn compile_changed_modules(
 
     // Phase 2: Compile each module independently.
     let mut outputs = Vec::new();
+    let mut runtime_export_ids = RuntimeExportIdRegistry::default();
     for mod_idx in 0..modules.len() {
         let module_id = modules[mod_idx].id();
         if !affected_modules.contains(&mod_idx) {
@@ -163,6 +167,7 @@ pub fn compile_changed_modules(
             mod_idx,
             string_table,
             &mut state.generic_choice_layouts,
+            &mut runtime_export_ids,
         )?;
         if let Err(errors) = galfus_bytecode::validation::validate_bytecode_module(&image) {
             return Err(anyhow::anyhow!(
@@ -215,6 +220,7 @@ fn compile_single_module(
     mod_idx: usize,
     string_table: &galfus_frontend::StringTable,
     generic_choice_layouts: &mut crate::bytecode_emission::GenericChoiceLayoutCache,
+    runtime_export_ids: &mut RuntimeExportIdRegistry,
 ) -> Result<(BytecodeModule, galfus_bytecode::graph::ExecutionMetadata)> {
     use crate::compile::resolve::{
         collect_call_targets, resolve_import_target, resolve_local_call_target,
@@ -273,15 +279,54 @@ fn compile_single_module(
                 modules[mod_idx].path().as_str(),
             )?;
             let target_module = &modules[target_mod_idx];
-            let symbol_name = target_module
-                .graph()
-                .resolution()
-                .and_then(|res| {
-                    res.export_for_symbol(galfus_core::SymbolId::new(target_func_id.raw()))
-                        .and_then(|id| res.export_record(id))
-                        .map(|export| export.name().to_string())
-                })
-                .unwrap_or_else(|| format!("func_{}", target_func_id.raw()));
+            let target_resolution = target_module.graph().resolution().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "module `{}` has no resolution while compiling import target {:?} for `{}`",
+                    target_module.path().as_str(),
+                    target_module_id,
+                    modules[mod_idx].path().as_str(),
+                )
+            })?;
+            let symbol_name = match target_resolution
+                .export_for_symbol(galfus_core::SymbolId::new(target_func_id.raw()))
+                .and_then(|id| target_resolution.export_record(id))
+            {
+                Some(export) if export.kind() == SymbolKind::Function => export.name().to_string(),
+                Some(export) => {
+                    return Err(anyhow::anyhow!(
+                        "module `{}` imports function target {:?} from module {:?} at `{}`, but export `{}` has kind {:?}",
+                        modules[mod_idx].path().as_str(),
+                        target_func_id,
+                        target_module_id,
+                        target_module.path().as_str(),
+                        export.name(),
+                        export.kind(),
+                    ));
+                }
+                None if specialized_targets
+                    .values()
+                    .any(|target| *target == (target_module_id, target_func_id)) =>
+                {
+                    format!("func_{}", target_func_id.raw())
+                }
+                None => {
+                    return Err(anyhow::anyhow!(
+                        "module `{}` imports unresolved function target {:?} from module {:?} at `{}`",
+                        modules[mod_idx].path().as_str(),
+                        target_func_id,
+                        target_module_id,
+                        target_module.path().as_str(),
+                    ));
+                }
+            };
+            let target_export_id = register_runtime_export_id(
+                runtime_export_ids,
+                modules[mod_idx].path().as_str(),
+                target_module_id,
+                target_module.path().as_str(),
+                RuntimeExportKind::Function,
+                symbol_name.as_str(),
+            )?;
             let slot = FuncIdx(own_func_count + import_slots.len() as u16);
             import_slots.push(ImportSlot {
                 module_name: target_module.path().as_str().to_string(),
@@ -289,6 +334,8 @@ fn compile_single_module(
                 // Type info not yet resolved — placeholder.
                 ty: TypeIdx(0),
                 kind: galfus_bytecode::ImportKind::Function,
+                target_module_id: Some(target_module_id),
+                target_export_id: Some(target_export_id),
             });
             import_func_map.insert((target_module_id, target_func_id), slot);
             slot
@@ -321,22 +368,33 @@ fn compile_single_module(
                 continue;
             };
             if matches!(export.kind(), SymbolKind::Var | SymbolKind::Const) {
+                let target_export_id = register_runtime_export_id(
+                    runtime_export_ids,
+                    modules[mod_idx].path().as_str(),
+                    target_module.id(),
+                    target_module.path().as_str(),
+                    RuntimeExportKind::Global,
+                    export.name(),
+                )?;
                 imported_globals.push((
                     target_module.id(),
                     target_module.path().as_str().to_string(),
-                    symbol_name.to_string(),
+                    export.name().to_string(),
+                    target_export_id,
                 ));
             }
         }
     }
     imported_globals.sort();
     imported_globals.dedup();
-    for (_, module_name, symbol_name) in imported_globals {
+    for (target_module_id, module_name, symbol_name, target_export_id) in imported_globals {
         import_slots.push(ImportSlot {
             module_name,
             symbol_name,
             ty: TypeIdx(0),
             kind: galfus_bytecode::ImportKind::Global,
+            target_module_id: Some(target_module_id),
+            target_export_id: Some(target_export_id),
         });
     }
 
@@ -586,6 +644,27 @@ fn compile_single_module(
         init_func_idx,
     };
     Ok((module, execution_metadata))
+}
+
+fn register_runtime_export_id(
+    registry: &mut RuntimeExportIdRegistry,
+    importer_path: &str,
+    target_module_id: galfus_core::ModuleId,
+    target_path: &str,
+    kind: RuntimeExportKind,
+    export_name: &str,
+) -> Result<RuntimeExportId> {
+    registry
+        .register(RuntimeExportIdentity::new(
+            target_module_id,
+            kind,
+            export_name,
+        ))
+        .map_err(|collision| {
+            anyhow::anyhow!(
+                "module `{importer_path}` imports {kind:?} export `{export_name}` from module {target_module_id:?} at `{target_path}`, but {collision}"
+            )
+        })
 }
 
 pub(super) fn target_module_index(

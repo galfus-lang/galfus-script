@@ -11,8 +11,31 @@ use super::{
 };
 use crate::{
     BytecodeGraph, BytecodeModule, BytecodeNode, CURRENT_BYTECODE_FORMAT_VERSION,
-    CURRENT_PACKAGE_FORMAT_VERSION, ConstantPool, ImportEdge,
+    CURRENT_PACKAGE_FORMAT_VERSION, ConstantPool, ImportEdge, ImportResolutionMode, ModuleCatalog,
+    PackageFormatVersion, derive_module_catalog,
 };
+
+const PACKAGE_FORMAT_V2_FIXTURE_HEX: &str = "0201000000000000000000000000000000000000000004746573740007666978747572650000000080ade204808080800180088008808001802080088080800480800180208010800880088040000000000000000000000000000000000000000000000200000000000000000000000000000000000000020100000000000000000000000000000000000001000000000000000000000000000000000000000100000000000000000000000000000000000000";
+
+fn package_format_v2_fixture() -> Vec<u8> {
+    PACKAGE_FORMAT_V2_FIXTURE_HEX
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let high = hex_digit(pair[0]).expect("fixture contains hexadecimal digits");
+            let low = hex_digit(pair[1]).expect("fixture contains hexadecimal digits");
+            (high << 4) | low
+        })
+        .collect()
+}
+
+fn hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        _ => None,
+    }
+}
 
 fn graph(paths: &[&str], edges: Vec<ImportEdge>) -> BytecodeGraph {
     BytecodeGraph::from_modules(
@@ -61,13 +84,58 @@ fn target() -> ExecutionTarget {
     ExecutionTarget::new("test").expect("valid target")
 }
 
+fn package_image(
+    graph: BytecodeGraph,
+    target: ExecutionTarget,
+    entry_point: Option<PackageEntryPoint>,
+    metadata: PackageMetadata,
+    limits: LimitsMetadata,
+    adapter_requirements: Vec<AdapterModuleRequirement>,
+    provider_requirements: Vec<galfus_contract::ProviderModuleRequirement>,
+) -> Result<PackageImage, PackageValidationError> {
+    let catalog = derive_module_catalog(&graph).map_err(|error| {
+        PackageValidationError::CatalogDerivation {
+            reason: error.to_string(),
+        }
+    })?;
+    PackageImage::try_new(
+        graph,
+        catalog,
+        target,
+        entry_point,
+        metadata,
+        limits,
+        adapter_requirements,
+        provider_requirements,
+    )
+}
+
+fn fixture_package() -> PackageImage {
+    package_image(
+        BytecodeGraph::new(),
+        target(),
+        None,
+        PackageMetadata {
+            name: "fixture".into(),
+            version: None,
+            author: None,
+            email: None,
+            description: None,
+        },
+        LimitsMetadata::default(),
+        Vec::new(),
+        Vec::new(),
+    )
+    .expect("fixture package is valid")
+}
+
 #[test]
 fn package_image_owns_its_graph_manifest_and_versions() {
     let entry = PackageEntryPoint::new(
         ModulePath::new("src/main.gfs").expect("valid module path"),
         "main",
     );
-    let package = PackageImage::try_new(
+    let package = package_image(
         crate::BytecodeGraph::new(),
         target(),
         Some(entry),
@@ -124,7 +192,7 @@ fn package_image_rejects_a_missing_reachable_adapter_requirement() {
     );
 
     assert!(matches!(
-        PackageImage::try_new(graph, target(), Some(entry), PackageMetadata { name: "test".into(), version: None, author: None, email: None, description: None }, LimitsMetadata::default(), Vec::new(), Vec::new()),
+        package_image(graph, target(), Some(entry), PackageMetadata { name: "test".into(), version: None, author: None, email: None, description: None }, LimitsMetadata::default(), Vec::new(), Vec::new()),
         Err(PackageValidationError::MissingAdapterRequirement { proxy_module })
             if proxy_module == "graphics.gfp"
     ));
@@ -139,7 +207,7 @@ fn package_image_rejects_unreachable_and_duplicate_adapter_requirements() {
     );
 
     assert!(matches!(
-        PackageImage::try_new(
+        package_image(
             graph.clone(),
             target(),
             Some(entry.clone()),
@@ -152,7 +220,7 @@ fn package_image_rejects_unreachable_and_duplicate_adapter_requirements() {
             if proxy_module == "graphics.gfp"
     ));
     assert!(matches!(
-        PackageImage::try_new(
+        package_image(
             graph,
             target(),
             Some(entry),
@@ -183,7 +251,7 @@ fn package_image_canonicalizes_adapter_requirement_and_export_order() {
             return_type: SurfaceSchema::Null,
         },
     ];
-    let package = PackageImage::try_new(
+    let package = package_image(
         graph(&["alpha.gfp", "beta.gfp"], Vec::new()),
         target(),
         None,
@@ -218,7 +286,7 @@ fn package_image_canonicalizes_adapter_requirement_and_export_order() {
         vec!["alpha", "zeta"]
     );
 
-    let same_package = PackageImage::try_new(
+    let same_package = package_image(
         graph(&["alpha.gfp", "beta.gfp"], Vec::new()),
         target(),
         None,
@@ -242,7 +310,7 @@ fn package_image_canonicalizes_adapter_requirement_and_export_order() {
 
 #[test]
 fn package_content_hash_changes_for_execution_relevant_data() {
-    let first = PackageImage::try_new(
+    let first = package_image(
         graph(&["main.gfs"], Vec::new()),
         target(),
         None,
@@ -258,7 +326,7 @@ fn package_content_hash_changes_for_execution_relevant_data() {
         Vec::new(),
     )
     .expect("valid package");
-    let second = PackageImage::try_new(
+    let second = package_image(
         graph(&["main.gfs"], Vec::new()),
         ExecutionTarget::new("other").expect("valid target"),
         None,
@@ -283,7 +351,7 @@ fn package_content_hash_changes_for_execution_relevant_data() {
 
 #[test]
 fn package_bytecode_round_trip_rebuilds_graph_indexes() {
-    let package = PackageImage::try_new(
+    let package = package_image(
         graph(
             &["src/main.gfs", "src/dependency.gfs"],
             vec![ImportEdge {
@@ -310,6 +378,8 @@ fn package_bytecode_round_trip_rebuilds_graph_indexes() {
     let decoded = PackageImage::from_bytecode(bytes.as_slice()).expect("package decodes");
 
     assert_eq!(decoded.graph().len(), 2);
+    assert_eq!(decoded.catalog().len(), 2);
+    assert!(decoded.catalog().get(ModuleId::new(1)).is_some());
     assert_eq!(
         decoded
             .graph()
@@ -318,6 +388,80 @@ fn package_bytecode_round_trip_rebuilds_graph_indexes() {
         vec![ModuleId::new(2)]
     );
     assert_eq!(decoded.to_bytecode().expect("package re-encodes"), bytes);
+}
+
+#[test]
+fn package_format_v2_fixture_decodes_and_upgrades_to_the_current_format() {
+    let fixture = package_format_v2_fixture();
+    let decoded = PackageImage::from_bytecode(fixture.as_slice()).expect("fixture package decodes");
+    let encoded = decoded.to_bytecode().expect("upgraded package encodes");
+
+    assert_eq!(
+        decoded.versions().package_format(),
+        CURRENT_PACKAGE_FORMAT_VERSION
+    );
+    assert_eq!(
+        decoded.import_resolution_mode(),
+        ImportResolutionMode::Legacy
+    );
+    assert!(decoded.catalog().is_empty());
+    assert_ne!(encoded, fixture);
+    let redecoded =
+        PackageImage::from_bytecode(encoded.as_slice()).expect("upgraded package decodes");
+    assert_eq!(
+        redecoded.import_resolution_mode(),
+        ImportResolutionMode::Direct
+    );
+    assert_eq!(
+        redecoded
+            .to_bytecode()
+            .expect("upgraded package re-encodes"),
+        encoded
+    );
+}
+
+#[test]
+fn package_image_rejects_a_catalog_that_does_not_describe_its_graph() {
+    let graph = graph(&["main.gfs"], Vec::new());
+
+    assert!(matches!(
+        PackageImage::try_new(
+            graph,
+            ModuleCatalog::new(Vec::new()).expect("empty catalog is valid"),
+            target(),
+            None,
+            PackageMetadata {
+                name: "test".into(),
+                version: None,
+                author: None,
+                email: None,
+                description: None,
+            },
+            LimitsMetadata::default(),
+            Vec::new(),
+            Vec::new(),
+        ),
+        Err(PackageValidationError::CatalogGraphMismatch)
+    ));
+}
+
+#[test]
+fn package_decoder_rejects_future_format_before_bytecode_validation() {
+    let mut package = fixture_package();
+    let future_format = PackageFormatVersion::new(
+        CURRENT_PACKAGE_FORMAT_VERSION.major(),
+        CURRENT_PACKAGE_FORMAT_VERSION.minor() + 1,
+        0,
+    );
+    package.versions.package_format = future_format;
+    package.versions.bytecode_format = PackageFormatVersion::new(0, 0, 0);
+    let bytes = package.to_bytecode().expect("future package encodes");
+
+    assert!(matches!(
+        PackageImage::from_bytecode(bytes.as_slice()),
+        Err(PackageDecodingError::UnsupportedPackageFormat { supported, actual })
+            if supported == CURRENT_PACKAGE_FORMAT_VERSION && actual == future_format
+    ));
 }
 
 #[test]

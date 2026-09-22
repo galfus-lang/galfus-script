@@ -6,20 +6,30 @@ pub mod graph;
 pub mod graph_resolver;
 pub mod instruction;
 pub mod loader;
+pub mod module_catalog;
+pub mod module_chunk;
+pub mod module_resolver;
 pub mod opcode;
 pub mod package;
 pub mod statistics;
 pub mod validation;
 pub mod version;
 
+use galfus_core::{ModuleId, RuntimeExportId, RuntimeExportKind};
+
 pub use graph::{
     BytecodeGraph, BytecodeGraphTransaction, BytecodeGraphTransactionError,
     BytecodeGraphValidationError, BytecodeGraphValidationErrors, BytecodeNode, DebugLocation,
     ExecutionMetadata, ImportEdge,
 };
-pub use graph_resolver::{GraphResolutionError, ModuleImports, ResolvedImport};
+pub use graph_resolver::{
+    GraphResolutionError, ImportResolutionMode, ModuleImports, ResolvedImport, ResolvedImportKind,
+};
 pub use instruction::*;
 pub use loader::*;
+pub use module_catalog::*;
+pub use module_chunk::*;
+pub use module_resolver::*;
 pub use opcode::*;
 pub use package::*;
 pub use statistics::*;
@@ -123,18 +133,40 @@ pub enum ImportKind {
     Global,
 }
 
+impl ImportKind {
+    pub const fn runtime_export_kind(&self) -> RuntimeExportKind {
+        match self {
+            Self::Function => RuntimeExportKind::Function,
+            Self::Global => RuntimeExportKind::Global,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ImportSlot {
     pub module_name: String,
     pub symbol_name: String,
     pub ty: TypeIdx,
     pub kind: ImportKind,
+    #[serde(default)]
+    pub target_module_id: Option<ModuleId>,
+    #[serde(default)]
+    pub target_export_id: Option<RuntimeExportId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ExportKind {
     Function(FuncIdx),
     Global(GlobalIdx),
+}
+
+impl ExportKind {
+    pub const fn runtime_export_kind(&self) -> RuntimeExportKind {
+        match self {
+            Self::Function(_) => RuntimeExportKind::Function,
+            Self::Global(_) => RuntimeExportKind::Global,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

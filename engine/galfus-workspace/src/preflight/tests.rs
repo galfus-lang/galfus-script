@@ -170,9 +170,11 @@ fn create_package(requirements: Vec<AdapterModuleRequirement>) -> PackageImage {
         .collect();
     let graph = BytecodeGraph::from_modules(SemanticRevision::new(1), modules, Vec::new())
         .expect("valid proxy graph");
+    let catalog = galfus_bytecode::derive_module_catalog(&graph).expect("catalog derives");
 
     PackageImage::try_new(
         graph,
+        catalog,
         ExecutionTarget::new("test").expect("valid target"),
         None,
         galfus_bytecode::PackageMetadata {

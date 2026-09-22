@@ -6,14 +6,17 @@ use galfus_contract::{
     CURRENT_NUMERIC_SEMANTICS_VERSION, CURRENT_PRODUCER_VERSION, ContentHash, ExecutionTarget,
     LimitsMetadata, NumericSemanticsVersion, ProducerVersion, ProviderModuleRequirement,
 };
-use galfus_core::{ModuleId, ModulePath};
+use galfus_core::{ModuleId, ModulePath, Version};
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use crate::{
     BytecodeFormatError, BytecodeFormatVersion, BytecodeGraph, BytecodeGraphValidationErrors,
-    CURRENT_PACKAGE_FORMAT_VERSION, PackageFormatError, PackageFormatVersion,
-    validate_package_format,
+    CURRENT_PACKAGE_FORMAT_VERSION, GraphResolutionError, ImportResolutionMode, ModuleCatalog,
+    PackageFormatError, PackageFormatVersion, derive_module_catalog,
 };
+
+const PACKAGE_FORMAT_V2: PackageFormatVersion = Version::new(2, 0, 0);
 
 /// The exported entry point of a package image.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -95,8 +98,29 @@ impl PackageVersions {
 ///
 /// The graph and its declarative external requirements are created together
 /// and cannot be replaced independently after publication.
+///
+/// The field order is the package-format v3 wire contract. Postcard does not
+/// encode field names or a self-describing schema, so adding, removing, or
+/// reordering serialized fields requires a new package format and a dedicated
+/// decoding branch. Never change this layout in place.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PackageImage {
+    graph: std::sync::Arc<BytecodeGraph>,
+    target: ExecutionTarget,
+    entry_point: Option<PackageEntryPoint>,
+    metadata: PackageMetadata,
+    limits: LimitsMetadata,
+    adapter_requirements: Vec<AdapterModuleRequirement>,
+    provider_requirements: Vec<ProviderModuleRequirement>,
+    versions: PackageVersions,
+    catalog: ModuleCatalog,
+    #[serde(skip, default)]
+    import_resolution_mode: ImportResolutionMode,
+}
+
+/// The package-format v2 prefix retained solely for explicit legacy decoding.
+#[derive(serde::Deserialize)]
+struct PackageImageV2 {
     graph: std::sync::Arc<BytecodeGraph>,
     target: ExecutionTarget,
     entry_point: Option<PackageEntryPoint>,
@@ -120,6 +144,10 @@ pub enum PackageValidationError {
     DuplicateProviderRequirement { module_path: String },
     #[error("provider alias `{alias}` is duplicated")]
     DuplicateProviderAlias { alias: String },
+    #[error("the supplied module catalog does not exactly describe the package graph")]
+    CatalogGraphMismatch,
+    #[error("could not derive a module catalog from the package graph: {reason}")]
+    CatalogDerivation { reason: String },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -132,6 +160,13 @@ pub enum PackageEncodingError {
 pub enum PackageDecodingError {
     #[error("could not decode the package image: {0}")]
     Postcard(#[from] postcard::Error),
+    #[error(
+        "package format {actual} is not supported by this decoder; supported package format is {supported}"
+    )]
+    UnsupportedPackageFormat {
+        supported: PackageFormatVersion,
+        actual: PackageFormatVersion,
+    },
     #[error(transparent)]
     PackageFormat(PackageFormatError),
     #[error(transparent)]
@@ -139,17 +174,24 @@ pub enum PackageDecodingError {
     #[error(transparent)]
     Graph(#[from] BytecodeGraphValidationErrors),
     #[error(transparent)]
+    GraphResolution(#[from] GraphResolutionError),
+    #[error(transparent)]
     Validation(#[from] PackageValidationError),
     #[error("package declares bytecode format {declared:?}, but graph contains {actual:?}")]
     BytecodeFormatMismatch {
         declared: BytecodeFormatVersion,
         actual: BytecodeFormatVersion,
     },
+    #[error("package format {package_format} has trailing bytes")]
+    UnexpectedTrailingBytes {
+        package_format: PackageFormatVersion,
+    },
 }
 
 impl PackageImage {
     pub fn try_new(
         graph: BytecodeGraph,
+        catalog: ModuleCatalog,
         target: ExecutionTarget,
         entry_point: Option<PackageEntryPoint>,
         metadata: PackageMetadata,
@@ -171,6 +213,7 @@ impl PackageImage {
         });
         Self::validate_adapter_requirements(&graph, entry_point.as_ref(), &adapter_requirements)?;
         Self::validate_provider_requirements(&provider_requirements)?;
+        Self::validate_catalog(&graph, &catalog)?;
 
         Ok(Self {
             versions: PackageVersions::for_bytecode(graph.format_version()),
@@ -181,7 +224,24 @@ impl PackageImage {
             limits,
             adapter_requirements,
             provider_requirements,
+            catalog,
+            import_resolution_mode: ImportResolutionMode::Direct,
         })
+    }
+
+    fn validate_catalog(
+        graph: &BytecodeGraph,
+        catalog: &ModuleCatalog,
+    ) -> Result<(), PackageValidationError> {
+        let expected = derive_module_catalog(graph).map_err(|error| {
+            PackageValidationError::CatalogDerivation {
+                reason: error.to_string(),
+            }
+        })?;
+        if catalog != &expected {
+            return Err(PackageValidationError::CatalogGraphMismatch);
+        }
+        Ok(())
     }
 
     fn validate_adapter_requirements(
@@ -305,8 +365,18 @@ impl PackageImage {
         self.provider_requirements.as_slice()
     }
 
+    /// Immutable catalog describing every module available to this package.
+    pub fn catalog(&self) -> &ModuleCatalog {
+        &self.catalog
+    }
+
     pub const fn versions(&self) -> PackageVersions {
         self.versions
+    }
+
+    /// Import identity contract selected while decoding this package image.
+    pub const fn import_resolution_mode(&self) -> ImportResolutionMode {
+        self.import_resolution_mode
     }
 
     /// Encodes this immutable package with a fixed-width, deterministic layout.
@@ -324,9 +394,65 @@ impl PackageImage {
 
     /// Decodes and validates a package received from a loader before it reaches the runtime.
     pub fn from_bytecode(bytes: &[u8]) -> Result<Self, PackageDecodingError> {
-        let mut package = postcard::from_bytes::<Self>(bytes)?;
-        validate_package_format(package.versions.package_format())
-            .map_err(PackageDecodingError::PackageFormat)?;
+        let (v2_prefix, remaining) = postcard::take_from_bytes::<PackageImageV2>(bytes)?;
+        match Self::decode_format(v2_prefix.versions.package_format())? {
+            PackageDecodingFormat::V2 => {
+                if !remaining.is_empty() {
+                    return Err(PackageDecodingError::UnexpectedTrailingBytes {
+                        package_format: PACKAGE_FORMAT_V2,
+                    });
+                }
+                Self::decode_v2(v2_prefix)
+            }
+            PackageDecodingFormat::V3 => {
+                let package = postcard::from_bytes::<Self>(bytes)?;
+                Self::decode_v3(package)
+            }
+        }
+    }
+
+    fn decode_format(
+        actual: PackageFormatVersion,
+    ) -> Result<PackageDecodingFormat, PackageDecodingError> {
+        if actual == PACKAGE_FORMAT_V2 {
+            return Ok(PackageDecodingFormat::V2);
+        }
+        if actual == CURRENT_PACKAGE_FORMAT_VERSION {
+            return Ok(PackageDecodingFormat::V3);
+        }
+
+        Err(PackageDecodingError::UnsupportedPackageFormat {
+            supported: CURRENT_PACKAGE_FORMAT_VERSION,
+            actual,
+        })
+    }
+
+    fn decode_v2(package: PackageImageV2) -> Result<Self, PackageDecodingError> {
+        let mut graph = package.graph;
+        Arc::make_mut(&mut graph).rebuild_transient_indexes()?;
+        Arc::make_mut(&mut graph).populate_direct_import_targets()?;
+        let catalog = derive_module_catalog(graph.as_ref()).map_err(|error| {
+            PackageDecodingError::Validation(PackageValidationError::CatalogDerivation {
+                reason: error.to_string(),
+            })
+        })?;
+        let mut versions = package.versions;
+        versions.package_format = CURRENT_PACKAGE_FORMAT_VERSION;
+        Self::decode_v3(Self {
+            graph,
+            target: package.target,
+            entry_point: package.entry_point,
+            metadata: package.metadata,
+            limits: package.limits,
+            adapter_requirements: package.adapter_requirements,
+            provider_requirements: package.provider_requirements,
+            versions,
+            catalog,
+            import_resolution_mode: ImportResolutionMode::Legacy,
+        })
+    }
+
+    fn decode_v3(mut package: Self) -> Result<Self, PackageDecodingError> {
         package
             .graph
             .validate_format()
@@ -344,10 +470,17 @@ impl PackageImage {
             &package.adapter_requirements,
         )?;
         Self::validate_provider_requirements(&package.provider_requirements)?;
+        Self::validate_catalog(&package.graph, &package.catalog)?;
         Ok(package)
     }
 
     pub fn content_hash(&self) -> Result<ContentHash, PackageEncodingError> {
         self.canonical_bytes().map(|bytes| ContentHash::of(&bytes))
     }
+}
+
+#[derive(Clone, Copy)]
+enum PackageDecodingFormat {
+    V2,
+    V3,
 }

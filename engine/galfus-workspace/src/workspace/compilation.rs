@@ -969,6 +969,8 @@ impl Workspace {
         let graph = base_graph
             .apply(transaction)
             .map_err(|error| CompileBlocked::CompilerError(error.to_string()))?;
+        let catalog = galfus_bytecode::derive_module_catalog(&graph)
+            .map_err(|error| CompileBlocked::CompilerError(error.to_string()))?;
         let adapter_requirements = self.adapter_requirements_for(&graph);
         let provider_requirements = self
             .provider_requirements_for(&graph)
@@ -1013,6 +1015,7 @@ impl Workspace {
         let unfinalized_package = Arc::new(
             PackageImage::try_new(
                 graph,
+                catalog,
                 self.config
                     .as_ref()
                     .map(WorkspaceConfig::compile_target)
