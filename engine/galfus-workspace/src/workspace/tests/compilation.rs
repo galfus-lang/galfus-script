@@ -1,7 +1,8 @@
 use super::*;
-use crate::state::{CompileBlocked, RunBlocked};
+use crate::state::{CheckState, CompileBlocked, CompileState, RunBlocked};
 use galfus_bytecode::{ImportKind, derive_module_catalog};
 use galfus_core::{RuntimeExportId, RuntimeExportKind};
+use galfus_runtime::{ModuleProducer, ModuleResolver};
 
 #[test]
 fn server_provider_requirement_matches_the_native_contract() {
@@ -323,8 +324,16 @@ fn compile_emits_one_module_per_source_module_with_import_slots() {
     );
     let catalog = derive_module_catalog(report.package.graph()).expect("catalog derives");
     assert_eq!(catalog.len(), report.package.graph().len());
+    assert_eq!(report.package.chunks().len(), catalog.len());
     for node in report.package.graph().modules() {
         let descriptor = catalog.get(node.id()).expect("catalog descriptor");
+        report
+            .package
+            .chunks()
+            .get(node.id())
+            .expect("compiled module chunk")
+            .verify(descriptor)
+            .expect("chunk matches the catalog descriptor");
         assert_eq!(descriptor.module_path(), node.path());
         assert_eq!(
             descriptor.has_initializer(),
@@ -739,6 +748,255 @@ fn compile_rebuilds_only_changed_modules_and_transitive_dependents() {
 }
 
 #[test]
+fn workspace_catalog_is_frozen_before_body_compilation_and_tracks_interfaces() {
+    let mut workspace = Workspace::new();
+    workspace
+        .load_manifest(
+            toml::from_str(
+                r#"
+                [module]
+                name = "workspace-catalog"
+                target = "app"
+                [entry]
+                path = "main.gfs"
+                "#,
+            )
+            .expect("valid configuration"),
+        )
+        .expect("configuration loads");
+    workspace
+        .load_module(
+            "main.gfs",
+            br#"
+            import { value } from "./dependency"
+            export fn main(args: [[u8]]): i32 { return value() }
+            "#,
+        )
+        .expect("main source loads");
+    workspace
+        .load_module("dependency.gfs", br#"export fn value(): i32 { return 1 }"#)
+        .expect("dependency source loads");
+    workspace
+        .load_module("detached.gfs", br#"export fn detached(): i32 { return 0 }"#)
+        .expect("detached source loads");
+
+    assert!(workspace.check().is_valid);
+    assert!(matches!(
+        workspace.bytecode_state.compile_state,
+        CompileState::Missing
+    ));
+    let first_catalog = workspace
+        .module_catalog()
+        .expect("successful check freezes a catalog")
+        .clone();
+    assert_eq!(first_catalog.len(), 3);
+    let main = first_catalog
+        .iter()
+        .find(|descriptor| descriptor.module_path().as_str() == "main.gfs")
+        .expect("main descriptor");
+    let dependency = first_catalog
+        .iter()
+        .find(|descriptor| descriptor.module_path().as_str() == "dependency.gfs")
+        .expect("dependency descriptor");
+    assert_eq!(main.dependencies(), &[dependency.module_id()]);
+
+    workspace
+        .load_module("dependency.gfs", br#"export fn value(): i32 { return 2 }"#)
+        .expect("updated dependency source loads");
+    assert!(workspace.check().is_valid);
+    let body_only_catalog = workspace
+        .module_catalog()
+        .expect("catalog remains available");
+    assert_eq!(
+        body_only_catalog
+            .get(dependency.module_id())
+            .expect("dependency descriptor")
+            .interface_hash(),
+        dependency.interface_hash()
+    );
+
+    workspace
+        .load_module(
+            "dependency.gfs",
+            br#"
+            export fn value(): i32 { return 2 }
+            export fn extra(): i32 { return 3 }
+            "#,
+        )
+        .expect("public dependency update loads");
+    assert!(workspace.check().is_valid);
+    let updated_catalog = workspace
+        .module_catalog()
+        .expect("catalog remains available");
+    assert_ne!(
+        updated_catalog
+            .get(dependency.module_id())
+            .expect("dependency descriptor")
+            .interface_hash(),
+        dependency.interface_hash()
+    );
+    match workspace.check_state() {
+        CheckState::Passed {
+            changed_modules, ..
+        } => assert!(changed_modules.contains(&main.module_id())),
+        state => panic!("expected a passed check, got {state:?}"),
+    }
+}
+
+#[test]
+fn workspace_source_producer_materializes_only_requested_module_from_frozen_snapshot() {
+    let mut workspace = Workspace::new();
+    workspace
+        .load_manifest(
+            toml::from_str(
+                r#"
+                [module]
+                name = "source-producer"
+                target = "app"
+                [entry]
+                path = "main.gfs"
+                "#,
+            )
+            .expect("valid configuration"),
+        )
+        .expect("configuration loads");
+    workspace
+        .load_module(
+            "main.gfs",
+            br#"
+            import { value } from "./dependency"
+            export fn main(args: [[u8]]): i32 { return value() }
+            "#,
+        )
+        .expect("main source loads");
+    workspace
+        .load_module("dependency.gfs", b"export fn value(): i32 { return 7 }")
+        .expect("dependency source loads");
+    workspace
+        .load_module("detached.gfs", b"export fn detached(): i32 { return 9 }")
+        .expect("detached source loads");
+    assert!(workspace.check().is_valid);
+
+    let catalog = workspace
+        .module_catalog()
+        .expect("successful check freezes a catalog");
+    let main_id = catalog
+        .iter()
+        .find(|descriptor| descriptor.module_path().as_str() == "main.gfs")
+        .expect("main descriptor")
+        .module_id();
+    let detached_id = catalog
+        .iter()
+        .find(|descriptor| descriptor.module_path().as_str() == "detached.gfs")
+        .expect("detached descriptor")
+        .module_id();
+    let producer = workspace
+        .source_module_producer()
+        .expect("checked workspace creates a source producer");
+    let resolver = ModuleResolver::new(
+        &catalog.runtime_catalog().expect("runtime catalog derives"),
+        producer.clone(),
+    );
+
+    let first = resolver.ensure_module(main_id).expect("main compiles");
+    let second = resolver.ensure_module(main_id).expect("main is cached");
+    assert!(std::sync::Arc::ptr_eq(&first, &second));
+    assert_eq!(producer.production_count(main_id), 1);
+    assert_eq!(producer.production_count(detached_id), 0);
+}
+
+#[test]
+fn workspace_source_producer_rejects_changed_source_snapshot() {
+    let mut workspace = Workspace::new();
+    workspace
+        .load_manifest(
+            toml::from_str(
+                r#"
+                [module]
+                name = "source-producer-snapshot"
+                target = "app"
+                [entry]
+                path = "main.gfs"
+                "#,
+            )
+            .expect("valid configuration"),
+        )
+        .expect("configuration loads");
+    workspace
+        .load_module(
+            "main.gfs",
+            b"export fn main(args: [[u8]]): i32 { return 0 }",
+        )
+        .expect("main source loads");
+    assert!(workspace.check().is_valid);
+    let module_id = workspace
+        .module_catalog()
+        .expect("catalog exists")
+        .iter()
+        .next()
+        .expect("main descriptor")
+        .module_id();
+    let producer = workspace
+        .source_module_producer()
+        .expect("checked workspace creates a source producer");
+
+    workspace
+        .load_module(
+            "main.gfs",
+            b"export fn main(args: [[u8]]): i32 { return 1 }",
+        )
+        .expect("changed main source loads");
+    assert!(matches!(
+        producer.produce(module_id),
+        Err(galfus_bytecode::ModuleResolveError::SourceSnapshotChanged { .. })
+    ));
+}
+
+#[test]
+fn workspace_source_producer_rejects_removed_source_module() {
+    let mut workspace = Workspace::new();
+    workspace
+        .load_manifest(
+            toml::from_str(
+                r#"
+                [module]
+                name = "source-producer-removed-module"
+                target = "app"
+                [entry]
+                path = "main.gfs"
+                "#,
+            )
+            .expect("valid configuration"),
+        )
+        .expect("configuration loads");
+    workspace
+        .load_module(
+            "main.gfs",
+            b"export fn main(args: [[u8]]): i32 { return 0 }",
+        )
+        .expect("main source loads");
+    assert!(workspace.check().is_valid);
+    let module_id = workspace
+        .module_catalog()
+        .expect("catalog exists")
+        .iter()
+        .next()
+        .expect("main descriptor")
+        .module_id();
+    let producer = workspace
+        .source_module_producer()
+        .expect("checked workspace creates a source producer");
+
+    workspace
+        .remove_module("main.gfs")
+        .expect("main source removes");
+    assert!(matches!(
+        producer.produce(module_id),
+        Err(galfus_bytecode::ModuleResolveError::SourceModuleUnavailable { .. })
+    ));
+}
+
+#[test]
 fn compile_removes_unreachable_modules() {
     let mut workspace = Workspace::new();
     assert!(matches!(
@@ -810,12 +1068,12 @@ fn compile_removes_unreachable_modules() {
 }
 
 #[test]
-fn run_requires_compile_and_executes_the_configured_entry() {
+fn run_requires_check_and_executes_the_configured_entry() {
     let mut workspace = Workspace::new();
     assert!(matches!(
         workspace.run(&[], None, std::rc::Rc::new(CooperativeDriver::new())),
         Err(crate::state::WorkspaceRunError::Blocked(
-            RunBlocked::CompileRequired
+            RunBlocked::CheckRequired
         ))
     ));
 
@@ -849,7 +1107,6 @@ fn run_requires_compile_and_executes_the_configured_entry() {
         Err(CompileBlocked::Dirty { .. })
     ));
     assert!(workspace.check().is_valid);
-    workspace.compile().expect("workspace compiles");
     let executor = std::rc::Rc::new(CooperativeDriver::new());
     let exit_code = Arc::new(Mutex::new(0));
     let ec = Arc::clone(&exit_code);
@@ -901,8 +1158,14 @@ fn run_rejects_a_missing_required_io_provider_before_execution() {
         .expect_err("a required provider must be available before execution");
     assert!(matches!(
         error,
-        crate::state::WorkspaceRunError::RuntimeStart(galfus_runtime::RuntimeError::ProviderRequirementUnsatisfied { module_path })
-            if module_path == "std/io"
+        crate::state::WorkspaceRunError::RuntimeStart(
+            galfus_runtime::RuntimeError::EagerModuleResolution(
+                galfus_bytecode::ModuleResolveError::ProviderRequirementUnsatisfied {
+                    module_path,
+                    ..
+                },
+            ),
+        ) if module_path == "std/io"
     ));
 }
 

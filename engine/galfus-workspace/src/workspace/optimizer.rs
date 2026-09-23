@@ -5,7 +5,7 @@ mod tests;
 
 use galfus_bytecode::{
     BytecodeFunction, BytecodeGraphTransaction, BytecodeModule, Constant, ExportKind, Instruction,
-    PackageImage, Reg, derive_module_catalog,
+    ModuleChunkStore, PackageImage, Reg, derive_module_catalog_with_capability_requirements,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -120,11 +120,24 @@ pub(crate) fn optimize_package(
     let new_graph = finalized_graph
         .apply(transaction)
         .map_err(|e| e.to_string())?;
-    let catalog = derive_module_catalog(&new_graph).map_err(|error| error.to_string())?;
+    let catalog = derive_module_catalog_with_capability_requirements(
+        &new_graph,
+        package.adapter_requirements(),
+        package.provider_requirements(),
+    )
+    .map_err(|error| error.to_string())?;
 
-    PackageImage::try_new(
+    let chunks = ModuleChunkStore::from_nodes(
+        new_graph.format_version(),
+        new_graph.modules().cloned(),
+        &catalog,
+    )
+    .map_err(|error| error.to_string())?;
+
+    PackageImage::try_new_with_chunks(
         new_graph,
         catalog,
+        chunks,
         package.target().clone(),
         package.entry_point().cloned(),
         package.metadata().clone(),

@@ -132,3 +132,28 @@ fn test_unknown_key_is_rejected_as_invalid_config() {
     let err_msg = result.unwrap_err().to_string();
     assert!(err_msg.contains("unknown field `unknown_limit`"));
 }
+
+#[test]
+fn test_loading_policy_cannot_be_configured_in_the_manifest() {
+    let toml = r#"
+        [module]
+        name = "test"
+        target = "app"
+
+        [entry]
+        path = "main.gfs"
+
+        [compile]
+        profile = "release"
+        resolver = "eager"
+    "#;
+
+    let result = toml::from_str::<WorkspaceManifest>(toml);
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("unknown field `resolver`")
+    );
+}

@@ -118,6 +118,7 @@ impl WorkspaceConfig {
 }
 
 #[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct WorkspaceManifest {
     pub module: Option<ModuleManifest>,
     pub entry: Option<EntryManifest>,
@@ -129,6 +130,7 @@ pub struct WorkspaceManifest {
 }
 
 #[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ModuleManifest {
     pub name: Option<String>,
     pub version: Option<String>,
@@ -139,6 +141,7 @@ pub struct ModuleManifest {
 }
 
 #[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct EntryManifest {
     pub path: Option<String>,
     pub function: Option<String>,
@@ -146,6 +149,7 @@ pub struct EntryManifest {
 }
 
 #[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct CompileManifest {
     pub target: Option<String>,
     pub arch: Option<String>,

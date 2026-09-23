@@ -1,5 +1,155 @@
 use super::compilation::io_catalog;
 use super::*;
+use crate::state::CompileState;
+
+#[test]
+fn start_execution_materializes_only_the_entry_from_checked_source() {
+    let mut workspace = Workspace::new();
+    workspace
+        .load_manifest(
+            toml::from_str(
+                r#"
+                [module]
+                name = "lazy-entry-only"
+                target = "app"
+                [entry]
+                path = "main.gfs"
+                "#,
+            )
+            .expect("valid configuration"),
+        )
+        .expect("configuration loads");
+    workspace
+        .load_module(
+            "main.gfs",
+            b"export fn main(args: [[u8]]): i32 { return 42 }",
+        )
+        .expect("main source loads");
+    workspace
+        .load_module("detached.gfs", b"export fn detached(): i32 { return 9 }")
+        .expect("detached source loads");
+    assert!(workspace.check().is_valid);
+    workspace.compile().expect("workspace compiles");
+    assert!(matches!(
+        workspace.bytecode_state.compile_state,
+        CompileState::Ready { .. }
+    ));
+
+    let driver = std::rc::Rc::new(CooperativeDriver::new());
+    let mut execution = workspace
+        .start_execution(&[], None, driver)
+        .expect("compiled workspace still starts from source");
+    let entry_id = workspace
+        .module_catalog()
+        .expect("checked catalog")
+        .iter()
+        .find(|descriptor| descriptor.module_path().as_str() == "main.gfs")
+        .expect("entry descriptor")
+        .module_id();
+    assert_eq!(execution.loaded_module_ids(), vec![entry_id]);
+    assert_eq!(
+        execution.run_sync_to_completion().expect("entry completes"),
+        42
+    );
+}
+
+#[test]
+fn source_execution_defers_an_unreached_provider_requirement() {
+    let mut workspace = Workspace::new();
+    workspace.set_catalog(io_catalog(galfus_contract::STD_IO_SOURCE));
+    workspace
+        .load_manifest(
+            toml::from_str(
+                r#"
+                [module]
+                name = "lazy-unreached-provider"
+                target = "app"
+                [entry]
+                path = "main.gfs"
+                "#,
+            )
+            .expect("valid configuration"),
+        )
+        .expect("configuration loads");
+    workspace
+        .load_module(
+            "main.gfs",
+            b"export fn main(args: [[u8]]): i32 { return 42 }",
+        )
+        .expect("main source loads");
+    workspace
+        .load_module(
+            "detached.gfs",
+            br#"
+            import { println } from "std/io"
+
+            export fn detached(): i32 {
+                println("not reached")
+                return 0
+            }
+            "#,
+        )
+        .expect("detached source loads");
+    assert!(workspace.check().is_valid);
+
+    let mut execution = workspace
+        .start_execution(&[], None, std::rc::Rc::new(CooperativeDriver::new()))
+        .expect("unreached provider does not block source startup");
+
+    assert_eq!(execution.run_sync_to_completion(), Ok(42));
+}
+
+#[test]
+fn source_execution_rejects_a_used_provider_before_body_materialization() {
+    let mut workspace = Workspace::new();
+    workspace.set_catalog(io_catalog(galfus_contract::STD_IO_SOURCE));
+    workspace
+        .load_manifest(
+            toml::from_str(
+                r#"
+                [module]
+                name = "lazy-used-provider"
+                target = "app"
+                [entry]
+                path = "main.gfs"
+                "#,
+            )
+            .expect("valid configuration"),
+        )
+        .expect("configuration loads");
+    workspace
+        .load_module(
+            "main.gfs",
+            br#"
+            import { println } from "std/io"
+
+            export fn main(args: [[u8]]): i32 {
+                println("reached")
+                return 0
+            }
+            "#,
+        )
+        .expect("main source loads");
+    assert!(workspace.check().is_valid);
+
+    let error =
+        match workspace.start_execution(&[], None, std::rc::Rc::new(CooperativeDriver::new())) {
+            Ok(_) => panic!("used provider must be checked before source compilation"),
+            Err(error) => error,
+        };
+
+    assert!(matches!(
+        error,
+        crate::state::WorkspaceRunError::RuntimeStart(
+            galfus_runtime::RuntimeError::EagerModuleResolution(
+                galfus_bytecode::ModuleResolveError::ProviderRequirementUnsatisfied {
+                    module_path,
+                    ..
+                }
+            )
+        ) if module_path == "std/io"
+    ));
+}
 
 #[test]
 fn run_passes_read_terminator_to_the_io_provider() {

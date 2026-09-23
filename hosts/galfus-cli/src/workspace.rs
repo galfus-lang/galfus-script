@@ -38,56 +38,16 @@ pub fn run_project(root: &str, cli_args: &[String]) -> Result<i32> {
         crate::diagnostics::print_diagnostics(&diagnostics, &workspace.source_state.store);
         bail!("workspace validation failed");
     }
-    let compile_report = workspace
-        .compile()
-        .map_err(|error| anyhow::anyhow!("workspace compilation failed: {error:?}"))?;
     let args = cli_args
         .iter()
         .map(|argument| argument.as_bytes().to_vec())
         .collect::<Vec<_>>();
 
-    let providers =
-        galfus_host_native::providers::default_providers(compile_report.package.metadata().clone());
+    let providers = galfus_host_native::providers::default_providers(workspace.package_metadata());
     let driver = std::rc::Rc::new(galfus_host_native::driver::NativeDriver::new());
-
-    let host = galfus_host_native::ExecutionHost::new(
-        providers,
-        galfus_contract::AdapterBindings::default(),
-        driver,
-    );
-
-    let code = match host.run(compile_report.package.clone(), args.as_slice()) {
-        Ok(code) => code,
-        Err(failure) => {
-            let style = dialoguer::console::style;
-            eprintln!(
-                "{}: {}",
-                style("Runtime Error").red().bold(),
-                failure.message
-            );
-            let mut cause = failure.cause.as_deref();
-            while let Some(error) = cause {
-                eprintln!("Caused by ({:?}): {}", error.kind, error.message);
-                cause = error.cause.as_deref();
-            }
-            if !failure.stack.is_empty() {
-                eprintln!("\n{}", style("Stack trace:").yellow().bold());
-                for frame in &failure.stack {
-                    let module_id = galfus_core::ModuleId::new(frame.module_id as u32);
-                    let module_name = match compile_report.package.graph().get(module_id) {
-                        Some(m) => m.path().as_str().to_string(),
-                        None => format!("<module {}>", frame.module_id),
-                    };
-                    eprintln!(
-                        "  at \x1b[36m{}\x1b[0m offset {}",
-                        module_name, frame.instruction_offset
-                    );
-                }
-            }
-            bail!("execution failed");
-        }
-    };
-    Ok(code)
+    workspace
+        .run(args.as_slice(), Some(providers), driver)
+        .map_err(|error| anyhow::anyhow!("execution failed: {error:?}"))
 }
 
 pub fn load_workspace(root: &Path) -> Result<Workspace> {

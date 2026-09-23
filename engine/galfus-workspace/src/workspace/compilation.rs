@@ -3,14 +3,13 @@ use super::*;
 use crate::diagnostic::WorkspaceDiagnosticCode;
 use crate::source_store::ModuleOrigin;
 use crate::state::*;
-use galfus_bytecode::PackageImage;
-use galfus_bytecode::{BytecodeGraph, ImportEdge, PackageMetadata};
+use galfus_bytecode::{BytecodeGraph, ImportEdge, ModuleChunkStore, PackageImage, PackageMetadata};
 use galfus_contract::{
     AdapterModuleRequirement, CURRENT_BOUNDARY_ABI_VERSION, ProviderFunctionSignature,
     ProviderModuleRequirement, SurfaceField, SurfaceSchema, SurfaceVariant,
 };
 use galfus_core::{Diagnostic, DiagnosticBag, ModulePath, Span, TypeId};
-use galfus_frontend::modules::FrontendRoots;
+use galfus_frontend::modules::{FrontendRoots, SemanticModule};
 use galfus_frontend::{
     ModuleAst, PrimitiveType, ResolutionLayer, StringTable, SymbolKind, SyntaxNodeKind,
     TypeCheckResult, TypeKind, TypeTable,
@@ -119,12 +118,45 @@ impl Workspace {
                         diagnostics: report.diagnostics,
                     };
                     self.frontend_snapshot = Some(self.frontend.snapshot(report.semantic_revision));
+                    self.semantic_state.module_catalog = None;
                 } else {
-                    self.frontend_snapshot = Some(self.frontend.snapshot(report.semantic_revision));
+                    let snapshot = self.frontend.snapshot(report.semantic_revision);
+                    let adapter_proxy_paths = self
+                        .adapter_descriptors
+                        .keys()
+                        .map(|path| path.as_str().to_string())
+                        .collect();
+                    let provider_module_paths = snapshot
+                        .modules()
+                        .iter()
+                        .filter_map(|module| {
+                            let path = module
+                                .path()
+                                .as_str()
+                                .strip_suffix(".gfs")
+                                .unwrap_or(module.path().as_str());
+                            self.catalog
+                                .provider_schema_fingerprint(path)
+                                .map(|_| path.to_string())
+                        })
+                        .collect();
+                    let module_catalog = Arc::new(build_workspace_module_catalog(
+                        &snapshot,
+                        report.source_revision,
+                        &adapter_proxy_paths,
+                        &provider_module_paths,
+                    ));
+                    let mut changed_modules = report.changed_modules;
+                    changed_modules.extend(interface_dependents(
+                        self.semantic_state.module_catalog.as_deref(),
+                        module_catalog.as_ref(),
+                    ));
+                    self.frontend_snapshot = Some(snapshot);
+                    self.semantic_state.module_catalog = Some(module_catalog);
                     self.semantic_state.check_state = CheckState::Passed {
                         revision: report.source_revision,
                         semantic_revision: report.semantic_revision,
-                        changed_modules: report.changed_modules,
+                        changed_modules,
                         diagnostics: report.diagnostics,
                     };
                 }
@@ -824,6 +856,20 @@ impl Workspace {
                 ..
             } => (*semantic_revision, changed_modules.clone()),
         };
+        let module_catalog = self
+            .semantic_state
+            .module_catalog
+            .as_ref()
+            .filter(|catalog| {
+                catalog.semantic_revision() == semantic_revision
+                    && matches!(
+                        self.semantic_state.check_state,
+                        CheckState::Passed { revision, .. } if catalog.source_revision() == revision
+                    )
+            })
+            .ok_or_else(|| {
+                CompileBlocked::CompilerError("workspace module catalog is unavailable".to_string())
+            })?;
         let frontend_snapshot = self
             .frontend_snapshot
             .as_ref()
@@ -921,9 +967,13 @@ impl Workspace {
             .iter()
             .filter(|m| reachable_modules.contains(&m.id()))
             .map(|m| {
+                let descriptor = module_catalog
+                    .get(m.id())
+                    .expect("frozen workspace catalog describes every frontend module");
+                debug_assert_eq!(descriptor.module_path(), m.path());
                 CompiledModule::new(
-                    m.id(),
-                    m.path().clone(),
+                    descriptor.module_id(),
+                    descriptor.module_path().clone(),
                     m.semantic_revision(),
                     m.source().clone(),
                     m.graph().clone(),
@@ -969,12 +1019,16 @@ impl Workspace {
         let graph = base_graph
             .apply(transaction)
             .map_err(|error| CompileBlocked::CompilerError(error.to_string()))?;
-        let catalog = galfus_bytecode::derive_module_catalog(&graph)
-            .map_err(|error| CompileBlocked::CompilerError(error.to_string()))?;
         let adapter_requirements = self.adapter_requirements_for(&graph);
         let provider_requirements = self
             .provider_requirements_for(&graph)
             .map_err(CompileBlocked::CompilerError)?;
+        let catalog = galfus_bytecode::derive_module_catalog_with_capability_requirements(
+            &graph,
+            &adapter_requirements,
+            &provider_requirements,
+        )
+        .map_err(|error| CompileBlocked::CompilerError(error.to_string()))?;
         let entry_point = match self
             .config
             .as_ref()
@@ -1012,10 +1066,17 @@ impl Workspace {
             .map(|c| c.limits().clone())
             .unwrap_or_default();
 
+        let chunks = ModuleChunkStore::from_nodes(
+            graph.format_version(),
+            graph.modules().cloned(),
+            &catalog,
+        )
+        .map_err(|error| CompileBlocked::CompilerError(error.to_string()))?;
         let unfinalized_package = Arc::new(
-            PackageImage::try_new(
+            PackageImage::try_new_with_chunks(
                 graph,
                 catalog,
+                chunks,
                 self.config
                     .as_ref()
                     .map(WorkspaceConfig::compile_target)
@@ -1068,6 +1129,27 @@ impl Workspace {
         requirements
     }
 
+    pub(crate) fn source_adapter_requirements_for(
+        &self,
+        catalog: &WorkspaceModuleCatalog,
+    ) -> Vec<AdapterModuleRequirement> {
+        let mut requirements = catalog
+            .iter()
+            .filter_map(|module| {
+                self.adapter_descriptors
+                    .get(module.module_path())
+                    .cloned()
+                    .map(|descriptor| AdapterModuleRequirement {
+                        proxy_module: module.module_path().as_str().to_string(),
+                        descriptor,
+                        boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
+                    })
+            })
+            .collect::<Vec<_>>();
+        requirements.sort_by(|left, right| left.proxy_module.cmp(&right.proxy_module));
+        requirements
+    }
+
     pub fn provider_requirements_for(
         &self,
         graph: &BytecodeGraph,
@@ -1094,6 +1176,34 @@ impl Workspace {
                     })
             })
             .collect::<Result<Vec<_>, _>>()
+    }
+
+    pub(crate) fn source_provider_requirements_for(
+        &self,
+        catalog: &WorkspaceModuleCatalog,
+    ) -> Result<Vec<ProviderModuleRequirement>, String> {
+        catalog
+            .iter()
+            .filter_map(|module| {
+                let provider_path = module
+                    .module_path()
+                    .as_str()
+                    .strip_suffix(".gfs")
+                    .unwrap_or(module.module_path().as_str());
+                self.catalog
+                    .provider_schema_fingerprint(provider_path)
+                    .map(|schema_fingerprint| {
+                        self.provider_interface_for(module.module_path())
+                            .map(|(alias, exports)| ProviderModuleRequirement {
+                                alias,
+                                module_path: provider_path.to_string(),
+                                schema_fingerprint,
+                                boundary_abi: CURRENT_BOUNDARY_ABI_VERSION,
+                                exports,
+                            })
+                    })
+            })
+            .collect()
     }
 
     fn provider_interface_for(
@@ -1174,4 +1284,159 @@ impl Workspace {
         };
         Ok((alias.clone(), exports))
     }
+}
+
+fn build_workspace_module_catalog(
+    snapshot: &FrontendSnapshot,
+    source_revision: galfus_core::Revision,
+    adapter_proxy_paths: &HashSet<String>,
+    provider_module_paths: &HashSet<String>,
+) -> WorkspaceModuleCatalog {
+    let semantic_graph = snapshot.semantic_graph();
+    let module_paths = snapshot
+        .modules()
+        .iter()
+        .map(|module| (module.id(), module.path().as_str().to_string()))
+        .collect::<HashMap<_, _>>();
+    let descriptors = snapshot
+        .modules()
+        .iter()
+        .map(|module| {
+            let exports = module
+                .graph()
+                .resolution()
+                .map(|resolution| {
+                    let type_layer = module.type_result().map(TypeCheckResult::layer);
+                    resolution
+                        .exports()
+                        .iter()
+                        .map(|export| {
+                            let type_name = type_layer
+                                .and_then(|layer| {
+                                    layer
+                                        .symbol_type(export.symbol())
+                                        .map(|type_id| layer.table().describe(type_id))
+                                })
+                                .unwrap_or_else(|| "<untyped>".to_string());
+                            format!("{:?}:{}:{type_name}", export.kind(), export.name())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let runtime_exports = module
+                .graph()
+                .resolution()
+                .map(|resolution| {
+                    resolution
+                        .exports()
+                        .iter()
+                        .filter_map(|export| {
+                            let kind = match export.kind() {
+                                SymbolKind::Function => galfus_core::RuntimeExportKind::Function,
+                                SymbolKind::Var | SymbolKind::Const => {
+                                    galfus_core::RuntimeExportKind::Global
+                                }
+                                _ => return None,
+                            };
+                            Some(galfus_bytecode::ModuleExportDescriptor::new(
+                                galfus_core::RuntimeExportId::new(module.id(), kind, export.name()),
+                                export.name(),
+                                kind,
+                            ))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let dependencies = semantic_graph
+                .dependencies_of(module.id())
+                .collect::<Vec<_>>();
+            let provider_modules = dependencies
+                .iter()
+                .filter(|dependency| {
+                    module_paths.get(dependency).is_some_and(|path| {
+                        provider_module_paths
+                            .contains(path.strip_suffix(".gfs").unwrap_or(path.as_str()))
+                    })
+                })
+                .copied()
+                .collect();
+            let adapter_proxy_modules = dependencies
+                .iter()
+                .filter(|dependency| {
+                    module_paths
+                        .get(dependency)
+                        .is_some_and(|path| adapter_proxy_paths.contains(path))
+                })
+                .copied()
+                .collect();
+            WorkspaceModuleDescriptor::new(
+                module.id(),
+                module.path().clone(),
+                dependencies,
+                provider_modules,
+                adapter_proxy_modules,
+                exports,
+                runtime_exports,
+                module_has_initializer(module),
+            )
+        })
+        .collect();
+    WorkspaceModuleCatalog::new(source_revision, snapshot.semantic_revision(), descriptors)
+}
+
+fn module_has_initializer(module: &SemanticModule) -> bool {
+    let syntax = module.graph().syntax();
+    let Some(root) = syntax.root() else {
+        return false;
+    };
+    syntax.node(root).is_some_and(|root| {
+        root.children().iter().copied().any(|item| {
+            let item = syntax
+                .node(item)
+                .and_then(|node| {
+                    (node.kind() == SyntaxNodeKind::ExportItem)
+                        .then(|| node.children().first().copied())
+                        .flatten()
+                })
+                .unwrap_or(item);
+            syntax.node(item).is_some_and(|node| {
+                matches!(
+                    node.kind(),
+                    SyntaxNodeKind::VarItem | SyntaxNodeKind::ConstItem
+                ) && syntax
+                    .first_child_of_kind(item, SyntaxNodeKind::Initializer)
+                    .is_some()
+            })
+        })
+    })
+}
+
+fn interface_dependents(
+    previous: Option<&WorkspaceModuleCatalog>,
+    current: &WorkspaceModuleCatalog,
+) -> HashSet<galfus_core::ModuleId> {
+    let Some(previous) = previous else {
+        return HashSet::new();
+    };
+    let changed = current
+        .iter()
+        .filter(|descriptor| {
+            previous.get(descriptor.module_id()).is_none_or(|old| {
+                old.semantic_interface_hash() != descriptor.semantic_interface_hash()
+            })
+        })
+        .map(WorkspaceModuleDescriptor::module_id)
+        .collect::<HashSet<_>>();
+    let mut invalidated = changed.clone();
+    let mut pending = changed.into_iter().collect::<Vec<_>>();
+    while let Some(module_id) = pending.pop() {
+        for descriptor in current.iter() {
+            if descriptor.dependencies().contains(&module_id)
+                && invalidated.insert(descriptor.module_id())
+            {
+                pending.push(descriptor.module_id());
+            }
+        }
+    }
+    invalidated
 }

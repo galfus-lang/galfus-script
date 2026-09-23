@@ -26,8 +26,9 @@ impl Workspace {
             } else {
                 continue;
             };
-            self.source_state.revision.next();
-            self.source_state
+            self.source_state.advance_revision();
+            let (module_id, _) = self
+                .source_state
                 .store
                 .load_module(
                     path.clone(),
@@ -48,6 +49,7 @@ impl Workspace {
                         id,
                     },
                 })?;
+            self.source_state.track_loaded_module(module_id);
             self.source_state.dirty_sources.insert(path.clone());
             loaded = true;
         }

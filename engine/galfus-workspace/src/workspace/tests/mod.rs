@@ -1,4 +1,5 @@
 mod compilation;
+mod equivalence;
 mod execution;
 
 use super::*;

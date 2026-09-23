@@ -3,6 +3,7 @@ pub mod dependency;
 pub mod execution;
 pub mod module;
 mod optimizer;
+mod source_producer;
 
 #[cfg(test)]
 mod tests;
@@ -84,7 +85,7 @@ impl Workspace {
 
     pub fn set_catalog(&mut self, catalog: Arc<galfus_contract::CapabilityCatalog>) {
         if self.catalog.fingerprint() != catalog.fingerprint() {
-            self.source_state.revision.next();
+            self.source_state.advance_revision();
             let removed = self
                 .source_state
                 .store
@@ -92,6 +93,7 @@ impl Workspace {
             for entry in removed {
                 self.source_state.dirty_sources.remove(&entry.path);
                 self.source_state.removed_modules.push(entry.module_id);
+                self.source_state.track_removed_module(entry.module_id);
             }
             self.catalog = catalog;
             self.mark_dirty();
@@ -153,6 +155,22 @@ impl Workspace {
 
     pub fn check_state(&self) -> &CheckState {
         &self.semantic_state.check_state
+    }
+
+    /// Returns the frozen interface catalog only while it matches a successful check.
+    pub fn module_catalog(&self) -> Option<&crate::state::WorkspaceModuleCatalog> {
+        match self.semantic_state.check_state {
+            CheckState::Passed { revision, .. }
+                if self
+                    .semantic_state
+                    .module_catalog
+                    .as_ref()
+                    .is_some_and(|catalog| catalog.source_revision() == revision) =>
+            {
+                self.semantic_state.module_catalog.as_deref()
+            }
+            _ => None,
+        }
     }
 
     pub fn source_file(&self, path: &ModulePath) -> Option<SourceFile> {

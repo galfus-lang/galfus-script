@@ -56,8 +56,9 @@ impl Workspace {
             (Arc::from(module_bytes), ModuleOrigin::User, None)
         };
 
-        self.source_state.revision.next();
-        self.source_state
+        self.source_state.advance_revision();
+        let (module_id, _) = self
+            .source_state
             .store
             .load_module(
                 module_path.clone(),
@@ -78,6 +79,7 @@ impl Workspace {
                     id,
                 },
             })?;
+        self.source_state.track_loaded_module(module_id);
         if let Some(descriptor) = descriptor {
             self.adapter_descriptors
                 .insert(module_path.clone(), descriptor);
@@ -94,8 +96,9 @@ impl Workspace {
         bridge: galfus_contract::BridgeModule,
     ) -> Result<LoadResult, WorkspaceError> {
         let module_path = ModulePath::new(&bridge.name).ok_or(WorkspaceError::InvalidPath)?;
-        self.source_state.revision.next();
-        self.source_state
+        self.source_state.advance_revision();
+        let (module_id, _) = self
+            .source_state
             .store
             .load_module(
                 module_path.clone(),
@@ -116,6 +119,7 @@ impl Workspace {
                     id,
                 },
             })?;
+        self.source_state.track_loaded_module(module_id);
         self.source_state.dirty_sources.insert(module_path);
         self.mark_dirty();
         Ok(LoadResult::Success)
@@ -126,9 +130,10 @@ impl Workspace {
 
         if let Some(entry) = self.source_state.store.remove_module(&module_path) {
             self.adapter_descriptors.remove(&module_path);
-            self.source_state.revision.next();
+            self.source_state.advance_revision();
             self.source_state.dirty_sources.remove(&module_path);
             self.source_state.removed_modules.push(entry.module_id);
+            self.source_state.track_removed_module(entry.module_id);
             self.mark_dirty();
             Ok(RemoveResult::Success)
         } else {
