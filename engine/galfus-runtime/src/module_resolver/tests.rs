@@ -4,13 +4,17 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
 use galfus_bytecode::{
-    BytecodeGraph, BytecodeModule, BytecodeNode, ConstantPool, ModuleCatalog, ModuleDependency,
-    ModuleDescriptor, ModuleResolveContext, ModuleResolveError, derive_module_catalog,
+    BytecodeGraph, BytecodeModule, BytecodeNode, ConstantPool, ModuleCatalog, ModuleChunkStore,
+    ModuleDependency, ModuleDescriptor, ModuleResolveContext, ModuleResolveError,
+    derive_module_catalog,
 };
 use galfus_contract::ContentHash;
 use galfus_core::{ModuleId, ModulePath, SemanticRevision};
 
-use super::{GraphModuleProducer, ModuleInitializationPlanError, ModuleProducer, ModuleResolver};
+use super::{
+    ChunkModuleProducer, GraphModuleProducer, ModuleInitializationPlanError, ModuleProducer,
+    ModuleResolver,
+};
 
 struct StaticProducer {
     result: Result<Arc<BytecodeNode>, ModuleResolveError>,
@@ -171,7 +175,7 @@ fn node(module_id: ModuleId) -> Arc<BytecodeNode> {
         path: module_path(module_id),
         semantic_revision: SemanticRevision::new(0),
         module: BytecodeModule {
-            name: format!("{}.gfs", module_id.raw()),
+            name: format!("module-{}", module_id.raw()),
             global_count: 0,
             constants: ConstantPool::default(),
             functions: Vec::new(),
@@ -199,6 +203,42 @@ fn graph(nodes: impl IntoIterator<Item = Arc<BytecodeNode>>) -> Arc<BytecodeGrap
 
 fn catalog_from_graph(graph: &BytecodeGraph) -> Arc<ModuleCatalog> {
     Arc::new(derive_module_catalog(graph).expect("catalog derives from graph"))
+}
+
+fn chunk_store(graph: &BytecodeGraph, catalog: &ModuleCatalog) -> Arc<ModuleChunkStore> {
+    Arc::new(
+        ModuleChunkStore::from_nodes(graph.format_version(), graph.modules().cloned(), catalog)
+            .expect("chunk store derives from graph"),
+    )
+}
+
+fn catalog_with_interface_hash(
+    catalog: &ModuleCatalog,
+    module_id: ModuleId,
+    interface_hash: ContentHash,
+) -> Arc<ModuleCatalog> {
+    Arc::new(
+        ModuleCatalog::new(
+            catalog
+                .iter()
+                .map(|descriptor| {
+                    ModuleDescriptor::new(
+                        descriptor.module_id(),
+                        descriptor.module_path().clone(),
+                        descriptor.dependencies().to_vec(),
+                        descriptor.exports().to_vec(),
+                        descriptor.has_initializer(),
+                        (descriptor.module_id() == module_id)
+                            .then_some(interface_hash)
+                            .unwrap_or_else(|| descriptor.interface_hash()),
+                        descriptor.chunk_hash(),
+                    )
+                    .expect("replacement descriptor is valid")
+                })
+                .collect(),
+        )
+        .expect("replacement catalog is valid"),
+    )
 }
 
 fn producer_error(module_id: ModuleId) -> ModuleResolveError {
@@ -355,6 +395,111 @@ fn graph_producer_preloads_every_graph_module() {
         let graph_node = graph.node_handle(module_id).expect("graph contains module");
         assert!(Arc::ptr_eq(&resolved, &graph_node));
     }
+}
+
+#[test]
+fn chunk_producer_preloads_every_catalog_module() {
+    let module_ids = [ModuleId::new(19), ModuleId::new(3), ModuleId::new(11)];
+    let graph = graph(module_ids.into_iter().map(node));
+    let catalog = catalog_from_graph(graph.as_ref());
+    let chunks = chunk_store(graph.as_ref(), catalog.as_ref());
+    let producer = Arc::new(ChunkModuleProducer::new(chunks, catalog.clone()));
+    let resolver = ModuleResolver::new(catalog.as_ref(), producer);
+
+    resolver.preload_all().expect("all chunks preload");
+
+    for module_id in module_ids {
+        let resolved = resolver
+            .ensure_module(module_id)
+            .expect("module stays ready");
+        assert_eq!(
+            resolved.as_ref(),
+            graph
+                .node_handle(module_id)
+                .expect("graph contains module")
+                .as_ref()
+        );
+    }
+}
+
+#[test]
+fn chunk_and_graph_producers_materialize_equivalent_modules() {
+    let module_id = ModuleId::new(7);
+    let graph = graph([node(module_id)]);
+    let catalog = catalog_from_graph(graph.as_ref());
+    let chunks = chunk_store(graph.as_ref(), catalog.as_ref());
+    let graph_producer =
+        GraphModuleProducer::new(graph, catalog.clone()).expect("graph catalog derives");
+    let chunk_producer = ChunkModuleProducer::new(chunks, catalog);
+
+    assert_eq!(
+        graph_producer
+            .produce(module_id)
+            .expect("graph module materializes"),
+        chunk_producer
+            .produce(module_id)
+            .expect("chunk module materializes")
+    );
+}
+
+#[test]
+fn chunk_producer_reports_a_missing_eager_chunk_without_panicking() {
+    let module_id = ModuleId::new(7);
+    let graph = graph([node(module_id)]);
+    let catalog = catalog_from_graph(graph.as_ref());
+    let chunks = Arc::new(ModuleChunkStore::new(Vec::new()).expect("empty store is valid"));
+    let producer = ChunkModuleProducer::new(chunks, catalog);
+
+    assert_eq!(
+        producer
+            .produce(module_id)
+            .expect_err("missing chunk is unavailable"),
+        ModuleResolveError::UnavailableInEager {
+            context: ModuleResolveContext::with_path(module_id, module_path(module_id)),
+        }
+    );
+}
+
+#[test]
+fn chunk_producer_rejects_corrupted_and_mismatched_chunks() {
+    let module_id = ModuleId::new(7);
+    let graph = graph([node(module_id)]);
+    let catalog = catalog_from_graph(graph.as_ref());
+    let chunks = chunk_store(graph.as_ref(), catalog.as_ref());
+    let mut bytes = postcard::to_stdvec(chunks.as_ref()).expect("chunk store encodes");
+    let module_name = b"module-7";
+    let name_offset = bytes
+        .windows(module_name.len())
+        .position(|window| window == module_name)
+        .expect("encoded chunk contains its module name");
+    bytes[name_offset] = b'x';
+    let corrupted = Arc::new(
+        postcard::from_bytes::<ModuleChunkStore>(bytes.as_slice())
+            .expect("corrupted chunk store keeps its structural encoding"),
+    );
+    let corrupted_producer = ChunkModuleProducer::new(corrupted, catalog.clone());
+
+    assert!(matches!(
+        corrupted_producer
+            .produce(module_id)
+            .expect_err("corrupted chunk is rejected"),
+        ModuleResolveError::ChunkHashMismatch { context, .. }
+            if context.module_id() == module_id
+    ));
+
+    let mismatched_catalog = catalog_with_interface_hash(
+        catalog.as_ref(),
+        module_id,
+        ContentHash::of(b"other interface"),
+    );
+    let mismatched_producer = ChunkModuleProducer::new(chunks, mismatched_catalog);
+    assert!(matches!(
+        mismatched_producer
+            .produce(module_id)
+            .expect_err("mismatched chunk interface is rejected"),
+        ModuleResolveError::InterfaceMismatch { context, .. }
+            if context.module_id() == module_id
+    ));
 }
 
 #[test]

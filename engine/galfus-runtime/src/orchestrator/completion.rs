@@ -106,11 +106,9 @@ impl Orchestrator {
         };
         match result {
             Ok(value) => {
-                let module = &vm
-                    .graph
-                    .get(pending.module_id)
-                    .expect("asynchronous call module is loaded")
-                    .module;
+                let module = vm
+                    .get_module(pending.module_id)
+                    .expect("asynchronous call module is loaded");
                 let value = match encode_future_value_into_thread_heap(
                     &mut thread.heap,
                     value,
@@ -205,14 +203,12 @@ impl Orchestrator {
                 &result,
             )
         {
-            let module = &self
+            let module = self
                 .vm
                 .as_ref()
                 .expect("VM is configured before execution")
-                .graph
-                .get(payload_module_id)
-                .expect("future payload module is loaded")
-                .module;
+                .get_module(payload_module_id)
+                .expect("future payload module is loaded");
             let thread_quota = std::sync::Arc::new(galfus_vm::quota::ThreadQuota::new(
                 self.quota.lock().unwrap().limits().clone(),
             ));

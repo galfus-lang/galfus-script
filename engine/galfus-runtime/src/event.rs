@@ -2,9 +2,11 @@
 mod tests;
 
 use crate::registry::ThreadId;
+use galfus_bytecode::{BytecodeNode, ModuleResolveError};
 use galfus_contract::{ExecutionFailure, SurfaceContract, SurfaceValue};
 use galfus_vm::thread::VmThreadState;
 use galfus_vm::{Continuation, VmEffect};
+use std::sync::Arc;
 
 /// Heap-independent completion data retained until the owning continuation resumes.
 #[derive(Debug, Clone, PartialEq)]
@@ -69,6 +71,11 @@ pub enum RuntimeEvent {
         thread: VmThreadState,
         effect: VmEffect,
         continuation: Continuation,
+    },
+    /// Completes one asynchronously produced module for every waiting VM thread.
+    ModuleLoadCompleted {
+        module_id: galfus_core::ModuleId,
+        result: Result<Arc<BytecodeNode>, ModuleResolveError>,
     },
     /// A thread has completed its execution naturally.
     Exited {

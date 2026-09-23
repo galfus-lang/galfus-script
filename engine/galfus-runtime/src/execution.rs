@@ -169,6 +169,13 @@ impl Execution {
         self.state
     }
 
+    /// Returns module IDs materialized for this execution so far.
+    pub fn loaded_module_ids(&self) -> Vec<galfus_core::ModuleId> {
+        self._module_resolver
+            .as_ref()
+            .map_or_else(Vec::new, |resolver| resolver.loaded_module_ids())
+    }
+
     pub fn result(&self) -> Option<&Result<i32, ExecutionFailure>> {
         self.result.as_ref()
     }

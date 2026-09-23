@@ -4,7 +4,7 @@ use galfus_bytecode::{
     BytecodeGraph, BytecodeModule, BytecodeNode, Constant, ExportKind, ExportSlot, ImportEdge,
     ImportKind, ImportSlot,
 };
-use galfus_core::{ModuleId, ModulePath, SemanticRevision};
+use galfus_core::{ModuleId, ModulePath, RuntimeExportId, RuntimeExportKind, SemanticRevision};
 
 use super::*;
 
@@ -39,8 +39,12 @@ fn nested_module_calls_keep_each_frame_code_alive() {
         symbol_name: "value".to_string(),
         ty: TypeIdx(0),
         kind: ImportKind::Function,
-        target_module_id: None,
-        target_export_id: None,
+        target_module_id: Some(callee_id),
+        target_export_id: Some(RuntimeExportId::new(
+            callee_id,
+            RuntimeExportKind::Function,
+            "value",
+        )),
     }];
     let mut callee = create_test_module(
         vec![

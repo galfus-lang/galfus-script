@@ -304,6 +304,9 @@ impl Orchestrator {
                     "execution cancelled",
                 ));
             }
+            RuntimeEvent::ModuleLoadCompleted { module_id, result } => {
+                self.complete_module_load(module_id, result);
+            }
             RuntimeEvent::Syscall { thread_id, .. } if self.shutting_down => {
                 #[cfg(feature = "metrics")]
                 {

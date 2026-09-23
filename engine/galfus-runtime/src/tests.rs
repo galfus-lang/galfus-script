@@ -9,7 +9,8 @@ use galfus_bytecode::instruction::{ConstIdx, FuncIdx, GlobalIdx, Instruction, Re
 use galfus_bytecode::{
     BytecodeFunction, BytecodeGraph, BytecodeModule, BytecodeNode, BytecodeType, Constant,
     ConstantPool, ExecutionMetadata, ExportSlot, ImportEdge, ImportSlot, ModuleCatalog,
-    ModuleDescriptor, PackageEntryPoint, PackageImage, PackageMetadata,
+    ModuleChunkStore, ModuleDependency, ModuleDescriptor, ModuleResolveError, PackageEntryPoint,
+    PackageImage, PackageMetadata,
 };
 use galfus_contract::{
     AdapterLoadContext, CURRENT_BOUNDARY_ABI_VERSION, ContentHash, ExecutionTarget,
@@ -335,6 +336,18 @@ fn start_with_provider(provider: StartupProvider) -> Execution {
 }
 
 #[test]
+fn decoded_package_starts_from_chunks_without_a_graph() {
+    let (graph, module_id) = startup_graph();
+    let package = package_with_entry(graph, module_id);
+    let bytes = package.to_bytecode().expect("package encodes");
+    let decoded = sync::Arc::new(PackageImage::from_bytecode(bytes.as_slice()).expect("decodes"));
+
+    Runtime::new(decoded, RuntimeCapabilities::builder().build())
+        .start(&[], std::rc::Rc::new(CooperativeDriver::new()))
+        .expect("decoded package starts from chunks");
+}
+
+#[test]
 fn runtime_rejects_an_unsupported_bytecode_format_before_loading_the_entry_module() {
     let graph =
         BytecodeGraph::with_format_version(galfus_bytecode::BytecodeFormatVersion::new(1, 0, 0));
@@ -393,8 +406,9 @@ fn eager_resolver_preserves_the_missing_module_id() {
         .expect("valid module catalog"),
     );
 
-    let error = match create_eager_module_resolver(sync::Arc::new(BytecodeGraph::new()), catalog) {
-        Ok(_) => panic!("missing eager graph node is rejected"),
+    let chunks = sync::Arc::new(ModuleChunkStore::new(Vec::new()).expect("empty store is valid"));
+    let error = match create_eager_module_resolver(catalog, chunks) {
+        Ok(_) => panic!("missing eager chunk is rejected"),
         Err(error) => error,
     };
 
@@ -451,6 +465,54 @@ fn runtime_rejects_a_missing_required_provider_before_execution() {
         Err(RuntimeError::ProviderRequirementUnsatisfied { module_path })
             if module_path == "std/io"
     ));
+}
+
+#[test]
+fn standalone_preflight_rejects_an_unreachable_capability_before_initialization() {
+    let (entry_graph, module_id) = startup_graph();
+    let mut modules = entry_graph.modules().cloned().collect::<Vec<_>>();
+    modules.push(node(
+        ModuleId::new(2),
+        "std/io.gfs",
+        BytecodeModule {
+            name: "std/io.gfs".to_string(),
+            global_count: 0,
+            constants: ConstantPool::default(),
+            functions: Vec::new(),
+            types: Vec::new(),
+            struct_layouts: Vec::new(),
+            choice_layouts: Vec::new(),
+            imports: Vec::new(),
+            exports: Vec::new(),
+            init_func_idx: None,
+        },
+    ));
+    let graph = sync::Arc::new(
+        BytecodeGraph::from_modules(SemanticRevision::new(0), modules, Vec::new())
+            .expect("graph has an unreachable provider module"),
+    );
+    let package = package_with_required_provider(graph, module_id);
+    let calls = sync::Arc::new(sync::Mutex::new(Vec::new()));
+    let provider = StartupProvider {
+        calls: sync::Arc::clone(&calls),
+        pending: sync::Arc::new(sync::Mutex::new(None)),
+        fail_initializer: false,
+    };
+
+    let result = Runtime::new(
+        package,
+        RuntimeCapabilities::builder()
+            .with_providers(Providers::new().with_host("main", Box::new(provider)))
+            .build(),
+    )
+    .start(&[], std::rc::Rc::new(CooperativeDriver::new()));
+
+    assert!(matches!(
+        result,
+        Err(RuntimeError::ProviderRequirementUnsatisfied { module_path })
+            if module_path == "std/io"
+    ));
+    assert!(calls.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -631,6 +693,193 @@ fn node(id: ModuleId, path: &str, module: BytecodeModule) -> BytecodeNode {
         module,
         metadata: None,
     }
+}
+
+struct SourceRecordingProducer {
+    nodes: collections::HashMap<ModuleId, sync::Arc<BytecodeNode>>,
+    requests: sync::Mutex<Vec<ModuleId>>,
+}
+
+impl SourceRecordingProducer {
+    fn new(nodes: impl IntoIterator<Item = BytecodeNode>) -> Self {
+        Self {
+            nodes: nodes
+                .into_iter()
+                .map(|node| (node.id(), sync::Arc::new(node)))
+                .collect(),
+            requests: sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn requests(&self) -> Vec<ModuleId> {
+        self.requests
+            .lock()
+            .expect("requests are available")
+            .clone()
+    }
+}
+
+impl ModuleProducer for SourceRecordingProducer {
+    fn produce(&self, module_id: ModuleId) -> Result<sync::Arc<BytecodeNode>, ModuleResolveError> {
+        self.requests
+            .lock()
+            .expect("requests are available")
+            .push(module_id);
+        self.nodes
+            .get(&module_id)
+            .cloned()
+            .ok_or_else(|| ModuleResolveError::ProducerFailed {
+                context: galfus_bytecode::ModuleResolveContext::new(module_id),
+            })
+    }
+}
+
+#[test]
+fn lazy_start_initializes_only_the_entry_dependency_closure() {
+    let dependency_id = ModuleId::new(7);
+    let entry_id = ModuleId::new(31);
+    let unused_id = ModuleId::new(50);
+    let dependency = BytecodeModule {
+        name: "dependency.gfs".to_string(),
+        global_count: 1,
+        constants: ConstantPool {
+            constants: vec![Constant::Int32(42)],
+        },
+        functions: vec![BytecodeFunction {
+            name: "__init_module".to_string(),
+            param_count: 0,
+            local_count: 0,
+            temp_count: 1,
+            return_ty: TypeIdx(1),
+            adapter_proxy_metadata: None,
+            instructions: vec![
+                Instruction::LoadConst {
+                    dest: Reg(0),
+                    const_idx: ConstIdx(0),
+                },
+                Instruction::StoreGlobal {
+                    module_id: dependency_id,
+                    global_idx: GlobalIdx(0),
+                    src: Reg(0),
+                },
+                Instruction::RetNull,
+            ],
+        }],
+        types: vec![BytecodeType::Int32, BytecodeType::Null],
+        struct_layouts: vec![],
+        choice_layouts: vec![],
+        imports: vec![],
+        exports: vec![],
+        init_func_idx: Some(FuncIdx(0)),
+    };
+    let entry = BytecodeModule {
+        name: "main.gfs".to_string(),
+        global_count: 0,
+        constants: ConstantPool::default(),
+        functions: vec![BytecodeFunction {
+            name: "main".to_string(),
+            param_count: 1,
+            local_count: 0,
+            temp_count: 1,
+            return_ty: TypeIdx(3),
+            adapter_proxy_metadata: None,
+            instructions: vec![
+                Instruction::LoadGlobal {
+                    dest: Reg(1),
+                    module_id: dependency_id,
+                    global_idx: GlobalIdx(0),
+                },
+                Instruction::Ret { src: Reg(1) },
+            ],
+        }],
+        types: vec![
+            BytecodeType::Uint8,
+            BytecodeType::Array(TypeIdx(0)),
+            BytecodeType::Array(TypeIdx(1)),
+            BytecodeType::Int32,
+        ],
+        struct_layouts: vec![],
+        choice_layouts: vec![],
+        imports: vec![],
+        exports: vec![ExportSlot {
+            symbol_name: "main".to_string(),
+            kind: galfus_bytecode::ExportKind::Function(FuncIdx(0)),
+        }],
+        init_func_idx: None,
+    };
+    let unused = BytecodeModule {
+        name: "unused.gfs".to_string(),
+        global_count: 0,
+        constants: ConstantPool::default(),
+        functions: vec![],
+        types: vec![],
+        struct_layouts: vec![],
+        choice_layouts: vec![],
+        imports: vec![],
+        exports: vec![],
+        init_func_idx: None,
+    };
+    let catalog = sync::Arc::new(
+        ModuleCatalog::new(vec![
+            ModuleDescriptor::new(
+                dependency_id,
+                ModulePath::new("dependency.gfs").expect("valid module path"),
+                vec![],
+                vec![],
+                true,
+                ContentHash::of(b"dependency-interface"),
+                ContentHash::of(b"dependency-chunk"),
+            )
+            .expect("valid dependency descriptor"),
+            ModuleDescriptor::new(
+                entry_id,
+                ModulePath::new("main.gfs").expect("valid module path"),
+                vec![ModuleDependency::new(dependency_id)],
+                vec![],
+                false,
+                ContentHash::of(b"entry-interface"),
+                ContentHash::of(b"entry-chunk"),
+            )
+            .expect("valid entry descriptor"),
+            ModuleDescriptor::new(
+                unused_id,
+                ModulePath::new("unused.gfs").expect("valid module path"),
+                vec![],
+                vec![],
+                false,
+                ContentHash::of(b"unused-interface"),
+                ContentHash::of(b"unused-chunk"),
+            )
+            .expect("valid unused descriptor"),
+        ])
+        .expect("valid module catalog"),
+    );
+    let producer = sync::Arc::new(SourceRecordingProducer::new([
+        node(dependency_id, "dependency.gfs", dependency),
+        node(entry_id, "main.gfs", entry),
+        node(unused_id, "unused.gfs", unused),
+    ]));
+    let mut execution = Runtime::start_with_source_producer(
+        SourceRuntimeConfiguration::new(
+            catalog,
+            PackageEntryPoint::new(
+                ModulePath::new("main.gfs").expect("valid module path"),
+                "main",
+            ),
+            LimitsMetadata::default(),
+            Vec::new(),
+            Vec::new(),
+        ),
+        producer.clone(),
+        RuntimeCapabilities::builder().build(),
+        &[],
+        std::rc::Rc::new(crate::driver::CooperativeDriver::new()),
+    )
+    .expect("lazy runtime starts");
+
+    assert_eq!(execution.loaded_module_ids(), vec![dependency_id, entry_id]);
+    assert_eq!(producer.requests(), vec![entry_id, dependency_id]);
+    assert_eq!(execution.run_sync_to_completion(), Ok(42));
 }
 
 #[test]

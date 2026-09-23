@@ -21,6 +21,9 @@ impl Orchestrator {
         continuation: galfus_vm::Continuation,
     ) {
         match effect {
+            galfus_vm::VmEffect::LoadModule { module_id } => {
+                self.handle_module_load(thread_id, thread, continuation, module_id)
+            }
             galfus_vm::VmEffect::FuturesDropped { future_ids } => {
                 self.handle_future_dropped(thread_id, thread, continuation, future_ids)
             }

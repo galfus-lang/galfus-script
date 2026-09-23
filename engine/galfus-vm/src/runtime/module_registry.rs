@@ -62,6 +62,10 @@ impl VmModuleRegistry {
             .ok_or(VmError::ModuleNotReady { module_id })
     }
 
+    pub(super) fn contains(&self, module_id: ModuleId) -> bool {
+        self.modules.contains_key(&module_id)
+    }
+
     pub(super) fn modules(&self) -> impl Iterator<Item = (ModuleId, &BytecodeModule)> {
         self.modules
             .iter()

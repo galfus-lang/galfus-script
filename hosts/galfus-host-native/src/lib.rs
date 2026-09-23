@@ -60,6 +60,7 @@ impl ExecutionHost {
         }
     }
 
+    /// Runs a final package through the mandatory eager standalone boundary.
     pub fn run(
         self,
         package: Arc<PackageImage>,

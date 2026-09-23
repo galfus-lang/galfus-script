@@ -708,6 +708,7 @@ dependencies = [
  "galfus-contract",
  "galfus-core",
  "galfus-vm",
+ "postcard",
  "smallvec",
  "thiserror 2.0.20",
 ]

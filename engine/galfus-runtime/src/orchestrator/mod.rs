@@ -36,6 +36,7 @@ pub(crate) mod completion;
 pub(crate) mod event_loop;
 pub(crate) mod future_waits;
 pub(crate) mod lifecycle;
+pub(crate) mod module_load;
 pub(crate) mod state;
 
 pub(crate) use aggregates::{AggregateCoordinator, AggregateMode};
@@ -54,6 +55,8 @@ pub(crate) struct Orchestrator {
     active_event_sequence: Option<EventSequence>,
     pending_aggregate_finishes: BTreeSet<CoordinatorId>,
     vm: Option<Arc<VirtualMachine>>,
+    module_resolver: Option<Arc<crate::module_resolver::ModuleResolver>>,
+    module_load_waiters: HashMap<galfus_core::ModuleId, Vec<ModuleLoadWaiter>>,
     /// Keeps orchestration state owned by exactly one execution lane.
     _not_send_sync: PhantomData<Rc<()>>,
     pub(crate) failure: Option<galfus_contract::ExecutionFailure>,
@@ -93,4 +96,10 @@ pub(crate) struct Orchestrator {
     aggregate_coordinators: HashMap<galfus_core::CoordinatorId, AggregateCoordinator>,
     aggregate_registration: Option<(galfus_core::CoordinatorId, usize)>,
     quota: std::sync::Arc<std::sync::Mutex<galfus_vm::quota::GlobalQuota>>,
+}
+
+pub(crate) struct ModuleLoadWaiter {
+    pub(crate) thread_id: crate::registry::ThreadId,
+    pub(crate) thread: galfus_vm::thread::VmThreadState,
+    pub(crate) continuation: galfus_vm::Continuation,
 }

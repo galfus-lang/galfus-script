@@ -19,8 +19,8 @@ use galfus_bytecode::instruction::{
     TypeIdx,
 };
 use galfus_bytecode::{
-    BytecodeGraph, BytecodeNode, BytecodeType, Constant, ImportResolutionMode, OwnershipKind,
-    ResolvedImportKind,
+    BytecodeGraph, BytecodeNode, BytecodeType, Constant, ExportKind, ModuleImports, OwnershipKind,
+    ResolvedImport, ResolvedImportKind,
 };
 use galfus_contract::Providers;
 use galfus_core::{BindingId, HandleId, ModuleId, OpaqueTypeId, RuntimeExportKind};
@@ -71,6 +71,11 @@ impl Continuation {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum VmEffect {
+    /// Requests that the host make a direct module dependency available to the VM.
+    ///
+    /// The suspended instruction is retried after its continuation is resumed; the
+    /// VM never resolves or compiles the module itself.
+    LoadModule { module_id: ModuleId },
     FutureWait {
         future_id: galfus_core::FutureId,
         module_id: ModuleId,
@@ -316,7 +321,6 @@ pub struct VirtualMachine {
     pub graph: Arc<BytecodeGraph>,
     pub context: VmContext,
     module_registry: VmModuleRegistry,
-    import_resolution_mode: ImportResolutionMode,
 }
 
 impl VirtualMachine {
@@ -481,27 +485,25 @@ impl VirtualMachine {
             graph,
             context: VmContext::new(None),
             module_registry,
-            import_resolution_mode: ImportResolutionMode::Legacy,
         }
     }
 
     /// Creates a VM whose module lookup is restricted to eager-ready nodes.
-    pub fn from_ready_modules(
-        graph: Arc<BytecodeGraph>,
-        modules: impl IntoIterator<Item = Arc<BytecodeNode>>,
-    ) -> Self {
+    pub fn from_ready_modules(modules: impl IntoIterator<Item = Arc<BytecodeNode>>) -> Self {
         Self {
-            graph,
+            graph: Arc::new(BytecodeGraph::new()),
             context: VmContext::new(None),
             module_registry: VmModuleRegistry::from_ready_modules(modules),
-            import_resolution_mode: ImportResolutionMode::Legacy,
         }
     }
 
-    /// Selects the import identity contract declared by the package image.
-    pub fn with_import_resolution_mode(mut self, mode: ImportResolutionMode) -> Self {
-        self.import_resolution_mode = mode;
-        self
+    /// Rebuilds the immutable lookup snapshot after the runtime materializes modules.
+    pub fn with_ready_modules(&self, modules: impl IntoIterator<Item = Arc<BytecodeNode>>) -> Self {
+        Self {
+            graph: self.graph.clone(),
+            context: self.context.clone(),
+            module_registry: VmModuleRegistry::from_ready_modules(modules),
+        }
     }
 
     pub fn with_context(mut self, context: VmContext) -> Self {
@@ -519,7 +521,7 @@ impl VirtualMachine {
         self
     }
 
-    pub(crate) fn get_module(
+    pub fn get_module(
         &self,
         id: galfus_core::ModuleId,
     ) -> Result<&galfus_bytecode::BytecodeModule, VmError> {
@@ -530,6 +532,24 @@ impl VirtualMachine {
         self.module_registry.get_node(id)
     }
 
+    pub(super) fn is_module_ready(&self, module_id: ModuleId) -> bool {
+        self.module_registry.contains(module_id)
+    }
+
+    pub(super) fn suspend_for_module_load(
+        &self,
+        thread: &mut thread::VmThreadState,
+        module_id: ModuleId,
+    ) -> VmStep {
+        if let Some(frame) = thread.call_stack.last_mut() {
+            frame.pc = frame.pc.saturating_sub(1);
+        }
+        VmStep::Suspend {
+            effect: VmEffect::LoadModule { module_id },
+            continuation: Continuation::new(None),
+        }
+    }
+
     pub(super) fn resolve_import_function(
         &self,
         importer: ModuleId,
@@ -537,8 +557,7 @@ impl VirtualMachine {
         func_idx: FuncIdx,
     ) -> Result<(ModuleId, FuncIdx), VmError> {
         let import = self
-            .graph
-            .resolve_imports_with_mode(importer, self.import_resolution_mode)
+            .resolve_imports(importer)
             .map_err(|_| VmError::FunctionOutOfBounds { index: func_idx })?
             .imports
             .into_iter()
@@ -555,6 +574,62 @@ impl VirtualMachine {
                 actual: RuntimeExportKind::Global,
             }),
         }
+    }
+
+    pub fn resolve_imports(&self, importer: ModuleId) -> Result<ModuleImports, VmError> {
+        self.resolve_direct_imports(importer)
+    }
+
+    fn resolve_direct_imports(&self, importer: ModuleId) -> Result<ModuleImports, VmError> {
+        let module = self.get_module(importer)?;
+        let mut imports = Vec::with_capacity(module.imports.len());
+        for (slot, import) in module.imports.iter().enumerate() {
+            let (target_module_id, target_export_id) = import
+                .target_module_id
+                .zip(import.target_export_id)
+                .ok_or(VmError::MissingDirectImportTarget {
+                    module_id: importer,
+                    slot,
+                })?;
+            let target = self.get_module(target_module_id)?;
+            let export = target
+                .exports
+                .iter()
+                .find(|export| {
+                    galfus_core::RuntimeExportId::new(
+                        target_module_id,
+                        export.kind.runtime_export_kind(),
+                        export.symbol_name.as_str(),
+                    ) == target_export_id
+                })
+                .ok_or(VmError::DirectImportExportNotFound {
+                    module_id: importer,
+                    slot,
+                })?;
+            let expected = import.kind.runtime_export_kind();
+            let actual = export.kind.runtime_export_kind();
+            if expected != actual {
+                return Err(VmError::ImportKindMismatch {
+                    module_id: importer,
+                    slot,
+                    expected,
+                    actual,
+                });
+            }
+            let kind = match export.kind {
+                ExportKind::Function(index) => ResolvedImportKind::Function(index),
+                ExportKind::Global(index) => ResolvedImportKind::Global(index),
+            };
+            imports.push(ResolvedImport {
+                slot,
+                module_id: target_module_id,
+                kind,
+            });
+        }
+        Ok(ModuleImports {
+            module_id: importer,
+            imports,
+        })
     }
 
     pub fn get_function(

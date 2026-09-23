@@ -90,6 +90,18 @@ pub enum VmError {
         actual: RuntimeExportKind,
     },
 
+    #[error("import slot {slot} in module {module_id:?} has no direct target IDs")]
+    MissingDirectImportTarget {
+        module_id: galfus_core::ModuleId,
+        slot: usize,
+    },
+
+    #[error("import slot {slot} in module {module_id:?} targets a missing export")]
+    DirectImportExportNotFound {
+        module_id: galfus_core::ModuleId,
+        slot: usize,
+    },
+
     #[error("Global index {index:?} is out of bounds")]
     GlobalOutOfBounds { index: GlobalIdx },
 

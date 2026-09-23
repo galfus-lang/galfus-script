@@ -2,7 +2,7 @@
 mod tests;
 
 use galfus_contract::ContentHash;
-use galfus_core::{ModuleId, ModulePath};
+use galfus_core::{ModuleId, ModulePath, Revision};
 use std::fmt;
 
 /// Stable diagnostic context for one module materialization attempt.
@@ -71,6 +71,26 @@ pub enum ModuleResolveError {
         expected: ContentHash,
         actual: ContentHash,
     },
+    #[error("{context} belongs to source revision {actual:?}, not frozen revision {expected:?}")]
+    SourceSnapshotChanged {
+        context: ModuleResolveContext,
+        expected: Revision,
+        actual: Revision,
+    },
+    #[error("{context} is unavailable from the frozen source snapshot")]
+    SourceModuleUnavailable { context: ModuleResolveContext },
+    #[error("{context} does not match its frozen source interface")]
+    SourceInterfaceMismatch { context: ModuleResolveContext },
+    #[error("{context} requires unavailable provider module `{module_path}`")]
+    ProviderRequirementUnsatisfied {
+        context: ModuleResolveContext,
+        module_path: String,
+    },
+    #[error("{context} requires unavailable adapter proxy `{proxy_module}`")]
+    AdapterRequirementUnsatisfied {
+        context: ModuleResolveContext,
+        proxy_module: String,
+    },
     #[error("dependency cycle detected while resolving {context}")]
     DependencyCycle { context: ModuleResolveContext },
     #[error("{context} could not be produced")]
@@ -85,6 +105,11 @@ impl ModuleResolveError {
             | Self::ChunkDecode { context }
             | Self::ChunkHashMismatch { context, .. }
             | Self::InterfaceMismatch { context, .. }
+            | Self::SourceSnapshotChanged { context, .. }
+            | Self::SourceModuleUnavailable { context }
+            | Self::SourceInterfaceMismatch { context }
+            | Self::ProviderRequirementUnsatisfied { context, .. }
+            | Self::AdapterRequirementUnsatisfied { context, .. }
             | Self::DependencyCycle { context }
             | Self::ProducerFailed { context } => context,
         }

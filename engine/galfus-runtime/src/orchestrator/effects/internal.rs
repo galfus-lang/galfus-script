@@ -111,14 +111,11 @@ impl Orchestrator {
                             ),
                             return_type,
                             module_id,
-                            &self
-                                .vm
+                            self.vm
                                 .as_ref()
                                 .expect("VM is ready")
-                                .graph
-                                .get(module_id)
-                                .unwrap()
-                                .module,
+                                .get_module(module_id)
+                                .expect("internal future source module is loaded"),
                         )
                         .map_err(|error| {
                             ExecutionFailure::new(
@@ -236,14 +233,11 @@ impl Orchestrator {
                             ),
                             return_type,
                             module_id,
-                            &self
-                                .vm
+                            self.vm
                                 .as_ref()
                                 .unwrap()
-                                .graph
-                                .get(module_id)
-                                .unwrap()
-                                .module,
+                                .get_module(module_id)
+                                .expect("internal thread source module is loaded"),
                         )
                         .map_err(|error| {
                             ExecutionFailure::new(

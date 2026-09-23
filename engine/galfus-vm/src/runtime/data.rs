@@ -71,6 +71,9 @@ impl VirtualMachine {
                 module_id,
                 global_idx,
             } => {
+                if !self.is_module_ready(module_id) {
+                    return Ok(self.suspend_for_module_load(thread, module_id));
+                }
                 let module = self.get_module(module_id)?;
                 if global_idx.raw() as usize >= module.global_count as usize {
                     panic!("Corrupted bytecode: Out of bounds");
@@ -89,6 +92,9 @@ impl VirtualMachine {
                 global_idx,
                 src,
             } => {
+                if !self.is_module_ready(module_id) {
+                    return Ok(self.suspend_for_module_load(thread, module_id));
+                }
                 let module = self.get_module(module_id)?;
                 if global_idx.raw() as usize >= module.global_count as usize {
                     panic!("Corrupted bytecode: Out of bounds");

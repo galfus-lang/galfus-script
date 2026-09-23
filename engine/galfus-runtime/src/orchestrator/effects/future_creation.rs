@@ -109,14 +109,12 @@ impl Orchestrator {
         };
         let future_id = future_lease.id;
 
-        let module = &self
+        let module = self
             .vm
             .as_ref()
             .unwrap()
-            .graph
-            .get(module_id)
-            .unwrap()
-            .module;
+            .get_module(module_id)
+            .expect("future source module is loaded");
         let activation_result = self.future_activation(
             module_id,
             target_module_id,
@@ -216,14 +214,12 @@ impl Orchestrator {
             self.kernel.cancel(thread_id);
             return;
         };
-        let source_module = &self
+        let source_module = self
             .vm
             .as_ref()
             .unwrap()
-            .graph
-            .get(module_id)
-            .unwrap()
-            .module;
+            .get_module(module_id)
+            .expect("indirect future source module is loaded");
         let activation_result = self.future_activation(
             module_id,
             target_module_id,
@@ -386,14 +382,12 @@ impl Orchestrator {
             &[galfus_contract::SurfaceSchema],
         ) -> Result<Vec<galfus_contract::SurfaceValue>, String>,
     ) -> Result<crate::orchestrator::future_registry::Activation, String> {
-        let target = &self
+        let target = self
             .vm
             .as_ref()
             .expect("VM is configured before execution")
-            .graph
-            .get(target_module_id)
-            .expect("future target module is loaded")
-            .module;
+            .get_module(target_module_id)
+            .expect("future target module is loaded");
         let function_name = target.functions[func_idx.raw() as usize].name.clone();
         let adapter_identity = target.functions[func_idx.raw() as usize]
             .adapter_proxy_metadata

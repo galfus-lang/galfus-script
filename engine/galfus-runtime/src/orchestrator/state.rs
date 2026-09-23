@@ -23,6 +23,8 @@ impl Orchestrator {
             active_event_sequence: None,
             pending_aggregate_finishes: BTreeSet::new(),
             vm: None,
+            module_resolver: None,
+            module_load_waiters: HashMap::new(),
             _not_send_sync: PhantomData,
             failure: None,
             pending_continuations: HashMap::new(),
@@ -71,6 +73,13 @@ impl Orchestrator {
 
     pub(crate) fn set_vm(&mut self, vm: Arc<VirtualMachine>) {
         self.vm = Some(vm);
+    }
+
+    pub(crate) fn set_module_resolver(
+        &mut self,
+        module_resolver: Arc<crate::module_resolver::ModuleResolver>,
+    ) {
+        self.module_resolver = Some(module_resolver);
     }
 
     pub(crate) fn set_adapter_bindings(

@@ -86,9 +86,24 @@ impl VirtualMachine {
                         (current_module_id, func_idx)
                     } else {
                         let import_idx = (func_idx.raw() as usize) - current_image.functions.len();
+                        let target_module_id = current_image
+                            .imports
+                            .get(import_idx)
+                            .ok_or(VmError::FunctionOutOfBounds { index: func_idx })?
+                            .target_module_id
+                            .ok_or(VmError::MissingDirectImportTarget {
+                                module_id: current_module_id,
+                                slot: import_idx,
+                            })?;
+                        if !self.is_module_ready(target_module_id) {
+                            return Ok(self.suspend_for_module_load(thread, target_module_id));
+                        }
                         self.resolve_import_function(current_module_id, import_idx, func_idx)?
                     };
 
+                if !self.is_module_ready(target_module_id) {
+                    return Ok(self.suspend_for_module_load(thread, target_module_id));
+                }
                 let target_image = self.get_module(target_module_id)?;
                 let callee = target_image
                     .functions
@@ -131,9 +146,24 @@ impl VirtualMachine {
                         (current_module_id, func_idx)
                     } else {
                         let import_idx = (func_idx.raw() as usize) - current_image.functions.len();
+                        let target_module_id = current_image
+                            .imports
+                            .get(import_idx)
+                            .ok_or(VmError::FunctionOutOfBounds { index: func_idx })?
+                            .target_module_id
+                            .ok_or(VmError::MissingDirectImportTarget {
+                                module_id: current_module_id,
+                                slot: import_idx,
+                            })?;
+                        if !self.is_module_ready(target_module_id) {
+                            return Ok(self.suspend_for_module_load(thread, target_module_id));
+                        }
                         self.resolve_import_function(current_module_id, import_idx, func_idx)?
                     };
 
+                if !self.is_module_ready(target_module_id) {
+                    return Ok(self.suspend_for_module_load(thread, target_module_id));
+                }
                 let target_image = self.get_module(target_module_id)?;
                 let callee = target_image
                     .functions
@@ -248,6 +278,14 @@ impl VirtualMachine {
                     }
                 };
 
+                if let Value::Object(object_ref) = thread.read_reg(obj)
+                    && let HeapObject::Struct { module_id, .. } =
+                        thread.heap.get_object(object_ref)?
+                    && !self.is_module_ready(*module_id)
+                {
+                    return Ok(self.suspend_for_module_load(thread, *module_id));
+                }
+
                 if let Some(value) =
                     self.execute_array_iterator_method(thread, obj, method_name.as_str())?
                 {
@@ -271,11 +309,15 @@ impl VirtualMachine {
                             module_id,
                             layout_idx,
                             ..
-                        } => self
-                            .get_module(*module_id)?
-                            .struct_layouts
-                            .get(layout_idx.raw() as usize)
-                            .map(|layout| (*module_id, layout.name.clone())),
+                        } => {
+                            if !self.is_module_ready(*module_id) {
+                                return Ok(self.suspend_for_module_load(thread, *module_id));
+                            }
+                            self.get_module(*module_id)?
+                                .struct_layouts
+                                .get(layout_idx.raw() as usize)
+                                .map(|layout| (*module_id, layout.name.clone()))
+                        }
                         _ => None,
                     },
                     _ => None,
@@ -336,10 +378,7 @@ impl VirtualMachine {
 
                 // 2. Search in imports
                 if resolved_target.is_none()
-                    && let Ok(link) = self.graph.resolve_imports_with_mode(
-                        resolution_module_id,
-                        self.import_resolution_mode,
-                    )
+                    && let Ok(link) = self.resolve_imports(resolution_module_id)
                 {
                     for imp in &link.imports {
                         let target_func_idx = match &imp.kind {
@@ -391,10 +430,7 @@ impl VirtualMachine {
                         .iter()
                         .map(|f| f.name.clone())
                         .collect::<Vec<_>>();
-                    if let Ok(link) = self.graph.resolve_imports_with_mode(
-                        resolution_module_id,
-                        self.import_resolution_mode,
-                    ) {
+                    if let Ok(link) = self.resolve_imports(resolution_module_id) {
                         for imp in &link.imports {
                             let target_func_idx = match &imp.kind {
                                 galfus_bytecode::graph_resolver::ResolvedImportKind::Function(
@@ -491,6 +527,9 @@ impl VirtualMachine {
                     }
                 };
 
+                if !self.is_module_ready(target_module_id) {
+                    return Ok(self.suspend_for_module_load(thread, target_module_id));
+                }
                 let current_image = self.get_module(target_module_id)?;
 
                 let (target_module_id, target_func_idx) =
@@ -498,9 +537,24 @@ impl VirtualMachine {
                         (target_module_id, func_idx)
                     } else {
                         let import_idx = (func_idx.raw() as usize) - current_image.functions.len();
+                        let target_module_id = current_image
+                            .imports
+                            .get(import_idx)
+                            .ok_or(VmError::FunctionOutOfBounds { index: func_idx })?
+                            .target_module_id
+                            .ok_or(VmError::MissingDirectImportTarget {
+                                module_id: target_module_id,
+                                slot: import_idx,
+                            })?;
+                        if !self.is_module_ready(target_module_id) {
+                            return Ok(self.suspend_for_module_load(thread, target_module_id));
+                        }
                         self.resolve_import_function(target_module_id, import_idx, func_idx)?
                     };
 
+                if !self.is_module_ready(target_module_id) {
+                    return Ok(self.suspend_for_module_load(thread, target_module_id));
+                }
                 let target_image = self.get_module(target_module_id)?;
                 let callee = target_image
                     .functions

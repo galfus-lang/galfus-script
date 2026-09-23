@@ -27,14 +27,17 @@ use std::rc::Rc;
 use std::sync;
 
 use crate::driver::ExecutionDriver;
-use crate::module_resolver::{
-    GraphModuleProducer, ModuleInitializationPlanError, ModuleProducer, ModuleResolver,
+use crate::module_resolver::ChunkModuleProducer;
+use crate::preflight::{
+    CapabilityValidatedModuleProducer, LazyCapabilityPreflight, validate_package_capabilities,
 };
 use galfus_bytecode::{
-    ModuleCatalog, ModuleCatalogDerivationError, ModuleResolveContext, ModuleResolveError,
+    BytecodeType, CURRENT_BYTECODE_FORMAT_VERSION, ExportKind, ModuleCatalog, ModuleResolveContext,
+    ModuleResolveError, PackageEntryPoint, validate_bytecode_format,
 };
 use galfus_contract::{
-    AdapterBindings, Providers, RuntimeCapabilities, validate_numeric_semantics,
+    AdapterBindings, AdapterModuleRequirement, CURRENT_NUMERIC_SEMANTICS_VERSION, LimitsMetadata,
+    ProviderModuleRequirement, Providers, RuntimeCapabilities, validate_numeric_semantics,
 };
 use galfus_vm::{VirtualMachine, VmPanic, VmValue};
 
@@ -46,6 +49,7 @@ pub use execution::{
     ShutdownReport,
 };
 pub use execution_host::{ExecutionHost, HostBootstrapError};
+pub use module_resolver::{ModuleInitializationPlanError, ModuleProducer, ModuleResolver};
 pub use preflight::{AdapterBindingPreflight, PreflightError};
 
 #[derive(Debug, thiserror::Error)]
@@ -72,20 +76,16 @@ pub enum RuntimeError {
     ProviderRequirementUnsatisfied { module_path: String },
     #[error("required adapter proxy module `{proxy_module}` is unavailable or incompatible")]
     AdapterRequirementUnsatisfied { proxy_module: String },
+    #[error("workspace capability declaration is invalid: {reason}")]
+    SourceCapabilityConfiguration { reason: String },
     #[error("package numeric semantics are incompatible: {0}")]
     NumericSemantics(galfus_contract::PackageCompatibilityError),
-    #[error("could not derive the eager module catalog from the bytecode graph: {0}")]
-    EagerResolverSetup(#[from] ModuleCatalogDerivationError),
     #[error(transparent)]
     EagerModuleResolution(#[from] ModuleResolveError),
     #[error("module initialization dependency cycle: {cycle:?}")]
     InitializationDependencyCycle { cycle: Vec<galfus_core::ModuleId> },
     #[error(transparent)]
     BytecodeFormat(#[from] galfus_bytecode::BytecodeFormatError),
-    #[error(transparent)]
-    GraphResolution(#[from] galfus_bytecode::GraphResolutionError),
-    #[error(transparent)]
-    GraphValidation(#[from] galfus_bytecode::BytecodeGraphValidationErrors),
     #[error("{0}")]
     VmPanic(#[from] VmPanic),
 }
@@ -133,6 +133,34 @@ pub struct Runtime {
     capabilities: RuntimeCapabilities,
 }
 
+/// Runtime inputs available from a checked workspace before module bodies exist.
+#[derive(Clone)]
+pub struct SourceRuntimeConfiguration {
+    catalog: sync::Arc<ModuleCatalog>,
+    entry_point: PackageEntryPoint,
+    limits: LimitsMetadata,
+    adapter_requirements: Vec<AdapterModuleRequirement>,
+    provider_requirements: Vec<ProviderModuleRequirement>,
+}
+
+impl SourceRuntimeConfiguration {
+    pub fn new(
+        catalog: sync::Arc<ModuleCatalog>,
+        entry_point: PackageEntryPoint,
+        limits: LimitsMetadata,
+        adapter_requirements: Vec<AdapterModuleRequirement>,
+        provider_requirements: Vec<ProviderModuleRequirement>,
+    ) -> Self {
+        Self {
+            catalog,
+            entry_point,
+            limits,
+            adapter_requirements,
+            provider_requirements,
+        }
+    }
+}
+
 impl Runtime {
     pub fn new(
         package: sync::Arc<galfus_bytecode::PackageImage>,
@@ -144,7 +172,7 @@ impl Runtime {
         }
     }
 
-    /// Starts a persistent execution from the package entry point.
+    /// Starts a standalone execution after preflighting every package capability.
     pub fn start(
         self,
         args: &[Vec<u8>],
@@ -155,198 +183,228 @@ impl Runtime {
             capabilities,
         } = self;
         let (providers, adapter_bindings) = capabilities.into_runtime_handles();
-        package.graph().validate_format()?;
-        package.graph().validate()?;
+        validate_bytecode_format(package.versions().bytecode_format())?;
         validate_numeric_semantics(package.versions().numeric_semantics())
             .map_err(RuntimeError::NumericSemantics)?;
-        preflight_capabilities(&package, providers.as_ref(), &adapter_bindings)?;
+        validate_package_capabilities(
+            package.adapter_requirements(),
+            package.provider_requirements(),
+            providers.as_ref(),
+            &adapter_bindings,
+        )?;
         driver.configure_limits(package.limits()).map_err(|_| {
             RuntimeError::EventQueueCapacityExceeded {
                 requested: package.limits().max_event_queue,
             }
         })?;
 
-        let quota = std::sync::Arc::new(std::sync::Mutex::new(galfus_vm::quota::GlobalQuota::new(
-            package.limits().clone(),
-        )));
-        let mut orchestrator = crate::orchestrator::Orchestrator::new(quota.clone());
-        let graph = package.graph_handle();
-        let module_resolver =
-            create_eager_module_resolver(graph.clone(), sync::Arc::new(package.catalog().clone()))?;
-        let entry = package
-            .entry_point()
-            .ok_or(RuntimeError::MissingPackageEntry)?;
-        let module_id = graph
-            .modules()
-            .find(|module| module.path() == entry.module_path())
-            .map(|module| module.id())
-            .ok_or_else(|| {
-                RuntimeError::ModuleNotLoaded(entry.module_path().as_str().to_string())
-            })?;
-        let entry_name = entry.function_name();
-        let image = &graph
-            .get(module_id)
-            .expect("entry module was resolved from the graph")
-            .module;
-        let abi = EntryAbi::default_app();
-        let entry_idx = image
-            .exports
-            .iter()
-            .find(|export| export.symbol_name == entry_name)
-            .and_then(|export| match export.kind {
-                galfus_bytecode::ExportKind::Function(f) => Some(f),
-                _ => None,
-            })
-            .ok_or_else(|| RuntimeError::EntryNotExported(entry_name.to_string()))?;
-
-        let entry_func = &image.functions[entry_idx.raw() as usize];
-        if entry_func.param_count != abi.expected_param_count() {
-            return Err(RuntimeError::EntryArityMismatch {
-                name: entry_name.to_string(),
-                expected: abi.expected_param_count() as usize,
-                found: entry_func.param_count as usize,
-            });
-        }
-        let return_ty = image.types.get(entry_func.return_ty.raw() as usize);
-        if !return_ty.is_some_and(|ty| abi.accepts_return_type(ty)) {
-            return Err(RuntimeError::EntryReturnTypeMismatch {
-                name: entry_name.to_string(),
-            });
-        }
-
-        let thread_quota =
-            std::sync::Arc::new(galfus_vm::quota::ThreadQuota::new(package.limits().clone()));
-        let mut thread = galfus_vm::thread::VmThreadState::new(quota.clone(), thread_quota);
-        let vm =
-            VirtualMachine::from_ready_modules(graph.clone(), module_resolver.ready_modules()?)
-                .with_import_resolution_mode(package.import_resolution_mode())
-                .with_provider_handle(providers);
-
-        let mut initializers = VecDeque::new();
-        let initialization_plan =
-            module_resolver
-                .initialization_plan(module_id)
-                .map_err(|error| match error {
-                    ModuleInitializationPlanError::UnknownModule { module_id } => {
-                        RuntimeError::EagerModuleResolution(ModuleResolveError::UnknownModule {
-                            context: ModuleResolveContext::new(module_id),
-                        })
-                    }
-                    ModuleInitializationPlanError::DependencyCycle { cycle } => {
-                        RuntimeError::InitializationDependencyCycle { cycle }
-                    }
-                })?;
-        for initialized_module_id in initialization_plan {
-            if thread.is_module_initialized(initialized_module_id) {
-                continue;
-            }
-            if let Some(init_idx) = module_resolver
-                .ensure_module(initialized_module_id)?
-                .module
-                .init_func_idx
-            {
-                initializers.push_back((initialized_module_id, init_idx));
-            } else {
-                thread.mark_module_initialized(initialized_module_id);
-            }
-        }
-
-        let entry_args = build_entry_args(&mut thread, &vm, module_id, args)?;
-        let startup_plan =
-            if let Some((initializer_module_id, initializer_func)) = initializers.pop_front() {
-                thread.begin_module_initialization(initializer_module_id);
-                vm.prepare_function(&mut thread, initializer_module_id, initializer_func, vec![])
-                    .map_err(RuntimeError::VmPanic)?;
-                Some(crate::orchestrator::StartupPlan {
-                    initializers,
-                    entry_module_id: module_id,
-                    entry_func: entry_idx,
-                    entry_args,
-                })
-            } else {
-                vm.prepare_function(&mut thread, module_id, entry_idx, vec![entry_args])
-                    .map_err(RuntimeError::VmPanic)?;
-                None
-            };
-
-        let root_thread_id = orchestrator
-            .kernel_mut()
-            .spawn(thread, None)
-            .expect("failed to spawn root thread");
-        orchestrator.set_root_thread(root_thread_id);
-
-        let is_initializing = startup_plan.is_some();
-        if let Some(startup_plan) = startup_plan {
-            orchestrator.set_startup_plan(root_thread_id, startup_plan);
-        }
-
-        let _ = orchestrator.kernel_mut().mark_running(root_thread_id);
-        let root_thread = orchestrator
-            .kernel_mut()
-            .take_thread(root_thread_id)
-            .unwrap();
-
-        let vm = sync::Arc::new(vm);
-
-        orchestrator.set_vm(vm);
-        orchestrator.set_adapter_bindings(Some(adapter_bindings));
-        orchestrator.set_driver(driver.clone());
-        orchestrator
-            .kernel_mut()
-            .enqueue_runnable(root_thread_id, root_thread)
-            .unwrap();
-
-        let initialization_complete = orchestrator.initialization_complete();
-        Ok(Execution::new(
-            orchestrator,
+        let module_resolver = create_eager_module_resolver(
+            sync::Arc::new(package.catalog().clone()),
+            sync::Arc::new(package.chunks().clone()),
+        )?;
+        start_with_module_resolver(
+            sync::Arc::new(package.catalog().clone()),
+            package
+                .entry_point()
+                .ok_or(RuntimeError::MissingPackageEntry)?,
+            package.limits(),
+            providers,
+            adapter_bindings,
+            module_resolver,
+            args,
             driver,
-            initialization_complete,
-            is_initializing,
         )
-        .with_module_resolver(module_resolver))
+    }
+
+    /// Starts from a checked source catalog without preloading module bodies.
+    pub fn start_with_source_producer(
+        configuration: SourceRuntimeConfiguration,
+        producer: sync::Arc<dyn ModuleProducer>,
+        capabilities: RuntimeCapabilities,
+        args: &[Vec<u8>],
+        driver: Rc<dyn ExecutionDriver>,
+    ) -> Result<Execution, RuntimeError> {
+        validate_bytecode_format(CURRENT_BYTECODE_FORMAT_VERSION)?;
+        validate_numeric_semantics(CURRENT_NUMERIC_SEMANTICS_VERSION)
+            .map_err(RuntimeError::NumericSemantics)?;
+        let (providers, adapter_bindings) = capabilities.into_runtime_handles();
+        let capability_preflight = LazyCapabilityPreflight::new(
+            configuration.catalog.as_ref(),
+            configuration.adapter_requirements.as_slice(),
+            configuration.provider_requirements.as_slice(),
+            providers.clone(),
+            adapter_bindings.clone(),
+        )?;
+        driver
+            .configure_limits(&configuration.limits)
+            .map_err(|_| RuntimeError::EventQueueCapacityExceeded {
+                requested: configuration.limits.max_event_queue,
+            })?;
+        let resolver = sync::Arc::new(ModuleResolver::new(
+            configuration.catalog.as_ref(),
+            sync::Arc::new(CapabilityValidatedModuleProducer::new(
+                producer,
+                capability_preflight,
+            )),
+        ));
+        start_with_module_resolver(
+            configuration.catalog,
+            &configuration.entry_point,
+            &configuration.limits,
+            providers,
+            adapter_bindings,
+            resolver,
+            args,
+            driver,
+        )
     }
 }
 
 fn create_eager_module_resolver(
-    graph: sync::Arc<galfus_bytecode::BytecodeGraph>,
     catalog: sync::Arc<ModuleCatalog>,
+    chunks: sync::Arc<galfus_bytecode::ModuleChunkStore>,
 ) -> Result<sync::Arc<ModuleResolver>, RuntimeError> {
     let producer: sync::Arc<dyn ModuleProducer> =
-        sync::Arc::new(GraphModuleProducer::new(graph, catalog.clone())?);
+        sync::Arc::new(ChunkModuleProducer::new(chunks, catalog.clone()));
     let resolver = sync::Arc::new(ModuleResolver::new(catalog.as_ref(), producer));
     resolver.preload_all()?;
     Ok(resolver)
 }
 
-fn preflight_capabilities(
-    package: &galfus_bytecode::PackageImage,
-    providers: Option<&sync::Arc<sync::Mutex<Providers>>>,
-    adapter_bindings: &sync::Arc<sync::Mutex<AdapterBindings>>,
-) -> Result<(), RuntimeError> {
-    let bindings = adapter_bindings
-        .lock()
-        .expect("runtime owns the adapter capability table");
-    for requirement in package.adapter_requirements() {
-        if !bindings.validates(requirement) {
-            return Err(RuntimeError::AdapterRequirementUnsatisfied {
-                proxy_module: requirement.proxy_module.clone(),
-            });
+#[allow(clippy::too_many_arguments)]
+fn start_with_module_resolver(
+    catalog: sync::Arc<ModuleCatalog>,
+    entry: &PackageEntryPoint,
+    limits: &LimitsMetadata,
+    providers: Option<sync::Arc<sync::Mutex<Providers>>>,
+    adapter_bindings: sync::Arc<sync::Mutex<AdapterBindings>>,
+    module_resolver: sync::Arc<ModuleResolver>,
+    args: &[Vec<u8>],
+    driver: Rc<dyn ExecutionDriver>,
+) -> Result<Execution, RuntimeError> {
+    let quota = sync::Arc::new(sync::Mutex::new(galfus_vm::quota::GlobalQuota::new(
+        limits.clone(),
+    )));
+    let mut orchestrator = crate::orchestrator::Orchestrator::new(quota.clone());
+    let module_id = catalog
+        .iter()
+        .find(|descriptor| descriptor.module_path() == entry.module_path())
+        .map(|descriptor| descriptor.module_id())
+        .ok_or_else(|| RuntimeError::ModuleNotLoaded(entry.module_path().as_str().to_string()))?;
+    let entry_name = entry.function_name();
+    let entry_module = module_resolver.ensure_module(module_id)?;
+    let image = entry_module.module();
+    let abi = EntryAbi::default_app();
+    let entry_idx = image
+        .exports
+        .iter()
+        .find(|export| export.symbol_name == entry_name)
+        .and_then(|export| match export.kind {
+            ExportKind::Function(f) => Some(f),
+            _ => None,
+        })
+        .ok_or_else(|| RuntimeError::EntryNotExported(entry_name.to_string()))?;
+
+    let entry_func = &image.functions[entry_idx.raw() as usize];
+    if entry_func.param_count != abi.expected_param_count() {
+        return Err(RuntimeError::EntryArityMismatch {
+            name: entry_name.to_string(),
+            expected: abi.expected_param_count() as usize,
+            found: entry_func.param_count as usize,
+        });
+    }
+    let return_ty = image.types.get(entry_func.return_ty.raw() as usize);
+    if !return_ty.is_some_and(|ty| abi.accepts_return_type(ty)) {
+        return Err(RuntimeError::EntryReturnTypeMismatch {
+            name: entry_name.to_string(),
+        });
+    }
+
+    let thread_quota = sync::Arc::new(galfus_vm::quota::ThreadQuota::new(limits.clone()));
+    let mut thread = galfus_vm::thread::VmThreadState::new(quota.clone(), thread_quota);
+    let mut initializers = VecDeque::new();
+    let initialization_plan = module_resolver
+        .initialization_plan(module_id)
+        .map_err(|error| match error {
+            ModuleInitializationPlanError::UnknownModule { module_id } => {
+                RuntimeError::EagerModuleResolution(ModuleResolveError::UnknownModule {
+                    context: ModuleResolveContext::new(module_id),
+                })
+            }
+            ModuleInitializationPlanError::DependencyCycle { cycle } => {
+                RuntimeError::InitializationDependencyCycle { cycle }
+            }
+        })?;
+    for initialized_module_id in initialization_plan {
+        if thread.is_module_initialized(initialized_module_id) {
+            continue;
+        }
+        if let Some(init_idx) = module_resolver
+            .ensure_module(initialized_module_id)?
+            .module
+            .init_func_idx
+        {
+            initializers.push_back((initialized_module_id, init_idx));
+        } else {
+            thread.mark_module_initialized(initialized_module_id);
         }
     }
-    drop(bindings);
 
-    for requirement in package.provider_requirements() {
-        let is_satisfied = providers
-            .and_then(|providers| providers.lock().ok())
-            .is_some_and(|providers| providers.validates(requirement));
-        if !is_satisfied {
-            return Err(RuntimeError::ProviderRequirementUnsatisfied {
-                module_path: requirement.module_path.clone(),
-            });
-        }
+    let vm = VirtualMachine::from_ready_modules(module_resolver.loaded_modules())
+        .with_provider_handle(providers);
+
+    let entry_args = build_entry_args(&mut thread, &vm, module_id, args)?;
+    let startup_plan =
+        if let Some((initializer_module_id, initializer_func)) = initializers.pop_front() {
+            thread.begin_module_initialization(initializer_module_id);
+            vm.prepare_function(&mut thread, initializer_module_id, initializer_func, vec![])
+                .map_err(RuntimeError::VmPanic)?;
+            Some(crate::orchestrator::StartupPlan {
+                initializers,
+                entry_module_id: module_id,
+                entry_func: entry_idx,
+                entry_args,
+            })
+        } else {
+            vm.prepare_function(&mut thread, module_id, entry_idx, vec![entry_args])
+                .map_err(RuntimeError::VmPanic)?;
+            None
+        };
+
+    let root_thread_id = orchestrator
+        .kernel_mut()
+        .spawn(thread, None)
+        .expect("failed to spawn root thread");
+    orchestrator.set_root_thread(root_thread_id);
+
+    let is_initializing = startup_plan.is_some();
+    if let Some(startup_plan) = startup_plan {
+        orchestrator.set_startup_plan(root_thread_id, startup_plan);
     }
 
-    Ok(())
+    let _ = orchestrator.kernel_mut().mark_running(root_thread_id);
+    let root_thread = orchestrator
+        .kernel_mut()
+        .take_thread(root_thread_id)
+        .unwrap();
+
+    orchestrator.set_vm(sync::Arc::new(vm));
+    orchestrator.set_module_resolver(module_resolver.clone());
+    orchestrator.set_adapter_bindings(Some(adapter_bindings));
+    orchestrator.set_driver(driver.clone());
+    orchestrator
+        .kernel_mut()
+        .enqueue_runnable(root_thread_id, root_thread)
+        .unwrap();
+
+    let initialization_complete = orchestrator.initialization_complete();
+    Ok(Execution::new(
+        orchestrator,
+        driver,
+        initialization_complete,
+        is_initializing,
+    )
+    .with_module_resolver(module_resolver))
 }
 
 fn build_entry_args(
@@ -355,15 +413,20 @@ fn build_entry_args(
     module_id: galfus_core::ModuleId,
     args: &[Vec<u8>],
 ) -> Result<VmValue, RuntimeError> {
-    let args_array_ty = vm
-        .graph.get(module_id).unwrap().module
+    let module = vm.get_module(module_id).map_err(|error| {
+        RuntimeError::VmPanic(VmPanic {
+            error,
+            stack_trace: Vec::new(),
+        })
+    })?;
+    let args_array_ty = module
         .types
         .iter()
         .enumerate()
         .find(|(_, ty)| {
-            matches!(ty, galfus_bytecode::BytecodeType::Array(element)
-                if matches!(vm.graph.get(module_id).unwrap().module.types.get(element.raw() as usize), Some(galfus_bytecode::BytecodeType::Array(inner))
-                    if matches!(vm.graph.get(module_id).unwrap().module.types.get(inner.raw() as usize), Some(galfus_bytecode::BytecodeType::Uint8))))
+            matches!(ty, BytecodeType::Array(element)
+                if matches!(module.types.get(element.raw() as usize), Some(BytecodeType::Array(inner))
+                    if matches!(module.types.get(inner.raw() as usize), Some(BytecodeType::Uint8))))
         })
         .map(|(index, _)| galfus_bytecode::instruction::TypeIdx(index as u16))
         .ok_or(RuntimeError::MissingArgumentType("[[u8]]"))?;
@@ -379,7 +442,7 @@ fn build_entry_args(
         value,
         args_array_ty,
         module_id,
-        &vm.graph.get(module_id).unwrap().module,
+        module,
         None,
     )
     .map_err(|error| {

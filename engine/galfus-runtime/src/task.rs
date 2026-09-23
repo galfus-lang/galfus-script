@@ -2,10 +2,13 @@
 mod tests;
 
 use crate::driver::RuntimeEventSink;
+use crate::event::RuntimeEvent;
+use crate::module_resolver::ModuleResolver;
 use crate::registry;
 use galfus_contract::{
     ExecutionFailure, ExecutionFailureKind, ExecutionFrame, RunnableTask, ThreadResult,
 };
+use galfus_core::ModuleId;
 use galfus_vm::{HeapObject, VirtualMachine, VmValue};
 
 use std::sync::Arc;
@@ -1085,6 +1088,42 @@ pub struct RuntimeTask {
     pub vm: Arc<VirtualMachine>,
     pub events: Arc<dyn RuntimeEventSink>,
     pub future_completion: Option<(registry::ThreadId, galfus_core::FutureLease)>,
+}
+
+/// Produces one resolver cell away from the VM thread that requested it.
+pub(crate) struct ModuleLoadTask {
+    resolver: Arc<ModuleResolver>,
+    module_id: ModuleId,
+    events: Arc<dyn RuntimeEventSink>,
+}
+
+impl ModuleLoadTask {
+    pub(crate) fn new(
+        resolver: Arc<ModuleResolver>,
+        module_id: ModuleId,
+        events: Arc<dyn RuntimeEventSink>,
+    ) -> Self {
+        Self {
+            resolver,
+            module_id,
+            events,
+        }
+    }
+}
+
+impl RunnableTask for ModuleLoadTask {
+    fn run(self: Box<Self>, _budget: usize) -> ThreadResult {
+        let result = self.resolver.produce_requested_module(self.module_id);
+        let _ = self.events.submit(RuntimeEvent::ModuleLoadCompleted {
+            module_id: self.module_id,
+            result,
+        });
+        ThreadResult::Discarded
+    }
+
+    fn into_any_thread(self: Box<Self>) -> Option<Box<dyn RunnableTask + Send>> {
+        Some(self)
+    }
 }
 
 pub(crate) struct QuotaTask<T: galfus_contract::RunnableTask> {
