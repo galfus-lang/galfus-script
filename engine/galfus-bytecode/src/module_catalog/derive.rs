@@ -3,11 +3,10 @@ mod tests;
 
 use std::collections::BTreeSet;
 
-use galfus_contract::ContentHash;
+use galfus_contract::{AdapterModuleRequirement, ContentHash, ProviderModuleRequirement};
 use galfus_core::{
     RuntimeExportId, RuntimeExportIdCollision, RuntimeExportIdRegistry, RuntimeExportIdentity,
 };
-use serde::Serialize;
 
 use super::{
     ModuleCatalog, ModuleCatalogError, ModuleDependency, ModuleDescriptor, ModuleDescriptorError,
@@ -37,6 +36,84 @@ pub fn derive_module_catalog(
     let catalog = ModuleCatalog::new(descriptors)?;
     cross_check_catalog(graph, &catalog, &graph_edges)?;
     Ok(catalog)
+}
+
+/// Derives the catalog metadata that binds emitted module dependencies to the
+/// package-wide external capability manifest.
+pub fn derive_module_catalog_with_capability_requirements(
+    graph: &BytecodeGraph,
+    adapter_requirements: &[AdapterModuleRequirement],
+    provider_requirements: &[ProviderModuleRequirement],
+) -> Result<ModuleCatalog, ModuleCatalogDerivationError> {
+    let catalog = derive_module_catalog(graph)?;
+    attach_capability_requirements(&catalog, adapter_requirements, provider_requirements)
+}
+
+/// Attaches externally declared capability requirements to an already-derived
+/// catalog. A module references a capability only when one of its direct
+/// dependencies names the corresponding provider or adapter proxy module.
+pub fn attach_capability_requirements(
+    catalog: &ModuleCatalog,
+    adapter_requirements: &[AdapterModuleRequirement],
+    provider_requirements: &[ProviderModuleRequirement],
+) -> Result<ModuleCatalog, ModuleCatalogDerivationError> {
+    let adapter_paths = adapter_requirements
+        .iter()
+        .map(|requirement| requirement.proxy_module.as_str())
+        .collect::<BTreeSet<_>>();
+    let provider_paths = provider_requirements
+        .iter()
+        .map(|requirement| requirement.module_path.as_str())
+        .collect::<BTreeSet<_>>();
+    let placeholder_hash = ContentHash::of(&[]);
+    let mut descriptors = Vec::with_capacity(catalog.len());
+
+    for descriptor in catalog.iter() {
+        let mut provider_modules = BTreeSet::new();
+        let mut adapter_proxy_modules = BTreeSet::new();
+        for dependency in descriptor.dependencies() {
+            let target = catalog.get(dependency.module_id()).ok_or(
+                ModuleCatalogDerivationError::MissingCapabilityTargetModule {
+                    module_id: descriptor.module_id(),
+                    target: dependency.module_id(),
+                },
+            )?;
+            let target_path = target.module_path().as_str();
+            if adapter_paths.contains(target_path) {
+                adapter_proxy_modules.insert(target.module_id());
+            }
+            let provider_path = target_path.strip_suffix(".gfs").unwrap_or(target_path);
+            if provider_paths.contains(provider_path) {
+                provider_modules.insert(target.module_id());
+            }
+        }
+
+        let provisional = ModuleDescriptor::new_with_capability_requirements(
+            descriptor.module_id(),
+            descriptor.module_path().clone(),
+            descriptor.dependencies().to_vec(),
+            provider_modules.into_iter().collect(),
+            adapter_proxy_modules.into_iter().collect(),
+            descriptor.exports().to_vec(),
+            descriptor.has_initializer(),
+            placeholder_hash,
+            descriptor.chunk_hash(),
+        )?;
+        let interface_hash = provisional.computed_interface_hash()?;
+        descriptors.push(ModuleDescriptor::new_with_capability_requirements(
+            provisional.module_id(),
+            provisional.module_path().clone(),
+            provisional.dependencies().to_vec(),
+            provisional.provider_modules().to_vec(),
+            provisional.adapter_proxy_modules().to_vec(),
+            provisional.exports().to_vec(),
+            provisional.has_initializer(),
+            interface_hash,
+            provisional.chunk_hash(),
+        )?);
+    }
+
+    Ok(ModuleCatalog::new(descriptors)?)
 }
 
 fn derive_descriptor(
@@ -143,6 +220,12 @@ fn direct_dependencies(
         }
         dependencies.insert(ModuleDependency::new(target_module_id));
     }
+    for (_, dependency) in graph_edges
+        .iter()
+        .filter(|(importer, _)| *importer == node.id())
+    {
+        dependencies.insert(ModuleDependency::new(*dependency));
+    }
     Ok(dependencies.into_iter().collect())
 }
 
@@ -205,27 +288,11 @@ fn cross_check_catalog(
 fn interface_hash(
     descriptor: &ModuleDescriptor,
 ) -> Result<ContentHash, ModuleCatalogDerivationError> {
-    let bytes = postcard::to_stdvec(&ModuleInterface {
-        module_id: descriptor.module_id(),
-        module_path: descriptor.module_path(),
-        dependencies: descriptor.dependencies(),
-        exports: descriptor.exports(),
-        has_initializer: descriptor.has_initializer(),
-    })?;
-    Ok(ContentHash::of(bytes.as_slice()))
+    Ok(descriptor.computed_interface_hash()?)
 }
 
 fn chunk_hash(node: &BytecodeNode) -> Result<ContentHash, ModuleCatalogDerivationError> {
     Ok(canonical_node_content_hash(node)?)
-}
-
-#[derive(Serialize)]
-struct ModuleInterface<'a> {
-    module_id: galfus_core::ModuleId,
-    module_path: &'a galfus_core::ModulePath,
-    dependencies: &'a [ModuleDependency],
-    exports: &'a [ModuleExportDescriptor],
-    has_initializer: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -275,6 +342,11 @@ pub enum ModuleCatalogDerivationError {
     MissingGraphEdge {
         importer: galfus_core::ModuleId,
         dependency: galfus_core::ModuleId,
+    },
+    #[error("module {module_id:?} refers to absent capability target module {target:?}")]
+    MissingCapabilityTargetModule {
+        module_id: galfus_core::ModuleId,
+        target: galfus_core::ModuleId,
     },
     #[error("catalog contains {catalog} modules, but graph contains {graph}")]
     ModuleCountMismatch { catalog: usize, graph: usize },

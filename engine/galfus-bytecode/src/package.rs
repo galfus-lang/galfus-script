@@ -6,17 +6,14 @@ use galfus_contract::{
     CURRENT_NUMERIC_SEMANTICS_VERSION, CURRENT_PRODUCER_VERSION, ContentHash, ExecutionTarget,
     LimitsMetadata, NumericSemanticsVersion, ProducerVersion, ProviderModuleRequirement,
 };
-use galfus_core::{ModuleId, ModulePath, Version};
+use galfus_core::{ModuleId, ModulePath};
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
 use crate::{
     BytecodeFormatError, BytecodeFormatVersion, BytecodeGraph, BytecodeGraphValidationErrors,
-    CURRENT_PACKAGE_FORMAT_VERSION, GraphResolutionError, ImportResolutionMode, ModuleCatalog,
-    PackageFormatError, PackageFormatVersion, derive_module_catalog,
+    CURRENT_PACKAGE_FORMAT_VERSION, ModuleCatalog, ModuleChunkStore, PackageFormatError,
+    PackageFormatVersion, attach_capability_requirements, derive_module_catalog,
 };
-
-const PACKAGE_FORMAT_V2: PackageFormatVersion = Version::new(2, 0, 0);
 
 /// The exported entry point of a package image.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -96,16 +93,17 @@ impl PackageVersions {
 
 /// Immutable compiled output delivered to a host.
 ///
-/// The graph and its declarative external requirements are created together
-/// and cannot be replaced independently after publication.
+/// The catalog, canonical chunks, and declarative external requirements are
+/// created together and cannot be replaced independently after publication.
 ///
-/// The field order is the package-format v3 wire contract. Postcard does not
+/// The field order is the package-format v7 wire contract. Postcard does not
 /// encode field names or a self-describing schema, so adding, removing, or
 /// reordering serialized fields requires a new package format and a dedicated
 /// decoding branch. Never change this layout in place.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PackageImage {
-    graph: std::sync::Arc<BytecodeGraph>,
+    #[serde(skip, default)]
+    graph: Option<std::sync::Arc<BytecodeGraph>>,
     target: ExecutionTarget,
     entry_point: Option<PackageEntryPoint>,
     metadata: PackageMetadata,
@@ -114,21 +112,7 @@ pub struct PackageImage {
     provider_requirements: Vec<ProviderModuleRequirement>,
     versions: PackageVersions,
     catalog: ModuleCatalog,
-    #[serde(skip, default)]
-    import_resolution_mode: ImportResolutionMode,
-}
-
-/// The package-format v2 prefix retained solely for explicit legacy decoding.
-#[derive(serde::Deserialize)]
-struct PackageImageV2 {
-    graph: std::sync::Arc<BytecodeGraph>,
-    target: ExecutionTarget,
-    entry_point: Option<PackageEntryPoint>,
-    metadata: PackageMetadata,
-    limits: LimitsMetadata,
-    adapter_requirements: Vec<AdapterModuleRequirement>,
-    provider_requirements: Vec<ProviderModuleRequirement>,
-    versions: PackageVersions,
+    chunks: ModuleChunkStore,
 }
 
 /// Errors that prevent a package image from having an exact adapter manifest.
@@ -136,18 +120,34 @@ struct PackageImageV2 {
 pub enum PackageValidationError {
     #[error("adapter requirement for `{proxy_module}` is duplicated")]
     DuplicateAdapterRequirement { proxy_module: String },
-    #[error("reachable adapter proxy `{proxy_module}` is missing from the package manifest")]
+    #[error("adapter proxy `{proxy_module}` is missing from the package manifest")]
     MissingAdapterRequirement { proxy_module: String },
-    #[error("adapter requirement `{proxy_module}` does not match a reachable adapter proxy")]
+    #[error("adapter requirement `{proxy_module}` does not match a package adapter proxy")]
     UnexpectedAdapterRequirement { proxy_module: String },
     #[error("provider requirement for `{module_path}` is duplicated")]
     DuplicateProviderRequirement { module_path: String },
     #[error("provider alias `{alias}` is duplicated")]
     DuplicateProviderAlias { alias: String },
+    #[error(
+        "module {module_id:?} refers to provider module {provider_module:?}, absent from the package manifest"
+    )]
+    UndeclaredProviderModuleRequirement {
+        module_id: ModuleId,
+        provider_module: ModuleId,
+    },
+    #[error(
+        "module {module_id:?} refers to adapter proxy module {adapter_proxy_module:?}, absent from the package manifest"
+    )]
+    UndeclaredAdapterProxyRequirement {
+        module_id: ModuleId,
+        adapter_proxy_module: ModuleId,
+    },
     #[error("the supplied module catalog does not exactly describe the package graph")]
     CatalogGraphMismatch,
     #[error("could not derive a module catalog from the package graph: {reason}")]
     CatalogDerivation { reason: String },
+    #[error("module chunks do not exactly describe the module catalog: {reason}")]
+    ChunkCatalogMismatch { reason: String },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -174,17 +174,11 @@ pub enum PackageDecodingError {
     #[error(transparent)]
     Graph(#[from] BytecodeGraphValidationErrors),
     #[error(transparent)]
-    GraphResolution(#[from] GraphResolutionError),
-    #[error(transparent)]
     Validation(#[from] PackageValidationError),
     #[error("package declares bytecode format {declared:?}, but graph contains {actual:?}")]
     BytecodeFormatMismatch {
         declared: BytecodeFormatVersion,
         actual: BytecodeFormatVersion,
-    },
-    #[error("package format {package_format} has trailing bytes")]
-    UnexpectedTrailingBytes {
-        package_format: PackageFormatVersion,
     },
 }
 
@@ -192,6 +186,57 @@ impl PackageImage {
     pub fn try_new(
         graph: BytecodeGraph,
         catalog: ModuleCatalog,
+        target: ExecutionTarget,
+        entry_point: Option<PackageEntryPoint>,
+        metadata: PackageMetadata,
+        limits: LimitsMetadata,
+        adapter_requirements: Vec<AdapterModuleRequirement>,
+        provider_requirements: Vec<ProviderModuleRequirement>,
+    ) -> Result<Self, PackageValidationError> {
+        let base_catalog = derive_module_catalog(&graph).map_err(|error| {
+            PackageValidationError::CatalogDerivation {
+                reason: error.to_string(),
+            }
+        })?;
+        let catalog = if catalog == base_catalog {
+            attach_capability_requirements(&catalog, &adapter_requirements, &provider_requirements)
+                .map_err(|error| PackageValidationError::CatalogDerivation {
+                    reason: error.to_string(),
+                })?
+        } else {
+            catalog
+        };
+        Self::validate_catalog(
+            &graph,
+            &catalog,
+            &adapter_requirements,
+            &provider_requirements,
+        )?;
+        let chunks = ModuleChunkStore::from_nodes(
+            graph.format_version(),
+            graph.modules().cloned(),
+            &catalog,
+        )
+        .map_err(|error| PackageValidationError::ChunkCatalogMismatch {
+            reason: error.to_string(),
+        })?;
+        Self::try_new_with_chunks(
+            graph,
+            catalog,
+            chunks,
+            target,
+            entry_point,
+            metadata,
+            limits,
+            adapter_requirements,
+            provider_requirements,
+        )
+    }
+
+    pub fn try_new_with_chunks(
+        graph: BytecodeGraph,
+        catalog: ModuleCatalog,
+        chunks: ModuleChunkStore,
         target: ExecutionTarget,
         entry_point: Option<PackageEntryPoint>,
         metadata: PackageMetadata,
@@ -211,13 +256,19 @@ impl PackageImage {
                 .cmp(&right.module_path)
                 .then_with(|| left.alias.cmp(&right.alias))
         });
-        Self::validate_adapter_requirements(&graph, entry_point.as_ref(), &adapter_requirements)?;
-        Self::validate_provider_requirements(&provider_requirements)?;
-        Self::validate_catalog(&graph, &catalog)?;
+        Self::validate_adapter_requirements(&catalog, &adapter_requirements)?;
+        Self::validate_provider_requirements(&catalog, &provider_requirements)?;
+        Self::validate_catalog(
+            &graph,
+            &catalog,
+            &adapter_requirements,
+            &provider_requirements,
+        )?;
+        Self::validate_chunks(&catalog, &chunks, graph.format_version())?;
 
         Ok(Self {
             versions: PackageVersions::for_bytecode(graph.format_version()),
-            graph: std::sync::Arc::new(graph),
+            graph: Some(std::sync::Arc::new(graph)),
             target,
             entry_point,
             metadata,
@@ -225,28 +276,51 @@ impl PackageImage {
             adapter_requirements,
             provider_requirements,
             catalog,
-            import_resolution_mode: ImportResolutionMode::Direct,
+            chunks,
         })
     }
 
     fn validate_catalog(
         graph: &BytecodeGraph,
         catalog: &ModuleCatalog,
+        adapter_requirements: &[AdapterModuleRequirement],
+        provider_requirements: &[ProviderModuleRequirement],
     ) -> Result<(), PackageValidationError> {
         let expected = derive_module_catalog(graph).map_err(|error| {
             PackageValidationError::CatalogDerivation {
                 reason: error.to_string(),
             }
         })?;
+        Self::validate_descriptor_requirements(
+            catalog,
+            adapter_requirements,
+            provider_requirements,
+        )?;
+        let expected =
+            attach_capability_requirements(&expected, adapter_requirements, provider_requirements)
+                .map_err(|error| PackageValidationError::CatalogDerivation {
+                    reason: error.to_string(),
+                })?;
         if catalog != &expected {
             return Err(PackageValidationError::CatalogGraphMismatch);
         }
         Ok(())
     }
 
+    fn validate_chunks(
+        catalog: &ModuleCatalog,
+        chunks: &ModuleChunkStore,
+        format_version: BytecodeFormatVersion,
+    ) -> Result<(), PackageValidationError> {
+        chunks
+            .verify_catalog(catalog, format_version)
+            .map_err(|error| PackageValidationError::ChunkCatalogMismatch {
+                reason: error.to_string(),
+            })
+    }
+
     fn validate_adapter_requirements(
-        graph: &BytecodeGraph,
-        entry_point: Option<&PackageEntryPoint>,
+        catalog: &ModuleCatalog,
         adapter_requirements: &[AdapterModuleRequirement],
     ) -> Result<(), PackageValidationError> {
         let mut declared_proxies = BTreeSet::new();
@@ -258,22 +332,13 @@ impl PackageImage {
             }
         }
 
-        let reachable_modules = match entry_point {
-            Some(entry_point) => graph
-                .modules()
-                .find(|module| module.path() == entry_point.module_path())
-                .map(|entry| Self::reachable_modules(graph, entry.id()))
-                .unwrap_or_default(),
-            None => graph.modules().map(|module| module.id()).collect(),
-        };
-        let reachable_proxies = reachable_modules
-            .into_iter()
-            .filter_map(|module_id| graph.get(module_id))
-            .map(|module| module.path().as_str())
+        let declared_proxy_modules = catalog
+            .iter()
+            .map(|descriptor| descriptor.module_path().as_str())
             .filter(|path| path.ends_with(".gfp"))
             .collect::<BTreeSet<_>>();
 
-        if let Some(proxy_module) = reachable_proxies
+        if let Some(proxy_module) = declared_proxy_modules
             .iter()
             .find(|proxy_module| !declared_proxies.contains(**proxy_module))
         {
@@ -284,7 +349,7 @@ impl PackageImage {
 
         if let Some(proxy_module) = declared_proxies
             .iter()
-            .find(|proxy_module| !reachable_proxies.contains(**proxy_module))
+            .find(|proxy_module| !declared_proxy_modules.contains(**proxy_module))
         {
             return Err(PackageValidationError::UnexpectedAdapterRequirement {
                 proxy_module: (*proxy_module).to_string(),
@@ -294,25 +359,8 @@ impl PackageImage {
         Ok(())
     }
 
-    fn reachable_modules(
-        graph: &BytecodeGraph,
-        entry: galfus_core::ModuleId,
-    ) -> BTreeSet<ModuleId> {
-        let mut reachable = BTreeSet::from([entry]);
-        let mut pending = vec![entry];
-
-        while let Some(module_id) = pending.pop() {
-            for dependency in graph.deps_of(module_id) {
-                if reachable.insert(dependency) {
-                    pending.push(dependency);
-                }
-            }
-        }
-
-        reachable
-    }
-
     fn validate_provider_requirements(
+        _catalog: &ModuleCatalog,
         provider_requirements: &[ProviderModuleRequirement],
     ) -> Result<(), PackageValidationError> {
         let mut paths = BTreeSet::new();
@@ -332,13 +380,62 @@ impl PackageImage {
         Ok(())
     }
 
-    pub fn graph(&self) -> &BytecodeGraph {
-        self.graph.as_ref()
+    fn validate_descriptor_requirements(
+        catalog: &ModuleCatalog,
+        adapter_requirements: &[AdapterModuleRequirement],
+        provider_requirements: &[ProviderModuleRequirement],
+    ) -> Result<(), PackageValidationError> {
+        let adapter_paths = adapter_requirements
+            .iter()
+            .map(|requirement| requirement.proxy_module.as_str())
+            .collect::<BTreeSet<_>>();
+        let provider_paths = provider_requirements
+            .iter()
+            .map(|requirement| requirement.module_path.as_str())
+            .collect::<BTreeSet<_>>();
+
+        for descriptor in catalog.iter() {
+            for provider_module in descriptor.provider_modules() {
+                let target = catalog.get(*provider_module).expect(
+                    "module catalog validates provider requirement targets before package validation",
+                );
+                let path = target
+                    .module_path()
+                    .as_str()
+                    .strip_suffix(".gfs")
+                    .unwrap_or(target.module_path().as_str());
+                if !provider_paths.contains(path) {
+                    return Err(
+                        PackageValidationError::UndeclaredProviderModuleRequirement {
+                            module_id: descriptor.module_id(),
+                            provider_module: *provider_module,
+                        },
+                    );
+                }
+            }
+            for adapter_proxy_module in descriptor.adapter_proxy_modules() {
+                let target = catalog.get(*adapter_proxy_module).expect(
+                    "module catalog validates adapter proxy requirement targets before package validation",
+                );
+                if !adapter_paths.contains(target.module_path().as_str()) {
+                    return Err(PackageValidationError::UndeclaredAdapterProxyRequirement {
+                        module_id: descriptor.module_id(),
+                        adapter_proxy_module: *adapter_proxy_module,
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 
-    /// Returns a shared handle to the immutable executable graph.
-    pub fn graph_handle(&self) -> std::sync::Arc<BytecodeGraph> {
-        self.graph.clone()
+    /// Returns the transient compilation graph when this image was constructed in memory.
+    ///
+    /// Encoded package images intentionally do not retain this graph; hosts must use the
+    /// catalog and chunks instead of this inspection-only view.
+    pub fn graph(&self) -> &BytecodeGraph {
+        self.graph
+            .as_deref()
+            .expect("encoded package images do not retain a bytecode graph")
     }
 
     pub fn target(&self) -> &ExecutionTarget {
@@ -370,13 +467,13 @@ impl PackageImage {
         &self.catalog
     }
 
-    pub const fn versions(&self) -> PackageVersions {
-        self.versions
+    /// Immutable canonical chunks for every catalog-declared module.
+    pub fn chunks(&self) -> &ModuleChunkStore {
+        &self.chunks
     }
 
-    /// Import identity contract selected while decoding this package image.
-    pub const fn import_resolution_mode(&self) -> ImportResolutionMode {
-        self.import_resolution_mode
+    pub const fn versions(&self) -> PackageVersions {
+        self.versions
     }
 
     /// Encodes this immutable package with a fixed-width, deterministic layout.
@@ -394,93 +491,28 @@ impl PackageImage {
 
     /// Decodes and validates a package received from a loader before it reaches the runtime.
     pub fn from_bytecode(bytes: &[u8]) -> Result<Self, PackageDecodingError> {
-        let (v2_prefix, remaining) = postcard::take_from_bytes::<PackageImageV2>(bytes)?;
-        match Self::decode_format(v2_prefix.versions.package_format())? {
-            PackageDecodingFormat::V2 => {
-                if !remaining.is_empty() {
-                    return Err(PackageDecodingError::UnexpectedTrailingBytes {
-                        package_format: PACKAGE_FORMAT_V2,
-                    });
-                }
-                Self::decode_v2(v2_prefix)
-            }
-            PackageDecodingFormat::V3 => {
-                let package = postcard::from_bytes::<Self>(bytes)?;
-                Self::decode_v3(package)
-            }
-        }
+        let package = postcard::from_bytes::<Self>(bytes)?;
+        Self::decode_v7(package)
     }
 
-    fn decode_format(
-        actual: PackageFormatVersion,
-    ) -> Result<PackageDecodingFormat, PackageDecodingError> {
-        if actual == PACKAGE_FORMAT_V2 {
-            return Ok(PackageDecodingFormat::V2);
-        }
-        if actual == CURRENT_PACKAGE_FORMAT_VERSION {
-            return Ok(PackageDecodingFormat::V3);
-        }
-
-        Err(PackageDecodingError::UnsupportedPackageFormat {
-            supported: CURRENT_PACKAGE_FORMAT_VERSION,
-            actual,
-        })
-    }
-
-    fn decode_v2(package: PackageImageV2) -> Result<Self, PackageDecodingError> {
-        let mut graph = package.graph;
-        Arc::make_mut(&mut graph).rebuild_transient_indexes()?;
-        Arc::make_mut(&mut graph).populate_direct_import_targets()?;
-        let catalog = derive_module_catalog(graph.as_ref()).map_err(|error| {
-            PackageDecodingError::Validation(PackageValidationError::CatalogDerivation {
-                reason: error.to_string(),
-            })
-        })?;
-        let mut versions = package.versions;
-        versions.package_format = CURRENT_PACKAGE_FORMAT_VERSION;
-        Self::decode_v3(Self {
-            graph,
-            target: package.target,
-            entry_point: package.entry_point,
-            metadata: package.metadata,
-            limits: package.limits,
-            adapter_requirements: package.adapter_requirements,
-            provider_requirements: package.provider_requirements,
-            versions,
-            catalog,
-            import_resolution_mode: ImportResolutionMode::Legacy,
-        })
-    }
-
-    fn decode_v3(mut package: Self) -> Result<Self, PackageDecodingError> {
-        package
-            .graph
-            .validate_format()
-            .map_err(PackageDecodingError::BytecodeFormat)?;
-        if package.versions.bytecode_format() != package.graph.format_version() {
-            return Err(PackageDecodingError::BytecodeFormatMismatch {
-                declared: package.versions.bytecode_format(),
-                actual: package.graph.format_version(),
+    fn decode_v7(package: Self) -> Result<Self, PackageDecodingError> {
+        if package.versions.package_format() != CURRENT_PACKAGE_FORMAT_VERSION {
+            return Err(PackageDecodingError::UnsupportedPackageFormat {
+                supported: CURRENT_PACKAGE_FORMAT_VERSION,
+                actual: package.versions.package_format(),
             });
         }
-        std::sync::Arc::make_mut(&mut package.graph).rebuild_transient_indexes()?;
-        Self::validate_adapter_requirements(
-            &package.graph,
-            package.entry_point.as_ref(),
-            &package.adapter_requirements,
+        Self::validate_adapter_requirements(&package.catalog, &package.adapter_requirements)?;
+        Self::validate_provider_requirements(&package.catalog, &package.provider_requirements)?;
+        Self::validate_chunks(
+            &package.catalog,
+            &package.chunks,
+            package.versions.bytecode_format(),
         )?;
-        Self::validate_provider_requirements(&package.provider_requirements)?;
-        Self::validate_catalog(&package.graph, &package.catalog)?;
         Ok(package)
     }
 
     pub fn content_hash(&self) -> Result<ContentHash, PackageEncodingError> {
         self.canonical_bytes().map(|bytes| ContentHash::of(&bytes))
     }
-}
-
-#[derive(Clone, Copy)]
-enum PackageDecodingFormat {
-    V2,
-    V3,
 }

@@ -1,12 +1,15 @@
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashMap;
+
 use galfus_contract::ContentHash;
 use galfus_core::{ModuleId, ModulePath};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
     BytecodeFormatError, BytecodeFormatVersion, BytecodeNode, BytecodeValidationError,
-    ModuleDescriptor, validate_bytecode_format, validate_bytecode_module,
+    ModuleCatalog, ModuleDescriptor, validate_bytecode_format, validate_bytecode_module,
 };
 
 /// Immutable, independently verifiable executable payload for one module.
@@ -17,6 +20,122 @@ pub struct ModuleChunk {
     node: BytecodeNode,
     content_hash: ContentHash,
     interface_hash: ContentHash,
+}
+
+/// Immutable ModuleId-indexed collection of canonical module chunks.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModuleChunkStore {
+    chunks: Vec<ModuleChunk>,
+    indexes_by_id: HashMap<ModuleId, usize>,
+}
+
+impl ModuleChunkStore {
+    pub fn new(mut chunks: Vec<ModuleChunk>) -> Result<Self, ModuleChunkStoreError> {
+        chunks.sort_unstable_by_key(ModuleChunk::module_id);
+        if let Some(module_id) = chunks
+            .windows(2)
+            .find(|pair| pair[0].module_id() == pair[1].module_id())
+            .map(|pair| pair[0].module_id())
+        {
+            return Err(ModuleChunkStoreError::DuplicateModuleId { module_id });
+        }
+
+        let indexes_by_id = chunks
+            .iter()
+            .enumerate()
+            .map(|(index, chunk)| (chunk.module_id(), index))
+            .collect();
+        Ok(Self {
+            chunks,
+            indexes_by_id,
+        })
+    }
+
+    pub fn from_nodes(
+        format_version: BytecodeFormatVersion,
+        nodes: impl IntoIterator<Item = BytecodeNode>,
+        catalog: &ModuleCatalog,
+    ) -> Result<Self, ModuleChunkStoreBuildError> {
+        let mut chunks = Vec::new();
+        for node in nodes {
+            let module_id = node.id();
+            let descriptor = catalog
+                .get(module_id)
+                .ok_or(ModuleChunkStoreBuildError::MissingDescriptor { module_id })?;
+            chunks.push(ModuleChunk::from_node(format_version, node, descriptor)?);
+        }
+        let store = Self::new(chunks)?;
+        store.verify_catalog(catalog, format_version)?;
+        Ok(store)
+    }
+
+    pub fn get(&self, module_id: ModuleId) -> Option<&ModuleChunk> {
+        self.indexes_by_id
+            .get(&module_id)
+            .map(|index| &self.chunks[*index])
+    }
+
+    /// Iterates canonical chunks in ascending ModuleId order.
+    pub fn iter(&self) -> impl Iterator<Item = &ModuleChunk> {
+        self.chunks.iter()
+    }
+
+    pub const fn len(&self) -> usize {
+        self.chunks.len()
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.chunks.is_empty()
+    }
+
+    pub(crate) fn verify_catalog(
+        &self,
+        catalog: &ModuleCatalog,
+        format_version: BytecodeFormatVersion,
+    ) -> Result<(), ModuleChunkStoreValidationError> {
+        for descriptor in catalog.iter() {
+            let chunk = self.get(descriptor.module_id()).ok_or(
+                ModuleChunkStoreValidationError::MissingChunk {
+                    module_id: descriptor.module_id(),
+                },
+            )?;
+            chunk.verify(descriptor)?;
+            if chunk.format_version() != format_version {
+                return Err(ModuleChunkStoreValidationError::BytecodeFormatMismatch {
+                    module_id: descriptor.module_id(),
+                    expected: format_version,
+                    actual: chunk.format_version(),
+                });
+            }
+        }
+        for chunk in &self.chunks {
+            if catalog.get(chunk.module_id()).is_none() {
+                return Err(ModuleChunkStoreValidationError::UnexpectedChunk {
+                    module_id: chunk.module_id(),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Serialize for ModuleChunkStore {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.chunks.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ModuleChunkStore {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let chunks = Vec::<ModuleChunk>::deserialize(deserializer)?;
+        Self::new(chunks).map_err(<D::Error as serde::de::Error>::custom)
+    }
 }
 
 impl ModuleChunk {
@@ -203,4 +322,38 @@ pub enum ModuleChunkDecodingError {
     UnexpectedTrailingBytes,
     #[error(transparent)]
     Validation(#[from] ModuleChunkValidationError),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ModuleChunkStoreError {
+    #[error("module chunk store contains module ID {module_id:?} more than once")]
+    DuplicateModuleId { module_id: ModuleId },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ModuleChunkStoreBuildError {
+    #[error("module {module_id:?} has no descriptor in the module catalog")]
+    MissingDescriptor { module_id: ModuleId },
+    #[error(transparent)]
+    Chunk(#[from] ModuleChunkValidationError),
+    #[error(transparent)]
+    Store(#[from] ModuleChunkStoreError),
+    #[error(transparent)]
+    Validation(#[from] ModuleChunkStoreValidationError),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ModuleChunkStoreValidationError {
+    #[error("module catalog declares {module_id:?}, but the chunk store does not")]
+    MissingChunk { module_id: ModuleId },
+    #[error("chunk store declares {module_id:?}, but the module catalog does not")]
+    UnexpectedChunk { module_id: ModuleId },
+    #[error("chunk module {module_id:?} has bytecode format {actual:?}, expected {expected:?}")]
+    BytecodeFormatMismatch {
+        module_id: ModuleId,
+        expected: BytecodeFormatVersion,
+        actual: BytecodeFormatVersion,
+    },
+    #[error(transparent)]
+    Chunk(#[from] ModuleChunkValidationError),
 }

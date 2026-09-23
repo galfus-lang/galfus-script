@@ -22,9 +22,7 @@ pub use graph::{
     BytecodeGraphValidationError, BytecodeGraphValidationErrors, BytecodeNode, DebugLocation,
     ExecutionMetadata, ImportEdge,
 };
-pub use graph_resolver::{
-    GraphResolutionError, ImportResolutionMode, ModuleImports, ResolvedImport, ResolvedImportKind,
-};
+pub use graph_resolver::{GraphResolutionError, ModuleImports, ResolvedImport, ResolvedImportKind};
 pub use instruction::*;
 pub use loader::*;
 pub use module_catalog::*;

@@ -1,7 +1,14 @@
-use super::{ModuleCatalogDerivationError, derive_module_catalog};
+use super::{
+    ModuleCatalogDerivationError, derive_module_catalog,
+    derive_module_catalog_with_capability_requirements,
+};
 use crate::{
     BytecodeGraph, BytecodeModule, BytecodeNode, ConstantPool, ExportKind, ExportSlot, ImportEdge,
     ImportKind, ImportSlot, instruction,
+};
+use galfus_contract::{
+    AdapterConfig, AdapterModuleDescriptor, AdapterModuleRequirement, BoundaryAbiVersion,
+    ProviderModuleRequirement,
 };
 use galfus_core::{ModuleId, ModulePath, RuntimeExportId, RuntimeExportKind, SemanticRevision};
 
@@ -128,4 +135,78 @@ fn derivation_rejects_a_direct_target_that_disagrees_with_its_import_path() {
             && import_path == "src/path-target.gfs"
             && target_path.as_str() == "src/direct-target.gfs"
     ));
+}
+
+#[test]
+fn capability_requirements_are_derived_from_direct_module_dependencies() {
+    let importer = ModuleId::new(4);
+    let provider = ModuleId::new(9);
+    let adapter_proxy = ModuleId::new(12);
+    let mut importer_node = module(importer, "src/main.gfs");
+    importer_node
+        .module
+        .imports
+        .push(import_slot(provider, "database.gfs"));
+    importer_node
+        .module
+        .imports
+        .push(import_slot(adapter_proxy, "graphics.gfp"));
+    let graph = BytecodeGraph::from_modules(
+        SemanticRevision::new(1),
+        vec![
+            importer_node,
+            module(provider, "database.gfs"),
+            module(adapter_proxy, "graphics.gfp"),
+        ],
+        vec![
+            ImportEdge {
+                from: importer,
+                to: provider,
+            },
+            ImportEdge {
+                from: importer,
+                to: adapter_proxy,
+            },
+        ],
+    )
+    .expect("graph is valid");
+    let adapters = vec![AdapterModuleRequirement {
+        proxy_module: "graphics.gfp".to_string(),
+        descriptor: AdapterModuleDescriptor {
+            adapter: "graphics".to_string(),
+            config: AdapterConfig::new(),
+            targets: Vec::new(),
+            exports: Vec::new(),
+        },
+        boundary_abi: BoundaryAbiVersion::new(1, 0, 0),
+    }];
+    let providers = vec![ProviderModuleRequirement {
+        alias: "database".to_string(),
+        module_path: "database".to_string(),
+        schema_fingerprint: 1,
+        boundary_abi: BoundaryAbiVersion::new(1, 0, 0),
+        exports: Vec::new(),
+    }];
+
+    let catalog = derive_module_catalog_with_capability_requirements(&graph, &adapters, &providers)
+        .expect("catalog derives");
+    let descriptor = catalog.get(importer).expect("importer descriptor");
+
+    assert_eq!(descriptor.provider_modules(), [provider]);
+    assert_eq!(descriptor.adapter_proxy_modules(), [adapter_proxy]);
+    assert_ne!(
+        descriptor.interface_hash(),
+        derive_module_catalog(&graph)
+            .expect("base catalog derives")
+            .get(importer)
+            .expect("base importer descriptor")
+            .interface_hash()
+    );
+    assert!(
+        catalog
+            .get(provider)
+            .expect("provider descriptor")
+            .provider_modules()
+            .is_empty()
+    );
 }

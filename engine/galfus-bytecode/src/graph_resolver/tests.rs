@@ -100,7 +100,7 @@ fn direct_mode_resolves_function_imports_by_module_and_export_ids() {
 
     assert_eq!(
         graph
-            .resolve_imports_with_mode(importer, ImportResolutionMode::Direct)
+            .resolve_imports(importer)
             .expect("direct import resolves")
             .imports,
         vec![ResolvedImport {
@@ -157,7 +157,7 @@ fn direct_mode_resolves_global_imports_by_module_and_export_ids() {
 
     assert_eq!(
         graph
-            .resolve_imports_with_mode(importer, ImportResolutionMode::Direct)
+            .resolve_imports(importer)
             .expect("direct import resolves")
             .imports,
         vec![ResolvedImport {
@@ -169,7 +169,7 @@ fn direct_mode_resolves_global_imports_by_module_and_export_ids() {
 }
 
 #[test]
-fn legacy_mode_resolves_path_and_name_while_direct_mode_rejects_the_same_slot() {
+fn direct_resolution_rejects_an_import_slot_without_target_ids() {
     let importer = ModuleId::new(7);
     let target = ModuleId::new(31);
     let graph = BytecodeGraph::from_modules(
@@ -202,24 +202,13 @@ fn legacy_mode_resolves_path_and_name_while_direct_mode_rejects_the_same_slot() 
             to: target,
         }],
     )
-    .expect("valid legacy graph");
+    .expect("valid graph");
 
     assert!(matches!(
-        graph.resolve_imports_with_mode(importer, ImportResolutionMode::Direct),
+        graph.resolve_imports(importer),
         Err(GraphResolutionError::MissingDirectImportTarget {
             importer: found_importer,
             slot: 0,
         }) if found_importer == importer
     ));
-    assert_eq!(
-        graph
-            .resolve_imports_with_mode(importer, ImportResolutionMode::Legacy)
-            .expect("legacy import resolves")
-            .imports,
-        vec![ResolvedImport {
-            slot: 0,
-            module_id: target,
-            kind: ResolvedImportKind::Function(FuncIdx(0)),
-        }]
-    );
 }

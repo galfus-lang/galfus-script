@@ -52,11 +52,12 @@ pub fn collect_package_statistics(
 ) -> Result<BytecodePackageStatistics, PackageEncodingError> {
     let mut statistics = BytecodePackageStatistics {
         encoded_package_bytes: package.to_bytecode()?.len(),
-        module_count: package.graph().len(),
+        module_count: package.chunks().len(),
         ..BytecodePackageStatistics::default()
     };
 
-    for node in package.graph().modules() {
+    for chunk in package.chunks().iter() {
+        let node = chunk.node();
         let module_statistics = collect_module_statistics(&node.module, node.path().as_str());
         statistics.function_count += module_statistics.functions.len();
         statistics.instruction_count += module_statistics.instruction_count;

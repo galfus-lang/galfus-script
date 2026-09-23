@@ -49,6 +49,8 @@ struct UncheckedModuleDescriptor {
     module_id: ModuleId,
     module_path: ModulePath,
     dependencies: Vec<ModuleDependency>,
+    provider_modules: Vec<ModuleId>,
+    adapter_proxy_modules: Vec<ModuleId>,
     exports: Vec<UncheckedModuleExportDescriptor>,
     has_initializer: bool,
     interface_hash: ContentHash,
@@ -130,6 +132,45 @@ fn descriptor_rejects_duplicate_dependency_ids() {
             module_id,
             dependency,
         }) if module_id == ModuleId::new(8) && dependency == ModuleId::new(2)
+    ));
+}
+
+#[test]
+fn descriptor_rejects_duplicate_capability_module_ids() {
+    assert!(matches!(
+        ModuleDescriptor::new_with_capability_requirements(
+            ModuleId::new(8),
+            ModulePath::new("src/example.gfs").expect("valid module path"),
+            Vec::new(),
+            vec![ModuleId::new(2), ModuleId::new(2)],
+            Vec::new(),
+            Vec::new(),
+            true,
+            hash(b"interface"),
+            hash(b"chunk"),
+        ),
+        Err(ModuleDescriptorError::DuplicateProviderModule {
+            module_id,
+            provider_module,
+        }) if module_id == ModuleId::new(8) && provider_module == ModuleId::new(2)
+    ));
+
+    assert!(matches!(
+        ModuleDescriptor::new_with_capability_requirements(
+            ModuleId::new(8),
+            ModulePath::new("src/example.gfs").expect("valid module path"),
+            Vec::new(),
+            Vec::new(),
+            vec![ModuleId::new(3), ModuleId::new(3)],
+            Vec::new(),
+            true,
+            hash(b"interface"),
+            hash(b"chunk"),
+        ),
+        Err(ModuleDescriptorError::DuplicateAdapterProxyModule {
+            module_id,
+            adapter_proxy_module,
+        }) if module_id == ModuleId::new(8) && adapter_proxy_module == ModuleId::new(3)
     ));
 }
 
@@ -252,6 +293,8 @@ fn catalog_rejects_duplicate_runtime_exports_from_encoded_input() {
         module_id,
         module_path: ModulePath::new("src/example.gfs").expect("valid module path"),
         dependencies: Vec::new(),
+        provider_modules: Vec::new(),
+        adapter_proxy_modules: Vec::new(),
         exports: vec![
             UncheckedModuleExportDescriptor {
                 runtime_export_id,

@@ -11,31 +11,10 @@ use super::{
 };
 use crate::{
     BytecodeGraph, BytecodeModule, BytecodeNode, CURRENT_BYTECODE_FORMAT_VERSION,
-    CURRENT_PACKAGE_FORMAT_VERSION, ConstantPool, ImportEdge, ImportResolutionMode, ModuleCatalog,
-    PackageFormatVersion, derive_module_catalog,
+    CURRENT_PACKAGE_FORMAT_VERSION, ConstantPool, ImportEdge, ModuleCatalog, ModuleChunk,
+    ModuleChunkStore, ModuleChunkStoreError, ModuleDescriptor, PackageFormatVersion,
+    derive_module_catalog,
 };
-
-const PACKAGE_FORMAT_V2_FIXTURE_HEX: &str = "0201000000000000000000000000000000000000000004746573740007666978747572650000000080ade204808080800180088008808001802080088080800480800180208010800880088040000000000000000000000000000000000000000000000200000000000000000000000000000000000000020100000000000000000000000000000000000001000000000000000000000000000000000000000100000000000000000000000000000000000000";
-
-fn package_format_v2_fixture() -> Vec<u8> {
-    PACKAGE_FORMAT_V2_FIXTURE_HEX
-        .as_bytes()
-        .chunks_exact(2)
-        .map(|pair| {
-            let high = hex_digit(pair[0]).expect("fixture contains hexadecimal digits");
-            let low = hex_digit(pair[1]).expect("fixture contains hexadecimal digits");
-            (high << 4) | low
-        })
-        .collect()
-}
-
-fn hex_digit(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        _ => None,
-    }
-}
 
 fn graph(paths: &[&str], edges: Vec<ImportEdge>) -> BytecodeGraph {
     BytecodeGraph::from_modules(
@@ -129,8 +108,17 @@ fn fixture_package() -> PackageImage {
     .expect("fixture package is valid")
 }
 
+fn chunk(graph: &BytecodeGraph, catalog: &ModuleCatalog, module_id: ModuleId) -> ModuleChunk {
+    ModuleChunk::from_node(
+        graph.format_version(),
+        graph.get(module_id).expect("graph module exists").clone(),
+        catalog.get(module_id).expect("catalog descriptor exists"),
+    )
+    .expect("chunk is valid")
+}
+
 #[test]
-fn package_image_owns_its_graph_manifest_and_versions() {
+fn package_image_owns_its_transient_graph_manifest_and_versions() {
     let entry = PackageEntryPoint::new(
         ModulePath::new("src/main.gfs").expect("valid module path"),
         "main",
@@ -178,6 +166,95 @@ fn package_image_owns_its_graph_manifest_and_versions() {
 }
 
 #[test]
+fn package_chunks_are_canonical_and_exactly_cover_the_catalog() {
+    let graph = graph(&["src/first.gfs", "src/second.gfs"], Vec::new());
+    let catalog = derive_module_catalog(&graph).expect("catalog derives");
+    let first = chunk(&graph, &catalog, ModuleId::new(1));
+    let second = chunk(&graph, &catalog, ModuleId::new(2));
+    let sorted = ModuleChunkStore::new(vec![first.clone(), second.clone()])
+        .expect("unique chunks form a store");
+    let reversed = ModuleChunkStore::new(vec![second, first]).expect("unique chunks form a store");
+
+    let metadata = PackageMetadata {
+        name: "test".into(),
+        version: None,
+        author: None,
+        email: None,
+        description: None,
+    };
+    let first_package = PackageImage::try_new_with_chunks(
+        graph.clone(),
+        catalog.clone(),
+        sorted,
+        target(),
+        None,
+        metadata.clone(),
+        LimitsMetadata::default(),
+        Vec::new(),
+        Vec::new(),
+    )
+    .expect("complete package is valid");
+    let second_package = PackageImage::try_new_with_chunks(
+        graph,
+        catalog.clone(),
+        reversed,
+        target(),
+        None,
+        metadata,
+        LimitsMetadata::default(),
+        Vec::new(),
+        Vec::new(),
+    )
+    .expect("complete package is valid");
+
+    assert_eq!(first_package.chunks().len(), catalog.len());
+    assert!(first_package.chunks().get(ModuleId::new(1)).is_some());
+    assert!(first_package.chunks().get(ModuleId::new(2)).is_some());
+    assert_eq!(
+        first_package
+            .canonical_bytes()
+            .expect("package encodes canonically"),
+        second_package
+            .canonical_bytes()
+            .expect("package encodes canonically")
+    );
+}
+
+#[test]
+fn package_rejects_duplicate_or_missing_chunks() {
+    let graph = graph(&["src/first.gfs", "src/second.gfs"], Vec::new());
+    let catalog = derive_module_catalog(&graph).expect("catalog derives");
+    let first = chunk(&graph, &catalog, ModuleId::new(1));
+
+    assert!(matches!(
+        ModuleChunkStore::new(vec![first.clone(), first.clone()]),
+        Err(ModuleChunkStoreError::DuplicateModuleId { module_id }) if module_id == ModuleId::new(1)
+    ));
+
+    let missing_second = ModuleChunkStore::new(vec![first]).expect("single chunk is unique");
+    assert!(matches!(
+        PackageImage::try_new_with_chunks(
+            graph,
+            catalog,
+            missing_second,
+            target(),
+            None,
+            PackageMetadata {
+                name: "test".into(),
+                version: None,
+                author: None,
+                email: None,
+                description: None,
+            },
+            LimitsMetadata::default(),
+            Vec::new(),
+            Vec::new(),
+        ),
+        Err(PackageValidationError::ChunkCatalogMismatch { .. })
+    ));
+}
+
+#[test]
 fn package_image_rejects_a_missing_reachable_adapter_requirement() {
     let graph = graph(
         &["src/main.gfs", "graphics.gfp"],
@@ -199,26 +276,31 @@ fn package_image_rejects_a_missing_reachable_adapter_requirement() {
 }
 
 #[test]
-fn package_image_rejects_unreachable_and_duplicate_adapter_requirements() {
+fn package_image_retains_unreachable_and_rejects_duplicate_adapter_requirements() {
     let graph = graph(&["src/main.gfs", "graphics.gfp"], Vec::new());
     let entry = PackageEntryPoint::new(
         ModulePath::new("src/main.gfs").expect("valid module path"),
         "main",
     );
 
-    assert!(matches!(
+    assert!(
         package_image(
             graph.clone(),
             target(),
             Some(entry.clone()),
-            crate::PackageMetadata { name: "test".into(), version: None, author: None, email: None, description: None },
+            crate::PackageMetadata {
+                name: "test".into(),
+                version: None,
+                author: None,
+                email: None,
+                description: None
+            },
             galfus_contract::LimitsMetadata::default(),
             vec![requirement("graphics.gfp")],
             Vec::new(),
-        ),
-        Err(PackageValidationError::UnexpectedAdapterRequirement { proxy_module })
-            if proxy_module == "graphics.gfp"
-    ));
+        )
+        .is_ok()
+    );
     assert!(matches!(
         package_image(
             graph,
@@ -231,6 +313,76 @@ fn package_image_rejects_unreachable_and_duplicate_adapter_requirements() {
         ),
         Err(PackageValidationError::DuplicateAdapterRequirement { proxy_module })
             if proxy_module == "graphics.gfp"
+    ));
+}
+
+#[test]
+fn package_rejects_a_descriptor_capability_absent_from_the_manifest() {
+    let graph = graph(
+        &["src/main.gfs", "src/library.gfs"],
+        vec![ImportEdge {
+            from: ModuleId::new(1),
+            to: ModuleId::new(2),
+        }],
+    );
+    let base_catalog = derive_module_catalog(&graph).expect("base catalog derives");
+    let main = base_catalog.get(ModuleId::new(1)).expect("main descriptor");
+    let provisional = ModuleDescriptor::new_with_capability_requirements(
+        main.module_id(),
+        main.module_path().clone(),
+        main.dependencies().to_vec(),
+        vec![ModuleId::new(2)],
+        Vec::new(),
+        main.exports().to_vec(),
+        main.has_initializer(),
+        galfus_contract::ContentHash::of(&[]),
+        main.chunk_hash(),
+    )
+    .expect("provisional descriptor is valid");
+    let main = ModuleDescriptor::new_with_capability_requirements(
+        provisional.module_id(),
+        provisional.module_path().clone(),
+        provisional.dependencies().to_vec(),
+        provisional.provider_modules().to_vec(),
+        provisional.adapter_proxy_modules().to_vec(),
+        provisional.exports().to_vec(),
+        provisional.has_initializer(),
+        provisional
+            .computed_interface_hash()
+            .expect("interface hash serializes"),
+        provisional.chunk_hash(),
+    )
+    .expect("descriptor is valid");
+    let catalog = ModuleCatalog::new(vec![
+        main,
+        base_catalog
+            .get(ModuleId::new(2))
+            .expect("library descriptor")
+            .clone(),
+    ])
+    .expect("catalog is valid");
+
+    assert!(matches!(
+        PackageImage::try_new(
+            graph,
+            catalog,
+            target(),
+            None,
+            PackageMetadata {
+                name: "test".into(),
+                version: None,
+                author: None,
+                email: None,
+                description: None,
+            },
+            LimitsMetadata::default(),
+            Vec::new(),
+            Vec::new(),
+        ),
+        Err(PackageValidationError::UndeclaredProviderModuleRequirement {
+            module_id,
+            provider_module,
+        }) if module_id == ModuleId::new(1) && provider_module == ModuleId::new(2)
     ));
 }
 
@@ -350,7 +502,7 @@ fn package_content_hash_changes_for_execution_relevant_data() {
 }
 
 #[test]
-fn package_bytecode_round_trip_rebuilds_graph_indexes() {
+fn package_bytecode_round_trip_uses_catalog_and_chunks_without_a_graph() {
     let package = package_image(
         graph(
             &["src/main.gfs", "src/dependency.gfs"],
@@ -377,13 +529,18 @@ fn package_bytecode_round_trip_rebuilds_graph_indexes() {
     let bytes = package.to_bytecode().expect("package encodes");
     let decoded = PackageImage::from_bytecode(bytes.as_slice()).expect("package decodes");
 
-    assert_eq!(decoded.graph().len(), 2);
+    assert!(decoded.graph.is_none());
     assert_eq!(decoded.catalog().len(), 2);
+    assert_eq!(decoded.chunks().len(), 2);
     assert!(decoded.catalog().get(ModuleId::new(1)).is_some());
     assert_eq!(
         decoded
-            .graph()
-            .deps_of(ModuleId::new(1))
+            .catalog()
+            .get(ModuleId::new(1))
+            .expect("entry descriptor exists")
+            .dependencies()
+            .iter()
+            .map(|dependency| dependency.module_id())
             .collect::<Vec<_>>(),
         vec![ModuleId::new(2)]
     );
@@ -391,33 +548,18 @@ fn package_bytecode_round_trip_rebuilds_graph_indexes() {
 }
 
 #[test]
-fn package_format_v2_fixture_decodes_and_upgrades_to_the_current_format() {
-    let fixture = package_format_v2_fixture();
-    let decoded = PackageImage::from_bytecode(fixture.as_slice()).expect("fixture package decodes");
-    let encoded = decoded.to_bytecode().expect("upgraded package encodes");
+fn package_decoder_rejects_the_previous_format_without_migration() {
+    let mut package = fixture_package();
+    let previous_format =
+        PackageFormatVersion::new(CURRENT_PACKAGE_FORMAT_VERSION.major() - 1, 0, 0);
+    package.versions.package_format = previous_format;
+    let bytes = postcard::to_stdvec(&package).expect("previous package format encodes");
 
-    assert_eq!(
-        decoded.versions().package_format(),
-        CURRENT_PACKAGE_FORMAT_VERSION
-    );
-    assert_eq!(
-        decoded.import_resolution_mode(),
-        ImportResolutionMode::Legacy
-    );
-    assert!(decoded.catalog().is_empty());
-    assert_ne!(encoded, fixture);
-    let redecoded =
-        PackageImage::from_bytecode(encoded.as_slice()).expect("upgraded package decodes");
-    assert_eq!(
-        redecoded.import_resolution_mode(),
-        ImportResolutionMode::Direct
-    );
-    assert_eq!(
-        redecoded
-            .to_bytecode()
-            .expect("upgraded package re-encodes"),
-        encoded
-    );
+    assert!(matches!(
+        PackageImage::from_bytecode(bytes.as_slice()),
+        Err(PackageDecodingError::UnsupportedPackageFormat { supported, actual })
+            if supported == CURRENT_PACKAGE_FORMAT_VERSION && actual == previous_format
+    ));
 }
 
 #[test]

@@ -3,13 +3,27 @@ mod tests;
 
 mod derive;
 
-pub use derive::{ModuleCatalogDerivationError, derive_module_catalog};
+pub use derive::{
+    ModuleCatalogDerivationError, attach_capability_requirements, derive_module_catalog,
+    derive_module_catalog_with_capability_requirements,
+};
 
 use std::collections::{BTreeSet, HashMap};
 
 use galfus_contract::ContentHash;
 use galfus_core::{ModuleId, ModulePath, RuntimeExportId, RuntimeExportKind};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+#[derive(Serialize)]
+struct ModuleInterface<'a> {
+    module_id: ModuleId,
+    module_path: &'a ModulePath,
+    dependencies: &'a [ModuleDependency],
+    provider_modules: &'a [ModuleId],
+    adapter_proxy_modules: &'a [ModuleId],
+    exports: &'a [ModuleExportDescriptor],
+    has_initializer: bool,
+}
 
 /// One direct dependency declared by a module interface.
 #[derive(
@@ -69,6 +83,8 @@ pub struct ModuleDescriptor {
     module_id: ModuleId,
     module_path: ModulePath,
     dependencies: Vec<ModuleDependency>,
+    provider_modules: Vec<ModuleId>,
+    adapter_proxy_modules: Vec<ModuleId>,
     exports: Vec<ModuleExportDescriptor>,
     has_initializer: bool,
     interface_hash: ContentHash,
@@ -85,10 +101,36 @@ impl ModuleDescriptor {
         interface_hash: ContentHash,
         chunk_hash: ContentHash,
     ) -> Result<Self, ModuleDescriptorError> {
+        Self::new_with_capability_requirements(
+            module_id,
+            module_path,
+            dependencies,
+            Vec::new(),
+            Vec::new(),
+            exports,
+            has_initializer,
+            interface_hash,
+            chunk_hash,
+        )
+    }
+
+    pub fn new_with_capability_requirements(
+        module_id: ModuleId,
+        module_path: ModulePath,
+        dependencies: Vec<ModuleDependency>,
+        provider_modules: Vec<ModuleId>,
+        adapter_proxy_modules: Vec<ModuleId>,
+        exports: Vec<ModuleExportDescriptor>,
+        has_initializer: bool,
+        interface_hash: ContentHash,
+        chunk_hash: ContentHash,
+    ) -> Result<Self, ModuleDescriptorError> {
         let mut descriptor = Self {
             module_id,
             module_path,
             dependencies,
+            provider_modules,
+            adapter_proxy_modules,
             exports,
             has_initializer,
             interface_hash,
@@ -101,6 +143,8 @@ impl ModuleDescriptor {
 
     fn canonicalize(&mut self) -> Result<(), ModuleDescriptorError> {
         self.dependencies.sort_unstable();
+        self.provider_modules.sort_unstable();
+        self.adapter_proxy_modules.sort_unstable();
         self.exports.sort_unstable_by(|left, right| {
             left.runtime_export_id
                 .cmp(&right.runtime_export_id)
@@ -117,6 +161,30 @@ impl ModuleDescriptor {
             return Err(ModuleDescriptorError::DuplicateDependency {
                 module_id: self.module_id,
                 dependency,
+            });
+        }
+
+        if let Some(provider_module) = self
+            .provider_modules
+            .windows(2)
+            .find(|pair| pair[0] == pair[1])
+            .map(|pair| pair[0])
+        {
+            return Err(ModuleDescriptorError::DuplicateProviderModule {
+                module_id: self.module_id,
+                provider_module,
+            });
+        }
+
+        if let Some(adapter_proxy_module) = self
+            .adapter_proxy_modules
+            .windows(2)
+            .find(|pair| pair[0] == pair[1])
+            .map(|pair| pair[0])
+        {
+            return Err(ModuleDescriptorError::DuplicateAdapterProxyModule {
+                module_id: self.module_id,
+                adapter_proxy_module,
             });
         }
 
@@ -159,6 +227,16 @@ impl ModuleDescriptor {
         self.dependencies.as_slice()
     }
 
+    /// Direct provider modules this module can invoke through its emitted body.
+    pub fn provider_modules(&self) -> &[ModuleId] {
+        self.provider_modules.as_slice()
+    }
+
+    /// Direct adapter proxy modules this module can invoke through its emitted body.
+    pub fn adapter_proxy_modules(&self) -> &[ModuleId] {
+        self.adapter_proxy_modules.as_slice()
+    }
+
     pub fn exports(&self) -> &[ModuleExportDescriptor] {
         self.exports.as_slice()
     }
@@ -173,6 +251,20 @@ impl ModuleDescriptor {
 
     pub const fn chunk_hash(&self) -> ContentHash {
         self.chunk_hash
+    }
+
+    /// Hashes the stable interface fields independently from the body chunk.
+    pub fn computed_interface_hash(&self) -> Result<ContentHash, postcard::Error> {
+        let bytes = postcard::to_stdvec(&ModuleInterface {
+            module_id: self.module_id,
+            module_path: &self.module_path,
+            dependencies: self.dependencies.as_slice(),
+            provider_modules: self.provider_modules.as_slice(),
+            adapter_proxy_modules: self.adapter_proxy_modules.as_slice(),
+            exports: self.exports.as_slice(),
+            has_initializer: self.has_initializer,
+        })?;
+        Ok(ContentHash::of(bytes.as_slice()))
     }
 }
 
@@ -226,6 +318,22 @@ impl ModuleCatalog {
                     return Err(ModuleCatalogError::MissingDependency {
                         module_id: descriptor.module_id,
                         dependency: dependency.module_id,
+                    });
+                }
+            }
+            for provider_module in &descriptor.provider_modules {
+                if !indexes_by_id.contains_key(provider_module) {
+                    return Err(ModuleCatalogError::MissingProviderModule {
+                        module_id: descriptor.module_id,
+                        provider_module: *provider_module,
+                    });
+                }
+            }
+            for adapter_proxy_module in &descriptor.adapter_proxy_modules {
+                if !indexes_by_id.contains_key(adapter_proxy_module) {
+                    return Err(ModuleCatalogError::MissingAdapterProxyModule {
+                        module_id: descriptor.module_id,
+                        adapter_proxy_module: *adapter_proxy_module,
                     });
                 }
             }
@@ -286,6 +394,16 @@ pub enum ModuleCatalogError {
         module_id: ModuleId,
         dependency: ModuleId,
     },
+    #[error("module {module_id:?} requires absent provider module {provider_module:?}")]
+    MissingProviderModule {
+        module_id: ModuleId,
+        provider_module: ModuleId,
+    },
+    #[error("module {module_id:?} requires absent adapter proxy module {adapter_proxy_module:?}")]
+    MissingAdapterProxyModule {
+        module_id: ModuleId,
+        adapter_proxy_module: ModuleId,
+    },
     #[error("module {module_id:?} lists runtime export ID {runtime_export_id:?} more than once")]
     DuplicateRuntimeExportId {
         module_id: ModuleId,
@@ -301,6 +419,18 @@ pub enum ModuleDescriptorError {
     DuplicateDependency {
         module_id: ModuleId,
         dependency: ModuleId,
+    },
+    #[error("module {module_id:?} lists provider module {provider_module:?} more than once")]
+    DuplicateProviderModule {
+        module_id: ModuleId,
+        provider_module: ModuleId,
+    },
+    #[error(
+        "module {module_id:?} lists adapter proxy module {adapter_proxy_module:?} more than once"
+    )]
+    DuplicateAdapterProxyModule {
+        module_id: ModuleId,
+        adapter_proxy_module: ModuleId,
     },
     #[error("module {module_id:?} lists runtime export ID {runtime_export_id:?} more than once")]
     DuplicateRuntimeExportId {
