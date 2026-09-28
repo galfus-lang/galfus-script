@@ -11,6 +11,7 @@ mod upgrade;
 mod workspace;
 
 use std::process;
+use std::time::Instant;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -79,14 +80,19 @@ enum Command {
 }
 
 fn main() -> Result<()> {
+    let process_started = Instant::now();
     tracing_subscriber::fmt::init();
-    match Cli::parse().command {
+    let command = Cli::parse().command;
+    let process_bootstrap = process_started.elapsed();
+    match command {
         Command::Run { workspace, args } => {
-            let exit_code = workspace::run_project(&workspace, &args)?;
+            let exit_code = workspace::run_project_from_cli(&workspace, &args, process_bootstrap)?;
             process::exit(exit_code);
         }
         Command::Init => init::run_init(),
-        Command::Check { workspace } => workspace::check_workspace_root(&workspace),
+        Command::Check { workspace } => {
+            workspace::check_workspace_root_from_cli(&workspace, process_bootstrap)
+        }
         Command::Compile {
             workspace,
             target,

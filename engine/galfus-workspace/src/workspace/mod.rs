@@ -3,7 +3,9 @@ pub mod dependency;
 pub mod execution;
 pub mod module;
 mod optimizer;
+mod source_loader;
 mod source_producer;
+mod timing;
 
 #[cfg(test)]
 mod tests;
@@ -17,17 +19,24 @@ use crate::state::{
 };
 use galfus_bytecode::{PackageEntryPoint, PackageImage};
 use galfus_compiler::{CompiledModule, gfp::parse_gfp_frontmatter};
+use galfus_contract::ContentHash;
 use galfus_contract::{
     AdapterFunctionSignature, AdapterModuleDescriptor, ExecutionTarget, Providers,
     RuntimeCapabilities,
 };
-use galfus_core::{DiagnosticBag, ModulePath, SourceFile};
+use galfus_core::{DiagnosticBag, ModuleId, ModulePath, SourceFile};
 use galfus_frontend::modules::{
     FrontendModuleKind, FrontendSession, FrontendSnapshot, FrontendSource, FrontendUpdate,
     SemanticRoot, SemanticRootKind,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
+
+pub use source_loader::{
+    LoadedWorkspaceSource, SourceLoadError, SourceLoadErrorKind, SourceRequestResult,
+    WorkspaceSourceLoader,
+};
+pub use timing::{WorkspaceRuntimeTiming, WorkspaceTimingCollector};
 
 pub struct Workspace {
     pub root_path: Option<std::path::PathBuf>,
@@ -37,6 +46,8 @@ pub struct Workspace {
     pub bytecode_state: BytecodeState,
     pub frontend: FrontendSession,
     frontend_snapshot: Option<FrontendSnapshot>,
+    source_loader: Option<Arc<dyn WorkspaceSourceLoader>>,
+    timing_collector: Option<Arc<WorkspaceTimingCollector>>,
     pub catalog: Arc<galfus_contract::CapabilityCatalog>,
     pub adapter_descriptors: HashMap<ModulePath, AdapterModuleDescriptor>,
 }
@@ -78,6 +89,8 @@ impl Workspace {
             bytecode_state: BytecodeState::new(),
             frontend: FrontendSession::new(),
             frontend_snapshot: None,
+            source_loader: None,
+            timing_collector: None,
             catalog: Arc::new(galfus_contract::CapabilityCatalog::default()),
             adapter_descriptors: HashMap::new(),
         }
@@ -94,10 +107,21 @@ impl Workspace {
                 self.source_state.dirty_sources.remove(&entry.path);
                 self.source_state.removed_modules.push(entry.module_id);
                 self.source_state.track_removed_module(entry.module_id);
+                self.record_removed_source(entry.module_id, entry.path);
             }
             self.catalog = catalog;
             self.mark_dirty();
         }
+    }
+
+    /// Installs optional timing collection for one workspace operation.
+    pub fn set_timing_collector(&mut self, collector: Arc<WorkspaceTimingCollector>) {
+        self.timing_collector = Some(collector);
+    }
+
+    /// Installs the backend used to load source modules requested on demand.
+    pub fn set_source_loader(&mut self, source_loader: Arc<dyn WorkspaceSourceLoader>) {
+        self.source_loader = Some(source_loader);
     }
 
     pub fn load_manifest(
@@ -147,6 +171,30 @@ impl Workspace {
                 unfinalized_package: Arc::clone(unfinalized_package),
             };
         }
+    }
+
+    pub(crate) fn record_loaded_source(
+        &mut self,
+        module_id: ModuleId,
+        module_path: ModulePath,
+        source_bytes: &[u8],
+    ) {
+        self.semantic_state
+            .module_states
+            .source_loaded(
+                module_id,
+                module_path,
+                self.source_state.revision,
+                ContentHash::of(source_bytes),
+            )
+            .expect("source store preserves ModuleId to ModulePath identity");
+    }
+
+    pub(crate) fn record_removed_source(&mut self, module_id: ModuleId, module_path: ModulePath) {
+        self.semantic_state
+            .module_states
+            .source_removed(module_id, module_path)
+            .expect("source store preserves ModuleId to ModulePath identity");
     }
 
     pub fn frontend_snapshot(&self) -> Option<&FrontendSnapshot> {

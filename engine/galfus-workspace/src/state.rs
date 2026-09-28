@@ -1,3 +1,5 @@
+mod module_graph;
+
 use crate::source_store;
 
 use galfus_bytecode::{
@@ -11,6 +13,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{
     Arc, RwLock,
     atomic::{AtomicU64, Ordering},
+};
+
+pub use module_graph::{
+    IncrementalModuleStateGraph, ModuleLifecycle, ModuleStateError, ModuleStateRecord,
 };
 
 #[derive(Debug)]
@@ -139,6 +145,9 @@ impl SourceState {
 }
 
 pub struct SemanticState {
+    /// Canonical incremental lifecycle state for every known module identity.
+    pub module_states: IncrementalModuleStateGraph,
+    /// Transitional command gate. It does not own module lifecycle state.
     pub check_state: CheckState,
     pub module_catalog: Option<Arc<WorkspaceModuleCatalog>>,
 }
@@ -152,6 +161,7 @@ impl Default for SemanticState {
 impl SemanticState {
     pub fn new() -> Self {
         Self {
+            module_states: IncrementalModuleStateGraph::new(),
             check_state: CheckState::Dirty {
                 current_revision: Revision::new(1),
                 previous_checked_revision: None,
@@ -435,6 +445,7 @@ impl CompileState {
 #[derive(Debug)]
 pub enum WorkspaceError {
     InvalidPath,
+    SourceLoad(crate::workspace::SourceLoadError),
     ReservedProviderModule(String),
     MissingConfiguration,
     Collision {

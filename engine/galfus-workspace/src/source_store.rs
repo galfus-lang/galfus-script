@@ -100,6 +100,10 @@ impl SourceStore {
         ))
     }
 
+    pub(crate) fn module_id_for_path(path: &ModulePath) -> ModuleId {
+        Self::module_id_for(path.as_str())
+    }
+
     fn source_id_for(logical_path: &str) -> SourceId {
         let hash = Self::fnv1a_32(b"galfus:source:v1:", logical_path.as_bytes());
         SourceId::new(Self::non_reserved_id(

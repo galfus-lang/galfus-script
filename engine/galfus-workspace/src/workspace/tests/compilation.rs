@@ -903,6 +903,15 @@ fn workspace_source_producer_materializes_only_requested_module_from_frozen_snap
     assert!(std::sync::Arc::ptr_eq(&first, &second));
     assert_eq!(producer.production_count(main_id), 1);
     assert_eq!(producer.production_count(detached_id), 0);
+    producer
+        .produce(main_id)
+        .expect("producer node cache resolves");
+
+    let counters = producer.work_counters();
+    assert_eq!(counters.semantic_graph_modules_inspected, 2);
+    assert_eq!(counters.last_dependency_closure_size, 2);
+    assert_eq!(counters.cached_node_hits, 1);
+    assert_eq!(counters.compiled_node_count, 2);
 }
 
 #[test]

@@ -1,6 +1,9 @@
 mod compilation;
 mod equivalence;
 mod execution;
+mod module_state;
+mod source_loader;
+mod source_producer;
 
 use super::*;
 use galfus_contract::KernelDriver;

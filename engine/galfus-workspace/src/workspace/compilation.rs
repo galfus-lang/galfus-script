@@ -113,6 +113,19 @@ impl Workspace {
                 self.validate_registered_adapter_schemas(&mut report.diagnostics);
 
                 if report.diagnostics.has_errors() {
+                    for module_id in &report.changed_modules {
+                        if self
+                            .semantic_state
+                            .module_states
+                            .get(*module_id)
+                            .is_some_and(|record| record.source_hash().is_some())
+                        {
+                            self.semantic_state
+                                .module_states
+                                .interface_invalid(*module_id)
+                                .expect("loaded module has incremental state");
+                        }
+                    }
                     self.semantic_state.check_state = CheckState::Failed {
                         revision: report.source_revision,
                         diagnostics: report.diagnostics,
@@ -146,6 +159,16 @@ impl Workspace {
                         &adapter_proxy_paths,
                         &provider_module_paths,
                     ));
+                    for descriptor in module_catalog.iter() {
+                        self.semantic_state
+                            .module_states
+                            .interface_valid(
+                                descriptor.module_id(),
+                                report.semantic_revision,
+                                descriptor.interface_hash(),
+                            )
+                            .expect("checked module has a loaded source state");
+                    }
                     let mut changed_modules = report.changed_modules;
                     changed_modules.extend(interface_dependents(
                         self.semantic_state.module_catalog.as_deref(),
@@ -1099,6 +1122,12 @@ impl Workspace {
             semantic_revision,
         )
         .map_err(CompileBlocked::CompilerError)?;
+        for chunk in package.chunks().iter() {
+            self.semantic_state
+                .module_states
+                .bytecode_produced(chunk.module_id(), chunk.content_hash())
+                .expect("compiled module has a valid incremental interface state");
+        }
         self.bytecode_state.compile_state = CompileState::Ready {
             semantic_revision,
             package: Arc::clone(&package),

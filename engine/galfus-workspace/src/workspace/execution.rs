@@ -48,6 +48,7 @@ impl Workspace {
                     Arc::clone(catalog),
                     self.source_state.revision_guard(),
                     self.source_state.module_guard(),
+                    self.timing_collector.clone(),
                 ))
             })
     }
@@ -162,8 +163,18 @@ impl Workspace {
             adapter_requirements,
             provider_requirements,
         );
-        Runtime::start_with_source_producer(configuration, producer, capabilities, args, driver)
-            .map_err(crate::state::WorkspaceRunError::RuntimeStart)
+        let started = std::time::Instant::now();
+        let execution = Runtime::start_with_source_producer(
+            configuration,
+            producer,
+            capabilities,
+            args,
+            driver,
+        );
+        if let Some(timing_collector) = &self.timing_collector {
+            timing_collector.record_runtime_start(started.elapsed());
+        }
+        execution.map_err(crate::state::WorkspaceRunError::RuntimeStart)
     }
 }
 

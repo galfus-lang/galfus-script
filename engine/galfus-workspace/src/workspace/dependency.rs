@@ -20,9 +20,9 @@ impl Workspace {
                 .iter()
                 .find(|(name, _)| *name == builtin_name)
             {
-                (*source, ModuleOrigin::Builtin)
+                ((*source).to_string(), ModuleOrigin::Builtin)
             } else if let Some(source) = self.catalog.provider_source(builtin_name) {
-                (source, ModuleOrigin::ProviderCatalog)
+                (source.to_string(), ModuleOrigin::ProviderCatalog)
             } else {
                 continue;
             };
@@ -50,6 +50,7 @@ impl Workspace {
                     },
                 })?;
             self.source_state.track_loaded_module(module_id);
+            self.record_loaded_source(module_id, path.clone(), source.as_bytes());
             self.source_state.dirty_sources.insert(path.clone());
             loaded = true;
         }
