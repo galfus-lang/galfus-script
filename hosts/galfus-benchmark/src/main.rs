@@ -1,17 +1,22 @@
+mod benchmark_report;
 #[cfg(test)]
 mod tests;
+mod workspace_timing;
 
+use benchmark_report::write_html_report;
 use cli_table::{Cell, Style, Table, format::Justify};
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitCode, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use sysinfo::{Pid, System};
+use workspace_timing::WorkspaceTiming;
 
 const SAMPLE_COUNT: usize = 7;
 const MEMORY_POLL_INTERVAL: Duration = Duration::from_millis(1);
@@ -168,7 +173,7 @@ const SERVER_BENCHMARKS: &[ServerBenchmark] = &[
     },
 ];
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct BenchmarkResult {
     benchmark: String,
     language: String,
@@ -178,15 +183,17 @@ struct BenchmarkResult {
     result: String,
     peak_rss_mb: f64,
     peak_virtual_mb: f64,
+    workspace_timing: Option<WorkspaceTiming>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct BenchmarkSample {
     script_time_ms: u64,
     total_time_ms: u64,
     result: String,
     peak_rss_bytes: u64,
     peak_virtual_bytes: u64,
+    workspace_timing: Option<WorkspaceTiming>,
 }
 
 #[derive(Debug, Serialize)]
@@ -198,13 +205,13 @@ struct RawBenchmarkRun {
     error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct CommandVersion {
     command: String,
     version: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct BenchmarkEnvironment {
     sample_count: usize,
     reuse_release_binaries: bool,
@@ -233,10 +240,10 @@ struct ServerMetrics {
     stderr: String,
 }
 
-#[derive(Debug, Serialize)]
-struct BenchmarkSummaryReport<'a> {
+#[derive(Debug, Deserialize, Serialize)]
+struct BenchmarkSummaryReport {
     environment: BenchmarkEnvironment,
-    summaries: &'a [BenchmarkResult],
+    summaries: Vec<BenchmarkResult>,
 }
 
 fn reuse_release_binaries() -> bool {
@@ -251,7 +258,43 @@ fn http_only() -> bool {
         .any(|argument| argument == "--http-only")
 }
 
+fn summary_to_render() -> Result<Option<PathBuf>, String> {
+    let mut arguments = std::env::args().skip(1);
+    while let Some(argument) = arguments.next() {
+        if argument == "--render-summary" {
+            return arguments
+                .next()
+                .map(PathBuf::from)
+                .map(Some)
+                .ok_or_else(|| "--render-summary requires a summary JSON path".to_string());
+        }
+    }
+    Ok(None)
+}
+
 fn main() -> ExitCode {
+    let summary_to_render = match summary_to_render() {
+        Ok(summary_to_render) => summary_to_render,
+        Err(error) => {
+            eprintln!("Could not render benchmark summary: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Some(path) = summary_to_render {
+        return match render_summary(path.as_path()) {
+            Ok(report_path) => {
+                println!(
+                    "Interactive language comparison written to {}",
+                    report_path.display()
+                );
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("Could not render benchmark summary: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     let reuse_release = reuse_release_binaries();
     let http_only = http_only();
     if reuse_release {
@@ -407,6 +450,13 @@ fn main() -> ExitCode {
     if let Err(error) = write_reports(reuse_release, raw_runs.as_slice(), results.as_slice()) {
         eprintln!("Could not persist benchmark reports: {error}");
     }
+    match write_interactive_report(reuse_release, results.as_slice()) {
+        Ok(path) => println!(
+            "Interactive language comparison written to {}",
+            path.display()
+        ),
+        Err(error) => eprintln!("Could not persist interactive language comparison: {error}"),
+    }
     ExitCode::SUCCESS
 }
 
@@ -501,7 +551,25 @@ fn write_reports(
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|error| error.to_string())?
         .as_secs();
-    let environment = BenchmarkEnvironment {
+    let environment = benchmark_environment(reuse_release);
+    write_json(
+        output_dir.join(format!("{timestamp}-raw.json")),
+        &RawBenchmarkReport {
+            environment: environment.clone(),
+            runs: raw_runs,
+        },
+    )?;
+    write_json(
+        output_dir.join(format!("{timestamp}-summary.json")),
+        &BenchmarkSummaryReport {
+            environment,
+            summaries: summaries.to_vec(),
+        },
+    )
+}
+
+fn benchmark_environment(reuse_release: bool) -> BenchmarkEnvironment {
+    BenchmarkEnvironment {
         sample_count: SAMPLE_COUNT,
         reuse_release_binaries: reuse_release,
         commands: [
@@ -519,20 +587,41 @@ fn write_reports(
         .iter()
         .map(|command| command_version(command))
         .collect(),
-    };
-    write_json(
-        output_dir.join(format!("{timestamp}-raw.json")),
-        &RawBenchmarkReport {
-            environment: environment.clone(),
-            runs: raw_runs,
-        },
-    )?;
-    write_json(
-        output_dir.join(format!("{timestamp}-summary.json")),
-        &BenchmarkSummaryReport {
-            environment,
-            summaries,
-        },
+    }
+}
+
+fn write_interactive_report(
+    reuse_release: bool,
+    summaries: &[BenchmarkResult],
+) -> Result<std::path::PathBuf, String> {
+    let output_dir = std::path::Path::new(".tmp/benchmark");
+    std::fs::create_dir_all(output_dir).map_err(|error| error.to_string())?;
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_secs();
+    write_html_report(
+        output_dir,
+        timestamp,
+        &benchmark_environment(reuse_release),
+        summaries,
+    )
+}
+
+fn render_summary(path: &Path) -> Result<PathBuf, String> {
+    let contents = std::fs::read(path).map_err(|error| error.to_string())?;
+    let summary = serde_json::from_slice::<BenchmarkSummaryReport>(contents.as_slice())
+        .map_err(|error| error.to_string())?;
+    let output_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_secs();
+    write_html_report(
+        output_dir,
+        timestamp,
+        &summary.environment,
+        summary.summaries.as_slice(),
     )
 }
 
@@ -565,6 +654,12 @@ fn run_sample(
         .args(&command[1..])
         .env("GALFUS_CACHE_DIR", ".tmp/galfus-cache")
         .stdout(Stdio::piped());
+    let timing_path = WorkspaceTiming::output_path(command);
+    if let Some(path) = &timing_path {
+        process.env(workspace_timing::TIMING_FILE_ENV, path);
+    } else {
+        process.env_remove(workspace_timing::TIMING_FILE_ENV);
+    }
 
     let started = Instant::now();
     let child = process.spawn().map_err(|error| error.to_string())?;
@@ -578,6 +673,13 @@ fn run_sample(
     let total_time_ms = started.elapsed().as_millis() as u64;
     let _ = stop_tx.send(());
     let (peak_rss_bytes, peak_virtual_bytes) = monitor.join().unwrap();
+    let workspace_timing = timing_path
+        .as_deref()
+        .map(WorkspaceTiming::read)
+        .transpose()?;
+    if let Some(path) = timing_path {
+        let _ = std::fs::remove_file(path);
+    }
     if !output.status.success() {
         return Err(format!("process exited with {}", output.status));
     }
@@ -593,6 +695,7 @@ fn run_sample(
         result,
         peak_rss_bytes,
         peak_virtual_bytes,
+        workspace_timing,
     })
 }
 
@@ -775,6 +878,7 @@ fn run_server_sample(
         ),
         peak_rss_bytes: metrics.peak_rss_bytes,
         peak_virtual_bytes: metrics.peak_virtual_bytes,
+        workspace_timing: None,
     })
 }
 
@@ -1075,6 +1179,11 @@ fn summarize(
         result,
         peak_rss_mb: bytes_to_mb(peak_rss_bytes),
         peak_virtual_mb: bytes_to_mb(peak_virtual_bytes),
+        workspace_timing: WorkspaceTiming::median(
+            samples
+                .into_iter()
+                .filter_map(|sample| sample.workspace_timing),
+        ),
     })
 }
 

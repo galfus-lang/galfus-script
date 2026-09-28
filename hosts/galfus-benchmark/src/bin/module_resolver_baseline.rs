@@ -205,7 +205,7 @@ fn run(options: Options) -> Result<(), String> {
         fixtures,
     };
     let report_root = repository_root()?;
-    let (json_path, markdown_path) = write_report(&report, report_root.as_path())?;
+    let (json_path, markdown_path, html_path) = write_report(&report, report_root.as_path())?;
     println!(
         "Module resolver baseline written to {}",
         json_path.display()
@@ -214,6 +214,7 @@ fn run(options: Options) -> Result<(), String> {
         "Human-readable summary written to {}",
         markdown_path.display()
     );
+    println!("Interactive report written to {}", html_path.display());
     Ok(())
 }
 

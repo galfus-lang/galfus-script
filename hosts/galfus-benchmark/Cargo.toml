@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 sysinfo = "0.30"
 cli-table = "0.4"
+plotly = { version = "0.14.1", features = ["plotly_embed_js"] }
 regex = "1.13"
 serde.workspace = true
 serde_json.workspace = true

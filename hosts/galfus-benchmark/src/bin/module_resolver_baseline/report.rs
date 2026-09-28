@@ -1,3 +1,6 @@
+#[path = "report/charts.rs"]
+mod charts;
+
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
@@ -108,6 +111,7 @@ struct PhaseOneFixtureComparison {
 #[derive(Debug, Serialize)]
 pub(super) struct BenchmarkEnvironment {
     git_revision: Option<String>,
+    working_tree_dirty: bool,
     operating_system: String,
     architecture: String,
     cpu: Option<String>,
@@ -241,17 +245,23 @@ fn signed_delta(current: u64, baseline: u64) -> i64 {
 pub(super) fn write_report(
     report: &BaselineReport,
     repository_root: &Path,
-) -> Result<(PathBuf, PathBuf), String> {
+) -> Result<(PathBuf, PathBuf, PathBuf), String> {
     let output_dir = repository_root.join(".tmp").join("benchmark");
     fs::create_dir_all(output_dir.as_path()).map_err(|error| error.to_string())?;
     let prefix = format!("module-resolver-baseline-{}", report.generated_unix_seconds);
     let json_path = output_dir.join(format!("{prefix}.json"));
     let markdown_path = output_dir.join(format!("{prefix}.md"));
+    let html_path = output_dir.join(format!("{prefix}.html"));
     let json = serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?;
     fs::write(json_path.as_path(), json).map_err(|error| error.to_string())?;
     fs::write(markdown_path.as_path(), markdown_report(report))
         .map_err(|error| error.to_string())?;
-    Ok((json_path, markdown_path))
+    fs::write(
+        html_path.as_path(),
+        html_report(report, json_path.as_path(), markdown_path.as_path()),
+    )
+    .map_err(|error| error.to_string())?;
+    Ok((json_path, markdown_path, html_path))
 }
 
 fn markdown_report(report: &BaselineReport) -> String {
@@ -306,14 +316,7 @@ fn markdown_report(report: &BaselineReport) -> String {
     output.push_str("\nRelease gate: any standalone-eager cold-start or process-time regression against this Phase 1 baseline requires an explicit release-note explanation. This gate intentionally uses the measured baseline and sets no synthetic percentage target.\n");
     output.push_str("No production optimization is selected by this report: any future optimization must attribute its benefit to direct ID lookup, canonical decoding, or a compiler pass with a measured before/after result.\n");
     output.push_str("\n## Environment\n\n");
-    output.push_str(&format!(
-        "- Git revision: {}\n",
-        report
-            .environment
-            .git_revision
-            .as_deref()
-            .unwrap_or("unavailable")
-    ));
+    output.push_str(&format!("- Git revision: {}\n", git_reference(report)));
     output.push_str(&format!(
         "- Platform: {} {}\n",
         report.environment.operating_system, report.environment.architecture
@@ -331,6 +334,149 @@ fn markdown_report(report: &BaselineReport) -> String {
         report.environment.cargo.as_deref().unwrap_or("unavailable")
     ));
     output
+}
+
+fn html_report(report: &BaselineReport, json_path: &Path, markdown_path: &Path) -> String {
+    let json_name = json_path.file_name().map_or_else(
+        || "report.json".to_string(),
+        |name| name.to_string_lossy().into(),
+    );
+    let markdown_name = markdown_path.file_name().map_or_else(
+        || "report.md".to_string(),
+        |name| name.to_string_lossy().into(),
+    );
+    let title = format!(
+        "Galfus cold-start benchmark · {} samples",
+        report.sample_count
+    );
+    let plots = [
+        ("runtime-start", charts::runtime_start_plot(report)),
+        ("stage-composition", charts::stage_composition_plot(report)),
+        (
+            "process-distribution",
+            charts::process_distribution_plot(report),
+        ),
+        ("materialization", charts::materialization_plot(report)),
+        (
+            "phase-one-comparison",
+            charts::phase_one_comparison_plot(report),
+        ),
+    ]
+    .into_iter()
+    .map(|(id, plot)| {
+        format!(
+            r#"<div class="chart">{}</div>"#,
+            plot.to_inline_html(Some(id))
+        )
+    })
+    .collect::<Vec<_>>();
+
+    format!(
+        r#"<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title}</title>
+  {plotly_js}
+  <style>
+    :root {{ color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #152238; background: #f5f7fb; }}
+    body {{ margin: 0; }}
+    main {{ max-width: 1480px; margin: 0 auto; padding: 32px 24px 48px; }}
+    h1, h2 {{ margin: 0; color: #0b1f3a; }}
+    h1 {{ font-size: 2rem; }}
+    h2 {{ font-size: 1.2rem; margin-bottom: 8px; }}
+    p {{ line-height: 1.5; }}
+    .lede {{ color: #50627c; max-width: 960px; }}
+    .links {{ display: flex; gap: 12px; flex-wrap: wrap; margin: 18px 0 26px; }}
+    a {{ color: #125cc5; font-weight: 600; }}
+    .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }}
+    .card {{ min-width: 0; background: white; border: 1px solid #dce3ef; border-radius: 12px; padding: 18px; box-shadow: 0 2px 10px #102a4310; overflow: hidden; }}
+    .wide {{ grid-column: 1 / -1; }}
+    .chart {{ height: 390px; min-width: 0; width: 100%; }}
+    .wide .chart {{ height: 470px; }}
+    .meta {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 20px 0; }}
+    .meta div {{ background: #edf3fc; border-radius: 8px; padding: 12px; }}
+    .meta strong {{ display: block; font-size: .78rem; color: #52657e; text-transform: uppercase; letter-spacing: .04em; }}
+    .meta span {{ display: block; margin-top: 4px; overflow-wrap: anywhere; }}
+    .note {{ color: #52657e; font-size: .9rem; }}
+    @media (max-width: 760px) {{ main {{ padding: 20px 12px 32px; }} .grid {{ grid-template-columns: minmax(0, 1fr); }} .wide {{ grid-column: auto; }} .chart, .wide .chart {{ height: 360px; }} }}
+    @media print {{ main {{ max-width: none; padding: 12px; }} .card {{ break-inside: avoid; box-shadow: none; }} }}
+  </style>
+</head>
+<body>
+<main>
+  <h1>{title}</h1>
+  <p class="lede">Interactive cold-start analysis for the lazy workspace and eager standalone boundaries. Hover a chart for exact values, click a legend item to isolate a series, and use the Plotly toolbar to export an image.</p>
+  <div class="links"><a href="{json_name}">Canonical JSON</a><a href="{markdown_name}">Markdown summary</a></div>
+  {metadata}
+  <section class="grid">
+    <article class="card">{runtime_start}</article>
+    <article class="card">{materialization}</article>
+    <article class="card wide">{stage_composition}</article>
+    <article class="card">{process_distribution}</article>
+    <article class="card">{phase_one_comparison}</article>
+  </section>
+  <p class="note">Durations are milliseconds. The report embeds Plotly.js, so it can be opened offline. Print this page from a browser to create a PDF.</p>
+</main>
+</body>
+</html>"#,
+        title = escape_html(title.as_str()),
+        plotly_js = charts::offline_js_sources(),
+        json_name = escape_html(json_name.as_str()),
+        markdown_name = escape_html(markdown_name.as_str()),
+        metadata = html_metadata(report),
+        runtime_start = plots[0],
+        stage_composition = plots[1],
+        process_distribution = plots[2],
+        materialization = plots[3],
+        phase_one_comparison = plots[4],
+    )
+}
+
+fn html_metadata(report: &BaselineReport) -> String {
+    format!(
+        r#"<section class="meta">
+  <div><strong>Samples</strong><span>{samples}</span></div>
+  <div><strong>Git revision</strong><span>{git_revision}</span></div>
+  <div><strong>Platform</strong><span>{platform}</span></div>
+  <div><strong>CPU</strong><span>{cpu}</span></div>
+  <div><strong>Phase 1 baseline</strong><span>{baseline}</span></div>
+</section>"#,
+        samples = report.sample_count,
+        git_revision = escape_html(git_reference(report).as_str()),
+        platform = escape_html(
+            format!(
+                "{} {}",
+                report.environment.operating_system, report.environment.architecture
+            )
+            .as_str()
+        ),
+        cpu = escape_html(report.environment.cpu.as_deref().unwrap_or("unavailable")),
+        baseline = escape_html(report.phase_one_comparison.source.as_str()),
+    )
+}
+
+fn git_reference(report: &BaselineReport) -> String {
+    let revision = report
+        .environment
+        .git_revision
+        .as_deref()
+        .unwrap_or("unavailable");
+    if report.environment.working_tree_dirty {
+        format!("{revision} (dirty worktree)")
+    } else {
+        revision.to_string()
+    }
+}
+
+fn escape_html(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 fn append_execution_row(
@@ -392,6 +538,11 @@ pub(super) fn benchmark_environment() -> BenchmarkEnvironment {
     let system = System::new_all();
     BenchmarkEnvironment {
         git_revision: command_output("git", &["rev-parse", "HEAD"]),
+        working_tree_dirty: command_output(
+            "git",
+            &["status", "--porcelain", "--untracked-files=no"],
+        )
+        .is_some_and(|status| !status.is_empty()),
         operating_system: env::consts::OS.to_string(),
         architecture: env::consts::ARCH.to_string(),
         cpu: system
